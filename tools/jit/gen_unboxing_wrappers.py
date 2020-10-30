@@ -24,7 +24,8 @@ from itertools import groupby
 from functools import reduce
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
-from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_without_overload
+from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_with_overload
+from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # JIT has a type system of
 # Scalar = int | float | bool # int is the largest int (int64_t),
@@ -280,8 +281,8 @@ def gen_unboxing_wrappers(
     declarations,
     out,
     template_path,
+    operator_selector: SelectiveBuilder,
     disable_autograd=False,
-    selected_op_list=None,
     force_schema_registration=False,
 ):
     GENERATED_UNBOXING_WRAPPERS_CPP = CodeTemplate.from_file(template_path + '/generated_unboxing_wrappers.cpp')
@@ -386,18 +387,19 @@ def gen_unboxing_wrappers(
 
         return constructor
 
-    def filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration):
+    def filter_decls(jit_decls, disable_autograd, operator_selector: SelectiveBuilder, force_schema_registration):
         result = []
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
-            op_name = op_name_without_overload(decl)
-            if selected_op_list is not None and op_name not in selected_op_list:
+            op_name = op_name_with_overload(decl)
+            if operator_selector.is_root_operator(op_name):
+                result.append(decl)
+            else:
                 if force_schema_registration:
                     decl['emit_dummy_placeholder'] = True
-                else:
-                    continue
-            result.append(decl)
+                    result.append(decl)
+
         return result
 
     # This function declares an order on declarations. This is necessary because
@@ -467,7 +469,7 @@ def gen_unboxing_wrappers(
             reorder_out_args(decl)
 
     jit_decls.extend(additional_jit_decls)
-    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration)
+    jit_decls = filter_decls(jit_decls, disable_autograd, operator_selector, force_schema_registration)
 
     # generation is deterministic
     jit_decl_groups = sort_decls(jit_decls)

@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -39,8 +40,7 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-// TODO: keep the else clause for trial runs
-#if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
+#if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
@@ -109,8 +109,8 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
 
-  if (tensorExprFuserEnabled()) {
-    // With TE fuser we don't generate bailouts
+  if (tensorExprFuserEnabled() || RegisterCudaFuseGraph::isRegistered()) {
+    // With TE fuser or nvfuser, we don't generate bailouts
     LowerGradOf(*graph);
     GRAPH_DEBUG("After LowerGradOf, before specializeAutogradZero\n", *graph);
   } else {

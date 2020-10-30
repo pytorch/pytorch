@@ -259,12 +259,12 @@ public:
   // Only required because vec256_qint refers to this.
   // Once we specialize that implementation for ARM
   // this should be removed. TODO (kimishpatel)
-  const float operator[](int idx) const {
+  float operator[](int idx) const {
     __at_align32__ float tmp[size()];
     store(tmp);
     return tmp[idx];
-  };
-  const float operator[](int idx) {
+  }
+  float operator[](int idx) {
     __at_align32__ float tmp[size()];
     store(tmp);
     return tmp[idx];
@@ -361,6 +361,16 @@ public:
   }
   Vec256<float> i0() const {
     return map(calc_i0);
+  }
+  Vec256<float> igamma(const Vec256<float> &x) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
   }
   Vec256<float> log() const {
     return map(std::log);

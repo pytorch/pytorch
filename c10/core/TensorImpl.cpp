@@ -62,8 +62,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
       data_type_(data_type),
       device_opt_(device_opt) {
   if (!key_set.empty()) {
-    AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
-              device_opt_.has_value());
+    TORCH_INTERNAL_ASSERT(data_type == ScalarType::Undefined || device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }

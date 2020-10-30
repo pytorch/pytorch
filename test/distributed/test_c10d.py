@@ -2403,6 +2403,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_arbitrary_forward_return_value_grad_is_view(self):
         self._test_arbitrary_forward_return_value(gradient_as_bucket_view=True)
 
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_ddp_with_lazy_parameters(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        with self.assertRaisesRegex(RuntimeError, 'Modules with uninitialized parameters'):
+            DistributedDataParallel(torch.nn.LazyLinear(10), process_group=process_group)
+
     def _test_find_unused_parameters_kwarg(self, gradient_as_bucket_view=False):
         """
         Note: this test can be sped up by only running it on a CPU module

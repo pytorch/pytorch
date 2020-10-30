@@ -1369,8 +1369,8 @@ std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
   Value* context = closure->node()->inputs().at(1);
 
   TORCH_CHECK(
-      fn->node()->kind() == prim::Function,
-      "closure tuple must contain a prim::Function");
+      fn->node()->kind() == prim::Closure,
+      "closure tuple must contain a prim::Closure");
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 

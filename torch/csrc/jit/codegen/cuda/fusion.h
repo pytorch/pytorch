@@ -12,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * Usage: FusionGuard and Fusion are required user interfaces for any operation
@@ -229,6 +230,7 @@ class TORCH_CUDA_API Fusion final {
   std::unordered_map<const Val*, Expr*> lowered_origin_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

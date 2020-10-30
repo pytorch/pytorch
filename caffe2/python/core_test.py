@@ -232,6 +232,24 @@ class TestCloneNet(test_util.TestCase):
             "external output not matched",
         )
 
+    def test_control_op_remap(self):
+        # Subnets under If/AsyncIf operators should get name remapping when cloned
+        n = core.Net("original")
+        then_net = core.Net("a")
+        then_net.FC(["inputA"], "fc_a")
+        else_net = core.Net("b")
+        else_net.FC(["inputB"], "fc_b")
+        n.If(
+            inputs=[],
+            outputs=[],
+            then_net=then_net.Proto(),
+            else_net=else_net.Proto(),
+        )
+        copied = n.Clone("copied", blob_remap={"inputA": "inputX"})
+        if_op = copied._net.op[0]
+        self.assertEqual(if_op.arg[0].n.op[0].input, ["inputX"])
+        self.assertEqual(if_op.arg[1].n.op[0].input, ["inputB"])
+
 
 class TestExternalInputs(test_util.TestCase):
     def testSetInputRecordWithBlobs(self):
