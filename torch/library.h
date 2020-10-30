@@ -650,17 +650,6 @@ public:
   ); \
   void TORCH_LIBRARY_init_ ## ns (torch::Library& m)
 
-
-// TODO: comment, maybe fold this into TORCH_LIBRARY_FRAGMENT
-#define TORCH_LIBRARY_FRAGMENT_UNIQUE(ns, m, uid) \
-  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## uid ( \
-    torch::Library::FRAGMENT, \
-    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid, \
-    #ns, c10::nullopt, __FILE__, __LINE__ \
-  ); \
-  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library& m)
-
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
@@ -677,6 +666,24 @@ public:
     #ns, c10::nullopt, __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
+
+/// \private
+///
+/// This macro should only be used in a few legacy areas.
+/// This macro is a version of TORCH_LIBRARY() that:
+///     - doesn't enforce that there is only library for the given namespace
+///     - takes in a unique identifier that it appends to the names
+///       of each static variable that it creates
+/// It effectively lets you define multiple TORCH_LIBRARY_FRAGMENT blocks
+/// for the same namespace within the same translation unit, avoiding naming collisions.
+#define TORCH_LIBRARY_FRAGMENT_UNIQUE(ns, m, uid) \
+  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library&); \
+  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## uid ( \
+    torch::Library::FRAGMENT, \
+    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid, \
+    #ns, c10::nullopt, __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library& m)
 
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
@@ -731,8 +738,16 @@ public:
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
 
-// TODO: meaningful comment
-#define TORCH_LIBRARY_IMPL_FRAGMENT(ns, k, m, uid) \
+/// \private
+///
+/// This macro should only be used in a few legacy areas.
+/// This macro is a version of TORCH_LIBRARY_IMPL() that:
+///     - takes in a unique identifier that it appends to the names
+///       of each static variable that it creates
+/// It effectively lets you define multiple TORCH_LIBRARY_IMPL blocks
+/// for the same namespace/dispatch key within the same translation unit,
+/// avoiding naming collisions.
+#define TORCH_LIBRARY_IMPL_UNIQUE(ns, k, m, uid) \
   static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## uid ( \
     torch::Library::IMPL, \
