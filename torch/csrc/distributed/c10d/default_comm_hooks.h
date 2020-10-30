@@ -17,7 +17,7 @@ class AllReduceCommHook : public CppCommHookInterface<ProcessGroup*> {
 
   ~AllReduceCommHook() override {}
 
-  c10::intrusive_ptr<torch::jit::Future> runHook(GradBucket& bucket) override;
+  c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 };
 
 class FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
@@ -27,7 +27,7 @@ class FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
 
   ~FP16CompressCommHook() override {}
 
-  c10::intrusive_ptr<torch::jit::Future> runHook(GradBucket& bucket) override;
+  c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 };
 
 } // namespace c10d

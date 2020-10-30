@@ -26,7 +26,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
+#include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
