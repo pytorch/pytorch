@@ -17934,53 +17934,65 @@ else:
             d = {x: i for i, x in enumerate(p)}
             return (d[0], d[1], d[2])
 
-        for perm1, perm2 in product(permutations((0, 1, 2)), repeat=2):
-            for perm3 in permutations((0, 1)):
-                b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
-                b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
-                b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
-                b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
+        def generate_tensor():
+            # transposed tensors
+            for perm1, perm2 in product(permutations((0, 1, 2)), repeat=2):
+                for perm3 in permutations((0, 1)):
+                    b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
+                    b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
+                    b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
+                    b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
+                    res = torch.bmm(b1, b2).sum(0, False)
+                    res2 = torch.zeros_like(res).permute(perm3).contiguous().permute(perm3)
+                    res3 = torch.zeros_like(res).permute(perm3).contiguous().permute(perm3)
+                    yield b1, b2, res, res2, res3
+            # broadcasting tensors
+            for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
+                shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
+                shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
+                b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
+                b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
                 res = torch.bmm(b1, b2).sum(0, False)
                 res2 = torch.zeros_like(res)
                 res3 = torch.zeros_like(res)
-                res2 = res2.permute(perm3).contiguous().permute(perm3)
-                res3 = res3.permute(perm3).contiguous().permute(perm3)
+                yield b1, b2, res, res2, res3
 
-                res2.addbmm_(b1, b2)
-                self.assertEqual(res2, res)
-                res3.copy_(res2)
+        for b1, b2, res, res2, res3 in generate_tensor():
+            res2.addbmm_(b1, b2)
+            self.assertEqual(res2, res)
+            res3.copy_(res2)
 
-                with self.maybeWarnsRegex(
-                        UserWarning, "This overload of addbmm_ is deprecated"):
-                    res2.addbmm_(1, b1, b2)
-                self.assertEqual(res2, res * 2),
-                res3.addbmm_(b1, b2, beta=1)
-                self.assertEqual(res2, res3)
+            with self.maybeWarnsRegex(
+                    UserWarning, "This overload of addbmm_ is deprecated"):
+                res2.addbmm_(1, b1, b2)
+            self.assertEqual(res2, res * 2),
+            res3.addbmm_(b1, b2, beta=1)
+            self.assertEqual(res2, res3)
 
-                with self.maybeWarnsRegex(
-                        UserWarning, "This overload of addbmm_ is deprecated"):
-                    res2.addbmm_(1., .5, b1, b2)
-                self.assertEqual(res2, res * 2.5)
-                res3.addbmm_(b1, b2, beta=1., alpha=.5)
-                self.assertEqual(res2, res3)
+            with self.maybeWarnsRegex(
+                    UserWarning, "This overload of addbmm_ is deprecated"):
+                res2.addbmm_(1., .5, b1, b2)
+            self.assertEqual(res2, res * 2.5)
+            res3.addbmm_(b1, b2, beta=1., alpha=.5)
+            self.assertEqual(res2, res3)
 
-                with self.maybeWarnsRegex(
-                        UserWarning, "This overload of addbmm is deprecated"):
-                    self.assertEqual(res2, torch.addbmm(1, res2, 0, b1, b2))
+            with self.maybeWarnsRegex(
+                    UserWarning, "This overload of addbmm is deprecated"):
+                self.assertEqual(res2, torch.addbmm(1, res2, 0, b1, b2))
 
-                res4 = torch.addbmm(res2, b1, b2, beta=1, alpha=.5)
-                self.assertEqual(res4, res * 3),
+            res4 = torch.addbmm(res2, b1, b2, beta=1, alpha=.5)
+            self.assertEqual(res4, res * 3),
 
-                nan = torch.full_like(res2, math.nan)
-                res5 = torch.addbmm(nan, b1, b2, beta=0, alpha=1)
-                self.assertEqual(res5, res)
+            nan = torch.full_like(res2, math.nan)
+            res5 = torch.addbmm(nan, b1, b2, beta=0, alpha=1)
+            self.assertEqual(res5, res)
 
-                res6 = torch.addbmm(res2, b1, b2, beta=.1, alpha=.5)
-                self.assertEqual(res6, res2 * .1 + .5 * res),
+            res6 = torch.addbmm(res2, b1, b2, beta=.1, alpha=.5)
+            self.assertEqual(res6, res2 * .1 + .5 * res),
 
-                res7 = torch.full_like(res2, math.nan)
-                torch.addbmm(nan, b1, b2, beta=0, out=res7)
-                self.assertEqual(res7, res)
+            res7 = torch.full_like(res2, math.nan)
+            torch.addbmm(nan, b1, b2, beta=0, out=res7)
+            self.assertEqual(res7, res)
 
     @onlyCPU
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
