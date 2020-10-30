@@ -164,6 +164,14 @@ class ModuleCloneHelper {
       for (auto& fn : type->methods()) {
         clone_method(module, r, *fn, module_qconfig_map, type_remap);
       }
+      // Execute __setstate__(__getstate__()) to initialize custom class
+      // members.
+      if (auto setstate_method = r.find_method("__setstate__")) {
+        auto getstate_method = r.find_method("__getstate__");
+        TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+        auto state = (*getstate_method)(Stack{});
+        (*setstate_method)(Stack{state});
+      }
     }
     return r;
   }
@@ -188,7 +196,7 @@ class ModuleCloneHelper {
     }
     for (Node* node : block->nodes()) {
       // remapping type for module instance
-      if (node->kind() == prim::CallMethod) {
+      if (node->kind() == prim::CallMethod || node->kind() == prim::GetAttr) {
         Value* instance = node->inputs()[0];
         auto child_opt = getInvokedModuleOpt(source, node, self);
         if (child_opt.has_value()) {

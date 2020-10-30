@@ -394,6 +394,13 @@ public:
   Vec256<T> i0() const {
     return map(calc_i0);
   }
+  Vec256<T> igamma(const Vec256<T> &x) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = calc_igamma(values[i], x[i]);
+    }
+    return ret;
+  }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
     // return value back to T in the case of unary operator- incuring a
@@ -615,23 +622,12 @@ inline T minimum(const T& a, const T& b) {
   return c;
 }
 
-// To save BC, it will not propagate NaN based on IEEE 754 201X
 template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] < min_vec[i] ? min_vec[i] : (a[i] > max_vec[i] ? max_vec[i] : a[i]);
-  }
-  return c;
-}
-
-template <class T,
-          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = std::abs(a[i]) < std::abs(min_vec[i]) ? min_vec[i] : (std::abs(a[i]) > std::abs(max_vec[i]) ? max_vec[i] : a[i]);
+    c[i] = std::min(std::max(a[i], min_vec[i]), max_vec[i]);
   }
   return c;
 }
@@ -647,31 +643,11 @@ Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = std::abs(a[i]) > std::abs(max_vec[i]) ? max_vec[i] : a[i];
-  }
-  return c;
-}
-
-template <class T,
           typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
-  }
-  return c;
-}
-
-template <class T,
-          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = std::abs(a[i]) < std::abs(min_vec[i]) ? min_vec[i] : a[i];
   }
   return c;
 }

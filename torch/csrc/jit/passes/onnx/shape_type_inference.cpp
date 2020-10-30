@@ -200,11 +200,34 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
       // prim::ListConstruct is converted to onnx::Concat. The conversion should
       // eventually be moved to symbolic. For now, treat this operator as
       // special case, and change from list type to tensor type. The scalar type
-      // is preserved.
+      // is preserved. If the elemtype is Int, insert a onnx::Concat node into
+      // the graph.
       TypePtr elem = v->type()->cast<ListType>()->getElementType();
       c10::optional<at::ScalarType> scalar_type = c10::nullopt;
       if (elem->cast<IntType>()) {
         scalar_type = at::kLong;
+
+        auto lc_node = v->node();
+        // ListConstruct Int[] output case, we need to transform to ONNX
+        // Concat to ensure the output is a single tensor(dynamic) type in
+        // order to be consumed as inputs
+        std::vector<Value*> unsqueezed;
+        for (auto* input : lc_node->inputs()) {
+          Node* unsqueezed_node =
+              n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
+          auto new_input = n_graph->addInput();
+          new_input->copyMetadata(input);
+          unsqueezed_node->addInput(new_input);
+          unsqueezed_node->is_(attr::axes, {0});
+          unsqueezed.emplace_back(unsqueezed_node->output());
+        }
+        Node* concat_node =
+            n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
+        concat_node->i_(attr::axis, 0);
+        for (auto v : unsqueezed) {
+          concat_node->addInput(v);
+        }
+        return concat_node->output();
       } else if (elem->cast<FloatType>()) {
         scalar_type = at::kFloat;
       } else if (elem->cast<BoolType>()) {

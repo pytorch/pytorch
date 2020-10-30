@@ -1,13 +1,12 @@
 #ifndef THCP_STREAM_INC
 #define THCP_STREAM_INC
 
+#include <torch/csrc/Stream.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/python_headers.h>
 #include <THC/THC.h>
 
-struct THCPStream {
-  PyObject_HEAD
-  uint64_t cdata;
+struct THCPStream : THPStream{
   at::cuda::CUDAStream cuda_stream;
 };
 extern PyObject *THCPStreamClass;

@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 import operator
 import unittest
 import contextlib
@@ -73,36 +71,6 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-
-    def assertAllFused(self, graph, except_for=()):
-
-        # note this helper collects nodes on 'fast path' only
-        # i.e. the true blocks of specialized checks
-        def get_nodes_and_parents_recursively(block, kind, acc):
-            for node in block.nodes():
-                if node.kind() == kind:
-                    acc[block].append(node)
-                elif node.kind() == 'prim::DifferentiableGraph':
-                    get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
-                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
-                    get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
-                else:
-                    for inner_block in node.blocks():
-                        get_nodes_and_parents_recursively(inner_block, kind, acc)
-
-        allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
-                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
-
-        fusion_groups = defaultdict(list)
-        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
-        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
-        (graph, fusion_nodes) = list(fusion_groups.items())[0]
-        # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
-        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
-        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-                        'got {}'.format(graph))
-
 
     def findFusionGroups(self, graph):
         result = []

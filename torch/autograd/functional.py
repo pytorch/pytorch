@@ -1,4 +1,5 @@
 import torch
+from typing import Tuple, List
 
 # Utility functions
 
@@ -131,8 +132,8 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
     assert isinstance(grad_outputs, tuple)
     assert len(outputs) == len(grad_outputs)
 
-    new_outputs = tuple()
-    new_grad_outputs = tuple()
+    new_outputs: Tuple[torch.Tensor, ...] = tuple()
+    new_grad_outputs: Tuple[torch.Tensor, ...] = tuple()
     for out, grad_out in zip(outputs, grad_outputs):
         if out is not None and out.requires_grad:
             new_outputs += (out,)
@@ -153,7 +154,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     if stage not in ["back", "back_trick", "double_back", "double_back_trick"]:
         raise RuntimeError("Invalid stage argument '{}' to _fill_in_zeros".format(stage))
 
-    res = tuple()
+    res: Tuple[torch.Tensor, ...] = tuple()
     for i, grads_i in enumerate(grads):
         if grads_i is None:
             if strict:
@@ -427,10 +428,11 @@ def jacobian(func, inputs, create_graph=False, strict=False):
                                           "jacobian")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    jacobian = tuple()
+    jacobian: Tuple[torch.Tensor, ...] = tuple()
     for i, out in enumerate(outputs):
 
-        jac_i = tuple([] for _ in range(len(inputs)))
+        # mypy complains that expression and variable have different types due to the empty list
+        jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore
         for j in range(out.nelement()):
             vj = _autograd_grad((out.reshape(-1)[j],), inputs,
                                 retain_graph=True, create_graph=create_graph)

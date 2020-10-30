@@ -527,7 +527,8 @@ void populateRemoteProfiledEvents(
     if (!foundCpuStart && 0 == strcmp(e.name(), "__start_profile")) {
       profilerStart = &e;
       foundCpuStart = true;
-    } else if (cudaProfilingEnabled && 0 == strcmp(e.name(), "__cuda_start_event")) {
+    } else if (
+        cudaProfilingEnabled && 0 == strcmp(e.name(), "__cuda_start_event")) {
       e.setCudaUs(e.cpuUs());
       auto device = e.device();
       TORCH_CHECK(

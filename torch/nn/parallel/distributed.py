@@ -16,7 +16,7 @@ if dist.is_available():
     from torch.distributed.distributed_c10d import ReduceOp
 from ..modules import Module
 from .replicate import replicate
-from .scatter_gather import scatter_kwargs, gather
+from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 from .parallel_apply import parallel_apply
 from torch._utils import _get_device_index, _get_all_device_indices
 
@@ -329,7 +329,7 @@ class DistributedDataParallel(Module):
     Example::
 
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
-        >>> net = torch.nn.DistributedDataParallel(model, pg)
+        >>> net = torch.nn.parallel.DistributedDataParallel(model, pg)
     """
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
@@ -368,7 +368,7 @@ class DistributedDataParallel(Module):
             if device_ids is None:
                 device_ids = _get_all_device_indices()
 
-            self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+            self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
                 output_device = device_ids[0]
@@ -404,7 +404,13 @@ class DistributedDataParallel(Module):
             )
             pass
 
-        # used for intra-node param sync and inter-node sync as well
+        # Check that a module does not have Uninitialized parameters
+        for param in module.parameters():
+            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+                raise RuntimeError(
+                    'Modules with uninitialized parameters can\'t be used with `DistributedDataParallel`. '
+                    'Run a dummy forward pass to correctly initialize the modules')
+        # used for intra-node param sync and inter-node sync as wel
         self.broadcast_bucket_size = int(250 * 1024 * 1024)
 
         # reduction bucket size
@@ -620,7 +626,7 @@ class DistributedDataParallel(Module):
 
         Example::
 
-            >>> ddp = torch.nn.DistributedDataParallel(model, pg)
+            >>> ddp = torch.nn.parallel.DistributedDataParallel(model, pg)
             >>> with ddp.no_sync():
             >>>   for input in inputs:
             >>>     ddp(input).backward()  # no synchronization, accumulate grads
@@ -660,10 +666,11 @@ class DistributedDataParallel(Module):
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
         if self.device_ids:
-            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
+                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
                 output = self.module(*inputs[0], **kwargs[0])
             else:
+                inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
                 outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
                 output = self.gather(outputs, self.output_device)
         else:
@@ -687,6 +694,41 @@ class DistributedDataParallel(Module):
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
+
+    def _recursive_to(self, inputs, target_gpu):
+        r"""
+        Recursively moves input to the target_gpu.
+        """
+        def to_map(obj):
+            if isinstance(obj, torch.Tensor):
+                return (obj.to(target_gpu), )
+            if is_namedtuple(obj):
+                return [type(obj)(*args) for args in zip(*map(to_map, obj))]
+            if isinstance(obj, tuple) and len(obj) > 0:
+                return list(zip(*map(to_map, obj)))
+            if isinstance(obj, list) and len(obj) > 0:
+                return [list(i) for i in zip(*map(to_map, obj))]
+            if isinstance(obj, dict) and len(obj) > 0:
+                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+            return [obj]
+
+        # Avoid reference cycle
+        try:
+            res = to_map(inputs)
+        finally:
+            to_map = None
+        return res
+
+    def to_kwargs(self, inputs, kwargs, device_id):
+        inputs = self._recursive_to(inputs, device_id) if inputs else []
+        kwargs = self._recursive_to(kwargs, device_id) if kwargs else []
+        if len(inputs) < len(kwargs):
+            inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
+        elif len(kwargs) < len(inputs):
+            kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
+        inputs = tuple(inputs)
+        kwargs = tuple(kwargs)
+        return inputs, kwargs
 
     def parallel_apply(self, replicas, inputs, kwargs):
         return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])

@@ -1580,7 +1580,29 @@ new_module_tests = [
         input_size=(4, 6, 5),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='1d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 12, 1e-3),
+        cpp_constructor_args='torch::nn::GroupNormOptions(3, 12).eps(1e-3)',
+        input_size=(4, 12),
+        cudnn=True,
+        check_eval=True,
+        check_bfloat16=True,
+        desc='1d_affine_GN',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(1, 6, 1e-3),
+        cpp_constructor_args='torch::nn::GroupNormOptions(1, 6).eps(1e-3)',
+        input_size=(150, 6),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_affine_large_batch',  # For large batch_size
+        check_bfloat16=True,
+        test_cpu=False,
     ),
     dict(
         module_name='GroupNorm',
@@ -1589,15 +1611,17 @@ new_module_tests = [
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNormi
     ),
     dict(
         module_name='GroupNorm',
-        constructor_args=(1, 5, 1e-3, False),
-        cpp_constructor_args='torch::nn::GroupNormOptions(1, 5).eps(1e-3).affine(false)',
-        input_size=(4, 5, 5),
+        constructor_args=(1, 10, 1e-3, False),
+        cpp_constructor_args='torch::nn::GroupNormOptions(1, 10).eps(1e-3).affine(false)',
+        input_size=(4, 10),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
     ),
     dict(
@@ -1607,7 +1631,19 @@ new_module_tests = [
         input_size=(4, 6, 2, 3),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='2d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 6, 1e-3),
+        cpp_constructor_args='torch::nn::GroupNormOptions(3, 6).eps(1e-3)',
+        input_size=(4, 6, 28, 28),
+        cudnn=True,
+        check_eval=True,
+        check_bfloat16=True,
+        desc='2d_affine_large_feature',
+        test_cpu=False,
     ),
     dict(
         module_name='GroupNorm',
@@ -1616,6 +1652,7 @@ new_module_tests = [
         input_size=(4, 3, 2, 3),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
     ),
     dict(
@@ -1625,6 +1662,7 @@ new_module_tests = [
         input_size=(4, 3, 2, 3),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
     ),
     dict(
@@ -1693,7 +1731,6 @@ new_module_tests = [
         input_size=(0, 4, 10),
         cudnn=True,
         desc='zero_batch',
-        test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
         tf32_precision=0.005,
     ),
@@ -1828,7 +1865,6 @@ new_module_tests = [
         cudnn=True,
         desc='zero_batch',
         check_with_long_tensor=True,
-        test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
     ),
     dict(
@@ -2214,7 +2250,6 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         desc='zero_batch',
-        test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
     ),
     dict(
@@ -4921,11 +4956,11 @@ class ModuleTest(TestBase):
             # are unreachable (which can happen if you differentiate
             # only on the gradient.
             cpu_gg = torch.autograd.grad(
-                cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
+                cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs),
                 cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
                 retain_graph=True)
             gpu_gg = torch.autograd.grad(
-                gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
+                gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
                 gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095

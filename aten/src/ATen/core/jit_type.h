@@ -47,6 +47,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(OptionalType)           \
   _(VarType)                \
   _(DeviceObjType)          \
+  _(StreamObjType)          \
   _(FunctionType)           \
   _(ClassType)              \
   _(PyObjectType)           \
@@ -238,7 +239,7 @@ inline bool operator!=(const Type& lhs, const Type& rhs) {
 }
 
 // common base for all types that have a single sub element
-// e.g. Future[T], Option[T], List[T]
+// e.g. Future[T], Optional[T], List[T]
 template <TypeKind K, typename T>
 struct SingleElementType : public Type {
   static const TypeKind Kind = K;
@@ -1550,6 +1551,28 @@ struct CAFFE2_API DeviceObjType : public Type {
   DeviceObjType() : Type(TypeKind::DeviceObjType) {}
 };
 
+struct StreamObjType;
+using StreamObjTypePtr = std::shared_ptr<StreamObjType>;
+// This type represents a Generator
+struct CAFFE2_API StreamObjType : public Type {
+  static StreamObjTypePtr create() {
+    return StreamObjTypePtr(
+      new StreamObjType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Stream";
+  }
+  static const TypeKind Kind = TypeKind::StreamObjType;
+  // global singleton
+  static StreamObjTypePtr get();
+
+private:
+  StreamObjType() : Type(TypeKind::StreamObjType) {}
+};
+
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 // This type represents a type variable, used in FunctionSchema
@@ -1724,6 +1747,12 @@ template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Stream> final {
+  static TypePtr call() {
+    return StreamObjType::get();
   }
 };
 template <>
@@ -1960,7 +1989,8 @@ struct CAFFE2_API ClassType : public NamedType {
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module = false);
+      bool is_module = false,
+      std::string doc_string = "");
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -2146,6 +2176,9 @@ struct CAFFE2_API ClassType : public NamedType {
     return constantNames_[slot];
   }
 
+  const std::string& doc_string() const {
+    return doc_string_;
+  }
 
   IValue getConstant(const std::string& name) const;
 
@@ -2242,7 +2275,8 @@ struct CAFFE2_API ClassType : public NamedType {
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module);
+      bool is_module,
+      std::string doc_string);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -2277,6 +2311,9 @@ struct CAFFE2_API ClassType : public NamedType {
   std::vector<Property> properties_;
 
   bool isModule_ = false;
+
+  // Doc string of class.
+  std::string doc_string_ = "";
 };
 
 struct InterfaceType;

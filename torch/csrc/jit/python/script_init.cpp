@@ -743,18 +743,26 @@ void initJitScriptBindings(PyObject* module) {
           .def(
               "getattr",
               [](Object& self, const std::string& name) {
-                return toPyObject(self.attr(name));
+                try {
+                  return toPyObject(self.attr(name));
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
+                }
               })
           .def(
               "__getattr__",
               [](Object& self, const std::string& name) -> py::object {
-                if (name == "__qualname__") {
-                  return py::cast(self.type()->name()->name());
+                try {
+                  if (name == "__qualname__") {
+                    return py::cast(self.type()->name()->name());
+                  }
+                  if (auto method = self.find_method(name)) {
+                    return py::cast(*method);
+                  }
+                  return toPyObject(self.attr(name));
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
                 }
-                if (auto method = self.find_method(name)) {
-                  return py::cast(*method);
-                }
-                return toPyObject(self.attr(name));
               })
           .def(
               "hasattr",
@@ -1179,9 +1187,13 @@ void initJitScriptBindings(PyObject* module) {
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
       .def_property_readonly(
-          "qualified_name", [](const StrongFunctionPtr& self) {
+          "qualified_name",
+          [](const StrongFunctionPtr& self) {
             return self.function_->qualname().qualifiedName();
-          });
+          })
+      .def_property_readonly("__doc__", [](const StrongFunctionPtr& self) {
+        return self.function_->doc_string();
+      });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
@@ -1448,6 +1460,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);
+  m.def("_debug_set_fusion_group_inlining", debugSetFusionGroupInlining);
+  m.def("_debug_get_fusion_group_inlining", getFusionGroupInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
       "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
