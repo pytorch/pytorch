@@ -3055,6 +3055,13 @@ class TestNN(NNTestCase):
         res_F = F.embedding(a, embeddings)
         self.assertEqual(res_old, res_F)
 
+        embed_old = torch.nn.Embedding(4, 3)
+        embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)
+        res_old = embed_old(a)
+        res_F = F.embedding(a, embeddings, padding_idx=2)
+
+        self.assertEqual(res_old, res_F)
+
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
@@ -10734,6 +10741,15 @@ class TestNNDeviceType(NNTestCase):
                 inp = torch.tensor([[0, 1, 1, 2], [3, 5, 7, 11]], dtype=torch.long).to(device)
                 return torch.nn.functional.embedding(inp, weight)
             return fn
+
+        fn = fn_wrapper(device)
+        _assertGradAndGradgradChecks(self, fn, (weight, ))
+
+        def fn_wrapper(device):
+            def padding_fn(weight):
+                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
+                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
+            return padding_fn
 
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
