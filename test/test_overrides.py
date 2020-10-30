@@ -822,7 +822,7 @@ class TestGradCheckOverride(TestCase):
         })
 
 class TestNamedTuple(TestCase):
-    "Regression test for gh-?????"
+    "Regression test for gh-47090"
     def test_max(self):
         x = torch.tensor([1, 2])
         xs = x.as_subclass(SubTensor2)
