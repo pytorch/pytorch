@@ -6356,11 +6356,12 @@ with the same number of elements as :attr:`input`.
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
-.. note:: This function always computes in double precision, unlike :func:`torch.pow`, 
-          which implements more typical :ref:`type promotion `.
-          This is useful when the computation needs to be performed in a wider or more precise dtype, 
-          or the results of computation may contain fractional values not representable in the input dtypes, 
-          like when an integer base is raised to a negative integer exponent.
+.. note:: 
+    This function always computes in double precision, unlike :func:`torch.pow`, 
+    which implements more typical :ref:`type promotion <type-promotion-doc>`.
+    This is useful when the computation needs to be performed in a wider or more precise dtype, 
+    or the results of computation may contain fractional values not representable in the input dtypes, 
+    like when an integer base is raised to a negative integer exponent.
 
 Args:
     {input}

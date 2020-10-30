@@ -6283,6 +6283,7 @@ class TestTorchDeviceType(TestCase):
                         op(base, exp, out=out)
                         self.assertEqual(expected, out)
 
+    @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
     def test_float_power_exceptions(self, device, dtype):
         values = [torch.tensor([-2.8, -2, -1, -0.5, 0, 0.5, 1, 2], device=device),
