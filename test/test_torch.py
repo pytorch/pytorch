@@ -18010,17 +18010,31 @@ else:
             d = {x: i for i, x in enumerate(p)}
             return (d[0], d[1], d[2])
 
-        for perm1, perm2, perm3 in product(permutations((0, 1, 2)), repeat=3):
-            b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
-            b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
-            b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
-            b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
-            res = torch.bmm(b1, b2)
-            res2 = torch.zeros_like(res)
-            res3 = torch.zeros_like(res)
-            res2 = res2.permute(perm3).contiguous().permute(invert_perm(perm3))
-            res3 = res3.permute(perm3).contiguous().permute(invert_perm(perm3))
+        def generate_tensor():
+            # transposed tensors
+            for perm1, perm2, perm3 in product(permutations((0, 1, 2)), repeat=3):
+                b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
+                b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
+                b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
+                b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
+                res = torch.bmm(b1, b2)
+                res2 = torch.zeros_like(res)
+                res3 = torch.zeros_like(res)
+                res2 = res2.permute(perm3).contiguous().permute(invert_perm(perm3))
+                res3 = res3.permute(perm3).contiguous().permute(invert_perm(perm3))
+                yield b1, b2, res, res2, res3 
+            # broadcasting tensors
+            for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
+                shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
+                shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
+                b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
+                b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
+                res = torch.bmm(b1, b2)
+                res2 = torch.zeros_like(res)
+                res3 = torch.zeros_like(res)
+                yield b1, b2, res, res2, res3
 
+        for b1, b2, res, res2, res3 in generate_tensor():
             self._test_addbmm_baddbmm("baddbmm", b1, b2, res, res2, res3)
 
     def _test_cop(self, torchfn, mathfn, dtype, device):
