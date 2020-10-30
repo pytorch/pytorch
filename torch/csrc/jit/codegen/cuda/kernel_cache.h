@@ -8,158 +8,222 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <type_traits>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-// [ Note -- 2 level cache implementation ]
-//
-// 2 level hierarchically nested cache is to handle the code generation and
-// execution of a given PyTorch IR graph that is unique in its computational
-// graph (see note computational graph down).
-//
-// The nested cache structures are:
-//     a. GraphCache
-//        - holds a vector of `InputsRequirement` & `FusionExecutorCache`, where
-//          each entry is constructed to handle a set of inputs with unique
-//          contiguity info, stride order & broadcasting semantics, on a given
-//          device;
-//        - `InputsRequirement::complyWith` demonstrates the meta information
-//          that remains unchanged for a given `FusionExecutorCache`
-//        - At run-time (or compile-time with Profiling Executor), we extract
-//          `InputsRequirement` from given inputs to the fused operation. We
-//          iterate through existing entries within GraphCache (that is the
-//          `input_stacks_`) looking for a suitable entry to execute the
-//          computation.
-//        - In the case of cache miss, we generate a new entry and put it in
-//          the GraphCache instance (We push back to both `input_stacks_` and
-//          `fe_cache_`, fusion executor cache.
-//     b. FusionExecutorCache
-//        - holds a group of `FusionExecutor` to handle dynamic shape (varying
-//          tensor sizes)
-//        - currently this is a dummy implementation and has branching to handle
-//          different scheduler for point-wise fusion and reduction fusion;
-//
-// * note computational graph
-// In theory, computational graph should refer to only the computational nodes
-// in a subgraph and should remain agnostic to input meta info, like
-// shape, strides, type e.t.c.. However, the contract right here is fuzzy.
-// Different executor applies their own protocol of what is a unique
-// computational graph. e.g. Legacy Executor embeds tensor type & dimensionality
-// in the graph, while Profiling Executor keeps symbolic shape as well as stride
-// order in the graph as well.
-// Our definition of computational graph is relaxed to support Legacy Executor,
-// so the `GraphCache` could handle varying memory layout of strided tensor
-// (different stride order & contiguity information). We utilize the profiling
-// information now by generating an entry in GraphCache with the given profiling
-// record.
+//! Encoding an input set to unique id, which is used to short-cut cache entry
+//! selection in our nested cache implementation to cut off overhead.
+//!
+//! We have implemented naive LRU cache eviction policy here, since each entry
+//! in `InputsIdLookup` is attached to a static input shape/stride, and could
+//! grow gigantic when we have input shapes that does not stabalize to a finite
+//! set.
+//!
+//! \note the uniqueness of the ide generated for a given input set is only
+//!   local to the instance of `InputsIdLookup`.
+//!
+class TORCH_CUDA_API InputsIdLookup {
+ public:
+  //! constructor where maximum cache size is fixed during init
+  explicit InputsIdLookup(size_t max_cache_size = 10)
+      : max_cache_size_(max_cache_size){};
+
+  //! struct to hold return value for lookupId.
+  struct IdLookupReturn {
+    size_t id = 0;
+    size_t evict_id = 0;
+    bool eviction = false;
+  };
+
+  //! encode each input sets to with an unique id;
+  //! Returned data structure also indicates whether eviction has happened
+  //! within the lookup cache. This is needed because lookup shortcut is also
+  //! cached in nested `GraphCache`, `FusionExecutorCache` and `FusionExecutor`.
+  //! see [ Note -- 2 level cache implementation ]
+  IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
+
+  //! debugging API that returns the size of lookup table
+  size_t size() const {
+    return encoding_lookup_.size();
+  }
+
+ private:
+  //! entry stored in `encoding_lookup_` to implement LRU
+  struct EncodingEntry {
+    size_t id;
+    std::list<std::string>::iterator lru_iter;
+  };
+
+  //! maximum cache size for LRU
+  const size_t max_cache_size_;
+
+  //! next available unique id, we monotonically increase `current_id_` avoid
+  //! conflicts
+  size_t current_id_ = 1;
+
+  //! entry in the cache, This is used to implement LRU cache, where entries in
+  //! the list is ordered by their recent usage (freshly used entry is placed at
+  //! the beginning)
+  std::list<std::string> used_entry_;
+
+  //! map from `std::string` to a unique id `size_t` (packaged in
+  //! `EncodingEntry`
+  //! ). We store an iterator to `used_entry_` to implement LRU
+  std::unordered_map<std::string, EncodingEntry> encoding_lookup_;
+};
+
+//! [ Note -- 2 level cache implementation ]
+//!
+//! We have 2 level cache for a separation in function to keep them simpler.
+//!
+//! 2 level hierarchically nested cache is to handle the code generation and
+//! execution of a given PyTorch IR graph that is unique in its computational
+//! graph (see note on unique computational graph down).
+//!
+//! The nested cache structures are:
+//!     a. GraphCache
+//!        - GraphCache translates PyTorch IR into Fusion IR and pass it to a
+//!          `FusionExecutorCache`;
+//!        - GraphCache assumes all inputs to comply with profiling information,
+//!          mostly tensor size & contiguity (see note on unique computational
+//!          graph). The assumption is assured at runtime by
+//!          `prim::CudaFusionGuard`;
+//!        - GraphCache handles permutation for I/O tensors, when they share
+//!          global stride order. This permutation facilitates dimension
+//!          collapsing, which gives simpler indexing.
+//!     b. FusionExecutorCache
+//!        - has a single `Fusion`, FusionExecutorCache handles kernel schedule
+//!          and passed scheduled tensor to `FusionExecutor` to generate code;
+//!        - create `FusionExecutor` instances to handle heuristics from dynamic
+//!          shape (varying tensor sizes);
+//!        - create `FusionExecutor` instances to handle different devices;
+//!        - holds input cache `InputsIdLookup`, which allow cache on heuristics
+//!          and launch parameters to reduce latency.
+//!
+//! * note on unique computational graph
+//! In theory, computational graph should refer to only the computational nodes
+//! in a subgraph and should remain agnostic to input meta info, like
+//! shape, strides, type e.t.c.. However, the contract right here is fuzzy.
+//! Different executor applies their own protocol of what is a unique
+//! computational graph. e.g. Legacy Executor embeds tensor type &
+//! dimensionality in the graph, while Profiling Executor keeps symbolic shape
+//! as well as stride order in the graph as well.
+//!
+//! Our definition of a "unique" computational graph is aligned with `Fusion`
+//! IR, hence the requirement extends to meta information on input tensors.
+//! Which means, for each input tensor, following properties are fixed:
+//!     a) stride order;
+//!     b) contiguity information;
+//!     c) broadcasting semantics (size-1 or not);
+//!     d) rank;
+//!     e) scalar type;
 
 class FusionExecutorCache {
  public:
-  // create new fusion executor cache at a given device to handle kernel
-  // generation of dynamic sizes;
-  // fusion executor is taking the ownership of `fusion`;
-  FusionExecutorCache(std::unique_ptr<Fusion>&& fusion, at::Device device);
+  //! create new fusion executor cache at a given device to handle kernel
+  //! generation of dynamic sizes;
+  //! fusion executor is taking the ownership of `fusion`;
+  explicit FusionExecutorCache(std::unique_ptr<Fusion>&& fusion);
 
-  // Execute fusion graph with given inputs, create `FusionExecutor` as needed;
+  //! Execute fusion graph with given inputs, create `FusionExecutor` as needed;
   std::vector<at::Tensor> runFusionWithInputs(
       const at::ArrayRef<IValue>& inputs);
 
  private:
-  // device_ where compiled binaries are loaded on & inputs are expected to
-  // reside;
-  at::Device device_;
+  //! evict cached short cut entry in `code_to_fe_lookup_` as well as cached
+  //! entry in `FusionExecutor`
+  void evictCache(size_t cache_id) {
+    auto iter = code_to_fe_lookup_.find(cache_id);
+    TORCH_INTERNAL_ASSERT(
+        iter != code_to_fe_lookup_.end(),
+        "evict cache failed to find an entry");
+    // evict nested lookup entry in nested `FusionExecutor`
+    (iter->second)->evictCache(cache_id);
+    code_to_fe_lookup_.erase(iter);
+  };
 
-  // original un-scheduled `Fusion`;
+ private:
+  //! original un-scheduled `Fusion`;
   std::unique_ptr<Fusion> fusion_;
 
-  // TODO: ugly logic for now. We should integrate the hashing of cache for
-  //       different kernels. (alternatively we could do so in scheduler).
-  // ugly bits now:
-  // The fact that we have heuristics only for reduction, but use a general
-  // kernel for all point-wise fusion ended up with this:
-  // 1. For point-wise fusion, we have a single `FusionExecutor` in
-  //    `pw_fusion_executor_cache_`
-  // 2. For reduction fusion we have a hash table with ReductionParams as entry
-  //    pointing to the actual `FusionExecutor` in `red_fusion_executor_cache_`
+  // I'm trading the const model in favor of assigning `has_reduction_` in the
+  // body of constructor, instead of the initializer list;
+  // Because of the move statement used in the constructor, it's tricky to
+  // maintain the code if we have `has_reduction_` as a const member and
+  // initizlize it in the initializer list, where the order of initialization
+  // is controled by the order of declaration instead of their order in the list
   //
-  // Unfortunately, at run-time in order to search compatible `FusionExecutor`,
-  // we have to call `scheduleReduction` in order to get an instance of
-  // `ReductionParams` for indexing. This is not very efficient. Hence the TODO:
-  // add a direct cache from inputs shapes to `FusionExecutor` entries.
-  std::unique_ptr<FusionExecutor> pw_fusion_executor_cache_;
-  std::unordered_map<ReductionParams, FusionExecutor, ReductionParamsHash>
+  //! cache fusion->hasReduction() because it's expensive;
+  bool has_reduction_;
+
+  //! TODO: ugly logic for now. We should integrate the hashing of cache for
+  //!       different kernels. (alternatively we could do so in scheduler).
+  //! ugly bits now:
+  //! The fact that we have heuristics only for reduction, but use a general
+  //! kernel for all point-wise fusion ended up with this:
+  //! 1. For point-wise fusion, we have a single `FusionExecutor` in
+  //!    `pw_fusion_executor_cache_`
+  //! 2. For reduction fusion we have a hash table with ReductionParams as entry
+  //!    pointing to the actual `FusionExecutor` in `red_fusion_executor_cache_`
+  //!
+  //! Both cache_ key on device_index, because `FusionExecutor` is designated to
+  //! a single device
+  std::unordered_map<int, std::unique_ptr<FusionExecutor>>
+      pw_fusion_executor_cache_;
+  std::unordered_map<
+      int,
+      std::unordered_map<ReductionParams, FusionExecutor, ReductionParamsHash>>
       red_fusion_executor_cache_;
+
+  //! short cut to FusionExecutor for input set encoded with id;
+  std::unordered_map<size_t, FusionExecutor*> code_to_fe_lookup_;
+
+  //! inputs to unique_id lookup table;
+  InputsIdLookup inputs_id_lookup_;
 };
 
 class GraphCache {
  public:
-  // TODO: we should probably change shared_ptr to unique_ptr, as we want to
-  //       claim the ownership of the computational graph.
-  // create GraphCache on a given graph;
-  // Note: if run with profiling executor, we'll try to generete a kernel with
-  // profiling information at this moment.
-  GraphCache(std::shared_ptr<Graph> graph);
+  //! TODO: we should probably change shared_ptr to unique_ptr, as we want to
+  //!       claim the ownership of the computational graph.
+  //! create GraphCache on a given graph;
+  //! We extract global stride index order and translate PyTorch JIT IR to
+  //! Fusion IR.
+  explicit GraphCache(const std::shared_ptr<Graph>& graph);
 
-  // execute graph with given inputs.
+  //! execute graph with given inputs, permutation on I/O tensors are performed.
   std::vector<at::Tensor> runGraphWithInputs(
       const at::ArrayRef<IValue>& inputs);
 
  private:
-  // TODO: place holder with naive implementation for now.
-  // structure use to mark the compatibility of each FusionExecutorCache;
-  // We also have `input_permutation_` & `output_permutation_` used to
-  // facilitate dimension coalescing per stride order.
-  struct InputsRequirement {
-    // target device
-    c10::optional<at::Device> device_;
-    // TODO: TensorTypePtr is not very easy to work with.
-    // c10::nullopt to take place of non-tensor type;
-    std::vector<c10::optional<at::TensorTypePtr>> vec_optional_ttp;
-
-    // common permutation order used for dimension coalescing;
-    at::DimVector input_permutation_;
-    at::DimVector output_permutation_;
-
-    // construct InputsRequirement from `Graph`, this is used for constructing
-    // `GraphCache` entry using profiling record
-    InputsRequirement(
-        const std::shared_ptr<Graph>& graph,
-        const std::vector<size_t>& reduction_axes);
-
-    // construct InputsRequirement from live input feeds, this is used to handle
-    // run-time inputs to: 1. search for compatible entry; 2. insert new entry
-    // in case of a cache miss.
-    InputsRequirement(
-        const at::ArrayRef<IValue>& inputs,
-        const std::vector<size_t>& reduction_axes);
-
-    // bool operator==(const InputsRequirement& other);
-    bool complyWith(const InputsRequirement& expect);
-
-    // helper function used at run-time to check whether a common permutation is
-    // present, this is used to take the short-cut to skip permutation logic.
-    bool requiresPermutation();
-  };
-
-  // construct FusionExecutorCache per InputsRequirement.
-  // This function makes sure that we properly insert both `input_stacks_` and
-  // `fe_cache_` at the same time.
-  FusionExecutorCache* createFusionExecutorCache(
-      const InputsRequirement& input_stack);
-
- private:
-  // Computation graph;
+  //! Computation graph;
   std::shared_ptr<Graph> graph_;
-  // TODO: poor name, we should use `eliminated_axes_` instead;
+  //! TODO: poor name, we should use `eliminated_axes_` instead;
   at::DimVector reduction_axes_;
 
-  // TODO: we should really hash instead of iterative check. Optimize later...
-  //       unordered_map<InputsRequirement, FusionExecutorCache>;
-  std::vector<InputsRequirement> input_stacks_;
-  std::vector<std::unique_ptr<FusionExecutorCache>> fe_cache_;
+  //! helper function used at run-time to check whether a common permutation is
+  //! present, this is used to take the short-cut to skip permutation logic.
+  bool requiresPermutation();
+
+  //! construct FusionExecutorCache
+  void createFusion(const std::shared_ptr<Graph>& graph);
+
+  //! extract permutation for I/O tensor from accumulcated tensor type pointer
+  //! on all inputs;
+  void extractPermutation(const TensorTypePtr& acc_type);
+
+ private:
+  // common permutation order used to facilitate dimension coalescing;
+  at::DimVector input_permutation_;
+  at::DimVector pw_output_permutation_;
+  at::DimVector reduction_output_permutation_;
+
+  //! FusionExecutorCache that performs schedule and kernel execution;
+  std::unique_ptr<FusionExecutorCache> fusion_executor_cache_;
 };
 
 } // namespace cuda

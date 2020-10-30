@@ -15,7 +15,7 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* dist_autograd_init(PyObject* /* unused */) {
+PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
   auto autograd_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.autograd"));
   if (!autograd_module) {
@@ -196,7 +196,7 @@ Example::
 
 static PyMethodDef methods[] = { // NOLINT
     {"_dist_autograd_init",
-     (PyCFunction)dist_autograd_init,
+     dist_autograd_init,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};

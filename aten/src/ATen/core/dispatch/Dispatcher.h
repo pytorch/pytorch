@@ -211,6 +211,28 @@ public:
     return dispatch_key != DispatchKey::BackendSelect;
   }
 
+  //
+  // ------------------------------------------------------------------------
+  //
+  // Assertions
+  //
+  // ------------------------------------------------------------------------
+
+  /**
+   * For testing purposes.
+   * Returns a list of all operators that were created through calls to registerImpl(),
+   * without any corresponding calls to registerDef(). After static initialization
+   * is done this is almost certainly a bug, as the created OperatorHandle won't have
+   * any schema associated with it and users calling the op through the dispatcher
+   * won't be able to access it
+   *
+   * Note that we cannot enforce this invariant "as we go" during static initialization,
+   * due to undefined static initialization order- we have no guarantees over the order
+   * in which .def() and .impl() calls are registered in the dispatcher at static
+   * initialization time. So this function should only be called after static initialization.
+   */
+  std::vector<OperatorHandle> findDanglingImpls() const;
+
 private:
   Dispatcher();
 
@@ -270,6 +292,10 @@ public:
 
   std::string dumpState() const {
     return operatorIterator_->op.dumpState();
+  }
+
+  std::string dumpComputedTable() const {
+    return operatorIterator_->op.dumpComputedTable();
   }
 
   void checkInvariants() const {
@@ -340,6 +366,8 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  // No alias dispatch key is allowed at runtime.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -355,14 +383,14 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       int64_t seq_num = -1;
       // Setting sequence number in the Autograd case to associate
       // the forward range with the coresponding Autograd's node
-      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
         torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
-        guard.before(op.schema().name(), stack, seq_num);
+        guard.before(op, stack, seq_num);
       } else {
-        guard.before(op.schema().name(), seq_num);
+        guard.before(op, seq_num);
       }
     }
   }
@@ -406,13 +434,13 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   if (C10_UNLIKELY(guard.active)) {
     if (shouldRecord(dispatchKey) && entry.isObserved()) {
       int64_t seq_num = -1;
-      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
-        guard.before(op.schema().name(), *stack, seq_num);
+        guard.before(op, *stack, seq_num);
       } else {
-        guard.before(op.schema().name(), seq_num);
+        guard.before(op, seq_num);
       }
     }
   }

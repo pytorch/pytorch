@@ -34,8 +34,10 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 using StmtNameType = unsigned int;
+
 constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE =
     std::numeric_limits<unsigned int>::max();
 
@@ -351,6 +353,7 @@ class TORCH_CUDA_API Expr : public Statement {
   std::vector<Val*> outputs_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

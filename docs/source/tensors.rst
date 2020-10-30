@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines 10 tensor types with CPU and GPU variants:
+Torch defines 10 tensor types with CPU and GPU variants which are as follows:
 
 ========================== ===========================================   ============================= ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
@@ -32,7 +32,7 @@ Boolean                    ``torch.bool``                                :class:
   Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
   significand bits. Useful when precision is important at the expense of range.
 .. [2]
-  Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
+  Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
   significand bits. Useful when range is important, since it has the same
   number of exponent bits as ``float32``
 
@@ -189,11 +189,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addcmul_
    .. automethod:: addmm
    .. automethod:: addmm_
+   .. automethod:: sspaddmm
+      :noindex:
    .. automethod:: addmv
    .. automethod:: addmv_
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
+   .. automethod:: amax
+   .. automethod:: amin
    .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
@@ -267,6 +271,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
+      :noindex:
    .. automethod:: detach
       :noindex:
    .. automethod:: detach_
@@ -282,6 +287,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: dist
    .. automethod:: div
    .. automethod:: div_
+   .. automethod:: divide
+   .. automethod:: divide_
    .. automethod:: dot
    .. automethod:: double
    .. automethod:: eig
@@ -324,17 +331,26 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gcd_
    .. automethod:: ge
    .. automethod:: ge_
+   .. automethod:: greater_equal
+   .. automethod:: greater_equal_
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger
    .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
+   .. automethod:: greater
+   .. automethod:: greater_
    .. automethod:: half
    .. automethod:: hardshrink
+   .. automethod:: heaviside
    .. automethod:: histc
    .. automethod:: hypot
    .. automethod:: hypot_
+   .. automethod:: i0
+   .. automethod:: i0_
+   .. automethod:: igamma
+   .. automethod:: igamma_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
@@ -346,6 +362,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_put
    .. automethod:: index_select
    .. automethod:: indices
+      :noindex:
    .. automethod:: int
    .. automethod:: int_repr
    .. automethod:: inverse
@@ -366,6 +383,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_shared
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
+      :noindex:
    .. automethod:: istft
    .. automethod:: isreal
    .. automethod:: item
@@ -374,6 +392,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lcm_
    .. automethod:: le
    .. automethod:: le_
+   .. automethod:: less_equal
+   .. automethod:: less_equal_
    .. automethod:: lerp
    .. automethod:: lerp_
    .. automethod:: lgamma
@@ -405,6 +425,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lstsq
    .. automethod:: lt
    .. automethod:: lt_
+   .. automethod:: less
+   .. automethod:: less_
    .. automethod:: lu
    .. automethod:: lu_solve
    .. automethod:: as_subclass
@@ -421,13 +443,18 @@ view of a storage and defines numeric operations on it.
    .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
+   .. automethod:: nanmedian
    .. automethod:: min
    .. automethod:: minimum
    .. automethod:: mm
+   .. automethod:: smm
+      :noindex:
    .. automethod:: mode
    .. automethod:: movedim
    .. automethod:: mul
    .. automethod:: mul_
+   .. automethod:: multiply
+   .. automethod:: multiply_
    .. automethod:: multinomial
    .. automethod:: mv
    .. automethod:: mvlgamma
@@ -436,8 +463,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
+   .. automethod:: nan_to_num
+   .. automethod:: nan_to_num_
    .. automethod:: ne
    .. automethod:: ne_
+   .. automethod:: not_equal
+   .. automethod:: not_equal_
    .. automethod:: neg
    .. automethod:: neg_
    .. automethod:: negative
@@ -465,6 +496,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: qr
    .. automethod:: qscheme
    .. automethod:: quantile
+   .. automethod:: nanquantile
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: q_per_channel_scales
@@ -472,6 +504,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_per_channel_axis
    .. automethod:: rad2deg
    .. automethod:: random_
+   .. automethod:: ravel
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
    .. automethod:: record_stream
@@ -512,19 +545,25 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sign
    .. automethod:: sign_
    .. automethod:: signbit
+   .. automethod:: sgn
+   .. automethod:: sgn_
    .. automethod:: sin
    .. automethod:: sin_
    .. automethod:: sinh
    .. automethod:: sinh_
    .. automethod:: asinh
    .. automethod:: asinh_
+   .. automethod:: arcsinh
+   .. automethod:: arcsinh_
    .. automethod:: size
    .. automethod:: slogdet
    .. automethod:: solve
    .. automethod:: sort
    .. automethod:: split
    .. automethod:: sparse_mask
+      :noindex:
    .. automethod:: sparse_dim
+      :noindex:
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: square
@@ -539,12 +578,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: stride
    .. automethod:: sub
    .. automethod:: sub_
+   .. automethod:: subtract
+   .. automethod:: subtract_
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
+   .. automethod:: tensor_split
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take
@@ -554,9 +596,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: atanh
    .. automethod:: atanh_
+   .. automethod:: arctanh
+   .. automethod:: arctanh_
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse
+      :noindex:
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_
@@ -579,7 +624,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values
+      :noindex:
    .. automethod:: var
+   .. automethod:: vdot
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where

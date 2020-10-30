@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
@@ -10,16 +11,18 @@
 #define LSEEK lseek
 #endif
 
-static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(size)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   return PyLong_FromLong(self->cdata->nbytes() / sizeof(scalar_t));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(dataPtr)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(dataPtr)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   return PyLong_FromVoidPtr(THWStorage_(data)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
@@ -31,9 +34,10 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(isPinned)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(isPinned)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
 #if defined(USE_CUDA)
   return PyBool_FromLong(at::globalContext().isPinnedPtr(THWStorage_(data)(LIBRARY_STATE self->cdata)));
 #else
@@ -42,16 +46,18 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(elementSize)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(elementSize)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   return PyLong_FromLong(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(new)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
   PyObject *_ret = THPStorage_(New)(new_storage);
   new_storage.release();
@@ -59,9 +65,10 @@ static PyObject * THPStorage_(new)(THPStorage *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
+static PyObject * THPStorage_(resize_)(PyObject *_self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THPUtils_assert(THPUtils_checkLong(number_arg), "resize_ expects an int, "
       "but got %s", THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
@@ -72,9 +79,10 @@ static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(fill_)(THPStorage *self, PyObject *number_arg)
+static PyObject * THPStorage_(fill_)(PyObject *_self, PyObject *number_arg)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THPUtils_assert(THPUtils_(checkReal)(number_arg), "fill_ expects %s, "
       "but got %s", THPUtils_typeTraits<scalar_t>::python_type_str,
       THPUtils_typename(number_arg));
@@ -125,17 +133,18 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
     return nullptr;
 
   if (offset < 0 || offset > buffer.len) {
-    PyErr_Format(PyExc_ValueError,
-      "offset must be non-negative and no greater than buffer length (%" PRId64 "), "
-      "but got %" PRId64, (int64_t)offset, (int64_t)buffer.len);
+    PyErr_SetString(PyExc_ValueError, fmt::format(
+      "offset must be non-negative and no greater than buffer length ({}) , but got {}",
+      offset, buffer.len));
     PyBuffer_Release(&buffer);
     return nullptr;
   }
 
   if (count < 0) {
     if ((buffer.len - offset) % sizeof(scalar_t) != 0) {
-      PyErr_Format(PyExc_ValueError, "buffer size (%" PRId64 ") must be a multiple "
-          "of element size (%" PRId64 ")", (int64_t)buffer.len, (int64_t)sizeof(scalar_t));
+      PyErr_SetString(PyExc_ValueError, fmt::format(
+         "buffer size ({}) must be a multiple of element size ({})",
+         buffer.len, sizeof(scalar_t)));
       PyBuffer_Release(&buffer);
       return nullptr;
     }
@@ -143,9 +152,9 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   if (offset + (count * (Py_ssize_t)sizeof(scalar_t)) > buffer.len) {
-    PyErr_Format(PyExc_ValueError, "buffer has only %" PRId64 " elements after offset "
-        "%" PRId64 ", but specified a size of %" PRId64, (int64_t)(buffer.len - offset),
-        (int64_t)offset, (int64_t)count);
+    PyErr_SetString(PyExc_ValueError, fmt::format(
+        "buffer has only {} elements after offset {}, but specified a size of {}",
+        buffer.len - offset, offset, count));
     PyBuffer_Release(&buffer);
     return nullptr;
   }
@@ -217,12 +226,13 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *args)
+PyObject * THPStorage_(writeFile)(PyObject *_self, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  PyObject *file = PyTuple_GET_ITEM(args, 0);
-  bool is_real_file = PyTuple_GET_ITEM(args, 1) == Py_True;
-  bool save_size = PyTuple_GET_ITEM(args, 2) == Py_True;
+  auto self = (THPStorage*)_self;
+  PyObject *file = PyTuple_GetItem(args, 0);
+  bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
+  bool save_size = PyTuple_GetItem(args, 2) == Py_True;
 
   if (!is_real_file) {
     THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size);
@@ -251,9 +261,10 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
+static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   PyObject *file = PyTuple_GET_ITEM(args, 0);
   PyObject *offset = PyTuple_GET_ITEM(args, 1);
   bool is_real_file = PyTuple_GET_ITEM(args, 2) == Py_True;
@@ -300,17 +311,19 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 }
 
 #ifdef THC_GENERIC_FILE
-PyObject * THPStorage_(getDevice)(THPStorage *self, PyObject *noargs)
+PyObject * THPStorage_(getDevice)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   return PyLong_FromLong(THCStorage_(getDevice)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 #endif
 
-PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
+PyObject * THPStorage_(_setCdata)(PyObject *_self, PyObject *new_cdata)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THPUtils_assert(THPUtils_checkLong(new_cdata), "given an invalid argument to "
       "_set_cdata - expected an int or long, but got %s",
       THPUtils_typename(new_cdata));
@@ -324,24 +337,27 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
-  {"copy_", (PyCFunction)(void(*)(void))THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, nullptr},
-  {"fill_", (PyCFunction)THPStorage_(fill_), METH_O, nullptr},
-  {"new", (PyCFunction)THPStorage_(new), METH_NOARGS, nullptr},
-  {"resize_", (PyCFunction)THPStorage_(resize_), METH_O, nullptr},
-  {"size", (PyCFunction)THPStorage_(size), METH_NOARGS, nullptr},
-  {"data_ptr", (PyCFunction)THPStorage_(dataPtr), METH_NOARGS, nullptr},
-  {"is_pinned", (PyCFunction)THPStorage_(isPinned), METH_NOARGS, nullptr},
-  {"_write_file", (PyCFunction)THPStorage_(writeFile), METH_VARARGS, nullptr},
-  {"_new_with_file", (PyCFunction)(void(*)(void))THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
-  {"_set_from_file", (PyCFunction)THPStorage_(setFromFile), METH_VARARGS, nullptr},
+  {"copy_", castPyCFunctionWithKeywords(THPStorage_(copy_)),
+    METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"element_size", THPStorage_(elementSize), METH_NOARGS, nullptr},
+  {"fill_", THPStorage_(fill_), METH_O, nullptr},
+  {"new", THPStorage_(new), METH_NOARGS, nullptr},
+  {"resize_", THPStorage_(resize_), METH_O, nullptr},
+  {"size", THPStorage_(size), METH_NOARGS, nullptr},
+  {"data_ptr", THPStorage_(dataPtr), METH_NOARGS, nullptr},
+  {"is_pinned", THPStorage_(isPinned), METH_NOARGS, nullptr},
+  {"_write_file", THPStorage_(writeFile), METH_VARARGS, nullptr},
+  {"_new_with_file", THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
+  {"_set_from_file", THPStorage_(setFromFile), METH_VARARGS, nullptr},
 #if !defined(THC_GENERIC_FILE)
-  {"from_buffer", (PyCFunction)(void(*)(void))THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_buffer", castPyCFunctionWithKeywords(THPStorage_(fromBuffer)),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #endif
-  {"from_file", (PyCFunction)(void(*)(void))THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_file", castPyCFunctionWithKeywords(THPStorage_(fromFile)),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #ifdef THC_GENERIC_FILE
-  {"get_device", (PyCFunction)THPStorage_(getDevice), METH_NOARGS, nullptr},
+  {"get_device", THPStorage_(getDevice), METH_NOARGS, nullptr},
 #endif
-  {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, nullptr},
+  {"_set_cdata", THPStorage_(_setCdata), METH_O, nullptr},
   {nullptr}
 };

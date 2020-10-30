@@ -15,6 +15,7 @@ class BoundsInference : public IRVisitor {
   void visit(const FunctionCall* v) override;
   void visit(const Load* v) override;
   void visit(const Store* v) override;
+  void visit(const ReduceOp* v) override;
   void visit(const For* v) override;
   void visit(const Block* v) override;
 
@@ -31,12 +32,17 @@ void BoundsInference::visit(const Load* v) {
 }
 
 void BoundsInference::visit(const FunctionCall* v) {
-  accesses_[v->tensor()->func_var()].push_back(
-      {kLoad, v->params(), v->params()});
+  accesses_[v->tensor()->buf()].push_back({kLoad, v->params(), v->params()});
 }
 
 void BoundsInference::visit(const Store* v) {
   accesses_[v->buf()].push_back({kStore, v->indices(), v->indices()});
+  IRVisitor::visit(v);
+}
+
+void BoundsInference::visit(const ReduceOp* v) {
+  accesses_[v->accumulator()].push_back(
+      {kLoad, v->output_args(), v->output_args()});
   IRVisitor::visit(v);
 }
 

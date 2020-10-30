@@ -37,9 +37,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("add.out", CppFunction::makeFallthrough());
   m.impl("add_.Scalar", CppFunction::makeFallthrough());
   m.impl("add_.Tensor", CppFunction::makeFallthrough());
-  m.impl("add_relu.Tensor", CppFunction::makeFallthrough());
-  m.impl("add_relu.out", CppFunction::makeFallthrough());
-  m.impl("add_relu_.Tensor", CppFunction::makeFallthrough());
+  m.impl("_add_relu.Tensor", CppFunction::makeFallthrough());
+  m.impl("_add_relu.out", CppFunction::makeFallthrough());
+  m.impl("_add_relu_.Tensor", CppFunction::makeFallthrough());
   m.impl("addcdiv", CppFunction::makeFallthrough());
   m.impl("addcdiv.out", CppFunction::makeFallthrough());
   m.impl("addcdiv_", CppFunction::makeFallthrough());
@@ -113,10 +113,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("conj.out", CppFunction::makeFallthrough());
   m.impl("contiguous", CppFunction::makeFallthrough());
   m.impl("copy_", CppFunction::makeFallthrough());
-  m.impl("copy_imag", CppFunction::makeFallthrough());
-  m.impl("copy_imag.out", CppFunction::makeFallthrough());
-  m.impl("copy_real", CppFunction::makeFallthrough());
-  m.impl("copy_real.out", CppFunction::makeFallthrough());
   m.impl("cos", CppFunction::makeFallthrough());
   m.impl("cos.out", CppFunction::makeFallthrough());
   m.impl("cos_", CppFunction::makeFallthrough());
@@ -211,6 +207,12 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("hypot", CppFunction::makeFallthrough());
   m.impl("hypot.out", CppFunction::makeFallthrough());
   m.impl("hypot_", CppFunction::makeFallthrough());
+  m.impl("i0", CppFunction::makeFallthrough());
+  m.impl("i0.out", CppFunction::makeFallthrough());
+  m.impl("i0_", CppFunction::makeFallthrough());
+  m.impl("igamma", CppFunction::makeFallthrough());
+  m.impl("igamma.out", CppFunction::makeFallthrough());
+  m.impl("igamma_", CppFunction::makeFallthrough());
   m.impl("imag", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Scalar", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Tensor", CppFunction::makeFallthrough());
@@ -314,6 +316,11 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("median.dim_values", CppFunction::makeFallthrough());
   m.impl("median.names_dim", CppFunction::makeFallthrough());
   m.impl("median.names_dim_values", CppFunction::makeFallthrough());
+  m.impl("nanmedian", CppFunction::makeFallthrough());
+  m.impl("nanmedian.dim", CppFunction::makeFallthrough());
+  m.impl("nanmedian.dim_values", CppFunction::makeFallthrough());
+  m.impl("nanmedian.names_dim", CppFunction::makeFallthrough());
+  m.impl("nanmedian.names_dim_values", CppFunction::makeFallthrough());
   m.impl("min", CppFunction::makeFallthrough());
   m.impl("min.dim", CppFunction::makeFallthrough());
   m.impl("min.dim_min", CppFunction::makeFallthrough());
@@ -450,6 +457,8 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("tanh", CppFunction::makeFallthrough());
   m.impl("tanh.out", CppFunction::makeFallthrough());
   m.impl("tanh_", CppFunction::makeFallthrough());
+  m.impl("tensor_split.indices", CppFunction::makeFallthrough());
+  m.impl("tensor_split.sections", CppFunction::makeFallthrough());
   m.impl("threshold", CppFunction::makeFallthrough());
   m.impl("threshold.out", CppFunction::makeFallthrough());
   m.impl("threshold_", CppFunction::makeFallthrough());
@@ -496,6 +505,5 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("is_leaf", CppFunction::makeFallthrough());
   m.impl("_version", CppFunction::makeFallthrough());
   m.impl("requires_grad_", CppFunction::makeFallthrough());
-  m.impl("requires_grad", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
 }

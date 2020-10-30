@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -10,6 +11,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 using id_map = std::unordered_map<IterDomain*, IterDomain*>;
 
@@ -128,6 +130,8 @@ class ReplaySelf : public ReplayTransformations {
 TensorDomain* TransformReplay::fullSelfReplay(
     const TensorDomain* new_self_root,
     const TensorDomain* self) {
+  FUSER_PERF_SCOPE("fullSelfReplay");
+
   TORCH_INTERNAL_ASSERT(
       new_self_root->nDims() == self->getRootDomain().size(),
       "Invalid number of IterDomains provided.");
@@ -181,6 +185,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     const TensorDomain* producer,
     const TensorDomain* consumer,
     int consumer_compute_at_axis) {
+  FUSER_PERF_SCOPE("replayPasC");
+
   if (consumer_compute_at_axis < 0)
     consumer_compute_at_axis += (int)consumer->nDims() + 1;
   TORCH_INTERNAL_ASSERT(
@@ -312,12 +318,16 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
 
   unsigned int producer_compute_at_axis = new_IDs.size();
   // Add axes in (2)
-  std::unordered_set<IterDomain*> consumer_CA_ids_set(
-      consumer_CA_ids.begin(), consumer_CA_ids.end());
   for (auto c_id : consumer->domain()) {
     auto it = replay_PasC.getReplay().find(c_id);
     if (it != replay_PasC.getReplay().end()) {
       auto id = it->second;
+      // If the leaf id from ReplayTransformations is used to move
+      // forward in BestEffortReplay, it is not a final ID.
+      if (producer_replayed_leaves.getUnorderedLeafIDs().find(id) ==
+          producer_replayed_leaves.getUnorderedLeafIDs().end()) {
+        continue;
+      }
       if (used_IDs.find(id) == used_IDs.end()) {
         new_IDs.push_back(id);
         used_IDs.emplace(id);
@@ -353,6 +363,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     const TensorDomain* consumer,
     const TensorDomain* producer,
     int producer_compute_at_axis) {
+  FUSER_PERF_SCOPE("replayCasP");
+
   if (producer_compute_at_axis < 0)
     producer_compute_at_axis += (int)producer->nDims() + 1;
 
@@ -484,12 +496,16 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   }
 
   // Add axes in (2)
-  std::unordered_set<IterDomain*> consumer_CA_ids_set(
-      producer_CA_ids.begin(), producer_CA_ids.end());
   for (auto p_id : producer->domain()) {
     auto it = replay_CasP.getReplay().find(p_id);
     if (it != replay_CasP.getReplay().end()) {
       auto id = it->second;
+      // If the leaf id from ReplayTransformations is used to move
+      // forward in BestEffortReplay, it is not a final ID.
+      if (consumer_replayed_leaves.getUnorderedLeafIDs().find(id) ==
+          consumer_replayed_leaves.getUnorderedLeafIDs().end()) {
+        continue;
+      }
       if (used_IDs.find(id) == used_IDs.end()) {
         new_IDs.push_back(id);
         used_IDs.emplace(id);
@@ -553,6 +569,7 @@ std::pair<TensorView*, unsigned int> TransformReplay::replayCasP(
   return {consumer, replay.second};
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

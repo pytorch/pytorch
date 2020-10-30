@@ -1,4 +1,5 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
+
 #include <test/cpp/jit/test_utils.h>
 
 #include <ATen/core/qualified_name.h>
@@ -42,7 +43,7 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-void testModuleClone() {
+TEST(ModuleAPITest, Clone) {
   auto cu = std::make_shared<CompilationUnit>();
   // creating child module
   auto child = ClassType::create("child", cu, true);
@@ -71,7 +72,7 @@ void testModuleClone() {
   ASSERT_EQ(Module(p2.attr("c2").toObject()).attr(attr_name).toInt(), 3);
 }
 
-void testModuleCloneWithModuleInterface() {
+TEST(ModuleAPITest, CloneWithModuleInterface) {
   auto cu = std::make_shared<CompilationUnit>();
 
   // define a initial module with two submods share same interface
@@ -115,7 +116,7 @@ void testModuleCloneWithModuleInterface() {
   ASSERT_NE(clonedMod.type(), parentMod.type());
 }
 
-void testModuleCopy() {
+TEST(ModuleAPITest, Copy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr_name = "attr";
@@ -144,7 +145,7 @@ void testModuleCopy() {
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
-void testModuleDeepcopy() {
+TEST(ModuleAPITest, DeepCopy) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto str_attr = "str_attr";
@@ -203,7 +204,7 @@ void testModuleDeepcopy() {
   ASSERT_TRUE(t1.equal(t3));
 }
 
-void testModuleDeepcopyString() {
+TEST(ModuleAPITest, DeepCopyString) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr1 = "attr1";
@@ -219,7 +220,7 @@ void testModuleDeepcopyString() {
   ASSERT_EQ(copied.attr(attr1).toString()->string(), original_str);
 }
 
-void testModuleDeepcopyAliasing() {
+TEST(ModuleAPITest, DeepCopyPreservesAliasing) {
   // check deepcopy preserves aliasing
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -256,7 +257,7 @@ void testModuleDeepcopyAliasing() {
   ASSERT_TRUE(copied_attr3.isAliasOf(copied_attr4));
 }
 
-void testModuleConstant() {
+TEST(ModuleAPITest, Constants) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   auto attr_name = "attr";
@@ -272,7 +273,7 @@ void testModuleConstant() {
   ASSERT_EQ(m.attr(const_name).toInt(), 3);
 }
 
-void testModuleParameter() {
+TEST(ModuleAPITest, Parameters) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
   Module m(cu, cls);
@@ -289,6 +290,40 @@ void testModuleParameter() {
   ASSERT_TRUE(m.hasattr("tensor_param"));
   ASSERT_TRUE(m.hasattr("none_param"));
   ASSERT_TRUE(m.hasattr("none_param2"));
+}
+
+TEST(ModuleAPITest, Define) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  auto result = m.run_method("add_it", torch::ones({}));
+  AT_ASSERT(result.toTensor().item<float>() == 6);
+}
+
+TEST(ModuleAPITest, To_CUDA) {
+  Module m("test");
+  {
+    // test cuda to cpu for params and buffers
+    m.register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m.register_buffer("bar", torch::ones({}, at::kCUDA));
+
+    m.to(at::kCUDA);
+    m.to(at::kCPU);
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cpu());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cpu());
+  }
+  {
+    // test cpu to cuda for params and buffers
+    m.register_parameter("foo", torch::ones({}), false);
+    m.register_buffer("bar", torch::ones({}));
+
+    m.to(at::kCUDA);
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cuda());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cuda());
+  }
 }
 
 } // namespace jit

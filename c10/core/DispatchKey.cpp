@@ -21,7 +21,8 @@ const char* toString(DispatchKey t) {
       return "XLA";
     case DispatchKey::Vulkan:
       return "Vulkan";
-
+    case DispatchKey::Metal:
+      return "Metal";
     case DispatchKey::MKLDNN:
       return "MKLDNN";
     case DispatchKey::OpenGL:
@@ -30,7 +31,6 @@ const char* toString(DispatchKey t) {
       return "OpenCL";
     case DispatchKey::IDEEP:
       return "IDEEP";
-
     case DispatchKey::QuantizedCPU:
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
@@ -63,35 +63,44 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Meta:
       return "Meta";
 
+    case DispatchKey::Autograd:
+      return "Autograd";
+    case DispatchKey::AutogradCPU:
+      return "AutogradCPU";
+    case DispatchKey::AutogradCUDA:
+      return "AutogradCUDA";
+    case DispatchKey::AutogradXLA:
+      return "AutogradXLA";
+    case DispatchKey::AutogradPrivateUse1:
+      return "AutogradPrivateUse1";
+    case DispatchKey::AutogradPrivateUse2:
+      return "AutogradPrivateUse2";
+    case DispatchKey::AutogradPrivateUse3:
+      return "AutogradPrivateUse3";
+    case DispatchKey::AutogradOther:
+      return "AutogradOther";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
     case DispatchKey::Named:
       return "Named";
 
-    case DispatchKey::Autograd:
-      return "Autograd";
-
     case DispatchKey::Tracer:
       return "Tracer";
 
-    case DispatchKey::AutogradXLA:
-      return "AutogradXLA";
-
     case DispatchKey::Autocast:
       return "Autocast";
-
-    case DispatchKey::PrivateUse1_PreAutograd:
-      return "PrivateUse1_PreAutograd";
-    case DispatchKey::PrivateUse2_PreAutograd:
-      return "PrivateUse2_PreAutograd";
-    case DispatchKey::PrivateUse3_PreAutograd:
-      return "PrivateUse3_PreAutograd";
 
     case DispatchKey::Batched:
       return "Batched";
 
     case DispatchKey::VmapMode:
       return "VmapMode";
+
+    case DispatchKey::Math:
+      return "Math";
+
+    case DispatchKey::DefaultBackend:
+      return "DefaultBackend";
 
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
@@ -106,6 +115,32 @@ const char* toString(DispatchKey t) {
 
 std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
+}
+
+// for a given backend key, return the associated autograd key.
+// for non-backend keys, return AutogradOther as a default.
+// Note: it's convenient and fast to return a default here rather than (say)
+// returning an optional<DispatchKey>, or throwing. But it makes callers
+// responsible for either a) enforcing the invariant that only backend keys
+// be passed as arguments, or b) interpreting our return value carefully.
+//
+DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
+  switch (t) {
+    case DispatchKey::CPU:
+      return DispatchKey::AutogradCPU;
+    case DispatchKey::CUDA:
+      return DispatchKey::AutogradCUDA;
+    case DispatchKey::XLA:
+      return DispatchKey::AutogradXLA;
+    case DispatchKey::PrivateUse1:
+      return DispatchKey::AutogradPrivateUse1;
+    case DispatchKey::PrivateUse2:
+      return DispatchKey::AutogradPrivateUse2;
+    case DispatchKey::PrivateUse3:
+      return DispatchKey::AutogradPrivateUse3;
+    default:
+      return DispatchKey::AutogradOther;
+  }
 }
 
 } // namespace c10

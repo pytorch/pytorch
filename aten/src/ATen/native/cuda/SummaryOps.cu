@@ -364,6 +364,7 @@ Tensor _bincount_cuda(
     const Tensor& self,
     const Tensor& weights,
     int64_t minlength) {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_bincount_cuda");
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
@@ -383,6 +384,7 @@ Tensor _histc_cuda(
   if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histc_cuda");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {

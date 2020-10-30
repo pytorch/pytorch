@@ -4,6 +4,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
+#include <c10/util/Optional.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
@@ -156,13 +157,15 @@ public:
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
   void assertSignatureIsCorrect() {
-    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == *cpp_signature_),
+    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == cpp_signature_->signature),
         "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
         CppSignature::make<FuncType>().name(),
         " but the operator was registered with ",
-        cpp_signature_->name(),
-        " (",
+        cpp_signature_->signature.name(),
+        " (schema: ",
         (schema_.has_value() ? schema_->debug : "unknown debug info"),
+        ", kernel: ",
+        cpp_signature_->debug,
         ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
     );
   }
@@ -226,15 +229,20 @@ private:
   // currently not high-pri.
   ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
 
-  std::list<AnnotatedKernel> catchAllKernel_;
   AnnotatedKernel missingKernel_;
+  static const AnnotatedKernel ambiguousAutogradOtherKernel_;
 
-  // signature_hash_ is set to the hash of the function signature if any of
+  // cpp_signature_ stores function signature if any of
   // the kernels was created in a way that allowed us to know the function
   // signature (i.e. by supplying an unboxed C++ kernel function).
-  // If this is set, it will be used in unboxed function calls
+  // If this is set, it will be used to check that future kernel
+  // registrations match and it will be used in unboxed function calls
   // to verify their arguments against the known function signature.
-  c10::optional<CppSignature> cpp_signature_;
+  struct CppSignatureWithDebug {
+    CppSignature signature;
+    std::string debug;
+  };
+  c10::optional<CppSignatureWithDebug> cpp_signature_;
 
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
@@ -244,10 +252,17 @@ private:
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
   ) const;
   // This function re-establishes the invariant that dispatchTable
-  // contains the front element from the kernels list for a given dispatch key.
+  // contains the front element from the kernels list for a given runtime dispatch key.
+  void updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
+  // Like above, but also handles alias dispatch keys.
   void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
+
+  // Returns true if kernel_ has entry for any key in ks.
+  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
+  // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
+  c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };
 
 } // namespace impl

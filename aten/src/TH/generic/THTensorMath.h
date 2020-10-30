@@ -14,8 +14,6 @@ TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTe
 
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 
-TH_API void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha);
-
 #if !defined(TH_REAL_IS_BOOL)
 TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value);
 #endif
@@ -35,9 +33,6 @@ TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTen
 TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 TH_API accreal THTensor_(trace)(THTensor *t);
 
-
-TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
-
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 TH_API void THTensor_(renorm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, scalar_t maxnorm);
@@ -49,7 +44,5 @@ TH_API accreal THTensor_(std_all)(THTensor *self, bool unbiased);
 #endif
 #endif
 #endif
-#else
-TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 #endif /* !defined(TH_REAL_IS_HALF) */
 #endif /* TH_GENERIC_FILE*/

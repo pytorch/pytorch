@@ -1,22 +1,23 @@
-#include <ATen/native/Sorting.h>
-
 #include <ATen/ATen.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/native/Resize.h>
+#include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/NamedTensorUtils.h>
+
+#include <utility>
 
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(sort_stub);
+DEFINE_DISPATCH(topk_stub);
+
 namespace {
 
-// maybe these days, one should define a random access iterator and use
-// std::sort...
 /* Note from TH:
-
    I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
    http://www.csie.ntu.edu.tw/~b93076/p847-sedgewick.pdf
@@ -31,7 +32,6 @@ namespace {
 
    Julien, November 12th 2013
 */
-
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
@@ -80,7 +80,7 @@ void quick_select_template(
       if (j < i)
         break;
       swap_fn(i, j);
-    } while (1);
+    } while (true);
     swap_fn(L, j);
 
     // Re-set active partition
@@ -88,12 +88,124 @@ void quick_select_template(
       L = i;
     if (j >= k)
       R = j - 1;
-  } while (1);
+  } while (true);
 }
 
-} // namespace
+void quantile_impl(
+    Tensor& out,
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim,
+    bool ignore_nan) {
+  int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim(), true);
 
-static std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
+  TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
+  TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
+  TORCH_CHECK(
+      self.scalar_type() == kFloat || self.scalar_type() == kDouble,
+      "quantile() input tensor must be either float or double dtype");
+  TORCH_CHECK(
+      self.scalar_type() == q.scalar_type(),
+      "quantile() q tensor must be same dtype as the input tensor");
+  TORCH_CHECK(
+      self.scalar_type() == out.scalar_type(),
+      "quantile() out tensor must be same dtype as the input tensor");
+  TORCH_CHECK(
+      self.device() == q.device(),
+      "quantile() q tensor must be on the same device as the input tensor");
+  TORCH_CHECK(
+      self.device() == out.device(),
+      "quantile() out tensor must be on the same device as the input tensor");
+
+  // Compute output shape: q_size + reduced_size
+  std::vector<int64_t> out_shape;
+  if (_dim && self.dim() > 0) {
+    out_shape = self.sizes().vec();
+    if (keepdim) {
+      out_shape[dim] = 1;
+    } else {
+      out_shape.erase(out_shape.begin() + dim);
+    }
+  } else if (keepdim) {
+    out_shape = std::vector<int64_t>(self.dim(), 1);
+  }
+  if (q.dim() > 0) {
+    out_shape.insert(out_shape.begin(), q.numel());
+  }
+  resize_output(out, out_shape);
+
+  // Checks that all q values are between 0 and 1, inclusive
+  // NOTE: this check is only performed when running on the CPU to avoid
+  // synchronizing an accelerator with the CPU
+  if (self.device().is_cpu()) {
+    TORCH_CHECK(
+        q.ge(0).logical_and_(q.le(1)).all().item<bool>(),
+        "quantile() q values must be in the range [0, 1]");
+  }
+
+  // Flatten input if no dim provided else move dim to reduce as last dimension.
+  // Sort to efficiently query kth values.
+  Tensor sorted;
+  if (!_dim) {
+    sorted = std::get<0>(self.flatten().sort());
+  } else if (dim == self.dim() - 1) {
+    sorted = std::get<0>(self.sort());
+  } else {
+    sorted = std::get<0>(self.unsqueeze(-1).transpose(dim, -1).sort());
+  }
+
+  // Treat q as a 1D tensor for the following computations
+  if (q.dim() == 0) {
+    out_shape.insert(out_shape.begin(), q.numel());
+  }
+
+  // View input as reduced_size + size of dim to reduce
+  std::vector<int64_t> in_shape(out_shape.size());
+  std::copy(out_shape.begin() + 1, out_shape.end(), in_shape.begin());
+  in_shape[in_shape.size() - 1] = sorted.size(-1);
+  sorted = sorted.view(in_shape);
+
+  // Ensure converting from int64_t to double won't overflow
+  TORCH_CHECK(
+      sorted.size(-1) <= std::pow(2, 24),
+      "quantile() input tensor is too large");
+
+  // Convert q in [0, 1] to ranks in [0, reduction_size)
+  Tensor ranks;
+  if (ignore_nan) {
+    // For nanquantile, compute ranks based on number of non-nan values.
+    // If all values are nan, set rank to 0 so the quantile computed is nan.
+    ranks = q * (sorted.isnan().logical_not_().sum(-1, true) - 1);
+    ranks.masked_fill_(ranks < 0, 0);
+  } else {
+    // For quantile, compute ranks based on reduction size. If there is nan
+    // set rank to last index so the quantile computed will be nan.
+    int64_t last_index = sorted.size(-1) - 1;
+    std::vector<Tensor> tl =
+        at::broadcast_tensors({q * last_index, sorted.isnan().any(-1, true)});
+    ranks = at::masked_fill(tl[0], tl[1], last_index);
+  }
+  Tensor ranks_below = ranks.toType(kLong);
+  Tensor weights = ranks - ranks_below;
+  Tensor ranks_above = ranks.ceil_().toType(kLong);
+
+  Tensor values_below = sorted.gather(-1, ranks_below);
+  Tensor values_above = sorted.gather(-1, ranks_above);
+
+  // Interpolate to compute quantiles and copy to out tensor
+  values_below.lerp_(values_above, weights);
+  if (q.dim() == 0) {
+    // If q is scalar, remove last dim to match out shape
+    values_below.squeeze_(-1);
+  } else {
+    // Move quantiles to first dim to match out shape
+    values_below.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
+  }
+  out.copy_(values_below);
+}
+
+std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
@@ -156,6 +268,240 @@ static std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
   return std::forward_as_tuple(values, indices);
 }
 
+// Computes both the median and its index along dimension dim of the input
+std::tuple<Tensor&, Tensor&> median_with_indices_impl(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    bool ignore_nan) {
+  dim = at::maybe_wrap_dim(dim, self.dim());
+
+  int64_t size = self.dim() > 0 ? self.size(dim) : 1;
+  TORCH_CHECK(
+      size > 0,
+      "median() cannot compute median for a dimension of size 0 because ",
+      "the operation does not have an identity");
+
+  checkDeviceType("median", {values, indices}, self.device().type());
+  checkScalarType("median", {indices, "indices", 1}, kLong);
+  checkSameType("median", {values, "values", 0}, {self, "self", 2});
+
+  std::vector<int64_t> out_shape = self.sizes().vec();
+  if (self.dim() > 0) {
+    if (keepdim) {
+      out_shape[dim] = 1;
+    } else {
+      out_shape.erase(out_shape.begin() + dim);
+    }
+  }
+
+  resize_output(values, out_shape);
+  resize_output(indices, out_shape);
+
+  // Ensure #dim is the same for all tensors required for dim_apply
+  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+  Tensor vals = keepdim && self.dim() > 0 ? values : values.unsqueeze(dim);
+  Tensor inds = keepdim && self.dim() > 0 ? indices : indices.unsqueeze(dim);
+
+  // Make dim to reduce contiguous (stride=1)
+  if (in.stride(dim) > 1) {
+    in = in.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim).contiguous();
+    vals = vals.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim);
+    inds = inds.unsqueeze(-1).transpose_(dim, -1).squeeze_(dim);
+    dim = in.dim() - 1;
+  }
+
+  AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_out", [&] {
+    dim_apply({in, vals, inds}, dim, [&](int64_t it, TensorList tl) {
+      // Make the current row to be reduced contiguous
+      scalar_t* ip = tl[0].data_ptr<scalar_t>();
+
+      // For torch.median, search for NaN and return it if found
+      if (!ignore_nan) {
+        scalar_t* nanp = std::find_if(ip, ip + size, _isnan<scalar_t>);
+        if (nanp != ip + size) {
+          *tl[1].data_ptr<scalar_t>() = *nanp;
+          *tl[2].data_ptr<int64_t>() = nanp - ip;
+          return;
+        }
+      }
+
+      // Vector of indices for indirectly partitioning input around median
+      std::vector<int64_t> idx(size);
+      auto first = idx.begin();
+      auto last = idx.end();
+      std::iota(first, last, 0);
+
+      // We partition the input around the median indirectly using the indices
+      // vector so that nth points to the index of the median in the unmodified
+      // input tensor.
+      auto nth = first;
+      if (!ignore_nan) {
+        // If we got here, there are no nan values
+        nth += (size - 1) / 2;
+        std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
+          return ip[i] < ip[j] || (ip[i] == ip[j] && i < j);
+        });
+      } else {
+        // For torch.nanmedian, compute median of non-nan values only
+        int64_t num_nan = std::count_if(ip, ip + size, _isnan<scalar_t>);
+        nth += (size - num_nan - 1) / 2;
+        std::nth_element(first, nth, last, [&ip](int64_t i, int64_t j) {
+          return ip[i] < ip[j] || (ip[i] == ip[j] && i < j) ||
+              (_isnan(ip[j]) && !_isnan(ip[i]));
+        });
+      }
+
+      *tl[1].data_ptr<scalar_t>() = ip[*nth];
+      *tl[2].data_ptr<int64_t>() = *nth;
+    });
+  });
+
+  return std::forward_as_tuple(values, indices);
+}
+
+// Computes the median of all values in the input
+Tensor median_impl(const Tensor& self, bool ignore_nan) {
+  NoNamesGuard guard;
+
+  int64_t size = self.numel();
+  TORCH_CHECK(
+      size > 0,
+      "median() operation does not have an identity for empty input tensor");
+
+  // Clone the input tensor so we can partition it around the median value
+  Tensor in = self.clone();
+  Tensor out = at::empty({}, self.options());
+
+  AT_DISPATCH_ALL_TYPES(in.scalar_type(), "median_cpu", [&] {
+    scalar_t* op = out.data_ptr<scalar_t>();
+    scalar_t* first = in.data_ptr<scalar_t>();
+    scalar_t* last = first + size;
+
+    // For torch.median, if there are nan values return nan
+    if (!ignore_nan && std::any_of(first, last, _isnan<scalar_t>)) {
+      *op = std::numeric_limits<scalar_t>::quiet_NaN();
+      return;
+    }
+
+    scalar_t* median = first;
+    if (!ignore_nan) {
+      // If we got here, there are no nan values
+      median += (size - 1) / 2;
+      std::nth_element(first, median, last);
+    } else {
+      // For torch.nanmedian, compute median of non-nan values only
+      int64_t num_nan = std::count_if(first, last, _isnan<scalar_t>);
+      median += (size - num_nan - 1) / 2;
+      std::nth_element(first, median, last, [](scalar_t a, scalar_t b) {
+        return a < b || (_isnan(b) && !_isnan(a));
+      });
+    }
+
+    *op = *median;
+  });
+
+  return out;
+}
+
+} // namespace
+
+Tensor& quantile_out(
+    Tensor& out,
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
+  return out;
+}
+
+Tensor& quantile_out(
+    Tensor& out,
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  TORCH_CHECK(
+      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
+  return at::quantile_out(
+      out,
+      self,
+      at::scalar_tensor(q, self.options()),
+      std::move(_dim),
+      keepdim);
+}
+
+Tensor quantile(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  Tensor out = at::empty({0}, self.options());
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/false);
+  return out;
+}
+
+Tensor quantile(
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  TORCH_CHECK(
+      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
+  return at::quantile(
+      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+}
+
+Tensor& nanquantile_out(
+    Tensor& out,
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
+  return out;
+}
+
+Tensor& nanquantile_out(
+    Tensor& out,
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  TORCH_CHECK(
+      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
+  return at::nanquantile_out(
+      out,
+      self,
+      at::scalar_tensor(q, self.options()),
+      std::move(_dim),
+      keepdim);
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  Tensor out = at::empty({0}, self.options());
+  quantile_impl(out, self, q, std::move(_dim), keepdim, /*ignore_nan=*/true);
+  return out;
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  TORCH_CHECK(
+      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
+  return at::nanquantile(
+      self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
+}
+
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     Tensor& values,
     Tensor& indices,
@@ -172,6 +518,17 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
   return result;
 }
 
+std::tuple<Tensor&, Tensor&> kthvalue_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    Dimname dim,
+    bool keepdim) {
+  return at::kthvalue_out(
+      values, indices, self, k, dimname_to_position(self, dim), keepdim);
+}
+
 std::tuple<Tensor, Tensor> kthvalue(
     const Tensor& self,
     int64_t k,
@@ -183,148 +540,12 @@ std::tuple<Tensor, Tensor> kthvalue(
   return std::make_tuple(values, indices);
 }
 
-// Compute the output shape for the quantile operator
-static std::vector<int64_t> quantile_out_shape(
+std::tuple<Tensor, Tensor> kthvalue(
     const Tensor& self,
-    const Tensor& q,
-    c10::optional<int64_t> _dim,
-    bool keepdim
-) {
-  auto dim = _dim ? at::maybe_wrap_dim(*_dim, self.dim(), true) : 0;
-  std::vector<int64_t> out_shape;
-  if (_dim) {
-    out_shape = self.sizes().vec();
-    if (keepdim) {
-      out_shape[dim] = 1;
-    } else {
-      out_shape.erase(out_shape.begin() + dim);
-    }
-  } else if (keepdim) {
-    out_shape = std::vector<int64_t>(self.dim(), 1);
-  }
-  if (q.dim() > 0) {
-    out_shape.insert(out_shape.begin(), q.numel());
-  }
-  return out_shape;
-}
-
-static Tensor quantile_impl(
-    const Tensor& self,
-    const Tensor& q,
-    c10::optional<int64_t> _dim,
+    int64_t k,
+    Dimname dim,
     bool keepdim) {
-  TORCH_CHECK(self.numel() > 0, "Input tensor must be non-empty");
-  TORCH_CHECK(q.dim() <= 1, "q must be a scalar or 1D tensor");
-  
-  TORCH_CHECK(self.scalar_type() == kFloat || self.scalar_type() == kDouble, 
-      "Input tensor must be either float or double dtype");
-  TORCH_CHECK(self.scalar_type() == q.scalar_type(), 
-      "q must be same dtype as the input tensor");
-  
-  TORCH_CHECK(self.device() == q.device(), 
-      "q must be on the same device as the input tensor");
-
-  if (self.device() == kCPU) {
-    TORCH_CHECK(q.ge(0).logical_and_(q.le(1)).all().item<bool>(),
-        "q values must be in the range [0, 1]");
-  }
-
-  // If user didn't specify a dimension then we flatten the input tensor
-  auto in = _dim ? self : self.flatten();
-  auto dim = _dim ? at::maybe_wrap_dim(*_dim, self.dim(), true) : 0;
-
-  // We sort the input tensor to efficiently query multiple kth values.
-  // In the future, it might be worthwhile to implement multiple quickselect.
-  auto sorted = std::get<0>(in.sort(dim));
-
-  // Convert quantile into indices in the given dimension.
-  // Check for overflow when casting to a floating point type.
-  TORCH_CHECK(sorted.size(dim) <= std::pow(2, 24), "Input tensor is too large");
-  auto indices = q * (sorted.size(dim) - 1);
-  auto indices_below = indices.floor().toType(kLong);
-  auto indices_above = indices.ceil().toType(kLong);
-
-  // Extract values from tensor
-  auto values_below = sorted.index_select(dim, indices_below);
-  auto values_above = sorted.index_select(dim, indices_above);
-
-  // Interpolate values to get quantiles
-  std::vector<int64_t> broadcast_shape(sorted.dim(), 1);
-  broadcast_shape[dim] = -1;
-  auto weights = (indices - indices_below).reshape(broadcast_shape);
-  auto quantiles = values_below.lerp_(values_above, weights);
-
-  // when the q tensor is not a scalar, numpy will prepend a new dimension
-  // to contain the quantiles. This code ensures we follow the same order
-  if (q.dim() > 0) {
-    quantiles.unsqueeze_(0);
-    ++dim;
-    std::vector<int64_t> numpy_dim_order;
-    for (int64_t i = 0; i < quantiles.dim(); ++i) {
-      numpy_dim_order.push_back(i);
-    }
-    std::iter_swap(numpy_dim_order.begin(), numpy_dim_order.begin() + dim);
-    quantiles = quantiles.permute(numpy_dim_order);
-  }
-
-  return quantiles;
-}
-
-Tensor& quantile_out(
-    Tensor& out,
-    const Tensor& self,
-    const Tensor& q,
-    c10::optional<int64_t> _dim,
-    bool keepdim) {
-  auto out_shape = quantile_out_shape(self, q, _dim, keepdim);
-
-  TORCH_CHECK(out.sizes().vec() == out_shape,
-      "expected out shape to be ", out_shape, " but got ", out.sizes().vec());
-  TORCH_CHECK(self.scalar_type() == out.scalar_type(), 
-      "out tensor must be same dtype as the input tensor");
-  TORCH_CHECK(self.device() == out.device(), 
-      "out tensor must be on the same device as the input tensor");
-
-  if (q.numel() == 0) {
-    return out;
-  }
-
-  out.copy_(quantile_impl(self, q, _dim, keepdim).reshape(out_shape));
-
-  return out;
-}
-
-Tensor& quantile_out(
-    Tensor& out,
-    const Tensor& self,
-    double q,
-    c10::optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_CHECK(q >= 0 && q <= 1, "q must be in the range [0, 1]");
-  return at::quantile_out(out, self, at::scalar_tensor(q, self.options()), _dim, keepdim);
-}
-
-Tensor quantile(
-    const Tensor& self,
-    const Tensor& q,
-    c10::optional<int64_t> _dim,
-    bool keepdim) {
-  auto out_shape = quantile_out_shape(self, q, _dim, keepdim);
-
-  if (q.numel() == 0) {
-    return at::empty(out_shape, self.options());
-  }
-
-  return quantile_impl(self, q, _dim, keepdim).reshape(out_shape);
-}
-
-Tensor quantile(
-    const Tensor& self,
-    double q,
-    c10::optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_CHECK(q >= 0 && q <= 1, "q must be in the range [0, 1]");
-  return at::quantile(self, at::scalar_tensor(q, self.options()), _dim, keepdim);
+  return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
 
 std::tuple<Tensor&, Tensor&> topk_out_cpu(
@@ -364,16 +585,30 @@ std::tuple<Tensor, Tensor> topk(
   return std::make_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> median_out(
+std::tuple<Tensor&, Tensor&> median_out_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  // note: kthvalue counts from 1..n
-  int64_t k = self.dim() > 0 ? (self.size(dim) + 1) / 2 : 1;
-  at::kthvalue_out(values, indices, self, k, dim, keepdim);
-  return std::forward_as_tuple(values, indices);
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return median_with_indices_impl(
+        values, indices, self, dim, keepdim, /*ignore_nan=*/false);
+  }();
+  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
+  return result;
+}
+
+std::tuple<Tensor&, Tensor&> median_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  return at::median_out(
+      values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
 std::tuple<Tensor, Tensor> median(
@@ -386,15 +621,6 @@ std::tuple<Tensor, Tensor> median(
   return std::make_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> median_out(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim) {
-  return at::median_out(values, indices, self, dimname_to_position(self, dim), keepdim);
-}
-
 std::tuple<Tensor, Tensor> median(
     const Tensor& self,
     Dimname dim,
@@ -402,52 +628,85 @@ std::tuple<Tensor, Tensor> median(
   return at::median(self, dimname_to_position(self, dim), keepdim);
 }
 
-std::tuple<Tensor&, Tensor&> kthvalue_out(
+Tensor median_cpu(const Tensor& self) {
+  return median_impl(self, /*ignore_nan=*/false);
+}
+
+std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
-    int64_t k,
-    Dimname dim,
+    int64_t dim,
     bool keepdim) {
-  return at::kthvalue_out(values, indices, self, k, dimname_to_position(self, dim), keepdim);
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return median_with_indices_impl(
+        values, indices, self, dim, keepdim, /*ignore_nan=*/true);
+  }();
+  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
+  return result;
 }
 
-std::tuple<Tensor, Tensor> kthvalue(
+std::tuple<Tensor&, Tensor&> nanmedian_out(
+    Tensor& values,
+    Tensor& indices,
     const Tensor& self,
-    int64_t k,
     Dimname dim,
     bool keepdim) {
-  return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
+  return at::nanmedian_out(
+      values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
-// this does not reduce to median with dim because we don't want to copy twice
-Tensor median_cpu(const Tensor& self) {
-  NoNamesGuard guard;
-  TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
+std::tuple<Tensor, Tensor> nanmedian(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::nanmedian_out(values, indices, self, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> nanmedian(
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  return at::nanmedian(self, dimname_to_position(self, dim), keepdim);
+}
+
+Tensor nanmedian_cpu(const Tensor& self) {
+  return median_impl(self, /*ignore_nan=*/true);
+}
+
+std::tuple<Tensor&, Tensor&> sort_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  values.resize_(self.sizes()).copy_(self);
+  indices.resize_(self.sizes());
+
+  // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone(at::MemoryFormat::Contiguous);
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
   }
-  auto tmp_values = self.clone(at::MemoryFormat::Contiguous).view(-1);
-  auto result = at::empty({1}, self.options());
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
-    // note, quick_select is 0 based while kthvalue is not
-    int64_t k = (tmp_values.size(0) - 1) / 2;
-    auto val_accessor = tmp_values.accessor<scalar_t, 1>();
-    quick_select_template(
-        val_accessor,
-        k,
-        [](scalar_t x, scalar_t y) -> bool {
-          return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
-        },
-        [&](int64_t i, int64_t j) {
-          std::swap(val_accessor[i], val_accessor[j]);
-        });
-    result.fill_(tmp_values[k]);
-  });
-  return result.view({});
+
+  sort_stub(kCPU, values, indices, dim, descending);
+
+  return std::forward_as_tuple(values, indices);
 }
 
-DEFINE_DISPATCH(topk_stub);
+std::tuple<Tensor, Tensor> sort_cpu(
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  return sort_out_cpu(values, indices, self, dim, descending);
+}
 
 } // namespace native
 } // namespace at

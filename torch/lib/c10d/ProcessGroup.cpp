@@ -4,6 +4,62 @@
 
 namespace c10d {
 
+std::string opTypeToString(OpType opType) {
+  switch (opType) {
+    case OpType::BROADCAST:
+      return "BROADCAST";
+    case OpType::ALLREDUCE:
+      return "ALLREDUCE";
+    case OpType::ALLREDUCE_COALESCED:
+      return "ALLREDUCE_COALESCED";
+    case OpType::REDUCE:
+      return "REDUCE";
+    case OpType::ALLGATHER:
+      return "ALLGATHER";
+    case OpType::ALLGATHER_BASE:
+      return "ALLGATHER_BASE";
+    case OpType::ALLGATHER_COALESCED:
+      return "ALLGATHER_COALESCED";
+    case OpType::GATHER:
+      return "GATHER";
+    case OpType::SCATTER:
+      return "SCATTER";
+    case OpType::REDUCE_SCATTER:
+      return "REDUCE_SCATTER";
+    case OpType::ALLTOALL_BASE:
+      return "ALLTOALL_BASE";
+    case OpType::ALLTOALL:
+      return "ALLTOALL";
+    case OpType::SEND:
+      return "SEND";
+    case OpType::RECV:
+      return "RECV";
+    case OpType::RECVANYSOURCE:
+      return "RECVANYSOURCE";
+    case OpType::BARRIER:
+      return "BARRIER";
+    case OpType::UNKNOWN:
+      return "UNKNOWN";
+    default:
+      TORCH_INTERNAL_ASSERT("Unknown op type!");
+  }
+  return "UNKNOWN";
+}
+
+bool isP2POp(OpType opType) {
+  return opType == OpType::SEND || opType == OpType::RECV ||
+      opType == OpType::RECVANYSOURCE;
+}
+
+ProcessGroup::Work::Work() : rank_(-1), opType_(OpType::UNKNOWN) {}
+
+ProcessGroup::Work::Work(int rank, OpType opType)
+    : rank_(rank), opType_(opType) {}
+
+OpType ProcessGroup::Work::retrieveOpType() {
+  return opType_;
+}
+
 ProcessGroup::Work::~Work() {}
 
 bool ProcessGroup::Work::isCompleted() {
@@ -27,7 +83,7 @@ int ProcessGroup::Work::sourceRank() const {
       "that correspond to a recv or recv-from-any call.");
 }
 
-std::vector<at::Tensor> ProcessGroup::Work::result() const {
+std::vector<at::Tensor> ProcessGroup::Work::result() {
   throw std::runtime_error("result() not implemented.");
 }
 

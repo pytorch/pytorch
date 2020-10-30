@@ -277,6 +277,24 @@ them the same thing!)
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
+Available backend options can be found at
+https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py#L970.
+In addition to the backends above, we also support the keywords:
+  - `DefaultBackend`: an alias that maps to all backends. Functions registered to
+    `DefaultBackend` should work for any backend inference.
+  - `Math`: an alias that maps to all backend and autograd backend keys. Functions
+    registered to `Math` key should be plain mathematical composition of other
+    `at::` functions and support training and inference for any backend.
+
+If you add `dispatch` section to any API that didn't have it before, you **have to** move
+the old implementation to `Math` field so that it's still available for other backends to use.
+
+If you implemented a native function in C++ and want to find out which dispatch keyword
+should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
+
+This work is currently WIP and you can find the design proposal in
+https://github.com/pytorch/pytorch/issues/44680.
+
 ### `device_guard`
 
 ```
@@ -318,6 +336,7 @@ set of reviewers.
 
 ```
 use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'
+use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
 use_c10_dispatcher: 'full'
 ```
 
@@ -328,6 +347,10 @@ Some ops use features that aren't supported by those templates yet,
 and enabling `use_c10_dispatcher: full` for those will result in a compiler error.
 For those, use `use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'` instead,
 or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the default.
+`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` is similar to `full`
+but adds a wrapper around the kernel before registering it with the dispatcher
+to support some legacy function signatures for kernels that we didn't migrate to
+the new signatures yet.
 
 ### `manual_kernel_registration`
 
@@ -371,6 +394,88 @@ However, in some situations, you can write a function in ATen and it
 will be automatically differentiated! This can be the case if the function implementation
 only calls other operations which are themselves differentiable.  In this
 case, you don't have to write an entry in `tools/autograd/derivatives.yaml`.
+
+### Choosing the right dispatch keyword
+
+After writing a native function in C++, it's important to think about which dispatch keyword
+to use in native_functions.yaml as it gives the dispatcher information about backend and autograd support
+of the implementation.
+
+Here're steps to follow to decide the right dispatch keyword:
+
+1. Think about inference: does your kernel work for all backends?
+
+    - No: you're likely providing different kernels for different backends, e.g.
+      backend-dependent logic is used in the implementation or it's implemented through DispatchStub.
+      DispatchStub only support a backend if you explicitly provide a kernel through `REGISTER_DISPATCH`.
+      Typically it only supports a few in-tree backends like CPU, CUDA, QuantizedCPU etc but not
+      out-of-tree backends like XLA.
+      Write a dispatch section, enumerate all supported backends and point them to the implementations.
+      ```
+      dispatch:
+        CPU: kernel_cpu
+        CUDA: kernel_cuda
+        QuantizedCPU: kernel_quantized_cpu
+      ```
+
+      You're done. Now this op will be called in `CPU/CUDA/QuantizedCPU` backend inference!
+
+      Note: to support training, you're required to write a formula in
+      derivatives.yaml since your backend implementations don't support autograd.
+
+    - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
+
+2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
+    - Yes: in other words, you're providing a `Math` kernel which supports both inference and autograd.
+      To use autograd support for training, simply skip adding a dispatch section or write
+      ```
+      dispatch:
+        Math: kernel
+      ```
+
+      You're done. This will allow this op to be correctly registered for both inference and training.
+
+    - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
+      ```
+      dispatch:
+        DefaultBackend: kernel
+      ```
+
+      You're done. This op will be called in inference for all backends.
+
+      Note: to support training you're required to add a autograd formula,
+      or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
+
+    - No: ops in this category are mainly using `_out` boilerplate where its out version doesn't have a derivative
+      formula defined. For example:
+      ```
+      Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+      Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
+      Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+      ```
+
+      `sign_out` uses DispatchStub so the supported backends are enumerated in its dispatch section.
+      For `sign` and `sign_`, write
+      ```
+      dispatch:
+        DefaultBackend: kernel
+      ```
+
+      You're done. This op will be called in inference for all backends.
+
+      Note: to support training you're required to add an autograd formula for `sign`,
+      or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
+
+      Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
+      the implementations and add dispatch section with device keywords instead.
+
+3. TODO: AutogradCPUOrCUDA
+
+Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
+  - direct registration to backend always has higher precendence than alias
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > Math`,
+    e.g. adding both `Math` and `DefaultBackend` kernels for one op will completely ignore `Math` kernel for
+    both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
 
 ### Will this function be exposed to python? What are the namespaces?
 

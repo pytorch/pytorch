@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.intrinsic import LinearReLU
@@ -31,7 +30,7 @@ class Linear(nn.Linear):
         return F.linear(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
@@ -39,9 +38,8 @@ class Linear(nn.Linear):
         """
         assert type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
-        if not qconfig:
-            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must have a valid qconfig'
+        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        assert mod.qconfig, 'Input float module must have a valid qconfig'
         if type(mod) == LinearReLU:
             mod = mod[0]
 

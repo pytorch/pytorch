@@ -15,3 +15,4 @@
 #include <torch/nn/options/upsampling.h>
 #include <torch/nn/options/transformerlayer.h>
 #include <torch/nn/options/transformercoder.h>
+#include <torch/nn/options/transformer.h>
