@@ -103,6 +103,7 @@ class Linear(Module):
 # that bias is never None, which appeases TorchScript
 class _LinearWithBias(Linear):
     bias: Tensor  # type: ignore
+
     def __init__(self, in_features: int, out_features: int) -> None:
         super().__init__(in_features, out_features, bias=True)  # type: ignore
 
