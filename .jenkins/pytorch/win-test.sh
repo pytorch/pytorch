@@ -51,7 +51,7 @@ run_tests() {
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             export PYTORCH_COLLECT_COVERAGE=1
             $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
-            $SCRIPT_HELPERS_DIR/test_libtorch.bat
+            $SCRIPT_HELPERS_DIR/test_libtorch.bat && \
             if [[ "${USE_CUDA}" == "1" ]]; then
               $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
             fi
@@ -64,6 +64,10 @@ run_tests() {
 }
 
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
+if [ $? > 0 ]; then
+    # exit once test failed.
+    exit 1
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]] && [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
   pushd $TEST_DIR
