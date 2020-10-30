@@ -114,8 +114,10 @@ TEST(TestAtomicOps, TestAtomicAdd) {
 }
 
 TEST(TestAtomicOps, TestAtomicMul) {
+#ifndef _WIN32
   test_atomic_mul<at::BFloat16>();
   test_atomic_mul<at::Half>();
+#endif
   test_atomic_mul<float>();
   test_atomic_mul<double>();
 }
