@@ -15,8 +15,6 @@
 namespace torch {
 namespace jit {
 
-#ifdef USE_PYTORCH_METAL
-
 namespace {
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
@@ -193,37 +191,5 @@ script::Module metalOptimizeForMobile(
   return cloned_module;
 }
 
-#else
-
-void metalInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-void metalInsertPrePackedOps(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-TORCH_API void metalFusePrePackedConvWithClamp(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-TORCH_API void metalFoldPrePackingOps(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-script::Module metalOptimizeForMobile(
-    const script::Module& m,
-    const std::vector<std::string>& preserved_methods) {
-  TORCH_INTERNAL_ASSERT(
-      "Mobile optimizaiton only available with metal at the moment. "
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-  return m;
-}
-
-#endif
 } // namespace jit
 } // namespace torch
