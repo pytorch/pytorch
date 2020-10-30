@@ -368,7 +368,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     // The dimension in each tensor's values object that corresponds to the overall dimension along which we're catting.
     int64_t values_dim = wrapped - sparse_dim + 1;
     // The final size along the catted dimension.
-    int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), 0, [values_dim](int64_t l, Tensor const &r) {
+    const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
       return l + r._values().size(values_dim);
     });
     auto zeros_sizes = tensors[0]._values().sizes().vec();
@@ -1262,6 +1262,47 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
+// torch.row_stack, alias for torch.vstack
+Tensor& row_stack_out(Tensor& result, TensorList tensors) {
+  return at::vstack_out(result, tensors);
+}
+
+Tensor row_stack(TensorList tensors) {
+  return at::vstack(tensors);
+}
+
+static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    // reshape 0D or 1D tensor t into (t.numel(), 1)
+    if (input.dim() <= 1) {
+      return input.reshape({input.numel(), 1});
+    }
+    return input;
+  };
+  std::transform(tensors.cbegin(),
+                 tensors.cend(),
+                 result.begin(),
+                 transform_lambda);
+  return result;
+}
+
+Tensor& column_stack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+              "column_stack expects a non-empty TensorList");
+
+  auto reshaped_tensors = reshape_input_for_column_stack(tensors);
+  return at::hstack_out(result, reshaped_tensors);
+}
+
+Tensor column_stack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+              "column_stack expects a non-empty TensorList");
+
+  auto reshaped_tensors = reshape_input_for_column_stack(tensors);
+  return at::hstack(reshaped_tensors);
+}
+
 static Tensor& propagate_transposed_names(
     Tensor& result,
     const Tensor& other,
@@ -1634,7 +1675,7 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
   TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
   TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
 
-  auto numel = std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int64_t>());
+  const int64_t numel = prod_intlist(sizes);
   if (self.has_names()) {
     TORCH_CHECK(numel == self.size(dim),
       "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
