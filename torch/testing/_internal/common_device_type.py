@@ -524,7 +524,7 @@ class skipCUDAIf(skipIf):
         super().__init__(dep, reason, device_type='cuda')
 
 def _has_sufficient_memory(device, size):
-    if torch.device(device).device_type == 'cuda':
+    if torch.device(device).type == 'cuda':
         if not torch.cuda.is_available():
             return False
         gc.collect()
