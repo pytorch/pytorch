@@ -3275,8 +3275,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 cur_shape = torch._shape_as_tensor(input)
                 final_shape: List[int] = cur_shape.tolist()
-                pad_tensor = torch.zeros(final_shape)
-                return torch.cat([input, pad_tensor], dim=0)
+                pad_tensor = torch.zeros([1, 2] + final_shape)
+                return pad_tensor
 
         x = torch.randn(2, 3)
         self.run_test(List(), (x,))
