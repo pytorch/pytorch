@@ -28,7 +28,6 @@ from .pattern_utils import (
     is_match,
     get_default_quant_patterns,
     get_default_output_activation_post_process_map,
-    input_output_observed,
 )
 
 from .observed_module import (
@@ -50,7 +49,6 @@ from .utils import (
 
 from collections import OrderedDict
 import warnings
-import copy
 import re
 
 from typing import Optional
@@ -476,7 +474,7 @@ class Quantizer:
                     output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
-                elif qconfig is not None and obj.all_node_args and input_output_observed(obj):
+                elif qconfig is not None and obj.all_node_args:
                     # observer for outputs
                     new_observer = qconfig.activation()
                     # respect device affinity when adding observers
@@ -563,7 +561,7 @@ class Quantizer:
                             weight_observer_module()
         return
 
-    def _convert(self, model, inplace=False, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
+    def _convert(self, model, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
         """ standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
         For standalone module: the inputs will be quantized by parent module,
@@ -576,8 +574,6 @@ class Quantizer:
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         self.restore_state(model)
-        if not inplace:
-            model = copy.deepcopy(model)
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
         self._run_weight_observers(model)
@@ -711,7 +707,7 @@ class Quantizer:
                             'CopyNode of type ' + node.op + ' is not handled'
                         quantized = is_quantized(node.args[0])
 
-                    if not activation_is_statically_quantized(qconfig) or not input_output_observed(obj):
+                    if not activation_is_statically_quantized(qconfig):
                         quantized = False
 
                 if quantized:
@@ -825,8 +821,8 @@ class Quantizer:
         quantized = GraphModule(quantized_root, folded_graph)
         return quantized
 
-    def convert(self, model, inplace=False, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
-        quantized = self._convert(model, inplace, debug, convert_custom_config_dict, is_standalone_module)
+    def convert(self, model, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
+        quantized = self._convert(model, debug, convert_custom_config_dict, is_standalone_module)
         if not debug:
             quantized = self._fold_weight(quantized)
         return quantized
@@ -948,7 +944,7 @@ class Quantizer:
                 # don't attach observer/fake_quant for CopyNode
                 if isinstance(quantize_handler, CopyNode):
                     qconfig = None
-                if root_node is node and input_output_observed(quantize_handler):
+                if root_node is node:
                     # matched_nodes[-1] is the first op in the sequence and
                     # matched_nodes[0] is the last op in the sequence
                     # inputs
