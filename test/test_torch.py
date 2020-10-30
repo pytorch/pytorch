@@ -26,7 +26,7 @@ from torch import multiprocessing as mp
 from torch.testing._internal.common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
 from torch.testing._internal.common_utils import \
-    (TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, run_tests,
+    (TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ASAN, TEST_WITH_ROCM, run_tests,
      skipIfNoLapack, suppress_warnings, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN,
      do_test_dtypes, IS_SANDCASTLE, load_tests, slowTest,
      skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -10536,6 +10536,23 @@ class TestTorchDeviceType(TestCase):
         check(torch.median, [[nan, nan], [1, 2]], [1], [[nan, 1]])
         check(torch.nanmedian, [[nan, nan], [1, 2]], [1], [[nan, 1.]])
 
+        # Discontiguous and strided tensors
+        a = torch.arange(12, device=device)
+        self.assertEqual(a[::2].median(), torch.tensor(4, device=device))
+        self.assertEqual(a[::2].nanmedian(), torch.tensor(4, device=device))
+
+        a.resize_(3, 4)
+        self.assertEqual(a.T.median(), torch.tensor(5, device=device))
+        self.assertEqual(a.T.nanmedian(), torch.tensor(5, device=device))
+        self.assertEqual(a[::2, ::2].median(-1)[0], torch.tensor([0, 8], device=device))
+        self.assertEqual(a[::2, ::2].nanmedian(-1)[0], torch.tensor([0, 8], device=device))
+
+        a.resize_(2, 3, 2)
+        self.assertEqual(a.T.median(), torch.tensor(5, device=device))
+        self.assertEqual(a.T.nanmedian(), torch.tensor(5, device=device))
+        self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
+        self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
+
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
@@ -19445,6 +19462,17 @@ else:
                 for p in permutations(range(t.dim())):
                     tp = t.permute(p)
                     compare_helper_(like_fn, tp)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Integer overflows are not allowed under ASAN")
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_muldiv_scalar(self, device, dtype):
+        x = make_tensor((10, 3), device, dtype, low=None, high=None)
+        s = make_tensor((1,), 'cpu', dtype, low=None, high=None).item()
+        y = torch.full_like(x, s)
+        self.assertEqual(x * s, x * y)
+        self.assertEqual(s * x, y * x)
+        self.assertEqual(x / s, x / y)
+        self.assertEqual(s / x, y / x)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
