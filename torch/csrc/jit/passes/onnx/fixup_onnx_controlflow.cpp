@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
+#include <algorithm> // std::find
+
 namespace torch {
 namespace jit {
 
@@ -234,15 +236,14 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
   for (Block* block : node->blocks()) {
-    if (block->nodes().begin() == block->nodes().end()) {
-      // ONNX does not support empty blocks, must use some op which does
-      // nothing
-      Value* output = block->outputs()[0];
-      Node* id_node = graph->create(onnx::Identity);
-      id_node->insertBefore(block->return_node());
-      id_node->addInput(output);
-      id_node->output()->copyMetadata(output);
-      block->return_node()->replaceInputWith(output, id_node->output());
+    for (Value* output : block->outputs()) {
+      if (output->node()->owningBlock() != block) {
+        Node* id_node = graph->create(onnx::Identity);
+        id_node->insertBefore(block->return_node());
+        id_node->addInput(output);
+        id_node->output()->copyMetadata(output);
+        block->return_node()->replaceInputWith(output, id_node->output());
+      }
     }
   }
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());

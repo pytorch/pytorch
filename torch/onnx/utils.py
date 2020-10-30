@@ -124,7 +124,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
                     params_dict=None, use_new_jit_passes=False, dynamic_axes=None, input_names=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
-
+    print(graph)
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
@@ -192,8 +192,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
             graph(%Ri):
                 return (%Ri)""", graph)
 
+        print(graph)
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
+        print(graph)
 
         from torch.onnx.symbolic_helper import _onnx_shape_inference
         if _onnx_shape_inference:
@@ -202,8 +204,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
             torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
-
+        print("1")
         torch._C._jit_pass_onnx_scalar_type_analysis(graph)
+        print("2")
         torch._C._jit_pass_lint(graph)
 
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
@@ -222,6 +225,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
     if _onnx_shape_inference:
         torch._C._jit_pass_onnx_graph_shape_type_inference(graph, _export_onnx_opset_version)
+    print(graph)
     return graph
 
 
@@ -948,7 +952,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
-            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
+            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack" or op_name == "Uninitialized":
                 # None is not an ONNX operator; keep it as None
                 # Let the exporter handle and finally eliminate these ops
                 # ListConstruct and ListUnpack will be erased in the ONNX peephole pass

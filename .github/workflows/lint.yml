@@ -162,6 +162,7 @@ jobs:
             --diff "$MERGE_BASE"                                   \
             -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
             -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp"\
+            -g"-torch/csrc/jit/passes/utils/onnx_utils.cpp"        \
             -g"-torch/csrc/jit/serialization/onnx.cpp"             \
             -g"-torch/csrc/jit/serialization/export.cpp"           \
             -g"-torch/csrc/jit/serialization/import.cpp"           \
