@@ -22,11 +22,11 @@ void main() {
 
     const int plane = size.x * size.y;
     const int base = pos.x + size.x * pos.y + 4 * plane * pos.z;
-    const ivec3 offset = plane * ivec3(1, 2, 3);
+    const ivec4 index = base + plane * ivec4(0, 1, 2, 3);
 
-    uBuffer.data[base           ] = texel.r;
-    uBuffer.data[base + offset.x] = texel.g;
-    uBuffer.data[base + offset.y] = texel.b;
-    uBuffer.data[base + offset.z] = texel.a;
+    uBuffer.data[index.x] = texel.r;
+    uBuffer.data[index.y] = texel.g;
+    uBuffer.data[index.z] = texel.b;
+    uBuffer.data[index.w] = texel.a;
   }
 }

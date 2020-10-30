@@ -20,15 +20,15 @@ void main() {
   if (all(lessThan(pos.xy, size))) {
     const int plane = size.x * size.y;
     const int base = pos.x + size.x * pos.y + 4 * plane * pos.z;
-    const ivec3 offset = plane * ivec3(1, 2, 3);
+    const ivec4 index = base + plane * ivec4(0, 1, 2, 3);
 
     imageStore(
         uImage,
         pos,
         vec4(
-            uBuffer.data[base           ],
-            uBuffer.data[base + offset.x],
-            uBuffer.data[base + offset.y],
-            uBuffer.data[base + offset.z]));
+            uBuffer.data[index.x],
+            uBuffer.data[index.y],
+            uBuffer.data[index.z],
+            uBuffer.data[index.w]));
   }
 }
