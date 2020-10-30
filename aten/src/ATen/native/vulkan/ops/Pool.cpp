@@ -121,8 +121,8 @@ Tensor avg_pool2d(
         uint32_t padding_x, padding_y;
         uint32_t dilate_x, dilate_y;
       } block {
-        input_width, input_height, input_channels,
-        output_width, output_height, input_channels,
+        input_width, input_height, input_batch * input_channels,
+        output_width, output_height, input_batch * input_channels,
         kernel_width, kernel_height,
         dW, dH,
         padW, padH,

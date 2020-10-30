@@ -239,8 +239,8 @@ void avg_pool2d(
   auto device = context().device();
   const auto c = _n * _c;
   struct ConstBlock {
-    int32_t inputSize[4];
-    int32_t outputSize[4];
+    int32_t inputSize[3];
+    int32_t outputSize[3];
     int32_t kernelSize[2];
     int32_t stride[2];
     int32_t padding[2];
