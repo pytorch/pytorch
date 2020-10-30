@@ -64,7 +64,7 @@ run_tests() {
 }
 
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
-if [ $? > 0 ]; then
+if [[ $? > 0 ]]; then
     # exit once test failed.
     exit 1
 fi
