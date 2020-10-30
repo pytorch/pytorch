@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <ATen/InferSize.h>
+#include <ATen/Utils.h>
 
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanCommon.h>
@@ -553,21 +554,19 @@ void add(
 void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
   const auto sizes = input.sizes();
 
-  const auto C = std::accumulate(
-      sizes.cbegin(), sizes.cend() - 2, 1, std::multiplies<int64_t>());
+  const auto C = prod_intlist(sizes.cbegin(), sizes.cend() - 2);
   const auto C_4 = UP_DIV(C, 4);
   const auto H = sizes[2];
   const auto W = sizes[3];
 
   auto device = context().device();
   struct ConstBlock {
-    int32_t inputSize[4];
+    int32_t inputSize[3];
     float s;
   };
   ConstBlock cb{{safe_downcast<int32_t>(W),
                  safe_downcast<int32_t>(H),
-                 safe_downcast<int32_t>(C_4),
-                 0},
+                 safe_downcast<int32_t>(C_4)},
                 s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
@@ -606,21 +605,19 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
 void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
   const auto sizes = input.sizes();
 
-  const auto C = std::accumulate(
-      sizes.cbegin(), sizes.cend() - 2, 1, std::multiplies<int64_t>());
+  const auto C = prod_intlist(sizes.cbegin(), sizes.cend() - 2);
   const auto C_4 = UP_DIV(C, 4);
   const auto H = sizes[2];
   const auto W = sizes[3];
 
   auto device = context().device();
   struct ConstBlock {
-    int32_t inputSize[4];
+    int32_t inputSize[3];
     float s;
   };
   ConstBlock cb{{safe_downcast<int32_t>(W),
                  safe_downcast<int32_t>(H),
-                 safe_downcast<int32_t>(C_4),
-                 0},
+                 safe_downcast<int32_t>(C_4)},
                 s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
