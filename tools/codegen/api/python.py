@@ -1,11 +1,12 @@
+import itertools
+from dataclasses import dataclass
+from typing import Optional, Union, Sequence, Set, List, Tuple, Dict
+
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
 import tools.codegen.local as local
 from tools.codegen.gen import pythonify_default
 from tools.codegen.model import *
-
-from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Set, List, Tuple
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -431,7 +432,7 @@ class DispatchLambdaArgumentExprs:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def _cpp_signature(f: NativeFunction, *, method: bool = False) -> cpp.CppSignature:
+def _cpp_signature(f: NativeFunction, *, method: bool = False) -> CppSignature:
     return CppSignatureGroup.from_schema(f.func, method=method).signature
 
 def has_tensor_options(f: NativeFunction) -> bool:

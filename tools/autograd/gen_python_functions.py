@@ -31,6 +31,7 @@
 #
 
 from collections import defaultdict
+import itertools
 import re
 from .gen_variable_type import DONT_RECORD_TRACE
 from .utils import write, is_tensor_method
@@ -40,7 +41,7 @@ from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, with_native_function
 from tools.codegen.model import *
 
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Tuple, Set
 
 #
 # declarations blocklist
@@ -362,7 +363,7 @@ def emit_namedtuple_typedefs(
             flddefnames[fn_key] = fieldsname
             fields = ', '.join(f'{{"{fn}", ""}}' for fn in fieldnames)
             flddefs.append(f"""\
-static PyStructSequence_Field {fieldsname}[] = {{ {fields}, {{nullptr}} }};
+static PyStructSequence_Field {fieldsname}[] = {{ {fields},  {{nullptr}} }};
 """)
 
         name = cpp.name(overload.function.func)  # use @with_native_function?
