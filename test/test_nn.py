@@ -3055,6 +3055,13 @@ class TestNN(NNTestCase):
         res_F = F.embedding(a, embeddings)
         self.assertEqual(res_old, res_F)
 
+        embed_old = torch.nn.Embedding(4, 3)
+        embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)
+        res_old = embed_old(a)
+        res_F = F.embedding(a, embeddings, padding_idx=2)
+
+        self.assertEqual(res_old, res_F)
+
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
@@ -10515,6 +10522,27 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
+    def test_pooling_shape(self, device):
+        ''' Test the output shape calculation for pooling functions '''
+
+        # Checks output shape against expected for 1D, 2D and 3D
+        def check(expected_out_shape, sizes, *args, **kwargs):
+            for kernel in ['max', 'avg']:
+                for i in [1, 2, 3]:
+                    if hasattr(torch.nn.functional, f'{kernel}_pool{i}d'):
+                        op = getattr(torch.nn.functional, f'{kernel}_pool{i}d')
+                        t = torch.randn(sizes[:i + 2], device=device)
+                        self.assertEqual(op(t, *args, **kwargs).shape, expected_out_shape[:i + 2])
+
+        check((1, 1, 3, 3, 4), (1, 1, 5, 6, 7), kernel_size=1, stride=2, padding=0, ceil_mode=True)
+        check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=False)
+        check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=True)
+
+        # Test case from issue https://github.com/pytorch/pytorch/issues/45357
+        x = torch.randn(1, 1, 6, 7, device=device)
+        y = torch.nn.functional.max_pool2d(x, 1, stride=(2, 2), padding=0, ceil_mode=True)
+        self.assertEqual(y.size(), (1, 1, 3, 4))
+
     @onlyOnCPUAndCUDA   # TODO: fix on XLA
     def test_adaptive_avg_pool2d_output_size_one(self, device):
         def helper(size, memory_format):
@@ -10734,6 +10762,15 @@ class TestNNDeviceType(NNTestCase):
                 inp = torch.tensor([[0, 1, 1, 2], [3, 5, 7, 11]], dtype=torch.long).to(device)
                 return torch.nn.functional.embedding(inp, weight)
             return fn
+
+        fn = fn_wrapper(device)
+        _assertGradAndGradgradChecks(self, fn, (weight, ))
+
+        def fn_wrapper(device):
+            def padding_fn(weight):
+                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
+                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
+            return padding_fn
 
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))

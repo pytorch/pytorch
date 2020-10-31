@@ -310,7 +310,7 @@ void ProcessGroupMPI::runLoop() {
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
     std::unique_ptr<WorkEntry> entry) {
-  auto work = std::make_shared<WorkMPI>();
+  auto work = c10::make_intrusive<WorkMPI>();
   std::unique_lock<std::mutex> lock(pgMutex_);
   queue_.push_back(std::make_tuple(std::move(entry), work));
   lock.unlock();
@@ -744,7 +744,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
         &request));
   }
 
-  return std::make_shared<AsyncWork>(tensor, request);
+  return c10::make_intrusive<AsyncWork>(tensor, request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
@@ -769,7 +769,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
         &request));
   }
 
-  return std::make_shared<AsyncWork>(tensor, request);
+  return c10::make_intrusive<AsyncWork>(tensor, request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
@@ -793,7 +793,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
         &request));
   }
 
-  return std::make_shared<AsyncWork>(tensor, request);
+  return c10::make_intrusive<AsyncWork>(tensor, request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
