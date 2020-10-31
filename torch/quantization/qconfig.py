@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 from collections import namedtuple
 from .observer import *
 from .fake_quantize import *
@@ -18,7 +17,7 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
     method (that behaves like functools.partial):
 
-      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8), 
+      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8),
       weight=default_observer.with_args(dtype=torch.qint8))
     """
     def __new__(cls, activation, weight):
@@ -41,7 +40,7 @@ default_per_channel_qconfig = QConfig(activation=default_observer,
 class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
     """
     Describes how to dynamically quantize a layer or a part of the network by providing
-    settings (observer classe) for weights.
+    settings (observer classes) for weights.
 
     It's like QConfig, but for dynamic quantization.
 
@@ -63,9 +62,13 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
 
 default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                          weight=default_weight_observer)
-float16_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                         weight=NoopObserver.with_args(dtype=torch.float16))
-per_channel_dynamic_qconfig = QConfigDynamic(weight=default_per_channel_weight_observer)
+float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
+                                         weight=PlaceholderObserver.with_args(dtype=torch.float16))
+per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                             weight=default_per_channel_weight_observer)
+
+float_qparams_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                               weight=default_float_qparams_observer)
 
 default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
@@ -83,7 +86,7 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                           weight=default_weight_observer)
     else:
-        raise ValueError("Unknown backend, please specify qconfig manually")
+        qconfig = default_qconfig
     return qconfig
 
 def get_default_qat_qconfig(backend='fbgemm'):
@@ -101,6 +104,5 @@ def get_default_qat_qconfig(backend='fbgemm'):
                                                             reduce_range=False),
                           weight=default_weight_fake_quant)
     else:
-        raise ValueError("Unknown backend, please specify qconfig manually")
-
+        qconfig = default_qat_qconfig
     return qconfig

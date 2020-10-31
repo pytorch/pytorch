@@ -4,15 +4,13 @@
 
 #include <unordered_set>
 
-C10_DECLARE_bool(caffe2_tvm_profiling_based_jit);
-
 namespace caffe2 {
 
 struct TvmTransformOptions final : public BackendTransformOptions {
   explicit TvmTransformOptions() : BackendTransformOptions() {}
 
   //  Whether to enable profiling based jit
-  bool profiling_based_jit{true};
+  bool profiling_based_jit{false};
 };
 
 class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
@@ -29,7 +27,7 @@ class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
   // \param weight_names list of the names of the constant weights
   // \param shape_hints User provided shape info, usually for primary inputs so
   // that bound shape inference can have something to start
-  // \param blacklisted_ops a set of ops that we don't want to lower to TVM in
+  // \param blocklisted_ops a set of ops that we don't want to lower to TVM in
   // terms of their net positions. This is very useful for debugging but for
   // normal runs it should be empty
   void transform(
@@ -37,13 +35,13 @@ class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
       const ShapeInfoMap& shape_hints,
-      const std::unordered_set<int>& blacklisted_ops) override;
+      const std::unordered_set<int>& blocklisted_ops) override;
 
   static const std::unordered_set<std::string>& getSupportedOps();
 
   static bool canConvertFullGraph(
       const caffe2::NetDef& net,
-      const std::unordered_set<int>& blacklisted_ops);
+      const std::unordered_set<int>& blocklisted_ops);
 
  private:
   // Given TVM runnable subnets, contract them into one TVMJitOp
@@ -56,7 +54,7 @@ class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
   NetDef applyTvmTransform(
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& blocklisted_ops,
       const ShapeInfoMap& shape_hints);
 
   // Options
@@ -77,9 +75,13 @@ CAFFE2_API void tvmTransform(
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& shape_hints,
-    const std::unordered_set<int>& blacklisted_ops,
-    size_t max_batch_size,
-    size_t max_seq_size,
+    const std::unordered_set<int>& blocklisted_ops,
+    int32_t max_batch_size,
+    int32_t max_seq_size,
+    int32_t num_embeddings,
+    int32_t embedding_size,
+    int32_t tvm_min_ops,
+    bool tvm_profiling_based_jit,
     bool debug);
 
 CAFFE2_API void cleanUpPredictNet(

@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/api/module.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -163,13 +163,24 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   return clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
-Module Module::clone() const {
+Module Module::copy() const {
+  return Module(_ivalue()->copy());
+}
+
+Module Module::deepcopy() const {
+  return Module(_ivalue()->deepcopy());
+}
+
+Module Module::clone(bool inplace) const {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  return clone_impl(type_remap);
+  IValue::HashAliasedIValueMap memo;
+  return clone_impl(type_remap, inplace, memo);
 }
 
 Module Module::clone_impl(
-    std::unordered_map<TypePtr, TypePtr>& type_remap) const {
+    std::unordered_map<TypePtr, TypePtr>& type_remap,
+    bool inplace,
+    IValue::HashAliasedIValueMap memo) const {
   // Create a new _ivalue in the same compilation unit.
   // Since now we have shared ClassType, we need to preserve the shared
   // ClassType during cloning, so we first need to check if the type
@@ -192,20 +203,33 @@ Module Module::clone_impl(
   size_t N = type()->numAttributes();
   for (size_t i = 0; i < N; ++i) {
     IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
+    std::string attr_name = type()->getAttributeName(i);
+    TypePtr attr_type = type()->getAttribute(i);
+    if (attr_type->is_module()) {
       const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_impl(type_remap);
+      Module cloned = orig.clone_impl(type_remap, inplace, memo);
       type_remap[orig.type()] = cloned.type();
-      r.register_module(type()->getAttributeName(i), cloned);
+      // NOTE: why do we need to manually setattr on object instead of using
+      // register_module here? because the attr can be a module interface
+      // type and hold a Module object still. register_module will not let us
+      // correctly set up the type for this attr, so we had to do this manually.
+      // In the case it's an interface type, the type will be shared by the new
+      // cloned instance in the same compilation unit bc it only contains a list
+      // of functionSchema
+      r.type()->addOrCheckAttribute(
+          attr_name, attr_type->cast<ClassType>() ? cloned.type() : attr_type);
+      r._ivalue()->setAttr(attr_name, cloned._ivalue());
     } else {
       // this adds new slot and creates a new attribute for the underlying type
       // if the type is not already cloned, otherwise it will only add a new
       // slot and typecheck
       r.register_attribute(
           type()->getAttributeName(i),
-          type()->getAttribute(i),
-          s,
-          type()->is_parameter(i));
+          attr_type,
+          // we'll deepcopy the IValue in non inplace option
+          inplace ? s : s.deepcopy(memo),
+          type()->is_parameter(i),
+          type()->is_buffer(i));
     }
   }
 
@@ -219,26 +243,15 @@ Module Module::clone_impl(
     for (auto& fn : type()->methods()) {
       r.clone_method(*this, *fn, type_remap);
     }
-  }
-  return r;
-}
 
-Module Module::clone_instance() const {
-  Module r(_ivalue()->compilation_unit(), type());
-
-  // Copy slots. If a slot is a module - recursively clone it.
-  size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
-    IValue s = _ivalue()->getSlot(i);
-    if (type()->getAttribute(i)->is_module()) {
-      const Module& orig = Module(s.toObject());
-      Module cloned = orig.clone_instance();
-      r._ivalue()->setAttr(type()->getAttributeName(i), cloned._ivalue());
-    } else {
-      r._ivalue()->setAttr(type()->getAttributeName(i), s);
+    // Execute __setstate__(__getstate__()) to initialize custom class members.
+    if (auto setstate_method = r.find_method("__setstate__")) {
+      auto getstate_method = r.find_method("__getstate__");
+      TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+      auto state = (*getstate_method)(Stack{});
+      (*setstate_method)(Stack{state});
     }
   }
-
   return r;
 }
 
@@ -275,7 +288,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   }
   // Note: following Python, `__init__()` modifies its first parameter in-place
   // and returns nothing.
-  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+  classType->getMethod("__init__").operator()(std::move(stackWithSelf));
 
   return obj;
 }

@@ -21,8 +21,8 @@ call %INSTALLER_DIR%\install_sccache.bat
 call %INSTALLER_DIR%\install_miniconda3.bat
 
 
-:: Install ninja
-if "%REBUILD%"=="" ( pip install -q ninja )
+:: Install ninja and other deps
+if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses )
 
 git submodule sync --recursive
 git submodule update --init --recursive
@@ -39,6 +39,7 @@ popd
 
 if "%CUDA_VERSION%" == "9" goto cuda_build_9
 if "%CUDA_VERSION%" == "10" goto cuda_build_10
+if "%CUDA_VERSION%" == "11" goto cuda_build_11
 goto cuda_build_end
 
 :cuda_build_9
@@ -52,6 +53,13 @@ goto cuda_build_common
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
 set CUDA_PATH_V10_1=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_11
+
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0
+set CUDA_PATH_V11_0=%CUDA_PATH%
 
 goto cuda_build_common
 
@@ -73,6 +81,8 @@ set PATH=%TMP_DIR_WIN%\bin;%PATH%
 :: jenkins has M40, which is 5.2
 if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 
+:: The default sccache idle timeout is 600, which is too short and leads to intermittent build errors.
+set SCCACHE_IDLE_TIMEOUT=0
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
@@ -85,7 +95,7 @@ if "%USE_CUDA%"=="1" (
   copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
 
   :: randomtemp is used to resolve the intermittent build error related to CUDA.
-  :: code: https://github.com/peterjc123/randomtemp
+  :: code: https://github.com/peterjc123/randomtemp-rust
   :: issue: https://github.com/pytorch/pytorch/issues/25393
   ::
   :: Previously, CMake uses CUDA_NVCC_EXECUTABLE for finding nvcc and then
@@ -93,17 +103,33 @@ if "%USE_CUDA%"=="1" (
   :: in PATH, and then pass the arguments to it.
   :: Currently, randomtemp is placed before sccache (%TMP_DIR_WIN%\bin\nvcc)
   :: so we are actually pretending sccache instead of nvcc itself.
-  curl -kL https://github.com/peterjc123/randomtemp/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
+)
+
+@echo off
+echo @echo off >> %TMP_DIR_WIN%\ci_scripts\pytorch_env_restore.bat
+for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR_WIN%\ci_scripts\pytorch_env_restore.bat
+@echo on
+
+if "%REBUILD%" == "" (
+  if NOT "%BUILD_ENVIRONMENT%" == "" (
+    :: Create a shortcut to restore pytorch environment
+    echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+    echo call "%TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+    echo cd /D "%CD%" >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore_helper.bat
+
+    aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
+  )
 )
 
 python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
     echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
   ) else (
-    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && python %SCRIPT_HELPERS_DIR%\upload_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
+    7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
 

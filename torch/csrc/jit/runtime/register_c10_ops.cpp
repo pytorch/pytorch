@@ -1,6 +1,6 @@
 #include <ATen/core/ATenOpList.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -17,7 +17,7 @@ namespace {
 //      It should also handle autograd.
 Operator createOperatorFromC10_withTracingHandledHere(
     const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack& stack) {
+  return Operator(op, [op](Stack* stack) {
     const auto input_size = op.schema().arguments().size();
     const auto output_size = op.schema().returns().size();
 
@@ -34,7 +34,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
       tracer::recordSourceLocation(node);
       const auto& args = op.schema().arguments();
       int i = 0;
-      for (auto iter = stack.end() - input_size; iter != stack.end();
+      for (auto iter = stack->end() - input_size; iter != stack->end();
            ++iter, ++i) {
         // TODO we need to refactor graph APIs (e.g., addInputs)
         // appropriately; after that, we can get rid of the giant if-else
@@ -72,6 +72,15 @@ Operator createOperatorFromC10_withTracingHandledHere(
             AT_ASSERT(iter->isTensorList());
             auto list = iter->toTensorVector();
             tracer::addInputs(node, args[i].name().c_str(), list);
+          } else if (auto class_type = elem_type->cast<ClassType>()) {
+            AT_ASSERT(iter->isList());
+            auto list = iter->toList();
+            std::vector<c10::intrusive_ptr<c10::ivalue::Object>> objects;
+            for (IValue iv : list) {
+              objects.emplace_back(std::move(iv).toObject());
+            }
+            tracer::addInputs(
+                node, args[i].name().c_str(), objects, class_type);
           } else if (elem_type->kind() == TypeKind::FloatType) {
             AT_ASSERT(iter->isDoubleList());
             // NB: now, tracer doesn't support tracing double list. We add
@@ -91,7 +100,9 @@ Operator createOperatorFromC10_withTracingHandledHere(
           } else if (elem_type->kind() == TypeKind::IntType) {
             AT_ASSERT(iter->isIntList());
             tracer::addInputs(
-                node, args[i].name().c_str(), iter->toIntVector());
+                node,
+                args[i].name().c_str(),
+                c10::IntArrayRef(iter->toIntVector()));
           } else if (elem_type->kind() == TypeKind::BoolType) {
             AT_ASSERT(iter->isBoolList());
             tracer::addInputs(
@@ -111,19 +122,12 @@ Operator createOperatorFromC10_withTracingHandledHere(
       jit::tracer::setTracingState(nullptr);
     }
 
-#ifdef USE_STATIC_DISPATCH
-    {
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
-      op.callBoxed(&stack);
-    }
-#else
-    op.callBoxed(&stack);
-#endif // USE_STATIC_DISPATCH
+    op.callBoxed(stack);
 
     if (tracer_state) {
       jit::tracer::setTracingState(std::move(tracer_state));
       int i = 0;
-      for (auto iter = stack.end() - output_size; iter != stack.end();
+      for (auto iter = stack->end() - output_size; iter != stack->end();
            ++iter, ++i) {
         const auto& type = op.schema().returns()[i].type();
         if (type->isSubtypeOf(TensorType::get())) {
@@ -138,22 +142,20 @@ Operator createOperatorFromC10_withTracingHandledHere(
             throw std::runtime_error(
                 "unsupported ouptut list type: " + elem_type->str());
           }
+        } else if (type->kind() == TypeKind::ClassType) {
+          AT_ASSERT(iter->isObject());
+          tracer::addOutput(node, iter->toObject());
         } else {
           throw std::runtime_error("unsupported output type: " + type->str());
         }
       }
     }
-
-    return 0;
   });
 }
 
 Operator createOperatorFromC10_withTracingNotHandledHere(
     const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack& stack) {
-    op.callBoxed(&stack);
-    return 0;
-  });
+  return Operator(op, [op](Stack* stack) { op.callBoxed(stack); });
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {

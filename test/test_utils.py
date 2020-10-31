@@ -1,4 +1,3 @@
-from __future__ import print_function
 import sys
 import os
 import re
@@ -14,8 +13,8 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import skipIfRocm, load_tests, retry, IS_SANDCASTLE
-from urllib.error import HTTPError
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE
+from urllib.error import URLError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -123,8 +122,7 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        # python_error in case of py2_7_9.
-        with self.assertRaisesRegex(RuntimeError, "(Checkpointing is not compatible)|(python_error)"):
+        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
@@ -267,6 +265,25 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
+    def test_checkpoint_partial_grad(self):
+        def run_fn(tensor1, tensor2):
+            # tensor 2 is used for other application logic
+            return tensor1, tensor2
+        input_var = torch.randn(1, 4, requires_grad=True)
+        input_var2 = torch.randn(1, 4, requires_grad=False)
+        out = checkpoint(run_fn, input_var, input_var2)
+        out[0].sum().backward()
+
+        def run_fn(tensor1, tensor2):
+            return tensor1
+        input_var = torch.randn(1, 4, requires_grad=False)
+        input_var2 = torch.randn(1, 4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
+        ):
+            out = checkpoint(run_fn, input_var, input_var2)
+            out.sum().backward()
 
 class TestDataLoader(TestCase):
     def setUp(self):
@@ -332,13 +349,17 @@ class TestFFI(TestCase):
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
-    def _run(self, command):
+    def _run(self, command, timeout=30):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
-        output, err = p.communicate()
+        try:
+            output, err = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            output, err = p.communicate()
         rc = p.returncode
         output = output.decode("ascii")
         err = err.decode("ascii")
@@ -356,11 +377,11 @@ class TestBottleneck(TestCase):
     def _check_run_args(self):
         # Check that this fails due to missing args
         rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py')
-        self.assertEqual(rc, 2, atol=0, message=self._fail_msg('Missing args should error', out + err))
+        self.assertEqual(rc, 2, atol=0, rtol=0, msg=self._fail_msg('Missing args should error', out + err))
 
         # This should succeed
         rc, out, err = self._run_bottleneck('bottleneck_test/test_args.py', '--foo foo --bar bar')
-        self.assertEqual(rc, 0, atol=0, message=self._fail_msg('Should pass args to script', out + err))
+        self.assertEqual(rc, 0, atol=0, rtol=0, msg=self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
         return '{}, output was:\n{}'.format(msg, output)
@@ -404,7 +425,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
-        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -413,10 +434,9 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
-        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -505,17 +525,31 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
-    @retry(HTTPError, tries=3)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_github(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist',
+            source='github',
             pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3)
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_from_local_dir(self):
+        local_dir = hub._get_cache_or_reload(
+            'ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(
+            local_dir,
+            'mnist',
+            source='local',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_branch(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example:ci/test_slash',
@@ -525,7 +559,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
@@ -539,12 +573,12 @@ class TestHub(TestCase):
         assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
         shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
 
-    @retry(HTTPError, tries=3)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_list_entrypoints(self):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
         self.assertObjectIn('mnist', entry_lists)
 
-    @retry(HTTPError, tries=3)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_download_url_to_file(self):
         temp_file = os.path.join(tempfile.gettempdir(), 'temp')
         hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
@@ -552,13 +586,13 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(HTTPError, tries=3)
+    @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_zip_checkpoint(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -568,15 +602,44 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
+    # Test the default zipfile serialization format produced by >=1.6 release.
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_zip_1_6_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
-            self.assertEqual(torch.hub._get_torch_home(), dirname)
+            self.assertEqual(torch.hub.get_dir(), dirname)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_state_dict_from_url_with_name(self):
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
+            torch.hub.set_dir(dirname)
+            file_name = 'test_file'
+            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
+            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
+            self.assertEqual(sum_of_state_dict(loaded_state),
+                             SUM_OF_HUB_EXAMPLE)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python # noqa
+
+
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertions work as expected
+        torch.Assert(True, "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch.Assert(False, "bar")
 
 
 if __name__ == '__main__':

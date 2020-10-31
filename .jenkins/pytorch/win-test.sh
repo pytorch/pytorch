@@ -14,7 +14,12 @@ fi
 
 export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
-
+export PROJECT_DIR="${PWD}"
+export PROJECT_DIR_WIN=$(cygpath -w "${PROJECT_DIR}")
+export TEST_DIR="${PWD}/test"
+export TEST_DIR_WIN=$(cygpath -w "${TEST_DIR}")
+export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
+export PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 
 mkdir -p $TMP_DIR/build/torch
 
@@ -40,16 +45,35 @@ run_tests() {
         $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
         $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM" && \
         $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat && \
+        $SCRIPT_HELPERS_DIR/test_custom_backend.bat && \
         $SCRIPT_HELPERS_DIR/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+            export PYTORCH_COLLECT_COVERAGE=1
             $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
             $SCRIPT_HELPERS_DIR/test_libtorch.bat
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
+            fi
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
             $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM" && \
+            $SCRIPT_HELPERS_DIR/test_custom_backend.bat && \
             $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
         fi
     fi
 }
 
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
+
+if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]] && [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+  pushd $TEST_DIR
+  python -mpip install coverage
+  echo "Generating XML coverage report"
+  time python -mcoverage xml
+  popd
+
+  pushd $PROJECT_DIR
+  python -mpip install codecov
+  python -mcodecov
+  popd
+fi

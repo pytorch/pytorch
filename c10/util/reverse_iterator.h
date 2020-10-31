@@ -261,10 +261,9 @@ inline constexpr bool operator>=(
 }
 
 template <typename _IteratorL, typename _IteratorR>
-inline constexpr auto operator-(
+inline constexpr decltype(auto) operator-(
     const reverse_iterator<_IteratorL>& __x,
-    const reverse_iterator<_IteratorR>& __y)
-    -> decltype(__y.base() - __x.base()) {
+    const reverse_iterator<_IteratorR>& __y) {
   return __y.base() - __x.base();
 }
 
@@ -288,8 +287,7 @@ inline constexpr reverse_iterator<_Iterator> make_reverse_iterator(
 }
 
 template <typename _Iterator>
-auto __niter_base(reverse_iterator<_Iterator> __it)
-    -> decltype(__make_reverse_iterator(__niter_base(__it.base()))) {
+decltype(auto) __niter_base(reverse_iterator<_Iterator> __it) {
   return __make_reverse_iterator(__niter_base(__it.base()));
 }
 

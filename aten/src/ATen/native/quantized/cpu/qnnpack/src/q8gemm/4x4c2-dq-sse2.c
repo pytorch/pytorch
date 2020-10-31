@@ -21,6 +21,7 @@ void pytorch_q8gemm_dq_ukernel_4x4c2__sse2(
     const float* restrict b,
     float* restrict c,
     size_t c_stride,
+    size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params
         quantization_params[RESTRICT_STATIC 1]) {
   __m128i vacc0x0123 = _mm_setzero_si128();
@@ -44,8 +45,31 @@ void pytorch_q8gemm_dq_ukernel_4x4c2__sse2(
   }
 
   const __m128i va_zero_point = _mm_set1_epi16(quantization_params->input_zero_point);
-  const __m128i vb_zero_point = _mm_set1_epi16(quantization_params->kernel_zero_point);
-  const __m128 vmultiplier = _mm_set1_ps(quantization_params->multiplier);
+  const int16_t vb_zero_point_0 =
+    (int16_t)(uint16_t)quantization_params->kernel_zero_points[
+    output_channel_index];
+  const int16_t vb_zero_point_1 =
+      (int16_t)(uint16_t)quantization_params->kernel_zero_points[
+        output_channel_index + 1];
+  const int16_t vb_zero_point_2 =
+      (int16_t)(uint16_t)quantization_params->kernel_zero_points[
+        output_channel_index + 2];
+  const int16_t vb_zero_point_3 =
+      (int16_t)(uint16_t)quantization_params->kernel_zero_points[
+        output_channel_index + 3];
+
+  __m128i vb_zero_point = _mm_set_epi16(vb_zero_point_3,
+                                        vb_zero_point_3,
+                                        vb_zero_point_2,
+                                        vb_zero_point_2,
+                                        vb_zero_point_1,
+                                        vb_zero_point_1,
+                                        vb_zero_point_0,
+                                        vb_zero_point_0
+                                        );
+  const __m128 vmultiplier =
+      _mm_loadu_ps(&quantization_params->multipliers[output_channel_index]);
+
   const __m128 vbias = _mm_load_ps(b);
 
   const __m128i vzero = _mm_setzero_si128();

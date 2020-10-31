@@ -25,7 +25,10 @@ Tensor pdist(const Tensor& self, const double p) {
   return at::_pdist_forward(self.contiguous(), p);
 }
 
-Tensor euclidean_dist_out(const Tensor& x1, const Tensor& x2) {
+Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
+  /** This function does the fist part of the euclidean distance calculation
+   * We divide it in two steps to simplify dealing with subgradients in the
+   * backward step */
   Tensor x1_norm = x1.pow(2).sum(-1, true);
   Tensor x1_pad = at::ones_like(x1_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor x2_norm = x2.pow(2).sum(-1, true);
@@ -71,7 +74,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
   tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
 
-  int expand_batch_product = std::accumulate(expand_batch_portion.begin(), expand_batch_portion.end(), 1, std::multiplies<int64_t>());
+  const int64_t expand_batch_product = prod_intlist(expand_batch_portion);
   std::vector<int64_t> tensor1_view{expand_batch_product, r1, c1};
   std::vector<int64_t> tensor2_view{expand_batch_product, r2, c2};
 
@@ -87,8 +90,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
   } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
-    Tensor dist = (expand_batch_product == 1) ? euclidean_dist_out(x1, x2) :
-                  euclidean_dist_out(tensor1_expanded, tensor2_expanded);
+    Tensor dist = (expand_batch_product == 1) ? at::_euclidean_dist(x1, x2) :
+                  at::_euclidean_dist(tensor1_expanded, tensor2_expanded);
     result = dist.view(output_shape);
   } else {
     result = at::empty(output_shape, x1.options());
@@ -144,8 +147,10 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, c
   auto device2 = x2.device().type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
   IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(x1.dim() - 2, 0));
-  int batch_product = std::accumulate(batch_tensor1.begin(), batch_tensor1.end(), 1, std::multiplies<int64_t>());
-  Tensor grad_x1 = at::empty_like(x1, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT).view({batch_product, n, m});
+  const int64_t batch_product = prod_intlist(batch_tensor1);
+  Tensor grad_x1 =
+      at::empty_like(x1, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+          .view({batch_product, n, m});
   cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
   return grad_x1;
 }

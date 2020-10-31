@@ -19,7 +19,7 @@ class ASGD(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
     .. _Acceleration of stochastic approximation by averaging:
-        http://dl.acm.org/citation.cfm?id=131098
+        https://dl.acm.org/citation.cfm?id=131098
     """
 
     def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0):

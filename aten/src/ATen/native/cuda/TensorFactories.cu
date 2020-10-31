@@ -22,15 +22,13 @@ namespace at {
 namespace native {
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n) {
-  return at::native::eye_out_cuda(result, n, /*m=*/-1);
+  // the default value of `m` equals to `n`
+  return at::native::eye_out_cuda(result, n, n);
 }
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
-
-  if(m < 0) {
-    m = n;
-  }
+  TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
   result.zero_();
@@ -45,21 +43,22 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.device().type() == at::DeviceType::CUDA);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
+  int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizeable=*/true);
+      c10::StorageImpl::use_byte_size_t(),
+      size_bytes,
+      allocator->allocate(size_bytes),
+      allocator,
+      /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA);
+  auto tensor =
+      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);

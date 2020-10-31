@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <aten/src/ATen/quantized/Quantizer.h>
@@ -104,8 +104,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
-      Function* getstate = type->getMethod("__getstate__");
-      pushIValue((*getstate)({obj}));
+      Function& getstate = type->getMethod("__getstate__");
+      pushIValue(getstate({obj}));
     } else {
       push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
       push<PickleOpCode>(PickleOpCode::MARK);
@@ -130,7 +130,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     TORCH_CHECK(
         torch::distributed::rpc::getAllowJitRRefPickle() == true,
         "RRef jit pickling is only allowed inside RPC calls.");
@@ -139,6 +139,13 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     TORCH_CHECK(
         false, "RRef pickling is only supported with the distributed package");
 #endif
+  } else if (ivalue.isEnum()) {
+    auto enum_holder = ivalue.toEnumHolder();
+    const auto& qualified_class_name =
+        enum_holder->type()->qualifiedClassName();
+    pushGlobal(qualified_class_name.prefix(), qualified_class_name.name());
+    pushIValue(enum_holder->value());
+    push<PickleOpCode>(PickleOpCode::REDUCE);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -159,7 +166,7 @@ void Pickler::pushDevice(const IValue& ivalue) {
   }
 }
 
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 void Pickler::pushRRef(const IValue& ivalue) {
   // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
@@ -289,14 +296,14 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // location
   pushString(tensor.device().str());
   // size
-  pushInt(tensor.storage().size());
+  pushInt(tensor.storage().nbytes() / tensor.element_size());
 
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 
   // TODO: Skip this if not writing tensors
   memoized_storage_map_[addr] = pushNextBinPut();
-  tensor_data_.push_back(getWriteableTensorData(tensor));
+  tensor_data_.push_back(tensor);
 }
 
 void Pickler::pushBytes(const std::string& string) {
@@ -384,12 +391,11 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
         pushDouble(tensor.q_scale());
         pushInt(tensor.q_zero_point());
         break;
+      case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
-        const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
-            tensor.quantizer().get());
-        pushTensor(quantizer->scales());
-        pushTensor(quantizer->zero_points());
-        pushInt(quantizer->axis());
+        pushTensor(tensor.q_per_channel_scales());
+        pushTensor(tensor.q_per_channel_zero_points());
+        pushInt(tensor.q_per_channel_axis());
       } break;
       default:
         TORCH_CHECK(
@@ -497,7 +503,7 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 
   // Push the dict type
   TORCH_INTERNAL_ASSERT(ivalue.type());
-  pushString(ivalue.type()->python_str());
+  pushString(ivalue.type()->annotation_str());
 
   // Pop the dict and type into a tuple
   push<PickleOpCode>(PickleOpCode::TUPLE2);
@@ -590,26 +596,29 @@ void Pickler::pushTuple(const IValue& ivalue) {
   }
 }
 
-WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
+WriteableTensorData getWriteableTensorData(
+    const at::Tensor& tensor,
+    bool to_cpu) {
   WriteableTensorData result;
   result.tensor_ = tensor;
-  result.size_ = tensor.element_size() * tensor.storage().size();
+  result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == at::DeviceType::CUDA) {
+  if (tensor.storage().device_type() == DeviceType::CUDA && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
-    result.tensor_ = at::empty({0}, tensor.options())
-                         .set_(
-                             tensor.storage(),
-                             /* storage_offset = */ 0,
-                             /* size = */
-                             {static_cast<int64_t>(tensor.storage().size())},
-                             /* stride = */ {1})
-                         .cpu();
+    result.tensor_ =
+        at::empty({0}, tensor.options())
+            .set_(
+                tensor.storage(),
+                /* storage_offset = */ 0,
+                /* size = */
+                {static_cast<int64_t>(
+                    tensor.storage().nbytes() / tensor.element_size())},
+                /* stride = */ {1})
+            .cpu();
     TORCH_CHECK(
-        result.tensor_.element_size() * result.tensor_.storage().size() ==
-            result.size_,
+        result.tensor_.storage().nbytes() == result.size_,
         "Storage tensor size did not match record size");
   }
   return result;
@@ -617,7 +626,7 @@ WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
 
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = cls->getMethod("__getstate__");
+  auto getstate = cls->findMethod("__getstate__");
   if (getstate == nullptr) {
     return false;
   }
@@ -637,7 +646,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
 
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
-  auto setstate = cls->getMethod("__setstate__");
+  auto setstate = cls->findMethod("__setstate__");
   if (!setstate) {
     return false;
   }
@@ -657,7 +666,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   TORCH_CHECK(
       set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
       "'__setstate__' must return None, but found value of type",
-      set_schema.returns().at(0).type()->python_str());
+      set_schema.returns().at(0).type()->annotation_str());
 
   // Check that the return type of __getstate__ matches the input to
   // __setstate__
@@ -667,9 +676,9 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   TORCH_CHECK(
       get_type->isSubtypeOf(set_type),
       "'__getstate__'s return type (",
-      get_type->python_str(),
+      get_type->annotation_str(),
       ") does not match '__setstate__'s argument type (",
-      set_type->python_str(),
+      set_type->annotation_str(),
       ")");
 
   return true;

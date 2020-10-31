@@ -14,8 +14,13 @@ Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::opti
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
-          caffe2::TypeMeta::Make<float>(), 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)), nullptr, false),
-      DispatchKey::MSNPU);
+          Storage::use_byte_size_t(),
+          0,
+          at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)),
+          nullptr,
+          false),
+      DispatchKey::MSNPU,
+      caffe2::TypeMeta::Make<float>());
   return Tensor(std::move(tensor_impl));
 }
 
@@ -24,12 +29,24 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   return a;
 }
 
+Tensor empty_strided_override(
+  IntArrayRef size,
+  IntArrayRef stride,
+  c10::optional<c10::ScalarType> dtype,
+  c10::optional<c10::Layout> layout,
+  c10::optional<c10::Device> device,
+  c10::optional<bool> pin_memory) {
+
+  return empty_override(size, at::kMSNPU, c10::nullopt);
+}
+
+TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
+  m.impl_UNBOXED("aten::empty.memory_format",  empty_override);
+  m.impl_UNBOXED("aten::empty_strided",        empty_strided_override);
+  m.impl_UNBOXED("aten::add.Tensor",           add_override);
+}
+
 TEST(BackendExtensionTest, TestRegisterOp) {
-  EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
-  auto registry1 = torch::RegisterOperators()
-    .op(torch::RegisterOperators::options()
-      .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(DispatchKey::MSNPU));
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -41,11 +58,6 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   ASSERT_EQ(b.device().index(), 1);
   ASSERT_EQ(b.dtype(), caffe2::TypeMeta::Make<float>());
 
-  EXPECT_ANY_THROW(add(a, b));
-  auto registry2 = torch::RegisterOperators()
-    .op(torch::RegisterOperators::options()
-      .schema("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(DispatchKey::MSNPU));
   add(a, b);
   ASSERT_EQ(test_int, 2);
 

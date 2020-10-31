@@ -17,6 +17,9 @@ inline Tensor & Tensor::operator=(Tensor && rhs) && {
 inline Tensor & Tensor::operator=(Scalar v) && {
   return fill_(v);
 }
+inline Tensor Tensor::operator~() const {
+  return bitwise_not();
+}
 inline Tensor Tensor::operator-() const {
   return neg();
 }
@@ -43,6 +46,15 @@ inline Tensor& Tensor::operator/=(const Tensor & other) {
 }
 inline Tensor& Tensor::operator/=(Scalar other) {
   return div_(other);
+}
+inline Tensor& Tensor::operator&=(const Tensor & other) {
+  return bitwise_and_(other);
+}
+inline Tensor& Tensor::operator|=(const Tensor & other) {
+  return bitwise_or_(other);
+}
+inline Tensor& Tensor::operator^=(const Tensor & other) {
+  return bitwise_xor_(other);
 }
 inline Tensor Tensor::operator[](Scalar index) const {
   if (!index.isIntegral(false)) {
@@ -73,6 +85,9 @@ _(*,x.mul(y), y.mul(x)) \
 _(-,x.sub(y), ::at::empty_like(y, at::MemoryFormat::Preserve).fill_(x).sub_(y)) \
 _(/,x.div(y), ::at::empty_like(y, at::MemoryFormat::Preserve).fill_(x).div_(y)) \
 _(%,x.remainder(y), ::at::empty_like(y, at::MemoryFormat::Preserve).fill_(x).remainder_(y)) \
+_(&,x.bitwise_and(y), y.bitwise_and(x)) \
+_(|,x.bitwise_or(y), y.bitwise_or(x)) \
+_(^,x.bitwise_xor(y), y.bitwise_xor(x)) \
 _(<,x.lt(y), y.gt(x)) \
 _(<=,x.le(y), y.ge(x)) \
 _(>,x.gt(y),y.lt(x)) \

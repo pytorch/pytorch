@@ -16,6 +16,7 @@ OPERATOR_SCHEMA(Copy)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
+    .InheritOnnxSchema("Identity")
     .SetDoc(R"DOC(
 Copy input tensor into output, potentially across devices.
 

@@ -14,6 +14,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_new.h"
@@ -44,6 +45,7 @@ using at::Generator;
 using at::TensorList;
 using at::Dimname;
 using at::DimnameList;
+using at::ArrayRef;
 
 using namespace torch::autograd::utils;
 
@@ -186,9 +188,13 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if (r.idx == 0) {
-    PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
-        "and will be removed in 0.5. Note that arange generates values in [start; end), "
-        "not [start; end].", 1);
+    auto ret = PyErr_WarnEx(
+        PyExc_UserWarning,
+        "torch.range is deprecated and will be removed in a future release "
+        "because its behavior is inconsistent with Python's range builtin. "
+        "Instead, use torch.arange, which produces values in [start, end).",
+        1);
+    if (ret != 0) throw python_error();
     if (r.isNone(3)) {
       const auto options = TensorOptions()
           .dtype(r.scalartype(4))
@@ -255,8 +261,7 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
       .dtype(r.scalartypeOptional(3))
       .layout(r.layout(4))
       .device(r.device(5))
-      .pinned_memory(r.toBool(6))
-      .requires_grad(r.toBool(7));
+      .pinned_memory(r.toBool(6));
 
   if (r.idx == 0) {
     // full
@@ -432,6 +437,14 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__sparse_coo_tensor_unsafe(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  jit::tracer::warn("torch._sparse_coo_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
+  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // implemented on python object to allow torch.tensor to be constructed with arbitrarily nested
 // python objects - list, tuple, np array, scalar, etc.
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -482,28 +495,32 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
 static PyMethodDef torch_functions[] = {
-  {"arange", (PyCFunction)(void(*)(void))THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"as_tensor", (PyCFunction)(void(*)(void))THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"dsmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
-  {"full", (PyCFunction)(void(*)(void))THPVariable_full, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"hsmm", (PyCFunction)(void(*)(void))THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"nonzero", (PyCFunction)(void(*)(void))THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"randint", (PyCFunction)(void(*)(void))THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"numel", (PyCFunction)(void(*)(void))THPVariable_numel, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"arange", castPyCFunctionWithKeywords(THPVariable_arange),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"as_tensor", castPyCFunctionWithKeywords(THPVariable_as_tensor),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"dsmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
+  {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"hsmm", castPyCFunctionWithKeywords(THPVariable_hspmm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"randint", castPyCFunctionWithKeywords(THPVariable_randint), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"saddmm", castPyCFunctionWithKeywords(THPVariable_sspaddmm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"sparse_coo_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_coo_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_sparse_coo_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_coo_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_validate_sparse_coo_tensor_args", castPyCFunctionWithKeywords(THPVariable__validate_sparse_coo_tensor_args), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"spmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"tensor", castPyCFunctionWithKeywords(THPVariable_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"get_device", castPyCFunctionWithKeywords(THPVariable_get_device), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };
 
 static PyTypeObject THPVariableFunctions = {
   PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._VariableFunctions",         /* tp_name */
+  "torch._C._VariableFunctionsClass",    /* tp_name */
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
@@ -547,6 +564,12 @@ void initTorchFunctions(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPVariableFunctions);
+
+  // Steals
+  Py_INCREF(&THPVariableFunctions);
+  if (PyModule_AddObject(module, "_VariableFunctionsClass", reinterpret_cast<PyObject*>(&THPVariableFunctions)) < 0) {
+    throw python_error();
+  }
   // PyType_GenericNew returns a new reference
   THPVariableFunctionsModule = PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
   // PyModule_AddObject steals a reference
@@ -563,29 +586,29 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
-    "nonzero(Tensor input, *, bool as_tuple)",
+    "nonzero(Tensor input, *, bool as_tuple=False, Tensor out=None)",
   });
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
     return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
   }
 
-  if (r.idx == 0) {
-    if (r.isNone(1)) {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
-    }
-  } else {
-    if (r.toBool(1)) {
-      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    }
+  const auto as_tuple = r.toBool(1);
+  const auto has_out = !r.isNone(2);
+
+  if (as_tuple) {
+    TORCH_CHECK(!has_out, "nonzero does not support the out kwarg when as_tuple is True");
+    return wrap(dispatch_nonzero_numpy(r.tensor(0)));
   }
+
+  if (has_out) {
+    return wrap(dispatch_nonzero(r.tensor(0), r.tensor(2)));
+  }
+
+  return wrap(dispatch_nonzero(r.tensor(0)));
+
   END_HANDLE_TH_ERRORS
 }
 

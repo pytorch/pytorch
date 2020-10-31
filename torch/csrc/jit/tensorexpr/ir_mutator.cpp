@@ -143,35 +143,6 @@ const Expr* IRMutator::mutate(const Var* v) {
   return v;
 }
 
-const Expr* IRMutator::mutate(const Let* v) {
-  const Expr* var = v->var();
-  const Expr* value = v->value();
-  const Expr* body = v->body();
-  const Expr* var_new = var->accept_mutator(this);
-  const Expr* value_new = value->accept_mutator(this);
-  const Expr* body_new = body->accept_mutator(this);
-  if ((var == var_new) && (value == value_new) && (body == body_new)) {
-    return v;
-  }
-  return new Let(var_new, value_new, body_new);
-}
-
-Stmt* IRMutator::mutate(const LetStmt* v) {
-  const Var* var = v->var();
-  const Expr* value = v->value();
-  Stmt* body = v->body();
-  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
-  if (var_new == nullptr) {
-    throw std::runtime_error("LetStmt var must be variable");
-  }
-  const Expr* value_new = value->accept_mutator(this);
-  Stmt* body_new = body->accept_mutator(this);
-  if ((var == var_new) && (value == value_new) && (body == body_new)) {
-    return (Stmt*)v;
-  }
-  return new LetStmt(var_new, value_new, body_new);
-}
-
 const Expr* IRMutator::mutate(const Ramp* v) {
   const Expr* base = v->base();
   const Expr* stride = v->stride();
@@ -270,10 +241,35 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
       v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
 }
 
+const Expr* IRMutator::mutate(const MaxTerm* v) {
+  const Expr* newScalar = nullptr;
+  if (v->scalar()) {
+    newScalar = v->scalar()->accept_mutator(this);
+  }
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new MaxTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+}
+
+const Expr* IRMutator::mutate(const MinTerm* v) {
+  const Expr* newScalar = nullptr;
+  if (v->scalar()) {
+    newScalar = v->scalar()->accept_mutator(this);
+  }
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new MinTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+}
+
 const Expr* IRMutator::mutate(const ReduceOp* v) {
   const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
   const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);
-  const Expr* init = v->initializer()->accept_mutator(this);
   auto body = v->body().node()->accept_mutator(this);
 
   std::vector<const Expr*> new_output_args;
@@ -287,7 +283,6 @@ const Expr* IRMutator::mutate(const ReduceOp* v) {
 
   return new ReduceOp(
       buf_new,
-      init,
       ExprHandle(body),
       v->interaction(),
       new_output_args,
@@ -337,8 +332,9 @@ Stmt* IRMutator::mutate(const For* v) {
 
 Stmt* IRMutator::mutate(const Block* v) {
   bool any_change = false;
+
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
@@ -400,17 +396,21 @@ Stmt* IRMutator::mutate(const AtomicAdd* v) {
   return new AtomicAdd(buf_new, indices_new, value_new);
 }
 
+Stmt* IRMutator::mutate(const SyncThreads* v) {
+  return new SyncThreads();
+}
+
 Stmt* IRMutator::mutate(const Allocate* v) {
   const Var* buffer_var_old = v->buffer_var();
   const Var* buffer_var_new =
       dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new == buffer_var_old;
+  bool any_change = buffer_var_new != buffer_var_old;
 
   std::vector<const Expr*> dims_old = v->dims();
   std::vector<const Expr*> dims_new(dims_old.size());
   for (size_t i = 0; i < dims_old.size(); i++) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
-    any_change |= (dims_new[i] == dims_old[i]);
+    any_change |= (dims_new[i] != dims_old[i]);
   }
 
   if (!any_change) {
@@ -429,6 +429,20 @@ Stmt* IRMutator::mutate(const Free* v) {
   }
 
   return new Free(buffer_var_new);
+}
+
+Stmt* IRMutator::mutate(const Let* v) {
+  const Var* var_old = v->var();
+  const Var* var_new = dynamic_cast<const Var*>(var_old->accept_mutator(this));
+
+  const Expr* val_old = v->value();
+  const Expr* val_new = val_old->accept_mutator(this);
+
+  if (var_new == var_old && val_old == val_new) {
+    return (Stmt*)v;
+  }
+
+  return new Let(var_new, val_new);
 }
 
 Stmt* IRMutator::mutate(const Cond* v) {
@@ -462,27 +476,15 @@ const Expr* IRMutator::DefaultMutator(
 
 class StmtClone : public IRMutator {
  public:
-  Stmt* mutate(const LetStmt* v) override;
   Stmt* mutate(const For* v) override;
   Stmt* mutate(const Block* v) override;
   Stmt* mutate(const Store* v) override;
   Stmt* mutate(const Allocate* v) override;
   Stmt* mutate(const Free* v) override;
+  Stmt* mutate(const Let* v) override;
   Stmt* mutate(const Cond* v) override;
   Stmt* mutate(const AtomicAdd* v) override;
 };
-
-Stmt* StmtClone::mutate(const LetStmt* v) {
-  // Expressions are immutable => we don't need to clone them
-  const Var* var = v->var();
-  const Expr* value = v->value();
-
-  // Statements are mutable => we need to clone them
-  Stmt* body_new = v->body()->accept_mutator(this);
-
-  // Create a new LetStmt with the cloned statement for body
-  return new LetStmt(var, value, body_new);
-}
 
 Stmt* StmtClone::mutate(const For* v) {
   // Only body needs to be cloned as only statements are mutable
@@ -493,7 +495,7 @@ Stmt* StmtClone::mutate(const For* v) {
 
 Stmt* StmtClone::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
-  for (Stmt* stmt : v->stmts()) {
+  for (Stmt* stmt : *v) {
     stmts.push_back(stmt->accept_mutator(this));
   }
   return new Block(stmts);
@@ -513,6 +515,10 @@ Stmt* StmtClone::mutate(const Allocate* v) {
 
 Stmt* StmtClone::mutate(const Free* v) {
   return new Free(v->buffer_var());
+}
+
+Stmt* StmtClone::mutate(const Let* v) {
+  return new Let(v->var(), v->value());
 }
 
 Stmt* StmtClone::mutate(const Cond* v) {

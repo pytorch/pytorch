@@ -6,16 +6,18 @@
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THCTensor type.
-#define THCudaTensor THCTensor
-#define THCudaDoubleTensor THCTensor
-#define THCudaHalfTensor THCTensor
-#define THCudaByteTensor THCTensor
-#define THCudaCharTensor THCTensor
-#define THCudaShortTensor THCTensor
-#define THCudaIntTensor THCTensor
-#define THCudaLongTensor THCTensor
-#define THCudaBoolTensor THCTensor
-#define THCudaBFloat16Tensor THCTensor
+#define THCudaTensor                THCTensor
+#define THCudaDoubleTensor          THCTensor
+#define THCudaHalfTensor            THCTensor
+#define THCudaByteTensor            THCTensor
+#define THCudaCharTensor            THCTensor
+#define THCudaShortTensor           THCTensor
+#define THCudaIntTensor             THCTensor
+#define THCudaLongTensor            THCTensor
+#define THCudaBoolTensor            THCTensor
+#define THCudaBFloat16Tensor        THCTensor
+#define THCudaComplexFloatTensor    THCTensor
+#define THCudaComplexDoubleTensor   THCTensor
 
 /**** access methods ****/
 THC_API THCStorage* THCTensor_(storage)(THCState *state, const THCTensor *self);

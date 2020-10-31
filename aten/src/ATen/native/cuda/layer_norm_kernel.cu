@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 #include <THC/THCDeviceUtils.cuh>
 
 #include <c10/cuda/CUDAMathCompat.h>
@@ -16,33 +17,7 @@ namespace native {
 namespace {
 
 constexpr int kCUDANumThreads = 256;
-constexpr int kCUDABlockReduceNumThreads = 512;
 constexpr int kColwiseReduceTileSize = 32;
-
-template <typename T>
-__inline__ __device__ T WarpReduceSum(T val) {
-#pragma unroll
-  for (int offset = (C10_WARP_SIZE >> 1); offset > 0; offset >>= 1) {
-    val += WARP_SHFL_DOWN(val, offset);
-  }
-  return val;
-}
-
-template <typename T>
-__inline__ __device__ T BlockReduceSum(T val, T* shared) {
-  const int lid = threadIdx.x % C10_WARP_SIZE;
-  const int wid = threadIdx.x / C10_WARP_SIZE;
-  val = WarpReduceSum(val);
-  if (lid == 0) {
-    shared[wid] = val;
-  }
-  __syncthreads();
-  val = (threadIdx.x < blockDim.x / C10_WARP_SIZE) ? shared[lid] : 0;
-  if (wid == 0) {
-    val = WarpReduceSum(val);
-  }
-  return val;
-}
 
 template <typename T>
 __global__ void RowwiseMomentsCUDAKernel(
@@ -62,8 +37,8 @@ __global__ void RowwiseMomentsCUDAKernel(
     sum1 += static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(X[index]) * static_cast<T_ACC>(X[index]);
   }
-  sum1 = BlockReduceSum<T_ACC>(sum1, m_shared);
-  sum2 = BlockReduceSum<T_ACC>(sum2, v_shared);
+  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, m_shared);
+  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, v_shared);
   if (threadIdx.x == 0) {
     const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
     sum1 *= scale;
@@ -118,8 +93,8 @@ __global__ void ComputeInternalGradientsCUDAKernel(
         static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]) * gamma_v;
     sum2 += static_cast<T_ACC>(dY[index]) * gamma_v;
   }
-  sum1 = BlockReduceSum<T_ACC>(sum1, ds_shared);
-  sum2 = BlockReduceSum<T_ACC>(sum2, db_shared);
+  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
+  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
   if (threadIdx.x == 0) {
     ds[i] = sum1;
     db[i] = sum2;
@@ -249,8 +224,8 @@ __global__ void GammaBetaBackwardCUDAKernel(
   __syncthreads();
   T_ACC sum1 = g_shared[threadIdx.x][threadIdx.y];
   T_ACC sum2 = b_shared[threadIdx.x][threadIdx.y];
-  sum1 = WarpReduceSum(sum1);
-  sum2 = WarpReduceSum(sum2);
+  sum1 = cuda_utils::WarpReduceSum(sum1);
+  sum2 = cuda_utils::WarpReduceSum(sum2);
   if (threadIdx.x == 0) {
     const int64_t j = blockIdx.x * blockDim.x + threadIdx.y;
     if (j < N) {
@@ -264,8 +239,8 @@ __global__ void GammaBetaBackwardCUDAKernel(
   }
   sum1 = g_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum2 = b_shared[threadIdx.x][threadIdx.y + blockDim.y];
-  sum1 = WarpReduceSum(sum1);
-  sum2 = WarpReduceSum(sum2);
+  sum1 = cuda_utils::WarpReduceSum(sum1);
+  sum2 = cuda_utils::WarpReduceSum(sum2);
   if (threadIdx.x == 0) {
     const int64_t j = blockIdx.x * blockDim.x + threadIdx.y + blockDim.y;
     if (j < N) {
@@ -301,7 +276,7 @@ void LayerNormKernelImplInternal(
   T* rstd_data = rstd->data_ptr<T>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   RowwiseMomentsCUDAKernel<T>
-      <<<M, kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
+      <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           N, eps, X_data, mean_data, rstd_data);
   LayerNormForwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
@@ -318,7 +293,7 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormKernelImpl", [&]() {
         LayerNormKernelImplInternal<scalar_t>(
             X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
@@ -352,7 +327,7 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType = X.scalar_type() == kHalf ? kFloat : X.scalar_type();
+    const auto kAccType = (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16) ? kFloat : X.scalar_type();
     Tensor ds = at::empty({M}, X.options().dtype(kAccType));
     Tensor db = at::empty({M}, X.options().dtype(kAccType));
     Tensor scale = at::empty({M}, X.options().dtype(kAccType));
@@ -362,7 +337,7 @@ void LayerNormBackwardKernelImplInternal(
     T_ACC* scale_data = scale.template data_ptr<T_ACC>();
     T_ACC* bias_data = bias.template data_ptr<T_ACC>();
     ComputeInternalGradientsCUDAKernel<T>
-        <<<M, kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
+        <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
             N, dY_data, X_data, gamma_data, ds_data, db_data);
     const int64_t B = (M + kCUDANumThreads - 1) / kCUDANumThreads;
     ComputeGradientFusedParamsCUDAKernel<T>
@@ -432,7 +407,7 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t>(
             dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);

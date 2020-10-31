@@ -1,8 +1,11 @@
 #pragma once
 
+// DO NOT DEFINE STATIC DATA IN THIS HEADER!
+// See Note [Do not compile initializers with AVX]
+
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -11,12 +14,11 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if defined(__AVX__) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
 
 template <> class Vec256<double> {
 private:
   __m256d values;
-  static const Vec256<double> ones;
 public:
   using value_type = double;
   static constexpr int size() {
@@ -147,6 +149,22 @@ public:
   Vec256<double> fmod(const Vec256<double>& q) const {
     return Vec256<double>(Sleef_fmodd4(values, q));
   }
+  Vec256<double> hypot(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_hypotd4_u05(values, b));
+  }
+  Vec256<double> i0() const {
+    return map(calc_i0);
+  }
+  Vec256<double> igamma(const Vec256<double> &x) const {
+    __at_align32__ double tmp[size()];
+    __at_align32__ double tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<double> log() const {
     return Vec256<double>(Sleef_logd4_u10(values));
   }
@@ -180,6 +198,9 @@ public:
   Vec256<double> frac() const;
   Vec256<double> neg() const {
     return _mm256_xor_pd(_mm256_set1_pd(-0.), values);
+  }
+  Vec256<double> nextafter(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_nextafterd4(values, b));
   }
   Vec256<double> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
@@ -318,30 +339,28 @@ Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b
   return _mm256_xor_pd(a, b);
 }
 
-const Vec256<double> Vec256<double>::ones(1.0);
-
 Vec256<double> Vec256<double>::eq(const Vec256<double>& other) const {
-  return (*this == other) & Vec256<double>::ones;
+  return (*this == other) & Vec256<double>(1.0);
 }
 
 Vec256<double> Vec256<double>::ne(const Vec256<double>& other) const {
-  return (*this != other) & Vec256<double>::ones;
+  return (*this != other) & Vec256<double>(1.0);
 }
 
 Vec256<double> Vec256<double>::gt(const Vec256<double>& other) const {
-  return (*this > other) & Vec256<double>::ones;
+  return (*this > other) & Vec256<double>(1.0);
 }
 
 Vec256<double> Vec256<double>::ge(const Vec256<double>& other) const {
-  return (*this >= other) & Vec256<double>::ones;
+  return (*this >= other) & Vec256<double>(1.0);
 }
 
 Vec256<double> Vec256<double>::lt(const Vec256<double>& other) const {
-  return (*this < other) & Vec256<double>::ones;
+  return (*this < other) & Vec256<double>(1.0);
 }
 
 Vec256<double> Vec256<double>::le(const Vec256<double>& other) const {
-  return (*this <= other) & Vec256<double>::ones;
+  return (*this <= other) & Vec256<double>(1.0);
 }
 
 template <>
@@ -357,7 +376,7 @@ inline void convert(const double* src, double* dst, int64_t n) {
   }
 }
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
 template <>
 Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
   return _mm256_fmadd_pd(a, b, c);

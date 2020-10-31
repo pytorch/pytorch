@@ -3,9 +3,11 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "activation_distribution_observer.h"
-#include "caffe2/opt/custom/fakefp16_transform.h"
+#include "caffe2/opt/fakefp16_transform.h"
+#include "caffe2/opt/custom/freeze_quantization_params.h"
+#include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/fbgemm_pack_blob.h"
-#include "caffe2_dnnlowp_utils.h"
+#include "caffe2/quantization/server/int8_gen_quant_params.h"
 #include "quantization_error_minimization.h"
 
 namespace caffe2 {
@@ -98,11 +100,21 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("delimiter") = " ");
 
   m.def(
+      "DumpOutputColumnMaxHistogramFile",
+      [](Observable<NetBase>::Observer* ob) {
+        OutputColumnMaxHistogramNetObserver* hist_ob =
+            dynamic_cast_if_rtti<OutputColumnMaxHistogramNetObserver*>(ob);
+        hist_ob->DumpOutputColumnMaxHistogramFile();
+      },
+      pybind11::arg("ob"));
+
+  m.def(
       "AddOutputColumnMaxHistogramObserver",
       [](const string& net_name,
          const string& out_file_name,
          const std::vector<std::string>& observe_column_max_for_blobs,
          int dump_freq,
+         int bin_nums,
          bool mul_nets,
          string delimiter) {
         Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
@@ -119,7 +131,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
                 net,
                 out_file_name,
                 observe_column_max_for_blobs,
-                2048,
+                bin_nums,
                 dump_freq,
                 mul_nets,
                 delimiter));
@@ -131,6 +143,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("out_file_name"),
       pybind11::arg("observe_column_max_for_blobs"),
       pybind11::arg("dump_freq") = -1,
+      pybind11::arg("bin_nums") = 16,
       pybind11::arg("mul_nets") = false,
       pybind11::arg("delimiter") = " ");
 
@@ -270,6 +283,18 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
   m.def("get_fakefp16_mapping", [](bool use_fp16_acc, bool use_nnpi) {
     return caffe2::opt::getFakeFp16OpMapping(use_fp16_acc, use_nnpi);
   });
+  m.def("freeze_quantization_params",
+      [](const pybind11::bytes& net_def_bytes){
+        NetDef def;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(net_def_bytes.cast<string>(), &def));
+        string protob;
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        freezeQuantizationParams(&def, gWorkspace);
+        CAFFE_ENFORCE(def.SerializeToString(&protob));
+        return pybind11::bytes(protob);
+      });
   m.def(
       "ChooseStaticQuantizationParams",
       [](float min,
@@ -373,9 +398,14 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
         const Int8FCDNNLowPPackedWeightBlob& packedInt8Blob =
             blob->template Get<Int8FCDNNLowPPackedWeightBlob>();
         auto& qparams = packedInt8Blob.qparams;
-        auto& int8_tensor = packedInt8Blob.original_tensor;
+        auto& unpacked_tensor = packedInt8Blob.original_tensor;
+        auto& packed_tensor = packedInt8Blob.W;
 
-        auto shape = int8_tensor.sizes();
+        auto shape = unpacked_tensor.sizes();
+        CAFFE_ENFORCE(shape.size() == 2);
+        vector<int8_t> unpacked_int8_data;
+        unpacked_int8_data.resize(shape[0] * shape[1]);
+        packed_tensor->unpack(unpacked_int8_data.data());
 
         ofstream fout;
         fout.open(weights_out_file);
@@ -392,13 +422,12 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
                << to_string(qparams[i].zero_point);
         }
         fout << endl;
-        int8_t* int8_data = int8_tensor.data<int8_t>();
         for (int i = 0; i < shape[0]; ++i) {
           for (int j = 0; j < shape[1]; ++j) {
             if (j > 0) {
               fout << " ";
             }
-            fout << to_string(int8_data[i * shape[1] + j]);
+            fout << to_string(unpacked_int8_data.data()[i * shape[1] + j]);
           }
           fout << endl;
         }
@@ -407,4 +436,68 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       },
       pybind11::arg("blob_name"),
       pybind11::arg("weights_out_file"));
+  m.def(
+      "CreateInt8QuantSchemeBlob",
+      [](std::string quant_scheme_blob_name,
+         std::string quantization_kind,
+         bool preserve_sparsity) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        auto* quant_scheme_blob = gWorkspace->GetBlob(quant_scheme_blob_name);
+        if (quant_scheme_blob == nullptr) {
+          quant_scheme_blob = gWorkspace->CreateBlob(quant_scheme_blob_name);
+        }
+        auto* quant_scheme_blob_data =
+            quant_scheme_blob->GetMutable<unique_ptr<Int8QuantSchemeBlob>>();
+        quant_scheme_blob_data->reset(
+            new Int8QuantSchemeBlob(quantization_kind, preserve_sparsity));
+      },
+      pybind11::arg("quant_scheme_blob_name"),
+      pybind11::arg("quantization_kind"),
+      pybind11::arg("preserve_sparsity"));
+  m.def(
+      "CreateInt8QuantParamsBlob",
+      [](std::string quant_params_blob_name, float scale, int zero_point) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        auto* quant_params_blob = gWorkspace->GetBlob(quant_params_blob_name);
+        if (quant_params_blob == nullptr) {
+          quant_params_blob = gWorkspace->CreateBlob(quant_params_blob_name);
+        }
+        auto* quant_params_blob_data =
+            quant_params_blob->GetMutable<unique_ptr<Int8QuantParamsBlob>>();
+        quant_params_blob_data->reset(
+            new Int8QuantParamsBlob(scale, zero_point));
+      },
+      pybind11::arg("quant_param_blob_name"),
+      pybind11::arg("scale"),
+      pybind11::arg("zero_point"));
+  m.def(
+      "ObserveInt8QuantParamsBlob",
+      [](std::string quant_params_blob_name) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        auto* quant_params_blob = gWorkspace->GetBlob(quant_params_blob_name);
+        CAFFE_ENFORCE(quant_params_blob);
+        auto* quant_params_blob_data =
+            quant_params_blob->Get<unique_ptr<Int8QuantParamsBlob>>().get();
+        return std::tuple<float, int>(
+            quant_params_blob_data->qparam.scale,
+            quant_params_blob_data->qparam.zero_point);
+      },
+      pybind11::arg("quant_params_blob_name"));
+  m.def(
+      "ObserveInt8QuantSchemeBlob",
+      [](std::string quant_scheme_blob_name) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        auto* quant_scheme_blob = gWorkspace->GetBlob(quant_scheme_blob_name);
+        CAFFE_ENFORCE(quant_scheme_blob);
+        auto* quant_scheme_blob_data =
+            quant_scheme_blob->Get<unique_ptr<Int8QuantSchemeBlob>>().get();
+        return std::tuple<std::string, bool>(
+            quant_scheme_blob_data->quantization_kind_,
+            quant_scheme_blob_data->preserve_sparsity_);
+      },
+      pybind11::arg("quant_scheme_blob_name"));
 }

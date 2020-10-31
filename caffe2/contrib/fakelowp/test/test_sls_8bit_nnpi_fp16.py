@@ -1,17 +1,17 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import unittest
 
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 import numpy as np
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 workspace.GlobalInit(
     [
@@ -25,7 +25,7 @@ GLOW_MATMUL_ATOL = 1e-5
 GLOW_MATMUL_RTOL = 1e-3
 
 
-class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
+class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
     def Skip_test_SLS_NonQuantized_fp16(self):
         N = 20000
         DIM = 64
@@ -99,6 +99,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             assert 0
 
     @given(seed=st.integers(0, 65535))
+    @settings(deadline=None)
     def test_slws_fused_8bit_rowwise_all_same(self, seed):
         # Comment out for predictable debugging
         np.random.seed(seed)
@@ -158,7 +159,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             pred_net,
             {},
             max_batch_size=max_segments,
-            max_seq_size=max_segments * max_segment_length,
+            max_seq_size=max_segment_length,
             debug=True,
             adjust_batch=True,
             use_onnx=False,
@@ -186,6 +187,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             print_test_debug_info(
                 "slws_fused_8bit_rowwise",
                 {
+                    "seed": seed,
                     "indices": indices,
                     "data": data,
                     "lengths": lengths,
@@ -205,6 +207,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
         batch_size=st.integers(1, 5),
         max_weight=st.integers(0, 100),
     )
+    @settings(deadline=None)
     def test_slws_fused_8bit_rowwise(self, seed, num_rows, embedding_dim, batch_size, max_weight):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -218,10 +221,12 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
         indices = np.asarray(indices).astype(np.int64)
 
         weights = np.random.uniform(
-            low=0, 
+            low=0,
             high=max_weight,
             size=[len(indices)]
         ).astype(np.float32)
+
+        assert(len(weights) < 64000)
 
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
@@ -261,11 +266,15 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             pred_net,
             {},
             max_batch_size=batch_size,
-            max_seq_size=batch_size * np.max(lengths),
+            max_seq_size=np.max(lengths),
             debug=True,
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)
@@ -286,6 +295,11 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             print_test_debug_info(
                 "slws_fused_8bit_rowwise_inv_scale",
                 {
+                    "seed": seed,
+                    "num_rows": num_rows,
+                    "embedding_dim": embedding_dim,
+                    "batch_size": batch_size,
+                    "max_weight": max_weight,
                     "indices": indices,
                     "data": data.shape,
                     "lengths": lengths,
@@ -301,6 +315,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
     # Simple test to aid debugging order of operations
     # Minimize the case to an SLS that adds two rows
     @given(seed=st.integers(0, 65535))
+    @settings(deadline=None)
     def test_small_sls(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -359,6 +374,10 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(unittest.TestCase):
             adjust_batch=True,
             use_onnx=False,
         )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in onnxified_net.op)
+        np.testing.assert_equal(num_onnxified_ops, 1)
+
         workspace.FeedBlob("indices", indices)
         workspace.FeedBlob("lengths", lengths)
         workspace.FeedBlob("weights", weights)

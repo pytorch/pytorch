@@ -76,8 +76,9 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
 // instanceof(t, torch.FloatTensor) work, but we are not going to keep
 // adding torch.QuantizedIntTensor classes for every new tensor type
 // we add...
-static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
+static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   HANDLE_TH_ERRORS
+  auto self = (PyTensorType*)_self;
   if (THPVariable_Check(arg)) {
     auto& var = ((THPVariable*)arg)->cdata;
     // NB: This is a little unfortunate, in that if I do an isinstance check
@@ -123,7 +124,7 @@ PyObject *Tensor_is_sparse(PyTensorType *self, void *unused) {
 }
 
 static struct PyMethodDef metaclass_methods[] = {
-  {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, nullptr},
+  {"__instancecheck__", Tensor_instancecheck, METH_O, nullptr},
   {nullptr}
 };
 
@@ -211,8 +212,8 @@ static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarT
   // This field is lazily initialized from backend and scalar_type
   type_obj.backend = static_cast<int>(backend);
   type_obj.scalar_type = static_cast<int>(scalarType);
-  type_obj.layout = torch::getLayout(backend);
-  type_obj.dtype = torch::getDtype(scalarType);
+  type_obj.layout = torch::getTHPLayout(layout_from_backend(backend));
+  type_obj.dtype = torch::getTHPDtype(scalarType);
   type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
 }
 

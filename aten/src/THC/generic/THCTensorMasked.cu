@@ -60,7 +60,7 @@ void THCTensor_(maskedCopy)(THCState* state,
              "mask and tensor must have the same number of elements");
 
   // Determine our output size
-  ptrdiff_t totalElements = THCudaByteTensor_sumall(state, mask);
+  ptrdiff_t totalElements = THTensor_wrap(mask).sum().item<ptrdiff_t>();
 
   // The number of `1` elements present in the mask must be <= the
   // number of elements available in `src`
@@ -126,7 +126,7 @@ void THCTensor_(maskedCopyBool)(THCState* state,
              "mask and tensor must have the same number of elements");
 
   // Determine our output size
-  ptrdiff_t totalElements = THCudaBoolTensor_sumall(state, mask);
+  ptrdiff_t totalElements = THTensor_wrap(mask).sum().item<ptrdiff_t>();
 
   // The number of `1` elements present in the mask must be <= the
   // number of elements available in `src`

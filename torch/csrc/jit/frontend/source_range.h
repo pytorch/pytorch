@@ -46,6 +46,11 @@ struct Source {
     return line_starting_offsets_.at(line);
   }
 
+  // Returns number of lines present.
+  size_t num_lines() const {
+    return line_starting_offsets_.size();
+  }
+
   // Calculate the line (within the code segment) on which `offset` resides.
   size_t lineno_for_offset(size_t offset) const {
     return std::upper_bound(

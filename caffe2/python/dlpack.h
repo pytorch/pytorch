@@ -80,6 +80,7 @@ typedef enum {
   kDLInt = 0U,
   kDLUInt = 1U,
   kDLFloat = 2U,
+  kDLBfloat = 4U,
 } DLDataTypeCode;
 
 /*!
@@ -110,9 +111,23 @@ typedef struct {
  */
 typedef struct {
   /*!
-   * \brief The opaque data pointer points to the allocated data.
-   *  This will be CUDA device pointer or cl_mem handle in OpenCL.
-   *  This pointer is always aligns to 256 bytes as in CUDA.
+   * \brief The opaque data pointer points to the allocated data. This will be
+   * CUDA device pointer or cl_mem handle in OpenCL. This pointer is always
+   * aligned to 256 bytes as in CUDA.
+   *
+   * For given DLTensor, the size of memory required to store the contents of
+   * data is calculated as follows:
+   *
+   * \code{.c}
+   * static inline size_t GetDataSize(const DLTensor* t) {
+   *   size_t size = 1;
+   *   for (tvm_index_t i = 0; i < t->ndim; ++i) {
+   *     size *= t->shape[i];
+   *   }
+   *   size *= (t->dtype.bits * t->dtype.lanes + 7) / 8;
+   *   return size;
+   * }
+   * \endcode
    */
   void* data;
   /*! \brief The device context of the tensor */
@@ -124,8 +139,8 @@ typedef struct {
   /*! \brief The shape of the tensor */
   int64_t* shape;
   /*!
-   * \brief strides of the tensor,
-   *  can be NULL, indicating tensor is compact.
+   * \brief strides of the tensor (in number of elements, not bytes)
+   *  can be NULL, indicating tensor is compact and row-majored.
    */
   int64_t* strides;
   /*! \brief The offset in bytes to the beginning pointer to data */
@@ -149,6 +164,7 @@ typedef struct DLManagedTensor {
   /*! \brief Destructor signature void (*)(void*) - this should be called
    *   to destruct manager_ctx which holds the DLManagedTensor. It can be NULL
    *   if there is no way for the caller to provide a reasonable destructor.
+   *   The destructors deletes the argument self as well.
    */
   void (*deleter)(struct DLManagedTensor * self);
 } DLManagedTensor;

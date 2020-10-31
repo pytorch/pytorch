@@ -8,7 +8,7 @@
 namespace at { namespace detail {
 
 template <typename T, int size>
-struct alignas(16) Array {
+struct Array {
   T data[size];
 
   C10_HOST_DEVICE T operator[](int i) const {

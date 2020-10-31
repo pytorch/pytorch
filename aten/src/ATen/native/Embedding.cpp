@@ -13,19 +13,31 @@ namespace at { namespace native {
 
 Tensor embedding(const Tensor & weight, const Tensor & indices,
                  int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+  TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding", indices_arg, kLong);
 
+  auto zerofill_padding = [&](Tensor& embedding) {
+    if (padding_idx >= 0) {
+      embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+    }
+  };
+
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
-    return weight.index_select(0, indices);
+    auto out = weight.index_select(0, indices);
+    zerofill_padding(out);
+    return out;
   }
 
   auto size = indices.sizes().vec();
   for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }
-  return weight.index_select(0, indices.reshape(-1)).view(size);
+
+  auto out = weight.index_select(0, indices.reshape(-1));
+  zerofill_padding(out);
+  return out.view(size);
 }
 
 Tensor embedding_backward(

@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python.core import DataType, BlobReference, ScopedBlobReference
 from caffe2.python.modeling.parameter_info import ParameterInfo
@@ -50,7 +50,7 @@ class ExternalInitializer(object):
         elif isinstance(param_name, six.string_types):
             param = ScopedBlobReference(param_name, init_net)
         else:
-            raise "Unsupported type for param_name"
+            raise TypeError("Unsupported type for param_name")
         # TODO(amalevich): Add operator that will check param in the workspace
         return ParameterInfo(
             param_id=None,

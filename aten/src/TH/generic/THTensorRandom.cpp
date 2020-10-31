@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <type_traits>
 #include <ATen/Utils.h>
+#include <ATen/core/DistributionsHelper.h>
 #include <TH/THGenerator.hpp>
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)

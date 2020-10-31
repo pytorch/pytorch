@@ -10,8 +10,6 @@
 #include <type_traits>
 #include <cstdlib>
 
-using namespace at;
-using namespace torch::test;
 
 struct DispatchTest : torch::test::SeedingFixture {};
 

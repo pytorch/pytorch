@@ -33,7 +33,7 @@ inline PyObject* wrap(double value) {
   return PyFloat_FromDouble(value);
 }
 
-inline PyObject* wrap(std::complex<double> value) {
+inline PyObject* wrap(c10::complex<double> value) {
   // I could probably also use FromComplex with a reinterpret cast,
   // but... eh.
   return PyComplex_FromDoubles(value.real(), value.imag());
@@ -49,12 +49,16 @@ inline PyObject* wrap(THPDtype *dtype) {
 }
 
 inline PyObject* wrap(at::ScalarType scalarType) {
-  return wrap(getDtype(scalarType));
+  return wrap(getTHPDtype(scalarType));
 }
 
 inline PyObject* wrap(THPLayout *layout) {
   Py_INCREF(layout);
   return (PyObject*)layout;
+}
+
+inline PyObject* wrap(at::Layout layout) {
+  return wrap(getTHPLayout(layout));
 }
 
 inline PyObject* wrap(at::Tensor tensor) {

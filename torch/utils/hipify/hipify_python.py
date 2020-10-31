@@ -23,8 +23,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-
-from __future__ import absolute_import, division, print_function
 import argparse
 import fnmatch
 import re
@@ -36,11 +34,13 @@ from . import constants
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
+from typing import Dict, List
+from collections.abc import Mapping
+
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
 to their actual types."""
 PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
-CAFFE2_TEMPLATE_MAP = {}
 
 
 class InputError(Exception):
@@ -87,10 +87,10 @@ class GeneratedFileCleaner:
     def __enter__(self):
         return self
 
-    def open(self, fn, *args):
+    def open(self, fn, *args, **kwargs):
         if not os.path.exists(fn):
             self.files_to_clean.add(os.path.abspath(fn))
-        return open(fn, *args)
+        return open(fn, *args, **kwargs)
 
     def makedirs(self, dn, exist_ok=False):
         parent, n = os.path.split(dn)
@@ -109,7 +109,7 @@ class GeneratedFileCleaner:
             for d in self.dirs_to_clean[::-1]:
                 os.rmdir(d)
 
-def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
+def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False, is_pytorch_extension=False):
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
 
@@ -122,7 +122,7 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
     # This is a very rough heuristic; really, we want to avoid scanning
     # any file which is not checked into source control, but this script
     # needs to work even if you're in a Git or Hg checkout, so easier to
-    # just blacklist the biggest time sinks that won't matter in the
+    # just block the biggest time sinks that won't matter in the
     # end.
     for (abs_dirpath, dirs, filenames) in os.walk(root_path, topdown=True):
         rel_dirpath = os.path.relpath(abs_dirpath, root_path)
@@ -143,10 +143,11 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
                 and (not _fnmatch(filepath, ignores))
                 and (match_extensions(filepath) or filepath in exact_matches)
             ):
-                if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
-                    continue
-                if out_of_place_only and not is_out_of_place(filepath):
-                    continue
+                if not is_pytorch_extension:  # for pytorch extensions, consider all files
+                    if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
+                        continue
+                    if out_of_place_only and not is_out_of_place(filepath):
+                        continue
                 yield filepath
 
 
@@ -169,7 +170,7 @@ def preprocess(
         clean_ctx = GeneratedFileCleaner(keep_intermediates=True)
 
     # Preprocessing statistics.
-    stats = {"unsupported_calls": [], "kernel_launches": []}
+    stats: Dict[str, List] = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
         result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
@@ -205,7 +206,7 @@ def add_dim3(kernel_string, cuda_kernel):
     count = 0
     closure = 0
     kernel_string = kernel_string.replace("<<<", "").replace(">>>", "")
-    arg_locs = [{} for _ in range(2)]
+    arg_locs: List[Dict[str, int]] = [{} for _ in range(2)]
     arg_locs[count]['start'] = 0
     for ind, c in enumerate(kernel_string):
         if count > 1:
@@ -338,12 +339,15 @@ def processKernelLaunches(string, stats):
         # Extract cuda kernel
         cuda_kernel = string[params[0]["start"]:parenthesis + 1]
         kernel_string = string[kernel['start']:kernel['end']]
+        end_param_index = 0 if params[1]['end'] == -1 else 1
+        kernel_name_with_template = string[params[0]['start']:params[end_param_index]['end'] + 1]
         cuda_kernel_dim3 = add_dim3(kernel_string, cuda_kernel)
         # Keep number of kernel launch params consistent (grid dims, group dims, stream, dynamic shared size)
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
 
         hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel_dim3[0:-1].replace(
-            ">>>", ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(">>>", ", ")
+            ">>>", ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(
+            ">>>", ", ").replace(kernel_name_with_template, "(" + kernel_name_with_template + ")")
 
         # Replace cuda kernel with hip kernel
         output_string = output_string.replace(cuda_kernel, hip_kernel)
@@ -357,7 +361,7 @@ def processKernelLaunches(string, stats):
 def find_closure_group(input_string, start, group):
     """Generalization for finding a balancing closure group
 
-         if group = ["(", ")"], then finds the first balanced parantheses.
+         if group = ["(", ")"], then finds the first balanced parentheses.
          if group = ["{", "}"], then finds the first balanced bracket.
 
     Given an input string, a starting position in the input string, and the group type,
@@ -442,6 +446,7 @@ def hip_header_magic(input_string):
         return output_string
 
     # Rough logic to detect if we're inside device code
+    hasDeviceLogic: int
     hasDeviceLogic = "hipLaunchKernelGGL" in output_string
     hasDeviceLogic += "__global__" in output_string
     hasDeviceLogic += "__shared__" in output_string
@@ -630,6 +635,7 @@ CAFFE2_MAP = {}
 PYTORCH_TRIE = Trie()
 PYTORCH_MAP = {}
 for mapping in CUDA_TO_HIP_MAPPINGS:
+    assert isinstance(mapping, Mapping)
     for src, value in mapping.items():
         dst = value[0]
         meta_data = value[1:]
@@ -650,7 +656,7 @@ RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
-    with open(fin_path, 'r') as fin:
+    with open(fin_path, 'r', encoding='utf-8') as fin:
         output_source = fin.read()
 
     fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
@@ -702,7 +708,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
         output_source = processKernelLaunches(output_source, stats)
 
     # Replace std:: with non-std:: versions
-    if filepath.endswith(".cu") or filepath.endswith(".cuh"):
+    if (filepath.endswith(".cu") or filepath.endswith(".cuh")) and "PowKernel" not in filepath:
         output_source = replace_math_functions(output_source)
 
     # Include header if device code is contained.
@@ -713,10 +719,10 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
 
     do_write = True
     if os.path.exists(fout_path):
-        with open(fout_path, 'r') as fout_old:
+        with open(fout_path, 'r', encoding='utf-8') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
-        with clean_ctx.open(fout_path, 'w') as fout:
+        with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
             fout.write(output_source)
         return "ok"
     else:
@@ -844,7 +850,8 @@ def hipify(
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
-                                        out_of_place_only=out_of_place_only))
+                                        out_of_place_only=out_of_place_only,
+                                        is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
     all_files += [f for f in extra_files if f not in all_files_set]
 

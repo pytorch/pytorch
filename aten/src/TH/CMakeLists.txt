@@ -15,16 +15,12 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorFill.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorEvenMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THFile.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THDiskFile.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THMemoryFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
   ${extra_src}
   )
@@ -51,9 +47,6 @@ install(FILES
   TH.h
   THAllocator.h
   THBlas.h
-  THDiskFile.h
-  THFile.h
-  THFilePrivate.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateAllTypes.h
   THGenerateBFloat16Type.h
@@ -61,19 +54,22 @@ install(FILES
   THGenerateDoubleType.h
   THGenerateFloatType.h
   THGenerateHalfType.h
+  THGenerateComplexFloatType.h
+  THGenerateComplexDoubleType.h
   THGenerateLongType.h
   THGenerateIntType.h
   THGenerateShortType.h
   THGenerateCharType.h
   THGenerateByteType.h
   THGenerateFloatTypes.h
+  THGenerateComplexTypes.h
   THGenerateIntTypes.h
   THGenerateQUInt8Type.h
+  THGenerateQUInt4x2Type.h
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h
   THLapack.h
-  THMemoryFile.h
   THStorage.h
   THStorageFunctions.h
   THTensor.h
@@ -103,8 +99,6 @@ install(FILES
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
-  generic/THTensorFill.cpp
-  generic/THTensorFill.h
   generic/THTensorLapack.cpp
   generic/THTensorLapack.h
   generic/THTensorMath.cpp

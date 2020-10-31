@@ -78,7 +78,7 @@ Probability distributions - torch.distributions
     :show-inheritance:
 
 :hidden:`ContinuousBernoulli`
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.continuous_bernoulli
 .. autoclass:: ContinuousBernoulli

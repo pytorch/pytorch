@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -22,11 +22,9 @@ struct PeepholeOptimizeImpl {
   PeepholeOptimizeImpl(
       const std::shared_ptr<Graph>& graph,
       bool disable_shape_peepholes)
-      : aliasDb_(nullptr),
-        graph_(graph),
-        changed_(true),
-        shape_peepholes_(!disable_shape_peepholes) {
+      : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {
     run(graph->block());
+    PeepholeOptimizeListIdioms(graph);
   }
 
   // The intent for this optimization pass is to catch all of the small, easy to
@@ -70,7 +68,6 @@ struct PeepholeOptimizeImpl {
               " (x._grad_sum_to_size(x, None) == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
-          changed_ = true;
         } else {
           auto uses = node->output()->uses();
           for (Use u : uses) {
@@ -82,7 +79,6 @@ struct PeepholeOptimizeImpl {
                   " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
                   node->inputs().at(0)->debugName());
               u.user->replaceInput(0, node->inputs().at(0));
-              changed_ = true;
             }
           }
         }
@@ -91,8 +87,9 @@ struct PeepholeOptimizeImpl {
               "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
               /*const_inputs=*/attr::size)) {
         // x.expand(x.size()) == x
-        if (auto input_type =
-                node->namedInput(attr::self)->type()->cast<TensorType>()) {
+        auto input_type =
+            node->namedInput(attr::self)->type()->cast<TensorType>();
+        if (input_type && shape_peepholes_) {
           auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
           auto input_type_sizes = input_type->sizes().concrete_sizes();
           if (expanded_sizes.has_value() && input_type_sizes &&
@@ -102,7 +99,6 @@ struct PeepholeOptimizeImpl {
                 " (x.expand(x.size()) == x) is replaced with ",
                 node->namedInput(attr::self)->debugName());
             node->output()->replaceAllUsesWith(node->namedInput(attr::self));
-            changed_ = true;
           }
         }
       } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
@@ -114,10 +110,10 @@ struct PeepholeOptimizeImpl {
               " (x.t().t() == x) is replaced with ",
               input_node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
-          changed_ = true;
         }
-      } else if (node->matches(
-                     "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+      } else if (
+          node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor") &&
+          shape_peepholes_) {
         // x.type_as(y) == x iff x.type() == y.type()
         auto self_type = node->input(0)->type()->expect<TensorType>();
         auto other_type = node->input(1)->type()->expect<TensorType>();
@@ -128,7 +124,6 @@ struct PeepholeOptimizeImpl {
               " (x.type_as(y) == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
-          changed_ = true;
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
@@ -142,7 +137,6 @@ struct PeepholeOptimizeImpl {
               " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
-          changed_ = true;
         }
       } else if (
           node->matches("aten::size(Tensor self) -> int[]") &&
@@ -157,8 +151,39 @@ struct PeepholeOptimizeImpl {
             IValue ival(sizes);
             auto const_sizes_val = node->owningGraph()->insertConstant(ival);
             node->output()->replaceAllUsesWith(const_sizes_val);
-            changed_ = true;
           }
+        }
+      } else if (
+          node->matches("aten::size(Tensor self, int dim) -> int") &&
+          shape_peepholes_) {
+        if (auto ptt = node->inputs().at(0)->type()->cast<TensorType>()) {
+          if (auto maybe_ndim = ptt->sizes().size()) {
+            auto ndim = *maybe_ndim;
+            auto maybe_index = toIValue(node->inputs().at(1));
+            if (!maybe_index) {
+              continue;
+            }
+            int64_t index = maybe_index->toInt();
+            int64_t norm_index = index < 0 ? ndim + index : index;
+            if (norm_index >= 0 && norm_index < static_cast<int64_t>(ndim) &&
+                ptt->sizes()[norm_index]) {
+              WithInsertPoint guard(node);
+              IValue ival(*ptt->sizes()[norm_index]);
+              auto const_sizes_val = node->owningGraph()->insertConstant(ival);
+              node->output()->replaceAllUsesWith(const_sizes_val);
+            }
+          }
+        }
+      } else if (
+          node->matches("aten::is_floating_point(Tensor self) -> bool") &&
+          shape_peepholes_) {
+        auto ptt = node->inputs().at(0)->type()->cast<TensorType>();
+        if (auto maybe_dtype = ptt->scalarType()) {
+          c10::ScalarType dtype = *maybe_dtype;
+          WithInsertPoint guard(node);
+          IValue ival(at::isFloatingType(dtype));
+          auto new_constant = node->owningGraph()->insertConstant(ival);
+          node->output()->replaceAllUsesWith(new_constant);
         }
       } else if (node->kind() == prim::If) {
         IfView n(node);
@@ -181,7 +206,6 @@ struct PeepholeOptimizeImpl {
                 " (True or False) with ",
                 n.cond()->debugName());
             n.outputs().at(i)->replaceAllUsesWith(n.cond());
-            changed_ = true;
           }
         }
       } else if (
@@ -202,7 +226,6 @@ struct PeepholeOptimizeImpl {
             GRAPH_UPDATE(
                 "Folding ", getHeader(node), " to ", output->debugName());
             node->output()->replaceAllUsesWith(output);
-            changed_ = true;
           }
         }
       } else if (
@@ -218,7 +241,6 @@ struct PeepholeOptimizeImpl {
               node->input(),
               " can't be optional");
           node->output()->replaceAllUsesWith(node->input());
-          changed_ = true;
         }
       } else if (node->kind() == prim::unchecked_cast) {
         // unchecked_cast is not generated for tensor properties, so we are not
@@ -232,7 +254,8 @@ struct PeepholeOptimizeImpl {
               " as input type subtypes output type");
           node->output()->replaceAllUsesWith(node->input());
         }
-      } else if (node->matches("prim::dtype(Tensor a) -> int")) {
+      } else if (
+          node->matches("prim::dtype(Tensor a) -> int") && shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (ptt->scalarType()) {
           WithInsertPoint guard(node);
@@ -244,9 +267,10 @@ struct PeepholeOptimizeImpl {
               " with a type constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
-          changed_ = true;
         }
-      } else if (node->matches("prim::device(Tensor a) -> Device")) {
+      } else if (
+          node->matches("prim::device(Tensor a) -> Device") &&
+          shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (ptt->device()) {
           WithInsertPoint guard(node);
@@ -257,7 +281,6 @@ struct PeepholeOptimizeImpl {
               " with a device constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
-          changed_ = true;
         }
       } else if (
           node->matches("aten::dim(Tensor self) -> int") && shape_peepholes_) {
@@ -272,9 +295,10 @@ struct PeepholeOptimizeImpl {
               " with a \"dim\" constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
-          changed_ = true;
         }
-      } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
+      } else if (
+          node->matches("prim::is_cuda(Tensor a) -> bool") &&
+          shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (ptt->device()) {
           WithInsertPoint guard(node);
@@ -286,24 +310,15 @@ struct PeepholeOptimizeImpl {
               " with a is_cuda constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
-          changed_ = true;
         }
       }
 
-      // these transformations rely on AA for correctness
-      // see `runAliasingSensitivePeepholeTransformations` for more details
-      runAliasingSensitivePeepholeTransformations(node);
+      // [aliasing sensitive optimizations]
+      // aliasing sensitive peephole transforms are not run at the moment,
+      // because compilation cost of creating alias db is not worth
+      // the limited speedup of these optimizations
+      // runAliasingSensitivePeepholeTransformations(node);
     }
-  }
-
-  bool safeToChangeAliasingRelationship(Node* node) {
-    if (changed_) {
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
-      changed_ = false;
-    }
-
-    return aliasDb_->safeToChangeAliasingRelationship(
-        node->inputs(), node->outputs());
   }
 
   // if either the inputs or outputs of an op alias graph's inputs or
@@ -317,6 +332,9 @@ struct PeepholeOptimizeImpl {
   //     return s
   //
   void runAliasingSensitivePeepholeTransformations(Node* node) {
+    // this code is not currently enabled, see [aliasing sensitive
+    // optimizations]
+    TORCH_INTERNAL_ASSERT(false);
     if (node->matches(
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             /*const_inputs=*/{attr::alpha, attr::other}) ||
@@ -326,15 +344,11 @@ struct PeepholeOptimizeImpl {
       // x + 0 == x - 0 == x
       if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
           node->get<at::Scalar>(attr::other)->toDouble() == 0) {
-        if (!safeToChangeAliasingRelationship(node)) {
-          return;
-        }
         GRAPH_UPDATE(
             getHeader(node),
             " (x + 0 == x - 0 == x) is replaced with ",
             node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
-        changed_ = true;
       }
     } else if (
         node->matches(
@@ -345,23 +359,17 @@ struct PeepholeOptimizeImpl {
             /*const_inputs=*/attr::other)) {
       // x * 1 == x / 1 == x
       if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
-        if (!safeToChangeAliasingRelationship(node)) {
-          return;
-        }
         GRAPH_UPDATE(
             getHeader(node),
             " (x * 1 == x / 1 == x) is replaced with ",
             node->input(0)->debugName());
         node->output()->replaceAllUsesWith(node->input(0));
-        changed_ = true;
       }
     }
   }
 
  private:
-  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
-  bool changed_;
   bool shape_peepholes_;
 };
 

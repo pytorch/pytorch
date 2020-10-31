@@ -110,6 +110,7 @@ C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
 C10_CUDA_API void raw_delete(void* ptr);
 
 C10_CUDA_API Allocator* get();
+C10_CUDA_API void init(int device_count);
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);

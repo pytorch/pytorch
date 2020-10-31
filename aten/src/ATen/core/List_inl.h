@@ -43,7 +43,8 @@ List<T>::List(TypePtr elementType)
 : List(make_intrusive<c10::detail::ListImpl>(
     typename c10::detail::ListImpl::list_type(),
     std::move(elementType))) {
-  static_assert(std::is_same<T, IValue>::value, "This constructor is only valid for c10::impl::GenericList.");
+  static_assert(std::is_same<T, IValue>::value || std::is_same<T, c10::intrusive_ptr<ivalue::Future>>::value,
+                "This constructor is only valid for c10::impl::GenericList or List<Future>.");
 }
 
 namespace impl {
@@ -127,6 +128,17 @@ ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(
 template<class T, class Iterator>
 void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs) {
   std::swap(*lhs.iterator_, *rhs.iterator_);
+}
+
+template<class T, class Iterator>
+bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs) {
+  T lhs_tmp = lhs;
+  return lhs_tmp == rhs;
+}
+
+template<class T, class Iterator>
+inline bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs) {
+  return rhs == lhs;
 }
 }
 

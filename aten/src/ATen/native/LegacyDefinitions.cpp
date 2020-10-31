@@ -3,12 +3,14 @@
 #include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at { namespace native {
 
 // Methods
 
 Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & source) {
+  at::assert_no_internal_overlap(self);
   Tensor b_mask;
   std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
   // As we dispatch on self and TH is type-checked, we need different definitions.
@@ -19,26 +21,6 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
     return legacy::cpu::_th_masked_scatter_(self, b_mask, source);
   } else {
     return legacy::cpu::_th_masked_scatter_bool_(self, b_mask, source);
-  }
-}
-
-Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
-  namedinference::compute_broadcast_outnames(self, mask);
-  if (mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-    return legacy::cpu::_th_masked_select(self, mask);
-  } else {
-    return legacy::cpu::_th_masked_select_bool(self, mask);
-  }
-}
-
-Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
-  namedinference::compute_broadcast_outnames(self, mask);
-  if (mask.dtype() == at::ScalarType::Bool) {
-    return legacy::cpu::_th_masked_select_bool_out(result, self, mask);
-  } else {
-    return legacy::cpu::_th_masked_select_out(result, self, mask);
   }
 }
 

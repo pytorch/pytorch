@@ -62,6 +62,10 @@ class TORCH_API HashProvider : public IRVisitor {
     return exprToHash_.find(e) != exprToHash_.end();
   }
 
+  void clearCache() {
+    exprToHash_.clear();
+  }
+
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
   void visit(const Mul* v) override;
@@ -87,8 +91,6 @@ class TORCH_API HashProvider : public IRVisitor {
 
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
-  void visit(const Let* v) override;
-  void visit(const LetStmt* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
   void visit(const Store* v) override;
@@ -97,11 +99,14 @@ class TORCH_API HashProvider : public IRVisitor {
   void visit(const Broadcast* v) override;
   void visit(const IfThenElse* v) override;
   void visit(const BaseCallNode* v) override;
+  void visit(const Intrinsics* v) override;
   void visit(const Allocate* v) override;
   void visit(const Free* v) override;
   void visit(const Cond* v) override;
   void visit(const Term* v) override;
   void visit(const Polynomial* v) override;
+  void visit(const MaxTerm* v) override;
+  void visit(const MinTerm* v) override;
 
   template <typename... Types>
   SimplifierHashType hash_combine(const Types&... args) {

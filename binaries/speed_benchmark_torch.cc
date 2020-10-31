@@ -24,6 +24,8 @@
 #include "torch/csrc/jit/serialization/import.h"
 #include "torch/script.h"
 
+#include "c10/mobile/CPUCachingAllocator.h"
+
 #include <chrono>
 using namespace std::chrono;
 
@@ -45,6 +47,10 @@ C10_DEFINE_bool(
   no_inputs,
   false,
   "Whether the model has any input. Will ignore other input arugments if true");
+C10_DEFINE_bool(
+  use_caching_allocator,
+  false,
+  "Whether to cache allocations between inference iterations");
 C10_DEFINE_int(
     use_bundled_input,
     -1,
@@ -62,6 +68,7 @@ C10_DEFINE_bool(
   "Whether to print performance stats for AI-PEP.");
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
+C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
 
 std::vector<std::string>
 split(char separator, const std::string& string, bool ignore_empty = true) {
@@ -136,9 +143,14 @@ std::vector<c10::IValue> create_inputs() {
           "Unsupported input memory format: ", input_memory_format_list[i]);
     }
 
-    inputs.push_back(torch::ones(
+    const auto input_tensor = torch::ones(
         input_dims,
-        at::TensorOptions(input_type).memory_format(input_memory_format)));
+        at::TensorOptions(input_type).memory_format(input_memory_format));
+    if (FLAGS_vulkan) {
+      inputs.push_back(input_tensor.vulkan());
+    } else {
+      inputs.push_back(input_tensor);
+    }
   }
 
   if (FLAGS_pytext_len > 0) {
@@ -192,6 +204,11 @@ int main(int argc, char** argv) {
     std::cout << module.forward(inputs) << std::endl;
   }
 
+  c10::CPUCachingAllocator caching_allocator;
+  c10::optional<c10::WithCPUCachingAllocatorGuard> caching_allocator_guard;
+  if (FLAGS_use_caching_allocator) {
+    caching_allocator_guard.emplace(&caching_allocator);
+  }
   std::cout << "Starting benchmark." << std::endl;
   std::cout << "Running warmup runs." << std::endl;
   CAFFE_ENFORCE(
@@ -211,23 +228,23 @@ int main(int argc, char** argv) {
       ".");
   caffe2::Timer timer;
   std::vector<float> times;
-  auto millis = timer.MilliSeconds();
+  auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
     module.forward(inputs);
     auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<milliseconds>(stop - start);
+    auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());
   }
-  millis = timer.MilliSeconds();
+  micros = timer.MicroSeconds();
   if (FLAGS_report_pep) {
     for (auto t : times) {
       std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
     }
   }
-  std::cout << "Main run finished. Milliseconds per iter: "
-            << millis / FLAGS_iter
-            << ". Iters per second: " << 1000.0 * FLAGS_iter / millis
+  std::cout << "Main run finished. Microseconds per iter: "
+            << micros / FLAGS_iter
+            << ". Iters per second: " << 1000.0 * 1000 * FLAGS_iter / micros
             << std::endl;
 
   return 0;

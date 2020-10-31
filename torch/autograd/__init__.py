@@ -3,23 +3,30 @@
 differentiation of arbitrary scalar valued functions. It requires minimal
 changes to the existing code - you only need to declare :class:`Tensor` s
 for which gradients should be computed with the ``requires_grad=True`` keyword.
+As of now, we only support autograd for floating point :class:`Tensor` types (
+half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
 """
 import torch
 import warnings
+
+from torch.types import _TensorOrTensors
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
+from ..overrides import has_torch_function, handle_torch_function
 from . import profiler
 from . import functional
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
+_OptionalTensor = Optional[torch.Tensor]
 
-def _make_grads(outputs, grads):
-    new_grads = []
+def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor]) -> Tuple[_OptionalTensor, ...]:
+    new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
             if not out.shape == grad.shape:
@@ -28,7 +35,7 @@ def _make_grads(outputs, grads):
                                    + str(grad.shape) + " and output["
                                    + str(outputs.index(out)) + "] has a shape of "
                                    + str(out.shape) + ".")
-            if (out.dtype.is_complex != grad.dtype.is_complex):
+            if out.dtype.is_complex != grad.dtype.is_complex:
                 raise RuntimeError("For complex Tensors, both grad_output and output"
                                    " are required to have the same dtype."
                                    " Mismatch in dtype: grad_output["
@@ -50,7 +57,21 @@ def _make_grads(outputs, grads):
     return tuple(new_grads)
 
 
-def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, grad_variables=None):
+def _tensor_or_tensors_to_tuple(tensors: Optional[_TensorOrTensors], length: int) -> Tuple[_OptionalTensor, ...]:
+    if tensors is None:
+        return (None, ) * length
+    if isinstance(tensors, torch.Tensor):
+        return (tensors, )
+    return tuple(tensors)
+
+
+def backward(
+    tensors: _TensorOrTensors,
+    grad_tensors: Optional[_TensorOrTensors] = None,
+    retain_graph: Optional[bool] = None,
+    create_graph: bool = False,
+    grad_variables: Optional[_TensorOrTensors] = None,
+) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
     The graph is differentiated using the chain rule. If any of ``tensors``
@@ -63,7 +84,9 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
     all tensors that don't need gradient tensors).
 
     This function accumulates gradients in the leaves - you might need to zero
-    them before calling it.
+    ``.grad`` attributes or set them to ``None`` before calling it.
+    See :ref:`Default gradient layouts<default-grad-layouts>`
+    for details on the memory layout of accumulated gradients.
 
     .. note::
         Using this method with ``create_graph=True`` will create a reference cycle
@@ -71,6 +94,12 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
         We recommend using ``autograd.grad`` when creating the graph to avoid this.
         If you have to use this function, make sure to reset the ``.grad`` fields of your
         parameters to ``None`` after use to break the cycle and avoid the leak.
+
+    .. note::
+
+        If you run any forward ops, create ``grad_tensors``, and/or call ``backward``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
     Arguments:
         tensors (sequence of Tensor): Tensors of which the derivative will be
@@ -99,24 +128,25 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
 
-    if grad_tensors is None:
-        grad_tensors = [None] * len(tensors)
-    elif isinstance(grad_tensors, torch.Tensor):
-        grad_tensors = [grad_tensors]
-    else:
-        grad_tensors = list(grad_tensors)
-
-    grad_tensors = _make_grads(tensors, grad_tensors)
+    grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
+    grad_tensors_ = _make_grads(tensors, grad_tensors_)
     if retain_graph is None:
         retain_graph = create_graph
 
     Variable._execution_engine.run_backward(
-        tensors, grad_tensors, retain_graph, create_graph,
+        tensors, grad_tensors_, retain_graph, create_graph,
         allow_unreachable=True)  # allow_unreachable flag
 
 
-def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=False,
-         only_inputs=True, allow_unused=False):
+def grad(
+    outputs: _TensorOrTensors,
+    inputs: _TensorOrTensors,
+    grad_outputs: Optional[_TensorOrTensors] = None,
+    retain_graph: Optional[bool] = None,
+    create_graph: bool = False,
+    only_inputs: bool = True,
+    allow_unused: bool = False
+) -> Tuple[torch.Tensor, ...]:
     r"""Computes and returns the sum of gradients of outputs w.r.t. the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``
@@ -128,6 +158,12 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
     w.r.t the specified inputs. If it's ``False``, then gradient w.r.t. all remaining
     leaves will still be computed, and will be accumulated into their ``.grad``
     attribute.
+
+    .. note::
+
+        If you run any forward ops, create ``grad_outputs``, and/or call ``grad``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
     Arguments:
         outputs (sequence of Tensor): outputs of the differentiated function.
@@ -148,28 +184,35 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
             used when computing outputs (and therefore their grad is always zero)
             is an error. Defaults to ``False``.
     """
+    outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
+    overridable_args = outputs + inputs
+    if has_torch_function(overridable_args):
+        return handle_torch_function(
+            grad,
+            overridable_args,
+            outputs,
+            inputs,
+            grad_outputs=grad_outputs,
+            retain_graph=retain_graph,
+            create_graph=create_graph,
+            only_inputs=only_inputs,
+            allow_unused=allow_unused,
+        )
+
     if not only_inputs:
         warnings.warn("only_inputs argument is deprecated and is ignored now "
                       "(defaults to True). To accumulate gradient for other "
                       "parts of the graph, please use torch.autograd.backward.")
 
-    outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
-    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
-
-    if grad_outputs is None:
-        grad_outputs = [None] * len(outputs)
-    elif isinstance(grad_outputs, torch.Tensor):
-        grad_outputs = [grad_outputs]
-    else:
-        grad_outputs = list(grad_outputs)
-
-    grad_outputs = _make_grads(outputs, grad_outputs)
+    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
+    grad_outputs_ = _make_grads(outputs, grad_outputs_)
 
     if retain_graph is None:
         retain_graph = create_graph
 
     return Variable._execution_engine.run_backward(
-        outputs, grad_outputs, retain_graph, create_graph,
+        outputs, grad_outputs_, retain_graph, create_graph,
         inputs, allow_unused)
 
 
@@ -197,3 +240,8 @@ def variable(*args, **kwargs):
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
+
+# Import all native method/classes
+from torch._C._autograd import (ProfilerState, ProfilerConfig, ProfilerEvent,
+                                _enable_profiler, _disable_profiler, _profiler_enabled,
+                                _enable_record_function, _set_empty_test_observer)

@@ -17,15 +17,17 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other);
 
 template <>
 Tensor _add_out<false>(Tensor& out, const Tensor& self, const Tensor& other) {
-  const auto kName = "quantized::t_helper1";
-  callOp(kName, "", self);
+  constexpr auto kName = "quantized::t_helper1";
+  static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(kName, "").typed<Tensor(Tensor)>();;
+  op.call(self);
   return out;
 }
 
 template <>
 Tensor _add_out<true>(Tensor& out, const Tensor& self, const Tensor& other) {
-  const auto kName = "quantized::t_helper2";
-  callOp(kName, "", self);
+  constexpr auto kName = "quantized::t_helper2";
+  static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(kName, "").typed<Tensor(Tensor)>();
+  op.call(self);
   return out;
 }
 
@@ -43,7 +45,8 @@ Tensor QHelper(Tensor qa) {
   std::cout << "Op: " << opName << std::endl;
   if (callOpName != nullptr) {
     std::cout << "Call op: " << callOpName << std::endl;
-    callOp(callOpName, "", qa);
+    static const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(callOpName, "").typed<Tensor(Tensor)>();
+    op.call(qa);
   }
   return qa;
 }

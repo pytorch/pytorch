@@ -2,8 +2,9 @@
 
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ThreadLocalDebugInfo.h>
 
-#include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/record_function.h>
 
 namespace at {
 
@@ -27,17 +28,15 @@ class TORCH_API ThreadLocalState {
 
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
-  std::shared_ptr<at::ThreadLocalDebugInfo> debug_info_;
+  std::shared_ptr<c10::ThreadLocalDebugInfo> debug_info_;
+
+  // RecordFunction TLS
+  RecordFunctionTLS rf_tls_;
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;
   bool grad_mode_enabled_;
 #endif
-
-  // Whether RecordFunctions need to be disabled;
-  // used in core PyTorch to avoid infitite recursion
-  // in observers framework
-  bool record_function_enabled_;
 
   friend class ThreadLocalStateGuard;
 };
@@ -60,8 +59,14 @@ class TORCH_API ThreadLocalStateGuard {
   const ThreadLocalState prev_state_;
 };
 
-// Internal, turns on/off record function observers
-TORCH_API bool _tls_is_record_function_enabled();
-TORCH_API void _tls_set_record_function_enabled(bool);
+template <typename T>
+std::function<T(void)> wrapPropagateTLSState(
+    std::function<T(void)> callback) {
+  return [tls_state = ThreadLocalState(), callback = std::move(callback)]() {
+    ThreadLocalStateGuard g(tls_state);
+    // Propagate value returned by callback().
+    return callback();
+  };
+}
 
 } // namespace at

@@ -7,6 +7,10 @@
 #include <cmath>
 #include <cstring>
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#include <cuda_bf16.h>
+#endif
+
 namespace c10 {
 
 namespace detail {
@@ -45,8 +49,10 @@ namespace detail {
   }
 
   inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(__HIP_PLATFORM_HCC__)
     if(src != src) {
+#elif defined(_MSC_VER)
+    if (isnan(src)) {
 #else
     if (std::isnan(src)) {
 #endif
@@ -82,6 +88,11 @@ struct alignas(2) BFloat16 {
   constexpr C10_HOST_DEVICE BFloat16(unsigned short bits, from_bits_t) : x(bits){};
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
+  explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
+#endif
 };
 
 } // namespace c10

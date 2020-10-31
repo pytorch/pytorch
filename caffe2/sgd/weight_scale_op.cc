@@ -14,15 +14,24 @@
  * limitations under the License.
  */
 
-#include "weight_scale_op.h"
+#include "caffe2/sgd/weight_scale_op.h"
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(WeightScale, WeightScaleOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(WeightScale, WeightScaleOp<CPUContext>);
 OPERATOR_SCHEMA(WeightScale)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 1}})
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      // ITER input lives on CPU
+      in_dev[1] = DeviceOption();
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 Every `stepsize` iterations, multiply the weights by a constant `scale`:
     nw = w * scale

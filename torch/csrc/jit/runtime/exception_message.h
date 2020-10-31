@@ -20,7 +20,7 @@ inline std::ostream& operator<<(
     const ExceptionMessage& msg) {
   auto c10_error = dynamic_cast<const c10::Error*>(&msg.e_);
   if (c10_error) {
-    out << c10_error->msg_without_backtrace();
+    out << c10_error->what_without_backtrace();
   } else {
     out << msg.e_.what();
   }

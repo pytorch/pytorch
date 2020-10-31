@@ -36,6 +36,9 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
   }
 }
 
+SavedVariable::SavedVariable(const c10::optional<Variable>& variable, bool is_output, bool is_inplace_view)
+  : SavedVariable(variable.has_value() ? *variable : Variable(), is_output, is_inplace_view) {}
+
 Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (!data_.defined()) {
     if (!was_default_constructed_) {
@@ -101,8 +104,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 }
 
 const char* ERR_BACKWARD_TWICE =
-    "Trying to backward through the graph a second time, but the buffers have "
-    "already been freed. Specify retain_graph=True when calling backward "
-    "the first time.";
+    "Trying to backward through the graph a second time, but the saved intermediate "
+    "results have already been freed. Specify retain_graph=True when calling "
+    "backward the first time.";
 
 }} // namespace torch::autograd

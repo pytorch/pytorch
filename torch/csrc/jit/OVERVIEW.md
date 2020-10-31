@@ -164,7 +164,7 @@ A node represents a single built-in instruction such as a matrix multiply or a c
 
 This reflects the reality of the PyTorch operator library where there are already several hundred valid operators.
 
-Nodes produce output Values and take input Values as arguments. For instance, a matrix-multiply will take two input tensors and produce one output tensor. Nodes can produce multiple outputs. For instance `prim::UnpackTuple` splits a tuple into its components, so it has a number of outputs equal to the number of members of the tuple. Though Nodes may have multiple outputs, the number of outputs is _statically known_ for each Node. Operations which may produce a dynamic amount of results, e.g. splitting a tensor into chunks of size 2, will be represented as an operator that results a list object.
+Nodes produce output Values and take input Values as arguments. For instance, a matrix-multiply will take two input tensors and produce one output tensor. Nodes can produce multiple outputs. For instance `prim::TupleUnpack` splits a tuple into its components, so it has a number of outputs equal to the number of members of the tuple. Though Nodes may have multiple outputs, the number of outputs is _statically known_ for each Node. Operations which may produce a dynamic amount of results, e.g. splitting a tensor into chunks of size 2, will be represented as an operator that results a list object.
 
 Because Nodes are not subclassed per-operator, it is very easy to construct invalid Nodes, e.g. by forgetting an input or an output, or by passing Values of the wrong Type. To help avoid this, Graph provides the method (`Graph::insert`) for constructing Nodes that guarantees Nodes have the correct setup. This method uses the database of registered Operators and their FunctionSchema to construct Nodes using that schema.
 
@@ -309,6 +309,38 @@ graph(%z.1 : Dynamic):
   return (%z)
 ```
 
+### With ###
+With-statements are represented in two different ways. For most of the compilation and optimization process, they are represented as a pair of `prim::Enter` and `prim::Exit` nodes that wrap the nodes corresponding to the body of the with-statement. However, with-statements are temporarily represented for the duration of the `exit_transform` pass using a block-based representation in which a `prim::With` node is inserted after the `prim::Exit` node, all of the nodes between the `prim::Exit` and `prim::Enter` are moved into the first block of the `prim::With`, and the `prim::Exit` is moved into the second block of the `prim::With`. For example, this program:
+
+```
+with c as mult:
+  y = x + mult
+```
+
+can be translated as:
+
+```
+%2 : int = prim::Constant[value=1]()
+%mult.1 : int = prim::Enter(%c.1)
+%y.1 : Tensor = aten::add(%x.1, %mult.1, %2)
+%11 : Tensor = prim::Exit(%c.1)
+```
+
+and will temporarily be transformed to:
+
+```
+%mult.1 : int = prim::Enter(%c.1)
+= prim::With()
+  block0():
+    %y.1 : Tensor = aten::add(%x.1, %mult.1, %4)
+    -> ()
+  block1():
+    %11 : Tensor = prim::Exit(%c.1)
+    -> ()
+```
+
+for the duration of the `exit_transform` pass.
+
 ## Value ##
 
 [ir.h](ir/ir.h)
@@ -351,7 +383,7 @@ The entry point from Python into C++ for tracing using `torch.jit.trace` is `_cr
 
 A thread local instance of the TracingState object maintains a mapping between actual data being computed during the trace (e.g. Tensors) stored in IValues, and the abstract `Value*` in the Graph that would compute that value. The functions `void setValueTrace(const IValue&, Value*)` and `Value* getValueTrace(const IValue&)` are used by the tracer to maintain this mapping.
 
-An initial IValue to Value mapping is setup up between the inputs to the function being traced and symbolic Value inputs to the Graph being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  These values are also added as mapping so that uses of the Parameters in the trace will create uses of the Parameters in the Graph.
+An initial IValue to Value mapping is set up between the inputs to the function being traced and symbolic Value inputs to the Graph being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  These values are also added as mapping so that uses of the Parameters in the trace will create uses of the Parameters in the Graph.
 
 As the trace runs, individual operators create Nodes in the Graph being traced to record what happens. This code is currently generated per operator in [tools/autograd/gen_variable_type.py](../../../tools/autograd/gen_variable_type.py). It results in code that looks like the following:
 
@@ -729,10 +761,10 @@ All builtin operators are represented using a stack machine concept. An operator
 
 ```cpp
 using Stack = std::vector<IValue>;
-using Operation = std::function<int(Stack&)>;
+using Operation = std::function<void(Stack*)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
-int example_add(Stack& stack) {
+void example_add(Stack* stack) {
     Tensor a, b;
     // stack before: ? ? ? a b <- back
     pop(stack, a, b); //Templated helper function
@@ -756,7 +788,7 @@ Operations also return a jump offset relative to the address of the next operato
 
 [runtime/operator.h](runtime/operator.h)
 
-The Operator object represents a single registered operator in the system. It combines a FunctionSchema that describes how an Operation executes with a method to lookup the corresponding Operation given the Node representing the operator in a Graph.  Most Operators are defined by providing a FunctionSchema and an Operation function. However, primitives like prim::Unpack require knowledge of their Node to know how to operate (e.g. how many elements to unpack). These Operators have a function that takes a Node* and returns an operation.
+The Operator object represents a single registered operator in the system. It combines a FunctionSchema that describes how an Operation executes with a method to lookup the corresponding Operation given the Node representing the operator in a Graph.  Most Operators are defined by providing a FunctionSchema and an Operation function. However, primitives like prim::Unpack require knowledge of their Node to know how to operate (e.g. how many elements to unpack). These Operators have a function that takes a `Node*` and returns an operation.
 
 
 ## Interpreter ##
@@ -854,7 +886,7 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     return hy, cy
 ```
 
-After going through the the frontend, we get start with this unoptimized graph:
+After going through the the frontend, we start with this unoptimized graph:
 
 ```
 graph(%x : Tensor,
@@ -1144,6 +1176,13 @@ one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
 `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in `>alias_analysis`.
 `>>` and `>>>` are also valid and **currently** are equivalent to `GRAPH_DEBUG` as there is no logging level that is
 higher than `GRAPH_DEBUG`.
+
+By default, types in the graph are printed with maximum verbosity.  The verbosity level can be controlled via the environment variable `PYTORCH_JIT_TYPE_VERBOSITY`.  The available settings are:
+
+* `0`: No type information
+* `1`: Types and shapes only
+* `2`: Also print strides
+* `3`: Also print device type and whether gradient is required
 
 ## DifferentiableGraphOp ##
 

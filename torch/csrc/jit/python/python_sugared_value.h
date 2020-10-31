@@ -47,8 +47,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& m,
-      at::ArrayRef<NamedValue> inputs_,
-      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
   std::string kind() const override;
@@ -62,6 +62,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
+
+  Value* asValue(const SourceRange& loc, Function& m) override {
+    throw ErrorReport(loc)
+        << kind() << " cannot be used as a value. "
+        << "Perhaps it is a closed over global variable? If so, please "
+        << "consider passing it in as an argument or use a local varible "
+        << "instead.";
+  }
 
  protected:
   py::object getattr(const SourceRange& loc, const std::string& name);
@@ -91,8 +99,8 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& caller,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     return toSimple(the_list_);
   }
@@ -112,10 +120,10 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& f,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    if (inputs.size() || attributes.size()) {
+    if (args.size() || kwargs.size()) {
       throw ErrorReport(loc)
           << name_ << " method does not accept any arguments";
     }
@@ -126,7 +134,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   const std::string name_;
 };
 
-struct SugaredModuleDict;
+struct SugaredDict;
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
@@ -145,24 +153,40 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
   Value* asValue(const SourceRange& loc, Function& m) override;
 
+  SugaredValuePtr asTupleValue(const SourceRange& loc, Function& m) override;
+
+  // select an attribute on it, e.g. `this.field`
+  std::shared_ptr<SugaredValue> tryGetAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field);
+
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       Function& m,
       const std::string& field) override;
 
+  // select an attribute on it, e.g. `this.field`
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
+
   // call module.forward
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& caller,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
     return attr(loc, caller, "forward")
-        ->call(loc, caller, inputs, attributes, n_binders);
+        ->call(loc, caller, args, kwargs, n_binders);
   }
 
-  std::shared_ptr<SugaredModuleDict> getSugaredModuleDict(
+  std::shared_ptr<SugaredDict> getSugaredDict(
+      const SourceRange& loc,
+      Function& m);
+
+  std::shared_ptr<SugaredDict> getSugaredNamedBufferDict(
       const SourceRange& loc,
       Function& m);
 
@@ -197,8 +221,8 @@ void recurseThroughNestedModules(
     const std::string& field);
 
 // Used to support named_modules()
-struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
-  explicit SugaredModuleDict(
+struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
+  explicit SugaredDict(
       std::shared_ptr<ModuleValue> self,
       std::shared_ptr<SugaredTupleValue> keys,
       std::shared_ptr<SugaredTupleValue> modules) {
@@ -244,8 +268,8 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& caller,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
  private:
@@ -265,8 +289,44 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
       Function& m,
       const std::string& field) override;
 
+  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
+      override;
+
  private:
   py::object py_type_;
+};
+
+struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
+  explicit PythonExceptionValue(const py::object& exception_class)
+      : ExceptionValue(
+            py::str(py::getattr(exception_class, "__name__", py::str("")))) {}
+
+  std::string kind() const override {
+    return "Python exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
+      size_t n_binders) override;
+};
+
+// Python Slice class.
+struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
+  explicit PythonSliceClass() {}
+
+  std::string kind() const override {
+    return "Python slice class";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
+      size_t n_binders) override;
 };
 
 } // namespace jit

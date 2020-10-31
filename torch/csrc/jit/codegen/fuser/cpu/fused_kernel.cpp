@@ -336,7 +336,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-RegisterFusionBackend reg(at::DeviceType::CPU, createFusionKernel);
+RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
 } // namespace cpu
 } // namespace fuser
 } // namespace jit

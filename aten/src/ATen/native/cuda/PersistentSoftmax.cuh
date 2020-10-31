@@ -135,13 +135,13 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         if (i >= local_batches)
             break;
-        if (is_log_softmax) sum[i] = max_value[i] + std::log(sum[i]);
+        if (is_log_softmax) sum[i] = std::log(sum[i]);
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
                 if (is_log_softmax) {
-                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - sum[i];
+                    dst[i*element_count+it*WARP_SIZE] = elements[i][it] - max_value[i] - sum[i];
                 } else {
                     dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
                 }

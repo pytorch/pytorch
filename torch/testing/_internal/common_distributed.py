@@ -1,5 +1,8 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
+from multiprocessing import Manager
+from contextlib import contextmanager
+from io import StringIO
+import os
 import sys
 import tempfile
 import time
@@ -8,24 +11,54 @@ import logging
 import traceback
 import types
 
-from collections import namedtuple
+from typing import NamedTuple
 from functools import wraps
 
 import torch
 import torch.distributed as c10d
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
 
-TestSkip = namedtuple('TestSkip', 'exit_code, message')
+class TestSkip(NamedTuple):
+    exit_code: int
+    message: str
 
 
 TEST_SKIPS = {
+    "backend_unavailable": TestSkip(72, "Skipped because distributed backend is not available."),
+    "small_worldsize": TestSkip(73, "Skipped due to small world size."),
+    "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
-    "known_issues": TestSkip(77, "Test skipped due to known issues"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm")
 }
+
+def skip_if_no_gpu(func):
+    """ Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
+            message = "Need at least {} CUDA devices".format(os.environ["WORLD_SIZE"])
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+            sys.exit(TEST_SKIPS["multi-gpu"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_small_worldsize(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) <= 2:
+            sys.exit(TEST_SKIPS["small_worldsize"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 def skip_if_not_multigpu(func):
@@ -34,10 +67,25 @@ def skip_if_not_multigpu(func):
     def wrapper(*args, **kwargs):
         if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
             return func(*args, **kwargs)
+        message = "Need at least {} CUDA devices".format(2)
+        TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
         sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
 
     return wrapper
 
+def require_n_gpus_for_nccl_backend(n, backend):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if backend == "nccl" and torch.cuda.device_count() < n:
+                message = "Need at least {} CUDA devices".format(n)
+                TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+                sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+            else:
+                return func(*args, **kwargs)
+        return wrapper
+
+    return decorator
 
 def skip_if_lt_x_gpu(x):
     def decorator(func):
@@ -45,20 +93,12 @@ def skip_if_lt_x_gpu(x):
         def wrapper(*args, **kwargs):
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
+            message = "Need at least {} CUDA devices".format(x)
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         return wrapper
 
     return decorator
-
-
-def skip_for_known_issues(func):
-    """Skips a test due to known issues (for c10d)."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        sys.exit(TEST_SKIPS['known_issues'].exit_code)
-
-    return wrapper
-
 
 def requires_gloo():
     return unittest.skipUnless(
@@ -92,10 +132,22 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+def skip_if_rocm_single_process(func):
+    """Skips a test for ROCm in a single process environment"""
+    func.skip_if_rocm = True
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_ROCM:
+            return func(*args, **kwargs)
+        raise unittest.SkipTest("Test skipped for ROCm")
+
+    return wrapper
 
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
     func.skip_if_rocm = True
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not TEST_WITH_ROCM:
@@ -104,13 +156,35 @@ def skip_if_rocm(func):
 
     return wrapper
 
+def skip_if_win32():
+    return unittest.skipIf(
+        sys.platform == 'win32',
+        "This unit test case is not supportted on Windows platform",
+    )
+
 TIMEOUT_DEFAULT = 100
-TIMEOUT_OVERRIDE = {}
+TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+
+
+def create_device(interface=None):
+    if sys.platform == 'win32' or interface is None:
+        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
+    else:
+        return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 
+@contextmanager
+def captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
 
 def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
     """
@@ -122,10 +196,10 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         # First sparse dimension is [0..rank].
         # Subsequent dimensions are always 0, so we know there is
         # a non-empty intersection between any two sparse tensors.
-        indices = [range(rank + 1)]
+        indices = torch.reshape(torch.arange(rank + 1), (1, rank + 1))
         shape = [world_size] + [2 for _ in range(dense_dims)]
         for _ in range(sparse_dims - 1):
-            indices.append([0] * (rank + 1))
+            indices = torch.cat((indices, torch.zeros(1, rank + 1)))
             shape.append(world_size)
         values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
         return torch.sparse_coo_tensor(indices, values, shape)
@@ -154,6 +228,26 @@ def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
         ]
     ]
 
+tmp_dir = None
+def initialize_temp_directories(init_method=None):
+    global tmp_dir
+    tmp_dir = tempfile.TemporaryDirectory()
+    os.environ["TEMP_DIR"] = tmp_dir.name
+    os.mkdir(os.path.join(tmp_dir.name, "barrier"))
+    os.mkdir(os.path.join(tmp_dir.name, "test_dir"))
+    init_dir_path = os.path.join(tmp_dir.name, "init_dir")
+    os.mkdir(init_dir_path)
+    # Set init method if specified.
+    if init_method is not None:
+        os.environ["INIT_METHOD"] = init_method
+    else:
+        os.environ["INIT_METHOD"] = FILE_SCHEMA + os.path.join(
+            init_dir_path, "shared_init_file"
+        )
+
+def cleanup_temp_dir():
+    if tmp_dir is not None:
+        tmp_dir.cleanup()
 
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
@@ -203,19 +297,33 @@ class MultiProcessTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.skip_return_code_checks = []
+        self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+        global TEST_SKIPS
+        self.old_test_skips = TEST_SKIPS.copy()
 
     def tearDown(self):
         super().tearDown()
         for p in self.processes:
             p.terminate()
+        # Each Process instance holds a few open file descriptors. The unittest
+        # runner creates a new TestCase instance for each test method and keeps
+        # it alive until the end of the entire suite. We must thus reset the
+        # processes to prevent an effective file descriptor leak.
+        self.processes = []
 
     def _current_test_name(self):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc):
+        test_skips_manager = Manager()
+        test_skips = test_skips_manager.dict()
+        global TEST_SKIPS
+        test_skips.update(TEST_SKIPS)
+        TEST_SKIPS = test_skips
+
         self.processes = []
         for rank in range(int(self.world_size)):
             process = proc(
@@ -249,41 +357,45 @@ class MultiProcessTestCase(TestCase):
         timeout = get_timeout(self.id())
         start_time = time.time()
         subprocess_error = False
-        while True:
-            # check to see if any subprocess exited with an error early.
-            for p in self.processes:
-                # This is the exited code processes exit with if they
-                # encountered an exception.
-                if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                    print("Some process exited badly, terminating rest.")
-                    active_children = torch.multiprocessing.active_children()
-                    for ac in active_children:
-                        ac.terminate()
-                    subprocess_error = True
+        try:
+            while True:
+                # check to see if any subprocess exited with an error early.
+                for (i, p) in enumerate(self.processes):
+                    # This is the exit code processes exit with if they
+                    # encountered an exception.
+                    if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
+                        print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
+                        active_children = torch.multiprocessing.active_children()
+                        for ac in active_children:
+                            ac.terminate()
+                        subprocess_error = True
+                        break
+                if subprocess_error:
                     break
-            if subprocess_error:
-                break
-            # All processes have joined cleanly if they all a valid exitcode
-            if all([p.exitcode is not None for p in self.processes]):
-                break
-            # Check if we should time out the test. If so, we terminate each process.
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                print(
-                    "Timing out after {} seconds and killing subprocesses.".format(
-                        timeout
+                # All processes have joined cleanly if they all a valid exitcode
+                if all([p.exitcode is not None for p in self.processes]):
+                    break
+                # Check if we should time out the test. If so, we terminate each process.
+                elapsed = time.time() - start_time
+                if elapsed > timeout:
+                    print(
+                        "Timing out after {} seconds and killing subprocesses.".format(
+                            timeout
+                        )
                     )
-                )
-                for p in self.processes:
-                    p.terminate()
-                break
-            # Sleep to avoid excessive busy polling.
-            time.sleep(0.1)
-        elapsed_time = time.time() - start_time
-        if fn in self.skip_return_code_checks:
-            self._check_no_test_errors(elapsed_time)
-        else:
-            self._check_return_codes(elapsed_time)
+                    for p in self.processes:
+                        p.terminate()
+                    break
+                # Sleep to avoid excessive busy polling.
+                time.sleep(0.1)
+            elapsed_time = time.time() - start_time
+            if fn in self.skip_return_code_checks:
+                self._check_no_test_errors(elapsed_time)
+            else:
+                self._check_return_codes(elapsed_time)
+        finally:
+            global TEST_SKIPS
+            TEST_SKIPS = self.old_test_skips
 
     def _check_no_test_errors(self, elapsed_time):
         """
@@ -325,7 +437,7 @@ class MultiProcessTestCase(TestCase):
             self.assertEqual(
                 p.exitcode,
                 first_process.exitcode,
-                "Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
+                msg="Expect process {} exit code to match Process 0 exit code of {}, but got {}".format(
                     i, first_process.exitcode, p.exitcode
                 ),
             )
@@ -335,7 +447,7 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            "Expected zero exit code but got {}".format(first_process.exitcode)
+            msg="Expected zero exit code but got {}".format(first_process.exitcode)
         )
 
     @property

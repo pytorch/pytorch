@@ -11,7 +11,7 @@ namespace c10 {
 
 template<typename dest_t, typename src_t>
 struct needs_real {
-  constexpr static bool value = (is_complex_t<src_t>::value && !is_complex_t<dest_t>::value);
+  constexpr static bool value = (is_complex<src_t>::value && !is_complex<dest_t>::value);
 };
 
 template<bool, typename src_t>
@@ -23,7 +23,7 @@ struct maybe_real {
 
 template<typename src_t>
 struct maybe_real<true, src_t> {
-  C10_HOST_DEVICE static inline auto apply(src_t src) -> decltype(src.real()) {
+  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
     return src.real();
   }
 };
@@ -57,15 +57,6 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
       static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
   }
 };
-
-#if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename dest_value_t, typename src_value_t>
-  struct static_cast_with_inter_type<std::complex<dest_value_t>, std::complex<src_value_t>> {
-    C10_HOST_DEVICE static inline std::complex<dest_value_t> apply(std::complex<src_value_t> src) {
-      return std::complex<dest_value_t>(src.real(), src.imag());
-    }
-};
-#endif
 
 // Dynamic type casting utils:
 // - fetch_and_cast

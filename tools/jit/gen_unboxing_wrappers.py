@@ -20,11 +20,12 @@ torch/csrc/jit/generated/
 
 import argparse
 import re
-import yaml
 from itertools import groupby
-from ..autograd.utils import CodeTemplate, YamlLoader, write
+from functools import reduce
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
+from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_with_overload
+from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # JIT has a type system of
 # Scalar = int | float | bool # int is the largest int (int64_t),
@@ -46,6 +47,7 @@ TYPE_MAP = {
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
+    'std::string?': 'str?',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
     'MemoryFormat?': 'MemoryFormat?',
@@ -59,6 +61,8 @@ TYPE_MAP = {
     # in returns
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
+    'IntArrayRef?': 'int[]?',
+    'ArrayRef<double>?': 'float[]?',
     'Layout': 'Layout',
     'Layout?': 'Layout?',
     'Device': 'Device',
@@ -112,6 +116,8 @@ FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
     'IntArrayRef': '{}.toIntVector()',
+    'IntArrayRef?': '{}.toOptionalIntArray()',
+    'ArrayRef<double>?': '{}.toOptionalDoubleArray()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
@@ -132,6 +138,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
+    'std::string?': '{}.toOptional<std::string>()',
     'Generator?': '{}.toOptional<at::Generator>()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
@@ -163,11 +170,7 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-#ifdef USE_STATIC_DISPATCH
-    auto result_ = at::${name}(${args_with_tensor_options});
-#else
     auto result_ = torch::${name}(${args_with_tensor_options});
-#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -194,7 +197,7 @@ OPERATOR = CodeTemplate("""\
 """)
 
 
-blacklisted_types = {
+disallowed_types = {
     'Storage',
     'DimnameList?',
     'ConstQuantizerPtr',
@@ -207,7 +210,7 @@ default_only_types = {'Generator'}
 
 def is_jit_arg(i, arg):
     simple_type = arg['simple_type']
-    if simple_type in blacklisted_types:
+    if simple_type in disallowed_types:
         return False
     if simple_type in default_only_types and 'default' not in arg:
         return False
@@ -251,10 +254,6 @@ def is_view(decl):
     return base_name(decl) in RETURNS_VIEWS_OF_INPUT
 
 
-def is_out_variant(decl):
-    return decl['name'].endswith('_out')
-
-
 # Copied from ..autograd.gen_python_functions.SKIP_PYTHON_BINDINGS
 BACKWARD_OP_PATTERNS = [
     '.*_backward',
@@ -278,19 +277,12 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
-def load_op_list(path):
-    with open(path, 'r') as f:
-        op_list = yaml.load(f, Loader=YamlLoader)
-    return op_list
-
-
 def gen_unboxing_wrappers(
     declarations,
     out,
     template_path,
+    operator_selector: SelectiveBuilder,
     disable_autograd=False,
-    selected_op_list_path=None,
-    selected_op_list=None,
     force_schema_registration=False,
 ):
     GENERATED_UNBOXING_WRAPPERS_CPP = CodeTemplate.from_file(template_path + '/generated_unboxing_wrappers.cpp')
@@ -344,7 +336,7 @@ def gen_unboxing_wrappers(
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -391,22 +383,23 @@ def gen_unboxing_wrappers(
                                                  op_capture=op_capture,
                                                  lvalues=lvalues)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
         return constructor
 
-    def filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration):
+    def filter_decls(jit_decls, disable_autograd, operator_selector: SelectiveBuilder, force_schema_registration):
         result = []
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
-            op_name = signature_without_args(decl)
-            if selected_op_list and op_name not in selected_op_list:
+            op_name = op_name_with_overload(decl)
+            if operator_selector.is_root_operator(op_name):
+                result.append(decl)
+            else:
                 if force_schema_registration:
                     decl['emit_dummy_placeholder'] = True
-                else:
-                    continue
-            result.append(decl)
+                    result.append(decl)
+
         return result
 
     # This function declares an order on declarations. This is necessary because
@@ -476,10 +469,7 @@ def gen_unboxing_wrappers(
             reorder_out_args(decl)
 
     jit_decls.extend(additional_jit_decls)
-    if not selected_op_list:
-        selected_op_list = []
-    selected_op_list += load_op_list(selected_op_list_path) if selected_op_list_path else []
-    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration)
+    jit_decls = filter_decls(jit_decls, disable_autograd, operator_selector, force_schema_registration)
 
     # generation is deterministic
     jit_decl_groups = sort_decls(jit_decls)
@@ -501,13 +491,22 @@ def gen_unboxing_wrappers(
                 shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
                                                      op=emit_decl_variant(decl)))
             else:
-                assert decl['use_c10_dispatcher'] == 'full'
+                assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
     for i, shard in enumerate(shards):
         env = {
             'constructors': shard,
         }
         write(out, 'generated_unboxing_wrappers_%d.cpp' % i, GENERATED_UNBOXING_WRAPPERS_CPP, env)
+
+    all_shards = reduce(
+        lambda lhs, rhs: lhs + rhs,
+        shards,
+    )
+    env = {
+        'constructors': all_shards,
+    }
+    write(out, 'generated_unboxing_wrappers_everything.cpp', GENERATED_UNBOXING_WRAPPERS_CPP, env)
 
 
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
@@ -526,12 +525,6 @@ def reorder_out_args(decl):
 def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
 
-def signature_without_args(decl):
-    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
-    return 'aten::{}{}'.format(name, overload_name)
-
-
 def main():
     parser = argparse.ArgumentParser(
         description='Generate JIT op dispatch')
@@ -542,7 +535,8 @@ def main():
     parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
-    gen_unboxing_wrappers(args.declarations, args.out, args.template_path)
+    gen_unboxing_wrappers(args.declarations, args.out, args.template_path,
+                          SelectiveBuilder.get_nop_selector())
 
 
 if __name__ == '__main__':

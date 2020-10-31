@@ -73,7 +73,7 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
 template <typename T, typename IndexType>
 void
 TensorInfo<T, IndexType>::reduceDim(int dim) {
-  assert(dim < dims && dim >= 0);
+  TORCH_INTERNAL_ASSERT(dim < dims && dim >= 0);
   sizes[dim] = 1;
 }
 
@@ -81,7 +81,7 @@ template <typename T, typename IndexType>
 int
 TensorInfo<T, IndexType>::collapseDims(const int excludeDim) {
 
-  assert(excludeDim >= -1 && excludeDim < dims);
+  TORCH_INTERNAL_ASSERT(excludeDim >= -1 && excludeDim < dims);
 
   int stopDim = (excludeDim == -1) ? dims : excludeDim;
   int newIndex = -1;

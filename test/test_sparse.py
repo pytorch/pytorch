@@ -6,11 +6,12 @@ torch.set_default_dtype(torch.double)
 
 import itertools
 import functools
+import operator
 import random
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 
@@ -36,7 +37,6 @@ def cuda_only(inner):
         inner(self, *args, **kwargs)
     return outer
 
-
 class TestSparse(TestCase):
 
     def setUp(self):
@@ -54,7 +54,7 @@ class TestSparse(TestCase):
 
         def sparse_empty_factory(*args, **kwargs):
             kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
-            kwargs['layout'] = kwargs.get('laytout', torch.sparse_coo)
+            kwargs['layout'] = kwargs.get('layout', torch.sparse_coo)
             kwargs['device'] = kwargs.get('device', self.device)
             return torch.empty(*args, **kwargs)
         self.sparse_empty = sparse_empty_factory
@@ -758,6 +758,17 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
+    def test_add_sub_nnz(self):
+        # nnz should not grow unbounded (gh-34964)
+        x = torch.randn(10, device=self.device).to_sparse()
+        x.add_(x)
+        x.add_(x)
+        self.assertLessEqual(x._nnz(), 10)
+
+        x.sub_(2 * x)
+        x.sub_(2 * x)
+        self.assertLessEqual(x._nnz(), 10)
+
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -917,9 +928,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and (
-            not torch.version.cuda
-            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        TEST_CUDA and _get_torch_cuda_version() < [10, 1],
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm(self):
@@ -983,8 +992,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        (not torch.version.cuda
-            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        _get_torch_cuda_version() < [10, 1],
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self):
@@ -1019,21 +1027,21 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        not IS_WINDOWS,
-        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows"
+        not IS_WINDOWS or _get_torch_cuda_version() >= [11, 0],
+        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
     def test_bmm_windows_error(self):
         a = torch.rand(2, 2, 2).to_sparse().cuda()
         b = torch.rand(2, 2, 2).cuda()
         with self.assertRaisesRegex(
                 RuntimeError,
-                "bmm sparse-dense CUDA is not supported on Windows"):
+                "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
             ab = a.bmm(b)
 
     @cuda_only
+    @skipIfRocm
     @unittest.skipIf(
-        (torch.version.cuda
-            and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
+        _get_torch_cuda_version() >= [10, 1],
         "this test ensures bmm gives error if CUDA version is less than 10.1"
     )
     def test_bmm_cuda_version_error(self):
@@ -1071,6 +1079,51 @@ class TestSparse(TestCase):
         test_shape(0, 100, 100, 0)
         test_shape(1000, 0, 100, 0)
         test_shape(1000, 100, 0, 0)
+
+    @cpu_only
+    def test_sspaddmm(self):
+
+        def test_shape(di, dj, dk, nnz):
+            x = self._gen_sparse(2, nnz, [di, dj])[0]
+            t = self._gen_sparse(2, nnz, [di, dk])[0]
+            y = torch.randn(dj, dk)
+            alpha = random.random()
+            beta = random.random()
+
+            res = t.sspaddmm(x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y, beta=beta, alpha=alpha)
+            self.assertEqual(self.safeToDense(res), expected)
+
+            res = t.sspaddmm(x, y)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y)
+            self.assertEqual(self.safeToDense(res), expected)
+
+        test_shape(7, 5, 3, 20)
+        test_shape(1000, 100, 100, 20)
+        test_shape(3000, 64, 300, 20)
+        test_shape(0, 100, 100, 0)
+        test_shape(1000, 0, 100, 0)
+        test_shape(1000, 100, 0, 0)
+
+        # Test code from issue https://github.com/pytorch/pytorch/issues/45113
+        batch_size, input_size, hidden_size = 5, 3, 7
+
+        # Create coalesced sparse tensor as in the issue
+        weight = torch.randn(hidden_size, input_size).to_sparse()
+        self.assertTrue(weight.is_coalesced())
+        self.assertFalse(weight._indices().is_contiguous())
+        # Create un/coalesced sparse tensor
+        bias = torch.randn((hidden_size, 1)).to_sparse()
+        bias = torch.cat([bias] * batch_size, dim=1)
+
+        if not self.is_uncoalesced:
+            bias = bias.coalesce()
+
+        x = torch.randn(input_size, batch_size)
+        res = bias.sspaddmm(weight, x)
+
+        true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
+        self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     def test_sparse_addmm(self):
         def test_shape(m, n, p, nnz, broadcast):
@@ -1224,7 +1277,7 @@ class TestSparse(TestCase):
         y = y.bfloat16()
         res_bf16 = torch.add(x, y)
         res_bf16 = res_bf16.float()  # to compare with reference
-        self.assertEqual(res_fp32, res_bf16, prec=1e-2)
+        self.assertEqual(res_fp32, res_bf16, atol=1e-2, rtol=0)
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
@@ -1235,6 +1288,23 @@ class TestSparse(TestCase):
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
+
+        # Unsupported arguments should error
+        kwarg_error_pairs = [
+            ({'keepdim': True},
+             RuntimeError, r'norm_sparse currently does not support keepdim=True'),
+            ({'dim': 0},
+             RuntimeError, r'norm_sparse currently only supports full reductions'),
+            ({'dtype': torch.double, 'p': 'fro'},
+             ValueError, r'dtype argument is not supported in frobenius norm'),
+            ({'dtype': torch.double, 'p': 0},
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument")
+        ]
+        x = self._gen_sparse(3, 10, 100)[0]
+        for kwargs, err, msg in kwarg_error_pairs:
+            with self.assertRaisesRegex(err, msg):
+                x.norm(**kwargs)
+
 
     @skipIfRocm
     def test_sparse_sum(self):
@@ -1345,14 +1415,6 @@ class TestSparse(TestCase):
         y2 = x1.clone()
         y2.div_(37.5)
         expected = self.safeToDense(x1) / 37.5
-        self.assertEqual(self.safeToDense(y1), expected)
-        self.assertEqual(self.safeToDense(y2), expected)
-
-        y1 = torch.true_divide(x1, 37.5)
-        y2 = x1.clone()
-        if y2.dtype.is_floating_point or y2.dtype.is_complex:
-            y2.true_divide_(37.5)
-        expected = torch.true_divide(self.safeToDense(x1), 37.5)
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
@@ -1591,6 +1653,100 @@ class TestSparse(TestCase):
         test_shape([0, 3, 4], [3, 4, 5, 6], [0])
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
+        sparse_tensor, _, _ = self._gen_sparse(len([2, 3]), 9, [2, 3] + [5, 6])
+        data = (sparse_tensor, sparse_tensor, sparse_tensor, sparse_tensor.unsqueeze(0))
+        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format, torch.channels_last_3d]
+        for x, mem_format in zip(data, mem_formats):
+
+            with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
+                result = torch.zeros_like(x, memory_format=mem_format)
+
+            result = torch.zeros_like(x, layout=torch.strided, memory_format=mem_format)
+            self.assertTrue(result.layout == torch.strided)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
+        ):
+            dense_tensor = sparse_tensor.to_dense()
+            result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
+
+    def _assert_sparse_invars(self, t):
+        # SparseTensor has the following invariants:
+        # - sparse_dim + dense_dim = len(SparseTensor.shape)
+        # - SparseTensor._indices().shape = (sparse_dim, nnz)
+        # - SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+        self.assertEqual(t.sparse_dim() + t.dense_dim(), len(t.shape))
+        self.assertEqual(tuple(t._indices().shape), (t.sparse_dim(), t._nnz()))
+        self.assertEqual(tuple(t._values().shape), (t._nnz(), ) + t.shape[t.sparse_dim():])
+
+    def _test_empty_like(self, sparse_tensor):
+
+        result = torch.empty_like(sparse_tensor)
+        self.assertTrue(result.is_sparse)
+        self._assert_sparse_invars(result)
+        self.assertEqual(result.shape, sparse_tensor.shape)
+        self.assertEqual(result.dtype, sparse_tensor.dtype)
+        self.assertEqual(result.device, sparse_tensor.device)
+        self.assertEqual(result.sparse_dim(), sparse_tensor.sparse_dim())
+        self.assertEqual(result.dense_dim(), sparse_tensor.dense_dim())
+
+        sparse_tensor, _, _ = self._gen_sparse(len([2, 3]), 9, [2, 3] + [5, 6])
+        data = (sparse_tensor, sparse_tensor, sparse_tensor, sparse_tensor.unsqueeze(0))
+        mem_formats = [torch.channels_last, torch.contiguous_format, torch.preserve_format, torch.channels_last_3d]
+        for x, mem_format in zip(data, mem_formats):
+
+            with self.assertRaisesRegex(RuntimeError, "memory format option is only supported by strided tensors"):
+                result = torch.empty_like(x, memory_format=mem_format)
+
+            result = torch.empty_like(x, layout=torch.strided, memory_format=mem_format)
+            self.assertTrue(result.layout == torch.strided)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
+        ):
+            dense_tensor = sparse_tensor.to_dense()
+            result = torch.empty_like(dense_tensor, layout=torch.sparse_coo)
+
+    def test_empty_like(self):
+        # tests https://github.com/pytorch/pytorch/issues/43699
+
+        if not self.is_uncoalesced:
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0, 1, 2]]),
+                values=torch.tensor([3.0, -4.0, 5.0]),
+                size=[3, ],
+                device=self.device
+            ).coalesce()
+            self._test_empty_like(input_coalesced)
+
+            # hybrid sparse input
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[1, 3], [2, 4]]),
+                values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+                size=[4, 5, 2],
+                device=self.device
+            ).coalesce()
+            self._test_empty_like(input_coalesced)
+
+        if self.is_uncoalesced:
+            # test uncoalesced input
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                size=[3, ],
+                device=self.device
+            )
+            self._test_empty_like(input_uncoalesced)
+
+            # test on empty sparse tensor
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.zeros([2, 0]),
+                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                device=self.device
+            )
+            self._test_empty_like(input_uncoalesced)
+
     def _test_narrow(self, input, narrow_args):
         expected = input.to_dense().narrow(*narrow_args)
         self.assertEqual(expected, input.narrow_copy(*narrow_args).to_dense())
@@ -1618,53 +1774,182 @@ class TestSparse(TestCase):
 
         self.assertRaises(RuntimeError, lambda: with_dense.narrow_copy(10, 0, 3))  # dim > sparseDim + denseDim
 
-    def _test_log1p_tensor(self, input, dense_tensor):
+    def _test_log1p_tensor(self, sparse_tensor):
+        dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.log1p()
-        self.assertEqual(expected_output, input.log1p().to_dense())
-        self.assertEqual(expected_output, input.coalesce().log1p_().to_dense())
 
-        # test in-place op on uncoalesced input
-        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported yet"):
-            input.log1p_()
+        self.assertEqual(expected_output, sparse_tensor.log1p().to_dense())
+        self.assertEqual(expected_output, sparse_tensor.coalesce().log1p_().to_dense())
 
-        input.requires_grad_()
-        self.assertTrue(input.requires_grad)
+        if self.is_uncoalesced:
+            # test in-place op on uncoalesced input
+            with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                sparse_tensor.log1p_()
+
+        sparse_tensor.requires_grad_()
+        self.assertTrue(sparse_tensor.requires_grad)
 
         # test autograd
-        x = input.clone()
-        y = input.log1p()
+        x = sparse_tensor.clone()
+        y = sparse_tensor.log1p()
         with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
             y.backward(x)
 
     def test_log1p(self):
-        input = torch.sparse_coo_tensor(
-            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).clone().detach(),
-            torch.FloatTensor([3, 4, 5]),
-            torch.Size([3]),
-            device=self.device)
-        self._test_log1p_tensor(input, torch.as_tensor([3, 4, 5], dtype=torch.float32))
+        if not self.is_uncoalesced:
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0], [1], [2]]).transpose(1, 0),
+                values=torch.tensor([3.0, 4.0, 5.0]),
+                size=[3, ],
+                device=self.device
+            ).coalesce()
+            self._test_log1p_tensor(input_coalesced)
 
-        # test uncoalesced input
-        input_uncoalesced = torch.sparse_coo_tensor(
-            torch.LongTensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0).clone().detach(),
-            torch.FloatTensor([2, 3, 4, 1, 1, 1]),
-            torch.Size([3]),
-            device=self.device)
-        self._test_log1p_tensor(input_uncoalesced, torch.as_tensor([3, 4, 5], dtype=torch.float32))
+            # hybrid sparse input
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[1, 3], [2, 4]]),
+                values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
+                size=[4, 5, 2],
+                device=self.device
+            ).coalesce()
+            self._test_log1p_tensor(input_coalesced)
 
-        input = torch.sparse_coo_tensor(
-            torch.zeros([2, 0]),
-            torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
-            torch.Size([0, 0, 5, 5, 5, 5, 5, 5, 0]),
-            device=self.device)
-        self._test_log1p_tensor(input, torch.zeros([0, 0, 5, 5, 5, 5, 5, 5, 0]))
+        if self.is_uncoalesced:
+            # test uncoalesced input
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                values=torch.tensor([2.0, 3.0, 4.0, 1.0, 1.0, 1.0]),
+                size=[3, ],
+                device=self.device
+            )
+            self._test_log1p_tensor(input_uncoalesced)
 
-        input = torch.sparse_coo_tensor(
-            torch.zeros([1, 5]),
-            torch.zeros([5, 6, 0]),
-            torch.Size([5, 6, 0]),
-            device=self.device)
-        self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
+            # test on empty sparse tensor
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.zeros([2, 0]),
+                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                device=self.device
+            )
+            self._test_log1p_tensor(input_uncoalesced)
+
+    def _test_neg_negative(self, sparse_tensor):
+        dense_tensor = sparse_tensor.to_dense()
+        expected_output = dense_tensor.neg()
+
+        ops = (
+            torch.neg, torch.Tensor.neg, torch.Tensor.neg_,
+            torch.negative, torch.Tensor.negative, torch.Tensor.negative_,
+            operator.neg
+        )
+        for op in ops:
+            sparse_tensor_copy = sparse_tensor.clone()
+            self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+
+            if op in (torch.neg, torch.negative):
+                sparse_tensor_out = torch.zeros_like(sparse_tensor)
+                op(sparse_tensor, out=sparse_tensor_out)
+                self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
+    def test_neg_negative(self):
+
+        if not self.is_uncoalesced:
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0, 1, 2]]),
+                values=torch.tensor([3.0, -4.0, 5.0]),
+                size=[3, ],
+                device=self.device
+            ).coalesce()
+            self._test_neg_negative(input_coalesced)
+
+            # hybrid sparse input
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[1, 3], [2, 4]]),
+                values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+                size=[4, 5, 2],
+                device=self.device
+            ).coalesce()
+            self._test_neg_negative(input_coalesced)
+
+        if self.is_uncoalesced:
+            # test uncoalesced input
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                size=[3, ],
+                device=self.device
+            )
+            self._test_neg_negative(input_uncoalesced)
+
+            # test on empty sparse tensor
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.zeros([2, 0]),
+                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                device=self.device
+            )
+            self._test_neg_negative(input_uncoalesced)
+
+    def _test_asin_arcsin(self, sparse_tensor):
+        dense_tensor = sparse_tensor.to_dense()
+        expected_output = dense_tensor.asin()
+
+        ops = (
+            torch.asin, torch.Tensor.asin,
+            torch.arcsin, torch.Tensor.arcsin,
+        )
+        for op in ops:
+            self.assertEqual(expected_output, op(sparse_tensor).to_dense())
+            if op in (torch.asin, torch.arcsin):
+                sparse_tensor_out = torch.zeros_like(sparse_tensor)
+                op(sparse_tensor, out=sparse_tensor_out)
+                self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
+        for op in (torch.Tensor.asin_, torch.Tensor.arcsin_):
+            self.assertEqual(expected_output, op(sparse_tensor.clone().coalesce()).to_dense())
+            if self.is_uncoalesced:
+                # test in-place op on uncoalesced input
+                with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                    op(sparse_tensor)
+
+    def test_asin_arcsin(self):
+
+        if not self.is_uncoalesced:
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0, 1, 2, 3]]),
+                values=torch.tensor([0.5, -0.5, 0.7, -0.7]),
+                size=[4, ],
+                device=self.device
+            ).coalesce()
+            self._test_asin_arcsin(input_coalesced)
+
+            # hybrid sparse input
+            input_coalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[1, 3], [2, 4]]),
+                values=torch.tensor([[-0.1, 0.24], [-0.44, 0.1]]),
+                size=[4, 5, 2],
+                device=self.device
+            ).coalesce()
+            self._test_asin_arcsin(input_coalesced)
+
+        if self.is_uncoalesced:
+            # test uncoalesced input
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                values=torch.tensor([0.3, -0.3, -0.4, 0.3, -0.5, 0.15]),
+                size=[3, ],
+                device=self.device
+            )
+            self._test_asin_arcsin(input_uncoalesced)
+
+            # test on empty sparse tensor
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.zeros([2, 0]),
+                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                device=self.device
+            )
+            self._test_asin_arcsin(input_uncoalesced)
 
     def test_mv(self):
         def test_shape(di, dj, dk, nnz):
@@ -1961,21 +2246,28 @@ class TestSparse(TestCase):
     @cuda_only
     def test_factory_device_type_inference(self):
         # both indices/values are CUDA
-        shape = (1, 3)
-        for indices_device in ['cuda', 'cpu']:
-            for values_device in ['cuda', 'cpu']:
-                for sparse_device in ['cuda', 'cpu', None]:
-                    for test_empty_tensor in [True, False]:
-                        if test_empty_tensor:
-                            t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
-                                                        self.value_empty(1, 0).to(values_device),
-                                                        (1, 3, 0), device=sparse_device)
-                        else:
-                            t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
-                                                        torch.tensor([1.], device=values_device),
-                                                        (1, 3), device=sparse_device)
-                        should_be_cuda = sparse_device == 'cuda' or (sparse_device is None and values_device == 'cuda')
-                        self.assertEqual(should_be_cuda, t.is_cuda)
+
+        cpu_cuda = ('cpu', 'cuda')
+        cpu_cuda_none = cpu_cuda + (None,)
+        for indices_device, values_device, device in itertools.product(cpu_cuda,
+                                                                       cpu_cuda,
+                                                                       cpu_cuda_none):
+            indices = torch.tensor(([0], [2]), device=indices_device)
+            values = torch.tensor([1.], device=values_device)
+            empty_values = self.value_empty(1, 0).to(values_device)
+            shape = (1, 3)
+            empty_shape = (1, 3, 0)
+            if device is None and indices_device != values_device:
+                with self.assertRaises(RuntimeError):
+                    torch.sparse_coo_tensor(indices, values, shape, device=device)
+                with self.assertRaises(RuntimeError):
+                    torch.sparse_coo_tensor(indices, empty_values, empty_shape, device=device)
+            else:
+                t = torch.sparse_coo_tensor(indices, values, shape, device=device)
+                t_empty = torch.sparse_coo_tensor(indices, empty_values, empty_shape, device=device)
+                should_be_cuda = (device == 'cuda' or (device is None and values_device == 'cuda'))
+                self.assertEqual(should_be_cuda, t.is_cuda)
+                self.assertEqual(t.is_cuda, t_empty.is_cuda)
 
     @cpu_only
     def test_factory_copy(self):
@@ -2202,7 +2494,7 @@ class TestSparse(TestCase):
         self.assertFalse(torch.sparse_coo_tensor(([0, 0],), (0., 0.), (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0, 0],), (-1., 1.), (1,)).is_nonzero())
         self.assertTrue(torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, []).is_nonzero())  # scalar sparse tensor
-        with self.assertRaisesRegex(RuntimeError, "bool value of Tensor with no values is ambiguous"):
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch.sparse_coo_tensor(([0, 1],), self.value_empty(2, 0), (4, 0)).is_nonzero()
 
     def test_allow_tensor_metadata_change(self):
@@ -2332,15 +2624,6 @@ class TestSparse(TestCase):
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
 
-    def test_true_divide_by_sparse_error(self):
-        def fn():
-            x = torch.tensor(1., device=self.device).to_sparse()
-            y = torch.tensor(1., device=self.device).to_sparse()
-            torch.true_divide(x, y)
-
-        self.assertRaisesRegex(RuntimeError, 'Sparse true division requires',
-                               fn)
-
     def test_floor_divide_by_sparse_error(self):
         self.assertRaisesRegex(RuntimeError, 'Sparse floor division requires',
                                lambda: torch.tensor(1., device=self.device).to_sparse()
@@ -2350,6 +2633,298 @@ class TestSparse(TestCase):
     def test_sparse_to_numpy(self):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
+
+    @skipIfRocm
+    def test_softmax(self):
+        import torch.nn.functional as F
+
+        def to_dense(sparse, fill_value=None):
+            """
+            Return dense tensor from a sparse tensor using given fill value.
+            """
+            if fill_value is None or fill_value == 0:
+                return sparse.to_dense()
+            sparse = sparse.coalesce()
+            dense = torch.full(sparse.shape, fill_value, dtype=sparse.dtype, device=sparse.device)
+            for idx, value in zip(sparse._indices().t(), sparse._values()):
+                dense[tuple(idx)] = value
+            return dense
+
+        def softmax_to_dense(sparse, dim):
+            """Dense softmax of a sparse tensor. Useful only for testing softmax
+            correctness.
+
+            When computing softmax of a sparse tensor, the value of
+            unspecified items is negative infinity rather than zero so
+            that
+
+              softmax(sparse.to_dense(fill_value=-inf), dim) == softmax(sparse, dim).to_dense()
+
+            holds for non-empty lines. One empty lines, the softmax
+            values are defined as 0 in order to preserve the sparsity
+            of result.
+
+            Note that in PyTorch, ``to_dense`` method does not
+            implement the ``fill_value`` keyword argument.
+            """
+            dtype = sparse.dtype
+            device = sparse.device
+            dense = to_dense(sparse, fill_value=-float('inf'))
+            r = F.softmax(dense, dim)
+            # softmax on empty lines results nan, replace with zeros to match the definition
+            r[r != r] = 0
+            return r
+
+        def sparse_softmax(sparse, dim):
+            """Pure Python softmax of a sparse tensor. Assuming -inf for
+            unspecified sparse tensor data. This is a prototype of
+            sparse softmax algorithm in Python.
+            """
+            dtype = sparse.dtype
+            device = sparse.device
+
+            # softmax is non-linear operation, so sparse tensors must
+            # be coalesced.
+            sparse = sparse.coalesce()
+            inf = float('inf')
+            indices = sparse._indices()
+            values = sparse._values()
+
+            if dim < sparse.sparse_dim():
+                nnz = sparse._nnz()
+
+                # compute pool indices
+                size = sparse.size()
+                strides = torch.ones((sparse.sparse_dim(), 1), dtype=indices.dtype, device=indices.device)
+                for i in reversed(range(sparse.sparse_dim() - 1)):
+                    strides[i, 0] = strides[i + 1, 0] * size[i + 1]
+                strides[dim, 0] = 0
+
+                pool = (indices * strides).sum(dim=0)
+                i2p = {}
+                for i in range(nnz):
+                    c = int(pool[i])
+                    if c not in i2p:
+                        i2p[c] = len(i2p)
+                    pool[i] = i2p[c]
+
+                # compute max
+                dense_size = tuple(size[sparse.sparse_dim():])
+                mx = torch.empty((pool.max() + 1,) + dense_size, dtype=dtype, device=device)
+                mx[:] = -inf
+                for n in range(nnz):
+                    p = pool[n]
+                    mx[p] = torch.max(mx[p], values[n])
+
+                # apply exp to (v - mx) and sum the results
+                exp_values = torch.empty_like(values)
+                exp_sums = torch.zeros_like(mx)
+                for n in range(nnz):
+                    p = pool[n]
+                    v = exp_values[n] = (values[n] - mx[p]).exp()
+                    exp_sums[p] = exp_sums[p] + v
+
+                # normalize with the sum of exponents
+                for n in range(nnz):
+                    p = pool[n]
+                    exp_values[n] = exp_values[n] / exp_sums[p]
+
+                return torch.sparse_coo_tensor(indices,
+                                               exp_values,
+                                               sparse.size(),
+                                               dtype=dtype, device=device)
+
+            elif dim < sparse.sparse_dim() + sparse.dense_dim():
+                return torch.sparse_coo_tensor(indices,
+                                               F.softmax(values, dim - sparse.sparse_dim() + 1),
+                                               sparse.size(),
+                                               dtype=dtype, device=device)
+            else:
+                raise ValueError(
+                    '`dim(=%s)` must be smaller than `sparse_dim(=%s) + dense_dim(=%s)`'
+                    % (dim, sparse.sparse_dim(), sparse.dense_dim()))
+
+        def softmax_jacobian_analytic(x, dim):
+            """Return Jacobian of softmax using analytic formula
+
+               D_jS_i = S_i * (1[i==j] - S_j).
+
+            where S = softmax(x, dim), x is dense tensor, i,j in
+            range(x.shape[dim]).
+            """
+            y = F.softmax(x, dim)
+            y[y != y] = 0  # replace nan-s with zeros
+            J = torch.zeros((x.shape[dim],) + tuple(x.shape), dtype=x.dtype, device=x.device)
+            si = [slice(None)] * len(y.shape)
+            sj = [slice(None)] * len(y.shape)
+            s = [slice(None)] * len(J.shape)
+            for i in range(y.shape[dim]):
+                si[dim] = i
+                s[dim + 1] = i
+                yi = y[tuple(si)]
+                for j in range(y.shape[dim]):
+                    sj[dim] = j
+                    s[0] = j
+                    if i == j:
+                        J[tuple(s)] = yi * (1 - yi)
+                    else:
+                        yj = y[tuple(sj)]
+                        J[tuple(s)] = - yi * yj
+                    sj[dim] = slice(None)
+                si[dim] = slice(None)
+                s[dim + 1] = slice(None)
+            return J
+
+        def softmax_jacobian_autograd(x, dim, log=False):
+            """Return Jacobian of softmax using PyTorch autograd feature.
+
+            x can be dense or sparse tensor.
+            """
+            import itertools
+
+            if x.is_sparse:
+                x = x.coalesce()
+
+            dtype = x.dtype
+            device = x.device
+            shape = tuple(x.shape)
+            J = torch.zeros((shape[dim],) + shape, dtype=dtype, device=device)
+            for i in range(shape[dim]):
+                if x.is_sparse:
+                    sparse_dim = x.sparse_dim()
+                    dense_dim = x.dense_dim()
+                    if dim < sparse_dim:
+                        ranges = []
+                        for j, sz in enumerate(shape[:sparse_dim]):
+                            if dim == j:
+                                ranges.append([i])
+                            else:
+                                ranges.append(list(range(sz)))
+                        indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
+                        values = torch.ones((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
+                    else:
+                        ranges = []
+                        for j, sz in enumerate(shape[:sparse_dim]):
+                            ranges.append(list(range(sz)))
+                        indices = torch.tensor(list(itertools.product(*ranges)), dtype=torch.long, device=device).t()
+                        values = torch.zeros((indices.shape[1],) + shape[sparse_dim:], dtype=dtype, device=device)
+                        sv = [slice(None)] * (dense_dim + 1)
+                        sv[dim - sparse_dim + 1] = i
+                        values[tuple(sv)] = 1
+                    v = torch.sparse_coo_tensor(indices, values, shape, dtype=dtype, device=device)
+                else:
+                    v = torch.zeros_like(x)
+                    sv = [slice(None)] * len(v.shape)
+                    sv[dim] = i
+                    v[tuple(sv)] = 1
+                x_ = x.clone()
+                x_.requires_grad_(True)
+
+                if log:
+                    if x_.is_sparse:
+                        y = torch.sparse.log_softmax(x_, dim)
+                    else:
+                        y = F.log_softmax(x_, dim)
+                else:
+                    if x_.is_sparse:
+                        y = torch.sparse.softmax(x_, dim)
+                    else:
+                        y = F.softmax(x_, dim)
+                        # replace nan-s with zeros
+                        y.data[y != y] = 0
+                y.backward(v)
+                g = x_.grad
+                if not g.is_sparse:
+                    # replace nan-s with zeros
+                    g.data[g != g] = 0
+                J[i] = g.to_dense() if g.is_sparse else g
+            return J
+
+        def test_op(sparse_dims, nnz, with_size):
+            if isinstance(with_size, Number):
+                with_size = [with_size] * sparse_dims
+
+            x, i, v = self._gen_sparse(sparse_dims, nnz, with_size)
+
+            def sparse_log(x):
+                return torch.sparse_coo_tensor(x._indices(), x._values().log(),
+                                               x.size(), dtype=x.dtype, device=x.device)
+
+            for dim in range(x.sparse_dim() + x.dense_dim()):
+                # Check sparse softmax definition
+
+                # check Python sparse softmax
+                y = sparse_softmax(x, dim)
+                r1 = softmax_to_dense(x, dim)
+                r2 = y.to_dense()
+                self.assertEqual(r1, r2)
+
+                # check C++ sparse softmax
+                y1 = torch.sparse.softmax(x, dim)
+                self.assertEqual(y, y1)
+
+                # check C++ sparse log_softmax
+                ly1 = torch.sparse.log_softmax(x, dim)
+                self.assertEqual(ly1, sparse_log(y1))
+
+                # Check autograd support on sparse softmax
+
+                # check softmax Jacobian definition for dense input
+                x1 = to_dense(x, fill_value=float('-inf'))
+                J = softmax_jacobian_analytic(x1, dim)
+                assert J.shape[0] == x.shape[dim]
+                assert J.shape[dim + 1] == x.shape[dim]
+
+                # check softmax Jacobian from autograd, dense input
+                J2 = softmax_jacobian_autograd(x1, dim)
+                self.assertEqual(J, J2)
+
+                # check softmax Jacobian from autograd, sparse input
+                J3 = softmax_jacobian_autograd(x, dim)
+                self.assertEqual(J, J3)
+
+                '''
+                y = softmax(x, dim)
+                z = log(y) = log_softmax(x, dim)
+                Dy/Dx = J
+                Dz/Dx = Dz/Dy Dy/Dx = 1/y * J
+                => J = J_log * y
+                '''
+                # log_softmax Jacobian from autograd, dense input
+                J2_log = softmax_jacobian_autograd(x1, dim, log=True)
+
+                # log_softmax Jacobian from autograd, sparse input
+                J3_log = softmax_jacobian_autograd(x, dim, log=True)
+
+                J = J.transpose(0, dim + 1)
+                J2_log = J2_log.transpose(0, dim + 1)
+                J3_log = J3_log.transpose(0, dim + 1)
+                self.assertEqual(J, J2_log * r1)
+                self.assertEqual(J, J3_log * r1)
+
+                if dim == 0:
+                    # check dtype argument
+                    other_dtype = torch.float32
+                    y2 = torch.sparse.softmax(x, dim, dtype=other_dtype)
+                    self.assertEqual(y2.dtype, other_dtype)
+                    self.assertEqual(y2, y1.type(other_dtype))
+
+                    ly2 = torch.sparse.log_softmax(x, dim, dtype=other_dtype)
+                    self.assertEqual(ly2.dtype, other_dtype)
+                    self.assertEqual(ly2, ly1.type(other_dtype))
+
+        test_op(1, 10, [3])
+        test_op(1, 10, [2, 3])
+        test_op(1, 10, [3, 2])
+        test_op(2, 10, [2, 3, 4])
+        test_op(2, 10, [3, 4])
+        test_op(2, 5, [5, 4])
+        test_op(2, 10, [3, 4, 2])
+        test_op(3, 10, [3, 4, 2])
+        test_op(3, 100, [3, 4, 2])
+        test_op(3, 100, [3, 4, 2, 3])
+        test_op(3, 100, [3, 4, 2, 3, 5, 2])
+        test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
 
 class TestUncoalescedSparse(TestSparse):

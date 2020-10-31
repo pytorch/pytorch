@@ -1,11 +1,10 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
 
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/codegen/fuser/interface.h"
-#include "torch/csrc/jit/frontend/code_template.h"
 #include "torch/csrc/jit/frontend/tracer.h"
 #include "torch/csrc/jit/ir/alias_analysis.h"
 #include "torch/csrc/jit/ir/attributes.h"
@@ -57,28 +56,27 @@
 namespace torch {
 namespace jit {
 
-void testFusion() {
-  auto testSimple = [&] {
-    const auto graph_string = R"IR(
+TEST(FuserTest, TestSimple_CUDA) {
+  const auto graph_string = R"IR(
       graph(%0 : Tensor,
             %1 : Tensor):
         %2 : Tensor = aten::mul(%0, %1)
         return (%2))IR";
-    Graph graph;
-    torch::jit::parseIR(graph_string, &graph);
+  Graph graph;
+  torch::jit::parseIR(graph_string, &graph);
 
-    auto a = at::rand({3, 4}, at::kCUDA);
-    auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
-    auto o = at::zeros({3, 4}, at::kCUDA);
-    auto outputs = debugLaunchGraph(graph, {a, b});
-    ASSERT_EQ(outputs.size(), 1);
-    auto o2 = a * b;
-    float max_diff = (o2 - outputs[0]).abs().max().item<double>();
-    // std::cout << "max diff: " << max_diff << "\n";
-    ASSERT_EQ(max_diff, 0);
-  };
-  testSimple();
+  auto a = at::rand({3, 4}, at::kCUDA);
+  auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
+  auto o = at::zeros({3, 4}, at::kCUDA);
+  auto outputs = debugLaunchGraph(graph, {a, b});
+  ASSERT_EQ(outputs.size(), 1);
+  auto o2 = a * b;
+  float max_diff = (o2 - outputs[0]).abs().max().item<double>();
+  // std::cout << "max diff: " << max_diff << "\n";
+  ASSERT_EQ(max_diff, 0);
+}
 
+TEST(FuserTest, TestOne_CUDA) {
   auto testOne = [&](int ti, int tj) {
     const auto graph_string = R"IR(
       graph(%0 : Tensor,
@@ -133,7 +131,9 @@ void testFusion() {
   testOne(0, 1);
   testOne(1, 2);
   testOne(0, 2);
+}
 
+TEST(FuserTest, FusedConcat_CUDA) {
   const auto graph_string0 = R"IR(
     graph(%0 : Tensor,
           %1 : Tensor):
@@ -176,7 +176,32 @@ void testFusion() {
   };
 }
 
-void testRegisterFusionCachesKernel() {
+TEST(FuserTest, FusionAliasing) {
+  const auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor):
+      %12 : int = prim::Constant[value=1]()
+      %2.1 : Tensor = aten::mul(%0, %1)
+      %2 : Tensor = aten::mul(%2.1, %1)
+      %3 : Tensor = aten::add_(%2, %1, %12)
+      %4 : Tensor = aten::mul(%2, %1)
+      %5 : Tensor = aten::add(%2, %4, %12)
+      return (%5))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseGraph(g);
+
+  // We should not be able to fuse across the in-place operation here.
+  testing::FileCheck()
+      .check("prim::FusionGroup_0")
+      ->check("aten::add_")
+      ->check("prim::FusionGroup_1")
+      ->run(*g);
+}
+
+TEST(FuserTest, KernelCaching) {
   // Constructs two functionally equivalent graphs
   const auto graph0_string = R"IR(
     graph(%0 : Float(2, 3, 4),

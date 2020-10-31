@@ -1,3 +1,5 @@
+:orphan:
+
 .. _remote-reference-protocol:
 
 Remote Reference Protocol

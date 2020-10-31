@@ -2,6 +2,8 @@ import time
 from collections import defaultdict
 from functools import partial
 
+import torch
+
 
 # Unfortunately it doesn't seem as if there was any way to get TensorBoard to do
 # anything without having TF installed, and so this file has a hard dependency on it
@@ -12,7 +14,7 @@ try:
     from tensorflow.python.summary.writer.writer import FileWriter
 except ImportError:
     raise ImportError("TensorBoard visualization of GraphExecutors requires having "
-                      "TensorFlow installed")
+                      "TensorFlow installed") from None
 
 
 def dump_tensorboard_summary(graph_executor, logdir):

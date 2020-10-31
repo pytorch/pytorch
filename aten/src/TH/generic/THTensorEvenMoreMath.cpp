@@ -75,50 +75,6 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 
 #if !defined(TH_REAL_IS_HALF) /* non half part */
 
-void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
-{
-  at::NoNamesGuard guard;
-  ptrdiff_t numel = THByteTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
-                   if (*mask_data > 1)
-                   {
-                     THFree(mask_counter);
-                     THFree(src_counter);
-                     THError("Mask tensor can take 0 and 1 values only");
-                   }
-                   else if (*mask_data == 1)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
-void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
-{
-  at::NoNamesGuard guard;
-  ptrdiff_t numel = THBoolTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
-                   if (*mask_data)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 {
   THTensor *srct = THTensor_(newContiguous)(src);
@@ -200,64 +156,6 @@ void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
 
 #if !defined(TH_REAL_IS_BFLOAT16) /* non bfloat16 part*/
 
-accreal THTensor_(sumall)(THTensor *tensor)
-{
-  accreal sum = 0;
-  TH_TENSOR_APPLY_REDUCTION_SUM_PARALLEL(
-    scalar_t, tensor, *tensor_data, sum, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  return sum;
-}
-
-scalar_t THTensor_(minall)(THTensor *tensor)
-{
-  scalar_t theMin;
-  scalar_t value;
-
-  THArgCheck(
-      THTensor_(nElement)(tensor) > 0,
-      1,
-      "cannot perform reduction function min "
-      "on tensor with no elements because the "
-      "operation does not have an identity"
-  );
-
-  theMin = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value<theMin in the case of NaNs */
-                  if(!(value >= theMin))
-                  {
-                    theMin = value;
-                    th_isnan_break(value)
-                  });
-  return theMin;
-}
-
-scalar_t THTensor_(maxall)(THTensor *tensor)
-{
-  scalar_t theMax;
-  scalar_t value;
-
-  THArgCheck(
-      THTensor_(nElement)(tensor) > 0,
-      1,
-      "cannot perform reduction function max "
-      "on tensor with no elements because the "
-      "operation does not have an identity"
-  );
-
-  theMax = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value>theMax in the case of NaNs */
-                  if(!(value <= theMax))
-                  {
-                    theMax = value;
-                    th_isnan_break(value)
-                  });
-  return theMax;
-}
-
 void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;
@@ -318,50 +216,6 @@ static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t nu
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
-void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
-{
-  THTensor_(resizeNd)(r_, index->dim(), THTensor_getSizePtr(index), NULL);
-  THTensor* dst = THTensor_(newContiguous)(r_);
-
-  index = THLongTensor_newContiguous(index);
-  int64_t* index_data = THLongTensor_data(index);
-  ptrdiff_t srcElements = THTensor_(nElement)(src);
-  scalar_t* src_data = src->data<scalar_t>();
-  scalar_t* dst_data = dst->data<scalar_t>();
-  ptrdiff_t nIndices = THLongTensor_nElement(index);
-  int isContiguous = THTensor_(isContiguous)(src);
-
-  // Exceptions must not be thrown across parallel sections, so we
-  // record the position of the invalid index and throw the exception after the
-  // loop.
-  std::atomic<int64_t> invalidIdxPos(-1);
-
-  at::parallel_for(0, nIndices, TH_OMP_OVERHEAD_THRESHOLD,
-      [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t idx = index_data[i];
-      if (idx < srcElements && idx >= -srcElements) {
-        idx = THTensor_(wrapLinearIndex)(idx, srcElements);
-        if (isContiguous) {
-          dst_data[i] = src_data[idx];
-        } else {
-          dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
-        }
-      } else {
-        int64_t tmp = -1;
-        invalidIdxPos.compare_exchange_strong(tmp, i);
-      }
-    }
-  });
-
-  if (invalidIdxPos >= 0) {
-    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
-  }
-
-  THLongTensor_free(index);
-  THTensor_(freeCopyTo)(dst, r_);
-}
-
 void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
 {
   THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
@@ -410,7 +264,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
     {
       tSlice = THTensor_(new)();
       THTensor_(select)(tSlice, tensor,dim,index_data[i]);
-      THTensor_(fill)(tSlice, val);
+      THTensor_wrap(tSlice).fill_(val);
       c10::raw::intrusive_ptr::decref(tSlice);
     }
     else
@@ -420,30 +274,6 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   }
   THLongTensor_free(index);
 }
-
-#if !defined(TH_REAL_IS_BOOL)
-
-accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
-{
-  at::NoNamesGuard guard;
-  if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
-    THError("1D tensors expected, got %dD, %dD tensors",
-       THTensor_nDimension(tensor), THTensor_nDimension(src));
-  }
-  accreal sum = 0;
-  /* we use a trick here. careful with that. */
-  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                   int64_t sz = (tensor_size-tensor_i < src_size-src_i ? tensor_size-tensor_i : src_size-src_i);
-                   sum += THBlas_(dot)(sz, src_data, src_stride, tensor_data, tensor_stride);
-                   tensor_i += sz;
-                   src_i += sz;
-                   tensor_data += sz*tensor_stride;
-                   src_data += sz*src_stride;
-                   break;);
-  return sum;
-}
-
-#endif
 
 #endif
 

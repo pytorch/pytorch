@@ -1,9 +1,9 @@
 # @package layer_model_helper
 # Module caffe2.python.layer_model_helper
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, model_helper, schema, scope, utils, muji
 from caffe2.python.modeling.parameter_info import (
@@ -219,6 +219,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.global_constants = {}
         self.global_constant_initializers = {}
         self.add_global_constant('ONE', 1.0)
+        self.add_global_constant('NAN', float("NaN"))
         self.add_global_constant('ZERO', 0.0)
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
 

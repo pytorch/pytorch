@@ -42,9 +42,23 @@ class TestCustomOperators(unittest.TestCase):
 
         go = torch.ones((), requires_grad=True)
         output.sum().backward(go, False, True)
+        grad = torch.ones(5, 5)
 
-        self.assertTrue(torch.allclose(x.grad, y + torch.ones((5, 5))))
-        self.assertTrue(torch.allclose(y.grad, x + torch.ones((5, 5)) * 2))
+        self.assertTrue(torch.allclose(x.grad, y + grad))
+        self.assertTrue(torch.allclose(y.grad, x + grad * 2))
+
+        # Test with optional arg.
+        x.grad.zero_()
+        y.grad.zero_()
+        z = torch.randn((5, 5), requires_grad=True)
+        output = ops.custom.op_with_autograd(x, 2, y, z)
+        self.assertTrue(output.allclose(x + 2 * y + x * y + z))
+
+        go = torch.ones((), requires_grad=True)
+        output.sum().backward(go, False, True)
+        self.assertTrue(torch.allclose(x.grad, y + grad))
+        self.assertTrue(torch.allclose(y.grad, x + grad * 2))
+        self.assertTrue(torch.allclose(z.grad, grad))
 
     def test_calling_custom_op_with_autograd_in_nograd_mode(self):
         with torch.no_grad():

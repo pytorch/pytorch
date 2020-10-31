@@ -10,7 +10,7 @@
 ### 2.0.7
 
  - Removed need in C++ compiler in cmake build
- - Fixed loads of uninitilized value errors found with Valgrind by memsetting m_dict to 0 in tdefl_init.
+ - Fixed loads of uninitialized value errors found with Valgrind by memsetting m_dict to 0 in tdefl_init.
  - Fix resource leak in mz_zip_reader_init_file_v2
  - Fix assert with mz_zip_writer_add_mem* w/MZ_DEFAULT_COMPRESSION
  - cmake build: install library and headers
@@ -66,7 +66,7 @@ The inflator now has a new failure status TINFL_STATUS_FAILED_CANNOT_MAKE_PROGRE
 - The inflator coroutine func. is subtle and complex so I'm being cautious about this release. I would greatly appreciate any help with testing or any feedback.
          I feel good about these changes, and they've been through several hours of automated testing, but they will probably not fix anything for the majority of prev. users so I'm
          going to mark this release as beta for a few weeks and continue testing it at work/home on various things.
-- The inflator in raw (non-zlib) mode is now usable on gzip or similiar data streams that have a bunch of bytes following the raw deflate data (problem discovered by rustyzip author williamw520).
+- The inflator in raw (non-zlib) mode is now usable on gzip or similar data streams that have a bunch of bytes following the raw deflate data (problem discovered by rustyzip author williamw520).
          This version should *never* read beyond the last byte of the raw deflate data independent of how many bytes you pass into the input buffer. This issue was caused by the various Huffman bitbuffer lookahead optimizations, and
          would not be an issue if the caller knew and enforced the precise size of the raw compressed data *or* if the compressed data was in zlib format (i.e. always followed by the byte aligned zlib adler32).
          So in other words, you can now call the inflator on deflate streams that are followed by arbitrary amounts of data and it's guaranteed that decompression will stop exactly on the last byte.
@@ -104,7 +104,7 @@ Interim bugfix release while I work on the next major release with zip64 and str
 - Retested this build under Windows (VS 2010, including static analysis), tcc  0.9.26, gcc v4.6 and clang v3.3.
 - Added example6.c, which dumps an image of the mandelbrot set to a PNG file.
 - Modified example2 to help test the MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY flag more.
-- In r3: Bugfix to mz_zip_writer_add_file() found during merge: Fix possible src file fclose() leak if alignment bytes+local header file write faiiled
+- In r3: Bugfix to mz_zip_writer_add_file() found during merge: Fix possible src file fclose() leak if alignment bytes+local header file write failed
 - In r4: Minor bugfix to mz_zip_writer_add_from_zip_reader(): Was pushing the wrong central dir header offset, appears harmless in this release, but it became a problem in the zip64 branch
 
 ### v1.14 - May 20, 2012

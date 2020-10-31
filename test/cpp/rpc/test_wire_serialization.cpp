@@ -42,7 +42,7 @@ TEST(WireSerialize, RecopySparseTensors) {
   at::Tensor main = torch::randn({k1K, k1K});
   at::Tensor tiny = main.select(0, 2); // Select a row in the middle
   EXPECT_EQ(tiny.numel(), k1K);
-  EXPECT_EQ(tiny.storage().numel(), k1K * k1K);
+  EXPECT_EQ(tiny.storage().nbytes() / tiny.dtype().itemsize(), k1K * k1K);
   auto ser = torch::distributed::rpc::wireSerialize({}, {tiny});
   auto deser = torch::distributed::rpc::wireDeserialize(ser.data(), ser.size());
   EXPECT_TRUE(torch::equal(tiny, deser.second[0]));

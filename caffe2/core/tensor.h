@@ -69,9 +69,9 @@ class CAFFE2_API Tensor final {
    */
   explicit Tensor(at::Device device)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            Storage::create_legacy(device, TypeMeta()),
-            c10::computeDispatchKey(at::device(device).layout(at::kStrided)))) {
-  }
+            Storage::create_legacy(device),
+            c10::computeDispatchKey(c10::nullopt, at::kStrided, device),
+            TypeMeta())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -153,7 +153,7 @@ class CAFFE2_API Tensor final {
         storage_initialized(),
         "Cloning a tensor that has no content and has size > 0");
     // set_storage already sets data_type_ of TensorImpl
-    x.impl_->set_storage(storage());
+    x.impl_->set_storage_and_dtype(storage(), impl_->dtype());
     x.impl_->set_storage_offset(impl_->storage_offset());
     x.impl_->set_sizes_and_strides(sizes(), strides());
     return x;
@@ -260,8 +260,8 @@ class CAFFE2_API Tensor final {
    */
   string DebugString() const {
     std::stringstream ss;
-    ss << "A Tensor of item size " << impl_->storage().itemsize()
-       << " and type " << impl_->dtype().name() << " and dimension (";
+    ss << "A Tensor of item size " << impl_->dtype().itemsize() << " and type "
+       << impl_->dtype().name() << " and dimension (";
     for (int d : impl_->sizes()) {
       ss << d << ",";
     }
@@ -286,38 +286,38 @@ class CAFFE2_API Tensor final {
   template <typename T>
   void ShareExternalPointer(
       T* src,
-      size_t capacity = 0,
+      size_t nbytes = 0,
       MemoryDeleter d = nullptr) const {
-    ShareExternalPointer((void*)src, caffe2::TypeMeta::Make<T>(), capacity, d);
+    ShareExternalPointer((void*)src, caffe2::TypeMeta::Make<T>(), nbytes, d);
   }
 
   template <typename T>
-  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t capacity = 0) const {
+  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t nbytes = 0) const {
     ShareExternalPointer(
-        std::move(data_ptr), caffe2::TypeMeta::Make<T>(), capacity);
+        std::move(data_ptr), caffe2::TypeMeta::Make<T>(), nbytes);
   }
 
   void ShareExternalPointer(
       void* src,
-      const TypeMeta& data_type,
-      size_t capacity = 0,
+      const TypeMeta data_type,
+      size_t nbytes = 0,
       MemoryDeleter d = nullptr) const {
     CAFFE_ENFORCE_WITH_CALLER(
         impl_->is_contiguous(),
         "Right now ShareExternalPointer is only supported for contiguous Tensor.");
     CAFFE_ENFORCE_WITH_CALLER(
-        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        data_type != ScalarType::Undefined,
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
     impl_.get()->ShareExternalPointer(
-        at::DataPtr(src, src, d, impl_->device_type()), data_type, capacity);
+        at::DataPtr(src, src, d, impl_->device_type()), data_type, nbytes);
   }
 
   void ShareExternalPointer(
       at::DataPtr&& data_ptr,
-      const TypeMeta& data_type,
-      size_t capacity) {
-    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
+      const TypeMeta data_type,
+      size_t nbytes) {
+    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, nbytes);
   }
 
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr()
@@ -342,7 +342,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->data<T>();
   }
 
-  inline void* raw_mutable_data(const TypeMeta& meta) const {
+  inline void* raw_mutable_data(const TypeMeta meta) const {
     return impl_.get()->raw_mutable_data(meta);
   }
 
@@ -358,7 +358,7 @@ class CAFFE2_API Tensor final {
   inline void* raw_mutable_data() const {
     const auto& data_type = impl_->dtype();
     CAFFE_ENFORCE_WITH_CALLER(
-        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        data_type != ScalarType::Undefined,
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(data_type);
@@ -402,7 +402,7 @@ class CAFFE2_API Tensor final {
    * Return the number of bytes each item takes in the tensor.
    */
   inline size_t itemsize() const {
-    return impl_->storage().itemsize();
+    return impl_->dtype().itemsize();
   }
 
   /**
@@ -463,13 +463,13 @@ class CAFFE2_API Tensor final {
    */
   template <typename T>
   inline bool IsType() const {
-    return impl_->storage().IsType<T>();
+    return impl_->dtype().Match<T>();
   }
 
   /**
    * Returns the TypeMeta object associated with the current data type.
    */
-  inline const TypeMeta& dtype() const {
+  inline const TypeMeta dtype() const {
     return impl_->dtype();
   }
 
@@ -477,7 +477,7 @@ class CAFFE2_API Tensor final {
    * (To be deprecated) Returns the TypeMeta object associated with the current
    * data type.
    */
-  inline const TypeMeta& meta() const {
+  inline const TypeMeta meta() const {
     return impl_->dtype();
   }
 

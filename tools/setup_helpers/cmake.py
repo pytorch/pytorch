@@ -1,6 +1,6 @@
 "Manages CMake."
 
-from __future__ import print_function
+
 
 import multiprocessing
 import os
@@ -115,14 +115,14 @@ class CMake:
         if IS_WINDOWS:
             return cmake_command
         cmake3 = which('cmake3')
-        if cmake3 is not None:
-            cmake = which('cmake')
-            if cmake is not None:
-                bare_version = CMake._get_version(cmake)
-                if (bare_version < LooseVersion("3.5.0") and
-                        CMake._get_version(cmake3) > bare_version):
-                    cmake_command = 'cmake3'
-        return cmake_command
+        cmake = which('cmake')
+        if cmake3 is not None and CMake._get_version(cmake3) >= LooseVersion("3.5.0"):
+            cmake_command = 'cmake3'
+            return cmake_command
+        elif cmake is not None and CMake._get_version(cmake) >= LooseVersion("3.5.0"):
+            return cmake_command
+        else:
+            raise RuntimeError('no cmake or cmake3 with version >= 3.5.0 found')
 
     @staticmethod
     def _get_version(cmd):
@@ -165,6 +165,11 @@ class CMake:
                 USE_NINJA and not os.path.exists(ninja_build_file)):
             # Everything's in place. Do not rerun.
             return
+        ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
+        if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
+            # Cannot rerun ninja on Windows due to a ninja bug.
+            # The workground is to remove `.ninja_deps`.
+            os.remove(ninja_deps_file)
 
         args = []
         if USE_NINJA:
@@ -240,6 +245,7 @@ class CMake:
              'MKL_THREADING',
              'MKLDNN_CPU_RUNTIME',
              'MSVC_Z7_OVERRIDE',
+             'CAFFE2_USE_MSVC_STATIC_RUNTIME',
              'Numa_INCLUDE_DIR',
              'Numa_LIBRARIES',
              'ONNX_ML',
@@ -338,19 +344,3 @@ class CMake:
         else:
             build_args += ['--', '-j', max_jobs]
         self.run(build_args, my_env)
-
-        # in cmake, .cu compilation involves generating certain intermediates
-        # such as .cu.o and .cu.depend, and these intermediates finally get compiled
-        # into the final .so.
-        # Ninja updates build.ninja's timestamp after all dependent files have been built,
-        # and re-kicks cmake on incremental builds if any of the dependent files
-        # have a timestamp newer than build.ninja's timestamp.
-        # There is a cmake bug with the Ninja backend, where the .cu.depend files
-        # are still compiling by the time the build.ninja timestamp is updated,
-        # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
-        # build detector.
-        # This line works around that bug by manually updating the build.ninja timestamp
-        # after the entire build is finished.
-        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
-        if os.path.exists(ninja_build_file):
-            os.utime(ninja_build_file, None)

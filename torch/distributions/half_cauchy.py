@@ -10,7 +10,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 
 class HalfCauchy(TransformedDistribution):
     r"""
-    Creates a half-normal distribution parameterized by `scale` where::
+    Creates a half-Cauchy distribution parameterized by `scale` where::
 
         X ~ Cauchy(0, scale)
         Y = |X| ~ HalfCauchy(scale)

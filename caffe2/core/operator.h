@@ -8,6 +8,7 @@
 #include <exception>
 #include <functional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <typeinfo>
 #include <vector>
@@ -31,8 +32,8 @@
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <ATen/core/TensorBody.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #endif
 
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
@@ -154,9 +155,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
       if (has_debug_def()) {
-        enf.AppendMessage(".\nOffending Blob name: ");
-        enf.AppendMessage(debug_def().input(idx));
-        enf.AppendMessage(".\n");
+        TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
       }
       throw enf;
     }
@@ -180,9 +179,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         return tensor;
       } catch (::caffe2::EnforceNotMet& enf) {
         if (has_debug_def()) {
-          enf.AppendMessage(".\nOffending Blob name: ");
-          enf.AppendMessage(debug_def().input(idx));
-          enf.AppendMessage(".\n");
+          TORCH_RETHROW(enf, "Offending Blob name: ", debug_def().input(idx), ".");
         }
         throw enf;
       }
@@ -208,7 +205,11 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE(
         ival.isTensor(),
         "Input(int, DeviceType) is only available for IValues that store Tensors");
-    Tensor tensor = caffe2::Tensor(ival.toTensor());
+    auto t = ival.toTensor();
+    if (!t.is_contiguous()) {
+      t = t.contiguous();
+    }
+    Tensor tensor = caffe2::Tensor(std::move(t));
     CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
     input_tensors_[idx] = std::move(tensor);
     return input_tensors_[idx];
@@ -243,10 +244,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor = caffe2::Tensor(output);
-    if (!tensor.defined() || tensor.GetDeviceType() != type) {
+    if (!output.defined() || caffe2::Tensor(output).GetDeviceType() != type) {
       // Fix tensor type
-      tensor = Tensor(type);
+      Tensor tensor = Tensor(type);
       output = at::Tensor(std::move(tensor.getIntrusivePtr()));
     }
     output_tensors_[idx] = caffe2::Tensor(output);
@@ -304,8 +304,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
     at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor =
-        GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
+    Tensor tensor = output.defined()
+        ? GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options)
+        : caffe2::empty(dims, options);
     // assign it back in case it changed
     output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
@@ -483,66 +484,15 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   virtual void CancelAsyncCallback() {}
 
-  // RunAsync, if implemenented by the specific operators, will schedule the
+  virtual void Cancel() {}
+
+  // RunAsync, if implemented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
   // event_ member object. If the specific operator does not support RunAsync,
   // it will simply be synchronous as a fallback.
-  virtual bool RunAsync(int stream_id = 0) {
-    try {
-      auto result = Run(stream_id);
-      if (result) {
-        if (HasAsyncPart()) {
-          RecordEvent();
-        } else {
-          SetEventFinished();
-        }
-      } else {
-        SetEventFinished(getErrorMsg().c_str());
-      }
-      return result;
-    } catch (EnforceNotMet& err) {
-      SetEventFinishedWithException(err.what());
-      throw;
-    } catch (const std::exception& err) {
-      SetEventFinishedWithException(err.what());
-      throw;
-    } catch (...) {
-      SetEventFinishedWithException(getErrorMsg().c_str());
-      throw;
-    }
-  }
+  virtual bool RunAsync(int stream_id = 0);
 
-  virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
-    CAFFE_ENFORCE(
-        isLegacyOperator(),
-        "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
-
-    if (!has_debug_def()) {
-      return;
-    }
-
-    bool found_input;
-    if (err->caller() != nullptr) {
-      for (size_t i = 0; i < inputs_.size(); i++) {
-        if (inputs_[i]->GetRaw() == err->caller()) {
-          found_input = true;
-          err->AppendMessage(
-              "\n** while accessing input: " + debug_def().input(i));
-          break;
-        }
-      }
-      for (size_t i = 0; i < outputs_.size(); i++) {
-        if (outputs_[i]->GetRaw() == err->caller()) {
-          if (found_input) {
-            err->AppendMessage("\n OR ");
-          }
-          err->AppendMessage(
-              "\n** while accessing output: " + debug_def().output(i));
-          break;
-        }
-      }
-    }
-  }
+  virtual void AddRelatedBlobInfo(EnforceNotMet* err);
 
   virtual std::string debug_info_string() const {
     return "";
@@ -1071,7 +1021,7 @@ class Operator : public OperatorBase {
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
-        err.AppendMessage(
+        err.add_context(
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
@@ -1109,7 +1059,7 @@ class Operator : public OperatorBase {
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
-        err.AppendMessage(
+        err.add_context(
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
@@ -1296,7 +1246,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename FirstType, typename... Types, typename... ExtraArgs>      \
   struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {      \
     template <typename Op>                                                     \
-    static bool call(Op* op, const TypeMeta& meta) {                           \
+    static bool call(Op* op, const TypeMeta meta) {                           \
       static_assert(                                                           \
           !std::is_same<GenericTensorImplementation, FirstType>::value,        \
           "GenericTensorImplementation must be the last in TensorTypes list"); \
@@ -1319,7 +1269,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename... ExtraArgs>                                             \
   struct DispatchHelper<TensorTypes<>, ExtraArgs...> {                         \
     template <typename Op>                                                     \
-    static bool call(Op* /* unused */, const TypeMeta& meta) {                 \
+    static bool call(Op* /* unused */, const TypeMeta meta) {                 \
       CAFFE_THROW("Unsupported type of tensor: ", meta.name());                \
     }                                                                          \
     template <typename Op>                                                     \
@@ -1337,7 +1287,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
       TensorTypes<GenericTensorImplementation>,                                \
       ExtraArgs...> {                                                          \
     template <typename Op>                                                     \
-    static bool call(Op* op, const TypeMeta&) {                                \
+    static bool call(Op* op, const TypeMeta) {                                \
       return op->template DoRunWithOtherType<ExtraArgs...>();                  \
     }                                                                          \
     template <typename Op>                                                     \

@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/tensor_types.h>
@@ -17,6 +18,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorIndexing.h>
+#include <ATen/TracerMode.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
@@ -30,6 +32,14 @@ namespace torch { namespace autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
+  if (check_has_torch_function(self)) {
+    py::object ret = py::reinterpret_steal<py::object>(handle_torch_function(self, "__len__"));
+    Py_ssize_t length = PyLong_AsSsize_t(ret.ptr());
+    if (PyErr_Occurred()) {
+      throw python_error();
+    }
+    return length;
+  }
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (self_.dim() == 0) {
     return 0;
@@ -79,7 +89,8 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
-  at::AutoNonVariableTypeMode guard;
+  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::tracer::impl::NoTracerDispatchMode tracer_guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options, device);
   }
@@ -256,6 +267,10 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
+  if (check_has_torch_function(self)) {
+    py::tuple args_ = py::make_tuple(py::handle(index));
+    return handle_torch_function(self, "__getitem__", args_.ptr());
+  }
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
 
@@ -328,6 +343,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
+  }
+  if (check_has_torch_function(self)) {
+    py::tuple args_ = py::make_tuple(py::handle(index), py::handle(py_value));
+    py::object ret = py::reinterpret_steal<py::object>(handle_torch_function(self, "__setitem__", args_.ptr()));
+    return 0;
   }
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;

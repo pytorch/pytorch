@@ -47,6 +47,17 @@ std::unique_ptr<CodeGen> CreateCodeGen(
   return method(stmt, params, device);
 }
 
+const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
+  if (v->op_type() == kSigmoid) {
+    auto x = v->param(0)->accept_mutator(this);
+    auto one = ExprHandle(getImmediateByType(v->dtype(), 1.0));
+    auto zero = ExprHandle(getImmediateByType(v->dtype(), 0.0));
+    ExprHandle y = one / (one + exp(zero - ExprHandle(x)));
+    return y.node();
+  }
+  return IRMutator::mutate(v);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

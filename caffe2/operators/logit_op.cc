@@ -6,6 +6,11 @@
 #include "caffe2/operators/elementwise_ops.h"
 #include "caffe2/utils/eigen_utils.h"
 
+#include "caffe2/operators/bucketize_op.h"
+
+#include "caffe2/core/operator.h"
+#include "caffe2/core/tensor.h"
+
 namespace caffe2 {
 
 template <>
@@ -86,3 +91,13 @@ class GetLogitGradient : public GradientMakerBase {
 REGISTER_GRADIENT(Logit, GetLogitGradient);
 
 } // namespace caffe2
+
+using LogitOp = caffe2::UnaryElementwiseWithArgsOp<
+    caffe2::TensorTypes<float>,
+    caffe2::CPUContext,
+    caffe2::LogitFunctor<caffe2::CPUContext>>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    Logit,
+    "_caffe2::Logit(Tensor X, float eps = 1e-6)->Tensor Y",
+    LogitOp);

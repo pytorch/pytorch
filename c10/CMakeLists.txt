@@ -17,6 +17,7 @@ set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 set(C10_USE_NUMA ${USE_NUMA})
+set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
@@ -32,12 +33,17 @@ file(GLOB C10_SRCS
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
+        mobile/*.cpp
         macros/*.cpp
         util/*.cpp
         )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+if(HAVE_SOVERSION)
+  set_target_properties(c10 PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.

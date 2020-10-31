@@ -7,7 +7,7 @@ SLEEF_COPTS = [
     "-DHAVE_SHM_OPEN=1",
     "-DHAVE_SHM_UNLINK=1",
     "-DIDEEP_USE_MKL",
-    "-DMKLDNN_THR=MKLDNN_THR_TBB",
+    "-DDNNL_CPU_RUNTIME=TBB",
     "-DONNX_ML=1",
     "-DONNX_NAMESPACE=onnx",
     "-DTH_BLAS_MKL",
@@ -51,7 +51,7 @@ SLEEF_PUBLIC_INCLUDES = [
 ]
 
 SLEEF_VISIBILITY = [
-    "@pytorch//:__subpackages__",
+    "//visibility:public",
 ]
 
 cc_binary(

@@ -209,6 +209,14 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 // with __half2float(). All mathematical operations are done on float
 // values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
+#ifdef __HIP_PLATFORM_HCC__
+constexpr auto half_support_literal =
+    R"(
+#include <hip/hip_fp16.h>
+
+typedef __half half;
+)";
+#else
 constexpr auto half_support_literal =
     R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
@@ -251,6 +259,7 @@ constexpr auto half_support_literal =
 
 typedef __half half;
 )";
+#endif
 
 } // namespace cuda
 } // namespace fuser

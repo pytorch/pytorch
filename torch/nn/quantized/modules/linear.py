@@ -1,14 +1,12 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import torch
 
-from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
-    _version = 2
+    _version = 3
 
     def __init__(self, dtype=torch.qint8):
         super(LinearPackedParams, self).__init__()
@@ -20,8 +18,7 @@ class LinearPackedParams(torch.nn.Module):
         self.set_weight_bias(wq, None)
 
     @torch.jit.export
-    def set_weight_bias(self, weight, bias):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, weight: torch.Tensor, bias: Optional[torch.Tensor]) -> None:
         if self.dtype == torch.qint8:
             self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
         elif self.dtype == torch.float16:
@@ -42,19 +39,29 @@ class LinearPackedParams(torch.nn.Module):
     def forward(self, x):
         return x
 
+    # Version 1
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #
+    # Version 2
+    #   self
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #   |--- dtype : torch.dtype
+    #
+    # Version 3
+    #   self
+    #   |--- _packed_params : (Tensor, Tensor) representing (weight, bias)
+    #                         of LinearPackedParams
+    #   |--- dtype : torch.dtype
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(LinearPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
-        (w, b) = self._weight_bias()
-        destination[prefix + 'weight'] = w
-        destination[prefix + 'bias'] = b
         destination[prefix + 'dtype'] = self.dtype
+        destination[prefix + '_packed_params'] = self._weight_bias()
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
-        state_dict.pop(prefix + 'weight')
-        state_dict.pop(prefix + 'bias')
-
         version = local_metadata.get('version', None)
         if version is None or version < 2:
             self.dtype = torch.qint8
@@ -62,15 +69,21 @@ class LinearPackedParams(torch.nn.Module):
             self.dtype = state_dict[prefix + 'dtype']
             state_dict.pop(prefix + 'dtype')
 
+        if version is None or version < 3:
+            self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
+            state_dict.pop(prefix + 'weight')
+            state_dict.pop(prefix + 'bias')
+
+        if version == 3:
+            weight, bias = state_dict[prefix + '_packed_params']
+            state_dict.pop(prefix + '_packed_params')
+            self.set_weight_bias(weight, bias)
+
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
 
     @torch.jit.export
     def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
-                               ' See https://github.com/pytorch/pytorch/issues/24045.'
-                               ' Please use state_dict or torch.jit serialization.')
         qweight, bias = self._weight_bias()
         return qweight, bias, self.training, self.dtype
 
@@ -110,7 +123,7 @@ class Linear(torch.nn.Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _version = 2
+    _version = 3
     _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
@@ -147,34 +160,7 @@ class Linear(torch.nn.Module):
         )
 
     def __repr__(self):
-        # We don't want to show `LinearPackedParams` children, hence custom
-        # `__repr__`. This is the same as nn.Module.__repr__, except the check
-        # for the `LinearPackedParams`.
-        # You should still override `extra_repr` to add more info.
-        extra_lines = []
-        extra_repr = self.extra_repr()
-        # empty string will be split into list ['']
-        if extra_repr:
-            extra_lines = extra_repr.split('\n')
-        child_lines = []
-        for key, module in self._modules.items():
-            if isinstance(module, LinearPackedParams):
-                continue
-            mod_str = repr(module)
-            mod_str = _addindent(mod_str, 2)
-            child_lines.append('(' + key + '): ' + mod_str)
-        lines = extra_lines + child_lines
-
-        main_str = self._get_name() + '('
-        if lines:
-            # simple one-liner info, which most builtin Modules will use
-            if len(extra_lines) == 1 and not child_lines:
-                main_str += extra_lines[0]
-            else:
-                main_str += '\n  ' + '\n  '.join(lines) + '\n'
-
-        main_str += ')'
-        return main_str
+        return hide_packed_params_repr(self, LinearPackedParams)
 
     def forward(self, x):
         return torch.ops.quantized.linear(
@@ -185,6 +171,30 @@ class Linear(torch.nn.Module):
     # regular QTensor form for serialization. Packed weights should not live
     # outside the process in which they were created, rather they should be derived
     # from the QTensor weight.
+    #
+    # Version 1
+    #   self
+    #   |--- scale : float
+    #   |--- zero_point : int
+    #   |--- weight : Tensor
+    #   |--- bias : Tensor
+    #
+    # Version 2
+    #   self
+    #   |--- scale : float
+    #   |--- zero_point : int
+    #   |--- _packed_params : Module
+    #        |--- weight : Tensor
+    #        |--- bias : Tensor
+    #
+    # Version 3
+    #   self
+    #   |--- scale : float
+    #   |--- zero_point : int
+    #   |--- _packed_params : Module
+    #        |--- _packed_params : (Tensor, Tensor) representing weight, bias
+    #                              of LinearPackedParams C++ struct
+    #
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = torch.tensor(self.scale)
@@ -223,8 +233,7 @@ class Linear(torch.nn.Module):
     def bias(self):
         return self._weight_bias()[1]
 
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params.set_weight_bias(w, b)
 
     @classmethod

@@ -145,7 +145,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
 }
 
 static void setInputBroadcastGroups(KernelSpec& spec) {
-  std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>>
+  std::unordered_set<std::vector<int64_t>, c10::hash<std::vector<int64_t>>>
       broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
     if (output->node()->kind() == prim::FusedConcat) {
@@ -216,8 +216,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     graph->inputs()[i]->setType(TensorType::create(
         desc.scalar_type,
         device,
-        c10::VaryingShape(desc.nDim()),
-        c10::VaryingShape(desc.nDim()),
+        {desc.nDim()},
         false)); // TODO: nDim is bad, as it is collapsed
   }
 
@@ -285,7 +284,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =
-      getConstructor(use_cuda ? at::DeviceType::CUDA : at::DeviceType::CPU);
+      getConstructor(use_cuda ? DeviceType::CUDA : DeviceType::CPU);
   return kernel_ctor(
       device.index(),
       name,

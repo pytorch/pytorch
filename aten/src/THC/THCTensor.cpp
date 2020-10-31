@@ -8,6 +8,9 @@
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensor.cpp>
+#include <THC/THCGenerateComplexTypes.h>
+
+#include <THC/generic/THCTensor.cpp>
 #include <THC/THCGenerateBoolType.h>
 
 #include <THC/generic/THCTensor.cpp>
@@ -71,6 +74,10 @@ THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
       return THCudaBoolTensor_new(state);
     case at::ScalarType::BFloat16:
       return THCudaBFloat16Tensor_new(state);
+    case at::ScalarType::ComplexFloat:
+      return THCudaComplexFloatTensor_new(state);
+    case at::ScalarType::ComplexDouble:
+      return THCudaComplexDoubleTensor_new(state);
     default:
       AT_ERROR("unexpected ScalarType: ", toString(scalar_type));
   }

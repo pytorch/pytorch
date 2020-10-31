@@ -771,7 +771,14 @@ mark_as_advanced(CUDA_NVCC_EXECUTABLE)
 
 if(CUDA_NVCC_EXECUTABLE AND NOT CUDA_VERSION)
   # Compute the version.
-  execute_process (COMMAND ${CUDA_NVCC_EXECUTABLE} "--version" OUTPUT_VARIABLE NVCC_OUT)
+  execute_process(COMMAND ${CUDA_NVCC_EXECUTABLE} "--version"
+    OUTPUT_VARIABLE NVCC_OUT
+    RESULT_VARIABLE NVCC_RC)
+  if(NOT (${NVCC_RC} EQUAL 0))
+    message(WARNING "Failed to execute '${CUDA_NVCC_EXECUTABLE} --version'")
+    set(CUDA_FOUND FALSE)
+    return()
+  endif()
   string(REGEX REPLACE ".*release ([0-9]+)\\.([0-9]+).*" "\\1" CUDA_VERSION_MAJOR ${NVCC_OUT})
   string(REGEX REPLACE ".*release ([0-9]+)\\.([0-9]+).*" "\\2" CUDA_VERSION_MINOR ${NVCC_OUT})
   set(CUDA_VERSION "${CUDA_VERSION_MAJOR}.${CUDA_VERSION_MINOR}" CACHE STRING "Version of CUDA as computed from nvcc.")
@@ -1505,7 +1512,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(_cuda_source_format ${format})
       endif()
       # If file isn't a .cu file, we need to tell nvcc to treat it as such.
-      if(NOT ${file} MATCHES "\\.cu$")
+      if(NOT file MATCHES "\\.cu$")
         set(cuda_language_flag -x=cu)
       else()
         set(cuda_language_flag)

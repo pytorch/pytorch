@@ -15,11 +15,11 @@ Tensor make_per_tensor_quantized_tensor_cuda(
       zero_point);
   AT_DISPATCH_QINT_TYPES(
       dst.scalar_type(), "make_per_tensor_quantized_tensor_cuda", [&]() {
-        auto iter = TensorIterator();
-        iter.add_output(dst);
-        iter.add_input(self);
-        iter.dont_compute_common_dtype();
-        iter.build();
+        auto iter = TensorIteratorConfig()
+          .check_all_same_dtype(false)
+          .add_output(dst)
+          .add_input(self)
+          .build();
         gpu_kernel(iter, [] GPU_LAMBDA(underlying_t value) -> scalar_t {
           return scalar_t(value);
         });

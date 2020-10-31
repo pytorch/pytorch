@@ -7,6 +7,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
@@ -97,15 +98,16 @@ struct WriteableTensorData {
   size_t sizeInBytes() const {
     return size_;
   }
-  size_t numel() const {
-    return tensor_.storage().numel();
+  size_t nbytes() const {
+    return tensor_.storage().nbytes();
   }
   bool storageHasDeleter() const {
     return tensor_.storage().data_ptr().get_context() != nullptr;
   }
 
  private:
-  friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+  friend TORCH_API WriteableTensorData
+  getWriteableTensorData(const at::Tensor& tensor, bool to_cpu);
   at::Tensor tensor_;
   uint64_t size_;
 };
@@ -113,7 +115,7 @@ struct WriteableTensorData {
 void setTypeTags(bool state);
 bool getTypeTags();
 
-class Pickler {
+class TORCH_API Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
@@ -142,7 +144,7 @@ class Pickler {
   void startTuple();
   void endTuple();
 
-  const std::vector<WriteableTensorData>& tensorData() {
+  const std::vector<at::Tensor>& tensorData() {
     return tensor_data_;
   }
 
@@ -254,7 +256,7 @@ class Pickler {
 
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
-  std::vector<WriteableTensorData> tensor_data_;
+  std::vector<at::Tensor> tensor_data_;
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
@@ -263,8 +265,9 @@ class Pickler {
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
-// if necessary
-WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+// if it was CUDA and to_cpu is True.
+TORCH_API WriteableTensorData
+getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
 
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);

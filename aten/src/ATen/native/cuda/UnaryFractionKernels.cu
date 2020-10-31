@@ -7,7 +7,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
-#include <ATen/native/cuda/zmath.cuh>
 
 namespace at { namespace native {
 
@@ -57,11 +56,41 @@ void floor_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template <typename scalar_t>
+__host__ __device__ static inline scalar_t reciprocal_wrapper(scalar_t a) {
+  return static_cast<scalar_t>(1)/a;
+}
+
+template<typename T>
+__host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::complex<T> v) {
+  // Handle extreme cases for numpy compatibility
+  auto both_inf = [](T real, T imag) {
+    return (::isinf(real) && ::isinf(imag));
+  };
+
+  auto either_inf = [](T real, T imag) {
+    return ::isinf(real) || ::isinf(imag);
+  };
+
+  auto either_nan = [](T real, T imag) {
+    return ::isnan(real) || ::isnan(imag);
+  };
+
+  if (either_nan(v.real(), v.imag()) || both_inf(v.real(), v.imag())) {
+    // If either is Nan or both are infinite, return {nan, nan}
+    return {std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN()};
+  } else if (either_inf(v.real(), v.imag())) {
+    // If either is Inf, return {0, 0}
+    return {0, 0};
+  }
+  const c10::complex<T> one = c10::complex<T>(1.0, 0);
+  return one/v;
+}
+
 void reciprocal_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "reciprocal_cuda", [&]() {
-    using acc_t = acc_type<scalar_t, /*is_cuda=*/true>;
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "reciprocal_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return static_cast<acc_t>(1) / a;
+      return reciprocal_wrapper(a);
     });
   });
 }
@@ -76,16 +105,16 @@ __host__ __device__ static inline double nearbyint_wrapper(double a) {
   return ::nearbyint(a);
 }
 
-__host__ __device__ static inline std::complex<float> nearbyint_wrapper(std::complex<float> a) {
-  return std::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
+__host__ __device__ static inline c10::complex<float> nearbyint_wrapper(c10::complex<float> a) {
+  return c10::complex<float>(::nearbyintf(static_cast<float>(a.real())), ::nearbyintf(static_cast<float>(a.imag())));
 }
 
-__host__ __device__ static inline std::complex<double> nearbyint_wrapper(std::complex<double> a) {
-  return std::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
+__host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::complex<double> a) {
+  return c10::complex<double>(::nearbyint(static_cast<double>(a.real())), ::nearbyint(static_cast<double>(a.imag())));
 }
 
 void round_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.dtype(), "round_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "round_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       // We do not use std::round because we would like to round midway numbers to the nearest even integer.
       return nearbyint_wrapper(a);
@@ -103,12 +132,12 @@ __host__ __device__ static inline double trunc_wrapper(double a) {
   return ::trunc(a);
 }
 
-__host__ __device__ static inline std::complex<float> trunc_wrapper(std::complex<float> a) {
-  return std::complex<float>(::truncf(static_cast<float>(a.real())), ::truncf(static_cast<float>(a.imag())));
+__host__ __device__ static inline c10::complex<float> trunc_wrapper(c10::complex<float> a) {
+  return c10::complex<float>(::truncf(static_cast<float>(a.real())), ::truncf(static_cast<float>(a.imag())));
 }
 
-__host__ __device__ static inline std::complex<double> trunc_wrapper(std::complex<double> a) {
-  return std::complex<double>(::trunc(static_cast<double>(a.real())), ::trunc(static_cast<double>(a.imag())));
+__host__ __device__ static inline c10::complex<double> trunc_wrapper(c10::complex<double> a) {
+  return c10::complex<double>(::trunc(static_cast<double>(a.real())), ::trunc(static_cast<double>(a.imag())));
 }
 
 void trunc_kernel_cuda(TensorIterator& iter) {

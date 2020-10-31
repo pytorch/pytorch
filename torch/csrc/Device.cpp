@@ -138,9 +138,10 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_reduce(THPDevice *self, PyObject *noargs)
+PyObject *THPDevice_reduce(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPDevice*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret) throw python_error();
 
@@ -165,6 +166,8 @@ PyObject *THPDevice_reduce(THPDevice *self, PyObject *noargs)
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
+// NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
+
 static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
@@ -172,7 +175,7 @@ static struct PyGetSetDef THPDevice_properties[] = {
 };
 
 static PyMethodDef THPDevice_methods[] = {
-  {"__reduce__", (PyCFunction)THPDevice_reduce, METH_NOARGS, nullptr},
+  {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */
 };
 

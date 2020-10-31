@@ -1,9 +1,9 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import warnings
+from typing import Any, Iterable, List, Tuple
 
 
-def detach_variable(inputs):
+def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
         out = []
         for inp in inputs:
@@ -20,7 +20,7 @@ def detach_variable(inputs):
             "Only tuple of tensors is supported. Got Unsupported input type: ", type(inputs).__name__)
 
 
-def check_backward_validity(inputs):
+def check_backward_validity(inputs: Iterable[Any]) -> None:
     if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
 
@@ -32,7 +32,7 @@ def check_backward_validity(inputs):
 # the device of all Tensor args.
 #
 # To consider:  maybe get_device_states and set_device_states should reside in torch/random.py?
-def get_device_states(*args):
+def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
     # the conditionals short-circuit.
     fwd_gpu_devices = list(set(arg.get_device() for arg in args
@@ -46,7 +46,7 @@ def get_device_states(*args):
     return fwd_gpu_devices, fwd_gpu_states
 
 
-def set_device_states(devices, states):
+def set_device_states(devices, states) -> None:
     for device, state in zip(devices, states):
         with torch.cuda.device(device):
             torch.cuda.set_rng_state(state)
@@ -96,7 +96,19 @@ class CheckpointFunction(torch.autograd.Function):
 
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
-        torch.autograd.backward(outputs, args)
+
+        # run backward() with only tensor that requires grad
+        outputs_with_grad = []
+        args_with_grad = []
+        for i in range(len(outputs)):
+            if outputs[i].requires_grad:
+                outputs_with_grad.append(outputs[i])
+                args_with_grad.append(args[i])
+        if len(outputs_with_grad) == 0:
+            raise RuntimeError(
+                "none of output has requires_grad=True,"
+                " this checkpoint() is not necessary")
+        torch.autograd.backward(outputs_with_grad, args_with_grad)
         grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else inp
                       for inp in detached_inputs)
         return (None, None) + grads
@@ -129,10 +141,19 @@ def checkpoint(function, *args, **kwargs):
         checkpointed version won't be equivalent, and unfortunately it can't be
         detected.
 
+    .. warning::
+        If checkpointed segment contains tensors detached from the computational
+        graph by `detach()` or `torch.no_grad()`, the backward pass will raise an
+        error. This is because `checkpoint` makes all the outputs require
+        gradients which causes issues when a tensor is defined to have no
+        gradient in the model. To circumvent this, detach the tensors outside of
+        the `checkpoint` function.
+
     .. warning:
         At least one of the inputs needs to have :code:`requires_grad=True` if
         grads are needed for model inputs, otherwise the checkpointed part of the
-        model won't have gradients.
+        model won't have gradients. At least one of the outputs needs to have
+        :code:`requires_grad=True` as well.
 
     Args:
         function: describes what to run in the forward pass of the model or

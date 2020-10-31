@@ -137,29 +137,6 @@ void HashProvider::visit(const Var* v) {
   putHash(v, hash_combine("var", name_manager_.get_unique_name(v)));
 }
 
-void HashProvider::visit(const Let* v) {
-  CACHE_GUARD();
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-
-  putHash(
-      v,
-      hash_combine(
-          "let", hashOf(v->var()), hashOf(v->value()), hashOf(v->body())));
-}
-
-void HashProvider::visit(const LetStmt* v) {
-  CACHE_GUARD();
-  v->var()->accept(this);
-  v->value()->accept(this);
-  v->body()->accept(this);
-  putHash(
-      v,
-      hash_combine(
-          "letstmt", hashOf(v->var()), hashOf(v->value()), hashOf(v->body())));
-}
-
 void HashProvider::visit(const Ramp* v) {
   CACHE_GUARD();
   v->base()->accept(this);
@@ -207,7 +184,8 @@ void HashProvider::visit(const Store* v) {
 void HashProvider::visit(const Block* v) {
   CACHE_GUARD();
   SimplifierHashType hash;
-  for (Stmt* s : v->stmts()) {
+
+  for (Stmt* s : *v) {
     s->accept(this);
     hash = hash_combine(hash, hashOf(s));
   }
@@ -222,6 +200,7 @@ void HashProvider::visit(const For* v) {
 
   SimplifierHashType hash = hash_combine(
       "for", hashOf(v->var()), hashOf(v->start()), hashOf(v->stop()));
+  hash = hash_combine(hash, v->loop_options().ToString());
   if (v->body()) {
     v->body()->accept(this);
     hash = hash_combine(hash, hashOf(v->body()));
@@ -253,6 +232,24 @@ void HashProvider::visit(const IfThenElse* v) {
 
 void HashProvider::visit(const BaseCallNode* v) {
   CACHE_GUARD();
+  SimplifierHashType hash(te_hash(v->func_name()));
+  for (int i = 0; i < v->nparams(); i++) {
+    v->param(i)->accept(this);
+    hash = hash_combine(hash, hashOf(v->param(i)));
+  }
+
+  putHash(v, hash);
+}
+
+void HashProvider::visit(const Intrinsics* v) {
+  CACHE_GUARD();
+  // calls to rand are not symbolic and have a different value each time, they
+  // should not hash to anything and this is the best we can do.
+  if (v->op_type() == kRand) {
+    putHash(v, (SimplifierHashType)rand());
+    return;
+  }
+
   SimplifierHashType hash(te_hash(v->func_name()));
   for (int i = 0; i < v->nparams(); i++) {
     v->param(i)->accept(this);
@@ -331,6 +328,39 @@ void HashProvider::visit(const Polynomial* v) {
 
   putHash(v, hash);
 }
+
+void HashProvider::visit(const MaxTerm* v) {
+  CACHE_GUARD();
+  SimplifierHashType hash = hash_combine("maxterm");
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    hash = hash_combine(hash, hashOf(v->scalar()));
+  }
+
+  for (auto* c : v->variables()) {
+    c->accept(this);
+    hash = hash_combine(hash, hashOf(c));
+  }
+
+  putHash(v, hash);
+}
+
+void HashProvider::visit(const MinTerm* v) {
+  CACHE_GUARD();
+  SimplifierHashType hash = hash_combine("minterm");
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    hash = hash_combine(hash, hashOf(v->scalar()));
+  }
+
+  for (auto* c : v->variables()) {
+    c->accept(this);
+    hash = hash_combine(hash, hashOf(c));
+  }
+
+  putHash(v, hash);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -1,9 +1,9 @@
 ## @package download
 # Module caffe2.python.models.download
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import argparse
 import os
 import sys
@@ -80,8 +80,6 @@ def downloadFromURLToFile(url, filename, show_progress=True):
     except URLError as e:
         raise Exception("Could not download model. [URL Error] {reason}."
                         .format(reason=e.reason))
-    except Exception as e:
-        raise e
 
 
 def getURLFromName(name, filename):

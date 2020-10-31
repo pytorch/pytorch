@@ -38,6 +38,7 @@ static void compute_q8gemm(
   uint8_t* c = context->c;
   const size_t c_stride = context->c_stride;
 
+  size_t output_channel_index = nr_block_start;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -47,6 +48,7 @@ static void compute_q8gemm(
       (const void*) ((uintptr_t) packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
       c + (pixel_index + mr_block_start) * c_stride + nr_block_start + group_index * n,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -55,11 +57,9 @@ enum pytorch_qnnp_status qnnpackLinear(
     const size_t input_channels,
     const size_t output_channels,
     const uint8_t input_zero_point,
-    const float input_scale,
-    const uint8_t kernel_zero_point,
-    const float kernel_scale,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
     const uint8_t output_zero_point,
-    const float output_scale,
     const uint8_t output_min,
     const uint8_t output_max,
     const uint8_t* input,
@@ -79,20 +79,10 @@ enum pytorch_qnnp_status qnnpackLinear(
   const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
 
   const size_t output_size = batch_size * 1;
-  const float requantization_scale = input_scale * kernel_scale / output_scale;
-  if (requantization_scale >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create fully connected operator with %.7g input scale, %.7g "
-        "kernel scale, and %.7g output scale: "
-        "requantization scale %.7g is greater or equal to 1.0",
-        input_scale,
-        kernel_scale,
-        output_scale,
-        requantization_scale);
-    return pytorch_qnnp_status_unsupported_parameter;
-  }
-  union pytorch_qnnp_conv_quantization_params conv_quantization_params = pytorch_qnnp_compute_conv_quantization_params(
-      input_zero_point, kernel_zero_point, requantization_scale, output_zero_point, output_min, output_max);
+  union pytorch_qnnp_conv_quantization_params conv_quantization_params =
+      pytorch_qnnp_compute_conv_quantization_params(
+          input_zero_point, kernel_zero_points,
+          requantization_scales, output_zero_point, output_min, output_max);
 
   struct q8gemm_context q8gemm_context = {
       .k = group_input_channels,
@@ -107,6 +97,12 @@ enum pytorch_qnnp_status qnnpackLinear(
       .quantization_params = conv_quantization_params,
       .ukernel = pytorch_qnnp_params.q8conv.gemm,
   };
+
+  if (output_size == 0) {
+      // pthreadpool can tolerate a range of 0, but not a tile of 0.
+      // We use output_size as a tile size, so bail here if it's 0.
+      return pytorch_qnnp_status_success;
+  }
 
   pthreadpool_compute_4d_tiled(
       threadpool,

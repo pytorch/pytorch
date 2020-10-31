@@ -56,11 +56,11 @@ static bool IsStandardOp(const NodeKind& nkind) {
 
 // For these operators, all inputs share the same scalar type.
 // The output scalar type is always Bool.
-static const std::unordered_set<NodeKind> comparisonOps = {
-    onnx::Greater,
-    onnx::Less,
-    onnx::Equal,
-};
+static const std::unordered_set<NodeKind> comparisonOps = {onnx::Greater,
+                                                           onnx::Less,
+                                                           onnx::Equal,
+                                                           onnx::GreaterOrEqual,
+                                                           onnx::LessOrEqual};
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
@@ -69,12 +69,7 @@ static bool IsComparisonOp(const NodeKind& nkind) {
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
-  return TensorType::create(
-      scalar_type,
-      typePtr->device(),
-      typePtr->sizes(),
-      typePtr->strides(),
-      typePtr->requiresGrad());
+  return typePtr->withScalarType({scalar_type});
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
@@ -126,30 +121,41 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   const c10::optional<c10::ScalarType> output_st =
       n->output()->type()->cast<TensorType>()->scalarType();
 
-  if (typesFromScalars.size() == n->inputs().size()) {
-    // If all inputs are scalars, infer scalar_type by calling
-    // c10::promoteTypes.
+  if (IsComparisonOp(n->kind())) {
+    // For comparison ops, always promote scalar type to highest among inputs,
+    // regardless if that input is a tensor or scalar.
+    typesFromScalars.insert(
+        typesFromScalars.end(),
+        typesFromTensors.begin(),
+        typesFromTensors.end());
     st = PromoteScalarTypes(typesFromScalars);
-  } else if (output_st && !IsComparisonOp(n->kind())) {
-    // If output scalar type is available, use that.
-    st = output_st;
-  } else if (!typesFromTensors.empty()) {
-    // When inputs consist of tensors and scalars. In PyTorch, scalars are
-    // implicitly casted to have the same scalar type as input tensors.
-    st = typesFromTensors[0];
-    if (std::any_of(
-            typesFromTensors.begin(),
-            typesFromTensors.end(),
-            [&st](const c10::ScalarType& type) { return type != st; })) {
-      std::cerr
-          << "Warning: ONNX Scalar Type Analysis - Scalar types mismatch for tensor inputs of operator "
-          << n->kind().toDisplayString() << ". Please report a bug to PyTorch. "
-          << "The scalar type " << c10::toString(*st)
-          << " of the first tensor is chosen." << std::endl;
-    }
   } else {
-    // When inputs consist of only scalars.
-    st = PromoteScalarTypes(typesFromScalars);
+    if (typesFromScalars.size() == n->inputs().size()) {
+      // If all inputs are scalars, infer scalar_type by calling
+      // c10::promoteTypes.
+      st = PromoteScalarTypes(typesFromScalars);
+    } else if (output_st) {
+      // If output scalar type is available, use that.
+      st = output_st;
+    } else if (!typesFromTensors.empty()) {
+      // When inputs consist of tensors and scalars. In PyTorch, scalars are
+      // implicitly casted to have the same scalar type as input tensors.
+      st = typesFromTensors[0];
+      if (std::any_of(
+              typesFromTensors.begin(),
+              typesFromTensors.end(),
+              [&st](const c10::ScalarType& type) { return type != st; })) {
+        std::cerr
+            << "Warning: ONNX Scalar Type Analysis - Scalar types mismatch for tensor inputs of operator "
+            << n->kind().toDisplayString()
+            << ". Please report a bug to PyTorch. "
+            << "The scalar type " << c10::toString(*st)
+            << " of the first tensor is chosen." << std::endl;
+      }
+    } else {
+      // When inputs consist of only scalars.
+      st = PromoteScalarTypes(typesFromScalars);
+    }
   }
 
   return st;

@@ -15,7 +15,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__aarch64__)
 #include <ATen/quantized/Quantizer.h>
 #include <arm_neon.h>
 #endif
@@ -23,6 +23,16 @@
 namespace at {
 namespace native {
 namespace {
+
+void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
+  TORCH_CHECK(
+      ref.is_contiguous(ref.suggest_memory_format()),
+      "Quantized tensor should be contiguous");
+  TORCH_CHECK(
+      other.is_contiguous(ref.suggest_memory_format()),
+      "Float tensor should be contiguous "
+      "in same memory format as quantizd tensor");
+}
 
 // ****************** HEY YOU! YES YOU! Read this! ********************
 //
@@ -163,7 +173,7 @@ int64_t hsum(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -184,7 +194,7 @@ int64_t hsum(const uint8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -199,7 +209,7 @@ int64_t hsum(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
   __m256i one_epi8_v = _mm256_set1_epi8(1);
@@ -220,7 +230,7 @@ int64_t hsum(const int8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -235,7 +245,7 @@ int64_t hsum(const int32_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_epi64 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -255,7 +265,7 @@ int64_t hsum(const int32_t* A, int len) {
   for (int k = 0; k < 4; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -270,7 +280,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v_epu32 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 16 * 16; i += 16) {
@@ -296,7 +306,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -311,7 +321,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v_epi32 = _mm256_setzero_si256();
   // vectorized
   for (; i < len / 16 * 16; i += 16) {
@@ -337,7 +347,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -353,7 +363,7 @@ float hsum_sq(const int32_t* A, int len) {
   float row_sum = 0;
   int i = 0;
 
-#ifdef __AVX2__
+#ifdef CPU_CAPABILITY_AVX2
   __m256 sum_ps = _mm256_setzero_ps();
   // vectorized
   for (; i < len / 8 * 8; i += 8) {
@@ -367,7 +377,7 @@ float hsum_sq(const int32_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += static_cast<float>(temp[k]);
   }
-#endif // __AVX2__
+#endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
@@ -476,7 +486,8 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   });
 }
 
-void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
+void qsigmoid_kernel(
+    const Tensor& qx, Tensor& qy, double output_scale, int64_t output_zero_point ) {
   int64_t zero_point = qx.q_zero_point();
   float scale = qx.q_scale();
   auto scale_vec = Vec256<float>(scale);
@@ -484,19 +495,6 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
-    // Naive implemenentation: uses dequantize/execute/quantize routine
-    // - Output scale is set to 1.0 / 2^(BIT_NUM)
-    // - For signed types output zero point is set to 0
-    // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
-    // See https://stackoverflow.com/a/34448562/3606192 for potential
-    // optimizations
-    float output_scale = 0.00390625;  // 1.0 / 2^8
-    int64_t output_zero_point = 0;
-    if (SCALAR_TYPE == at::kQInt32) {
-      output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
-    } else if (SCALAR_TYPE == at::kQInt8) {
-      output_zero_point = -128;
-    }
     float inv_output_scale = 1.0 / output_scale;
 
     qy = at::_empty_affine_quantized(
@@ -631,6 +629,125 @@ void qclamp_kernel(
   });
 }
 
+void qclamp_min_kernel(const Tensor& qx, Scalar min_scalar, Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU)
+            .dtype(SCALAR_TYPE)
+            .memory_format(qx.suggest_memory_format()),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        c10::nullopt);
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qy, qx);
+    auto min = min_scalar.to<float>();
+    scalar_t min_q = at::native::quantize_val<scalar_t>(
+        qx.q_scale(), qx.q_zero_point(), min);
+    auto min_vec = Vec(min_q);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          return scalar_t(std::max<underlying_t>(value.val_, min_q.val_));
+        },
+        [&](Vec val) -> Vec { return val.maximum(min_vec); });
+  });
+}
+
+void qclamp_max_kernel(const Tensor& qx, Scalar max_scalar, Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU)
+            .dtype(SCALAR_TYPE)
+            .memory_format(qx.suggest_memory_format()),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        c10::nullopt);
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qy, qx);
+    auto max = max_scalar.to<float>();
+    scalar_t max_q = at::native::quantize_val<scalar_t>(
+        qx.q_scale(), qx.q_zero_point(), max);
+    auto max_vec = Vec(max_q);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          return scalar_t(std::min<underlying_t>(value.val_, max_q.val_));
+        },
+        [&](Vec val) -> Vec { return val.minimum(max_vec); });
+  });
+}
+
+void qthreshold_kernel(
+  // TODO: For future tasks, since output quantization parameters are set equal to
+  // the input ones, it might make sense to implement this completely in the
+  // quantized domain.
+   const Tensor& qx,
+   Scalar threshold_scalar,
+   Scalar value_scalar,
+   Tensor& qy) {
+
+  // defines input and output scales and zero_points
+  int64_t input_zero_point = qx.q_zero_point();
+  float input_scale = qx.q_scale();
+  int64_t output_zero_point = qy.q_zero_point();
+  float output_scale = qy.q_scale();
+  float inv_output_scale = 1.0 / output_scale;
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qthreshold", [&]() {
+    qy = at::_empty_affine_quantized(
+      qx.sizes(),
+      at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+      qx.q_scale(),
+      qx.q_zero_point(),
+      c10::nullopt);
+
+    // vectorized
+    using Vec = Vec256<float>;
+    using qVec = Vec256<scalar_t>;
+    // defines the iterator
+    auto iter = TensorIterator::unary_op(qy, qx);
+    // defines the vectorized versions
+    Vec input_scale_vec = Vec(input_scale);
+    Vec input_zero_point_vec = Vec(input_zero_point);
+    Vec input_scale_neg_zp_premul_vec = input_scale_vec * input_zero_point_vec.neg();
+    // defines the floating-point versions of threshold and value
+    float threshold_float = threshold_scalar.to<float>();
+    float value_float = value_scalar.to<float>();
+    Vec threshold_vec = Vec(threshold_float);
+    Vec value_vec = Vec(value_float);
+
+    // Naive implemenentation: uses dequantize/execute/quantize routine
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value_qx) -> scalar_t {
+          // dequantize
+          const auto x = at::native::dequantize_val(input_scale, input_zero_point, value_qx);
+          // Applies the Threshold operation
+          const auto y = x > threshold_float ? x : value_float;
+          // quantize
+          return at::native::quantize_val<scalar_t>(output_scale, output_zero_point, y);
+        },
+        [&](qVec value_qx) -> qVec {
+          // dequantize
+          auto dx_vec = value_qx.dequantize(
+            input_scale_vec, input_zero_point_vec, input_scale_neg_zp_premul_vec);
+          for (int idx = 0; idx < dx_vec.size(); ++idx) {
+            // check if any elements are below threshold
+            auto cmp_to_threshold = dx_vec[idx] > threshold_vec;
+            if (cmp_to_threshold.zero_mask()) {
+              // blend
+              dx_vec[idx] = Vec::blendv(value_vec, dx_vec[idx], cmp_to_threshold);
+              }
+            }
+          // quantize
+          return qVec::quantize(dx_vec, output_scale, output_zero_point, inv_output_scale);
+        });
+  });
+}
+
+
 void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
   const auto i_scale = qx.q_scale();
   const auto i_zero_point = qx.q_zero_point();
@@ -724,7 +841,17 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
-void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
+void qelu_kernel(
+    const Tensor& qx,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    Tensor& qy) {
+  // scale and input_scale arguments refer to a generalized ELU formula
+  // if x >= 0, ELU(x) = x * scale
+  // if x <= 0, ELU(x) = (exp(x * input_scale) - 1) * scale
+  // in the normal ELU formula, both are equal to 1
+  // they are NOT related to the quantization scale term
 
   int64_t i_zp = qx.q_zero_point();
   float i_scale = qx.q_scale();
@@ -736,6 +863,8 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
   float inv_o_scale = 1.0 / o_scale;
 
   float alpha_float = alpha.to<float>();
+  float scale_coef = scale.to<float>();
+  float input_scale_coef = input_scale.to<float>();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qelu_kernel", [&] {
 
@@ -748,6 +877,8 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
     Vec zero_vec = Vec(0.0f);
     Vec one_vec = Vec(1.0f);
     Vec alpha_vec = Vec(alpha_float);
+    Vec scale_coef_vec = Vec(scale_coef);
+    Vec input_scale_coef_vec = Vec(input_scale_coef);
     Vec i_scale_vec = Vec(i_scale);
     Vec i_zero_point_vec = Vec((float)i_zp);
     Vec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
@@ -759,8 +890,9 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
         const auto x = at::native::dequantize_val(i_scale, i_zp, value_qx);
         // ELU
         const auto y = x >= 0
-          ? x
-          : (alpha_float * (std::exp(x) - 1));
+          ? x * scale_coef
+          : ((std::exp(x * input_scale_coef) - 1) * alpha_float * scale_coef);
+
         // quantize
         return at::native::quantize_val<scalar_t>(o_scale, o_zp, y);
       },
@@ -777,6 +909,7 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
 
             Vec dx_vec_copy_neg_elu = dx_vec_vec[idx] * one_vec;
             // calculate the negative part of ELU on the copy
+            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.exp();
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu - one_vec;
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * alpha_vec;
@@ -784,6 +917,8 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
             dx_vec_vec[idx] = Vec::blendv(dx_vec_copy_neg_elu, dx_vec_vec[idx],
                                         dx_vec_vec[idx] > zero_vec);
           }
+
+          dx_vec_vec[idx] = dx_vec_vec[idx] * scale_coef_vec;
         }
         // quantize
         return qVec::quantize(dx_vec_vec, o_scale, o_zp, inv_o_scale);
@@ -1079,7 +1214,7 @@ void do_avg_pool_nhwc_on_AVX2(
     int hsize,
     int wsize,
     int csize) {
-#if defined(__AVX2__) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
   // buffer for channel accumulator, used to interchange channel-loop
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
@@ -1149,7 +1284,7 @@ void do_avg_pool_on_AVX2(
     int64_t stride_D,
     int64_t stride_H,
     int64_t stride_W) {
-#if defined(__AVX2__) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
   constexpr auto vec_width = Vec256<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channel_size; c += vec_width) {
@@ -1181,6 +1316,114 @@ void do_avg_pool_on_AVX2(
 #endif
 }
 
+void _qadaptive_avg_pool_kernel(
+    const std::string& fn_name,
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t sizeC,
+    int64_t isizeD,  // Set to 1 for 2d
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeD,  // Set to 1 for 2d
+    int64_t osizeH,
+    int64_t osizeW,
+    int64_t istrideB,
+    int64_t istrideC,
+    int64_t istrideD,  // Set to 1 for 2d
+    int64_t istrideH,
+    int64_t istrideW) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), fn_name, [&]() {
+    scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
+    scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
+    auto* i_p =
+        reinterpret_cast<typename scalar_t::underlying*>(idata + b * istrideB);
+
+    float input_scale = qx.q_scale();
+    float output_scale = qy.q_scale();
+    int input_zero_point = qx.q_zero_point();
+    int output_zero_point = qy.q_zero_point();
+
+    for (int64_t od = 0; od < osizeD; od++) {
+      int istartD = (int)std::floor((float)(od * isizeD) / osizeD);
+      int iendD = (int)std::ceil((float)((od + 1) * isizeD) / osizeD);
+      int kD = iendD - istartD;
+      for (int64_t oh = 0; oh < osizeH; oh++) {
+        int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
+        int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
+        int kH = iendH - istartH;
+        for (int64_t ow = 0; ow < osizeW; ow++) {
+          auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
+              odata +
+              b * osizeD * osizeH * osizeW * sizeC +
+              od * osizeH * osizeW * sizeC +
+              oh * osizeW * sizeC +
+              ow * sizeC);
+          int istartW = (int)std::floor((float)(ow * isizeW) / osizeW);
+          int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);
+          int kW = iendW - istartW;
+          int size = kD * kH * kW;
+          float multiplier = input_scale / output_scale / size;
+          int input_zero_point_m_size = -input_zero_point * size;
+          int64_t c = 0;
+          // For int8 or uint8quantization, we implicitly use int32 as
+          // accumulation Or else, it will go to the slow path
+          // TODO: support 16bit, 32bit, and etc.
+          auto* internal_i_p = i_p +
+                               istartD * istrideD +
+                               istartH * istrideH +
+                               istartW * istrideW;
+
+          // Note: If AVX is not available, `do_avg_pool_on_AVX2 is a noop.
+          //       In that case, the following loop takes over
+          // TODO: more vectorization with loop interleaving
+          do_avg_pool_on_AVX2<scalar_t>(
+              internal_i_p,
+              o_p,
+              c,
+              sizeC,
+              1,
+              input_zero_point_m_size,
+              output_zero_point,
+              multiplier,
+              0,
+              kD,
+              0,
+              kH,
+              0,
+              kW,
+              istrideC,
+              istrideD,
+              istrideH,
+              istrideW);
+
+          // 1) The following loop handles the remaining channels
+          // 2) It also handles the Non-AVX2 path
+          for (; c < sizeC; ++c) {
+            int32_t acc_int32 = input_zero_point_m_size;
+            int64_t tcntr = 0;
+            for (int64_t id = 0; id < kD; ++id) {
+              for (int64_t ih = 0; ih < kH; ++ih) {
+                for (int64_t iw = 0; iw < kW; ++iw) {
+                  tcntr = id * istrideD +
+                          ih * istrideH +
+                          iw * istrideW;
+                  auto val = *(internal_i_p + tcntr + c * istrideC);
+                  acc_int32 += val;
+                }
+              }
+            }
+            // clamp
+            o_p[c] = at::native::quantize_val<scalar_t>(1.0f / multiplier,
+                                                        output_zero_point,
+                                                        acc_int32).val_;
+          } // c
+        } // oh
+      } // ow
+    } // od
+  });
+}
+
 void qadaptive_avg_pool2d_nhwc_kernel(
     const Tensor& qx,
     Tensor& qy,
@@ -1194,181 +1437,60 @@ void qadaptive_avg_pool2d_nhwc_kernel(
     int64_t istrideC,
     int64_t istrideH,
     int64_t istrideW) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "adaptive_avg_pool2d_nhwc", [&]() {
-    scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
-    scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
-    auto minimum = std::numeric_limits<scalar_t::underlying>::lowest();
-    auto maximum = std::numeric_limits<scalar_t::underlying>::max();
-    auto* i_p =
-        reinterpret_cast<typename scalar_t::underlying*>(idata + b * istrideB);
-
-    float input_scale = qx.q_scale();
-    float output_scale = qy.q_scale();
-    int input_zero_point = qx.q_zero_point();
-    int output_zero_point = qy.q_zero_point();
-
-    for (int64_t oh = 0; oh < osizeH; oh++) {
-      int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
-      int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
-      int kH = iendH - istartH;
-      for (int64_t ow = 0; ow < osizeW; ow++) {
-        auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-            odata + b * osizeH * osizeW * sizeC + (oh * osizeW + ow) * sizeC);
-        int istartW = (int)std::floor((float)(ow * isizeW) / osizeW);
-        int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);
-        int kW = iendW - istartW;
-        int size = kH * kW;
-        float multiplier = input_scale / output_scale / size;
-        int input_zero_point_m_size = -input_zero_point * size;
-        int64_t c = 0;
-        // For int8 or uint8quantization, we implicitly use int32 as
-        // accumulation Or else, it will go to the slow path
-        // TODO: support 16bit, 32bit, and etc.
-        auto* internal_i_p = i_p + istartH * istrideH + istartW * istrideW;
-
-        // TODO: more vectorization with loop interleaving
-        do_avg_pool_on_AVX2<scalar_t>(
-            internal_i_p,
-            o_p,
-            c,
-            sizeC,
-            1,
-            input_zero_point_m_size,
-            output_zero_point,
-            multiplier,
-            0,
-            1,
-            0,
-            kH,
-            0,
-            kW,
-            istrideC,
-            1,
-            istrideH,
-            istrideW);
-        // 1) The following loop handles the remaining channels
-        // 2) It also handles the Non-AVX2 path
-        for (; c < sizeC; ++c) {
-          int32_t acc_int32 = input_zero_point_m_size;
-          int64_t tcntr = 0;
-          for (int64_t ih = 0; ih < kH; ih++) {
-            for (int64_t iw = 0; iw < kW; iw++) {
-              tcntr = ih * istrideH + iw * istrideW;
-              auto val = *(internal_i_p + tcntr + c * istrideC);
-              acc_int32 += val;
-            }
-          }
-          // clamp
-          o_p[c] = at::native::quantize_val<scalar_t>(
-                       1.0f / multiplier, output_zero_point, acc_int32)
-                       .val_;
-        } // c
-      } // oh
-    } // ow
-  });
+  _qadaptive_avg_pool_kernel("adaptive_avg_pool2d_nhwc",
+                             qx,
+                             qy,
+                             b,
+                             sizeC,
+                             /*isizeD=*/1,
+                             isizeH,
+                             isizeW,
+                             /*osizeD=*/1,
+                             osizeH,
+                             osizeW,
+                             istrideB,
+                             istrideC,
+                             /*istrideD=*/1,
+                             istrideH,
+                             istrideW);
 }
 
-void qavg_pool2d_nhwc_kernel(
+void qadaptive_avg_pool3d_ndhwc_kernel(
     const Tensor& qx,
     Tensor& qy,
     int64_t b,
-    int64_t nInputPlane,
-    int64_t inputWidth,
-    int64_t inputHeight,
-    int64_t outputWidth,
-    int64_t outputHeight,
-    int kW,
-    int kH,
-    int dW,
-    int dH,
-    int padW,
-    int padH,
-    bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
-    scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
-    scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
-    int64_t batch_size = nInputPlane * inputWidth * inputHeight;
-    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
-        idata + b * batch_size);
-
-    // lift these operations outside the loop to reduce access overheads
-    float input_scale = qx.q_scale();
-    float output_scale = qy.q_scale();
-    int input_zero_point = qx.q_zero_point();
-    int output_zero_point = qy.q_zero_point();
-    int64_t divisor_override_factor =
-        divisor_override.has_value() ? divisor_override.value() : 0;
-
-    for (int64_t oh = 0; oh < outputHeight; oh++) {
-      for (int64_t ow = 0; ow < outputWidth; ow++) {
-        auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-            odata + b * nInputPlane * outputWidth * outputHeight +
-            (oh * outputWidth + ow) * nInputPlane);
-        int64_t hstart = oh * dH - padH;
-        int64_t wstart = ow * dW - padW;
-        int64_t hend = std::min(hstart + kH, inputHeight + padH);
-        int64_t wend = std::min(wstart + kW, inputWidth + padW);
-        int64_t pool_size = (hend - hstart) * (wend - wstart);
-        hstart = std::max(hstart, (int64_t)0);
-        wstart = std::max(wstart, (int64_t)0);
-        hend = std::min(hend, inputHeight);
-        wend = std::min(wend, inputWidth);
-
-        int size = (hend - hstart) * (wend - wstart);
-        int divide_size = count_include_pad ? pool_size : size;
-        int divide_factor =
-            divisor_override_factor ? divisor_override_factor : divide_size;
-        float multiplier = input_scale / output_scale / divide_factor;
-        int input_zero_point_m_size = -input_zero_point * size;
-
-        int64_t c = 0;
-        // For int8 quantization, we implicitly use int32 as accumulation
-        // Or else, it will go to the slow path
-        // TODO: support 16bit, 32bit, and etc.
-        do_avg_pool_on_AVX2<scalar_t>(
-            i_p,
-            o_p,
-            c,
-            nInputPlane,
-            nInputPlane,
-            input_zero_point_m_size,
-            output_zero_point,
-            multiplier,
-            0,
-            1,
-            hstart,
-            hend,
-            wstart,
-            wend,
-            1,
-            1,
-            inputWidth,
-            1);
-        // 1) The following loop handles the remaining channels
-        // 2) It also handles the Non-AVX2 path
-        for (; c < nInputPlane; ++c) {
-          int32_t acc_int32 = input_zero_point_m_size;
-          int64_t tcntr = 0;
-          for (int64_t ih = hstart; ih < hend; ih++) {
-            for (int64_t iw = wstart; iw < wend; iw++) {
-              tcntr = ih * inputWidth + iw;
-              auto val = *(i_p + tcntr * nInputPlane + c);
-              acc_int32 += val;
-            }
-          }
-          double acc_fp = acc_int32 * 1.0;
-          // clamp
-          o_p[c] = at::native::quantize_val<scalar_t>(
-                       1.0f / multiplier, output_zero_point, acc_fp)
-                       .val_;
-        } // c
-      } // ow
-    } // oh
-  });
+    int64_t sizeC,
+    int64_t isizeD,
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeD,
+    int64_t osizeH,
+    int64_t osizeW,
+    int64_t istrideB,
+    int64_t istrideC,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW) {
+  _qadaptive_avg_pool_kernel("adaptive_avg_pool3d_ndhwc",
+                             qx,
+                             qy,
+                             b,
+                             sizeC,
+                             isizeD,
+                             isizeH,
+                             isizeW,
+                             osizeD,
+                             osizeH,
+                             osizeW,
+                             istrideB,
+                             istrideC,
+                             istrideD,
+                             istrideH,
+                             istrideW);
 }
 
-void qavg_pool3d_nhwc_kernel(
+void _qavg_pool_nhwc_kernel(
+    const std::string& fn_name,
     const Tensor& qx,
     Tensor& qy,
     int64_t b,
@@ -1390,12 +1512,19 @@ void qavg_pool3d_nhwc_kernel(
     int padD,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool3d_nhwc", [&]() {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), fn_name, [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
-    int batch_size = nInputPlane * inputWidth * inputHeight * inputDepth;
-    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
-        idata + b * batch_size);
+    int strideC = 1;
+    int strideW = strideC * nInputPlane;
+    int istrideH = strideW * inputWidth;
+    int istrideD = istrideH * inputHeight;
+    int istrideB = istrideD * inputDepth;
+    int ostrideH = strideW * outputWidth;
+    int ostrideD = ostrideH * outputHeight;
+    int ostrideB = ostrideD * outputDepth;
+    auto* i_p =
+        reinterpret_cast<typename scalar_t::underlying*>(idata + b * istrideB);
 
     // lift these operations outside the loop to reduce access overheads
     float input_scale = qx.q_scale();
@@ -1409,10 +1538,8 @@ void qavg_pool3d_nhwc_kernel(
       for (int oh = 0; oh < outputHeight; oh++) {
         for (int ow = 0; ow < outputWidth; ow++) {
           auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-              odata +
-              b * nInputPlane * outputWidth * outputHeight * outputDepth +
-              (od * outputHeight * outputWidth + oh * outputWidth + ow) *
-                  nInputPlane);
+              odata + b * ostrideB + od * ostrideD + oh * ostrideH +
+              ow * strideW);
           int dstart = od * dD - padD;
           int hstart = oh * dH - padH;
           int wstart = ow * dW - padW;
@@ -1463,12 +1590,12 @@ void qavg_pool3d_nhwc_kernel(
           // 2) It also handles the Non-AVX2 path
           for (int c = c_start; c < nInputPlane; ++c) {
             int32_t acc_int32 = input_zero_point_m_size;
-            int64_t tcntr = 0;
             for (int64_t id = dstart; id < dend; id++) {
               for (int64_t ih = hstart; ih < hend; ih++) {
                 for (int64_t iw = wstart; iw < wend; iw++) {
-                  tcntr = id * inputHeight * inputWidth + ih * inputWidth + iw;
-                  auto val = *(i_p + tcntr * nInputPlane + c);
+                  auto val =
+                      *(i_p + id * istrideD + ih * istrideH + iw * strideW +
+                        c * strideC);
                   acc_int32 += val;
                 }
               }
@@ -1483,7 +1610,96 @@ void qavg_pool3d_nhwc_kernel(
       } // oh
     } // od
   });
-} // namespace
+}
+
+void qavg_pool2d_nhwc_kernel(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t nInputPlane,
+    int64_t inputWidth,
+    int64_t inputHeight,
+    int64_t outputWidth,
+    int64_t outputHeight,
+    int kW,
+    int kH,
+    int dW,
+    int dH,
+    int padW,
+    int padH,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  _qavg_pool_nhwc_kernel(
+      "avg_pool2d_nhwc",
+      qx,
+      qy,
+      b,
+      nInputPlane,
+      inputWidth,
+      inputHeight,
+      1,
+      outputWidth,
+      outputHeight,
+      1,
+      kW,
+      kH,
+      1,
+      dW,
+      dH,
+      1,
+      padW,
+      padH,
+      0,
+      count_include_pad,
+      divisor_override);
+}
+
+void qavg_pool3d_nhwc_kernel(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t nInputPlane,
+    int64_t inputWidth,
+    int64_t inputHeight,
+    int64_t inputDepth,
+    int64_t outputWidth,
+    int64_t outputHeight,
+    int64_t outputDepth,
+    int kW,
+    int kH,
+    int kD,
+    int dW,
+    int dH,
+    int dD,
+    int padW,
+    int padH,
+    int padD,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  _qavg_pool_nhwc_kernel(
+      "avg_pool3d_nhwc",
+      qx,
+      qy,
+      b,
+      nInputPlane,
+      inputWidth,
+      inputHeight,
+      inputDepth,
+      outputWidth,
+      outputHeight,
+      outputDepth,
+      kW,
+      kH,
+      kD,
+      dW,
+      dH,
+      dD,
+      padW,
+      padH,
+      padD,
+      count_include_pad,
+      divisor_override);
+}
 
 template <typename T>
 int64_t do_quantized_bilinear_on_AVX2(
@@ -1504,7 +1720,7 @@ int64_t do_quantized_bilinear_on_AVX2(
     const int64_t h1p,
     const int64_t w1p) {
   int64_t c = 0;
-#if defined(__AVX2__) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
   constexpr auto vec_width = Vec256<T>::size() / 4;
   if (vec_width == 8) {
     for (; c + vec_width <= channels; c += vec_width) {
@@ -1851,7 +2067,7 @@ void fake_quantize_tensor_kernel(
     return (std::fmin(
                 std::fmax(
                     static_cast<int64_t>(
-                        std::nearbyint(self * inv_scale + z_point)),
+                        z_point + std::nearbyint(self * inv_scale)),
                     quant_min),
                 quant_max) -
             z_point) *
@@ -1870,53 +2086,139 @@ void fake_quantize_grad_tensor_kernel(
   float inv_scale = 1.0f / sc;
   auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
   cpu_kernel(iter, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(std::nearbyint(x * inv_scale + z_point));
+    int64_t xq = static_cast<int64_t>(z_point + std::nearbyint(x * inv_scale));
     return dy * (xq >= quant_min && xq <= quant_max);
   });
 }
 
-void fake_quant_per_channel_cpu(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
-  cpu_kernel(iter,
-    [=](float self, float scale, int64_t zero_point) -> float {
-      float inv_scale = 1.0f / scale;
-      return (std::fmin(
+void fake_quantize_learnable_tensor_grad_kernel_cpu(
+    TensorIterator& iter,
+    float scale,
+    float inv_scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float dscale_small = quant_min - zero_point;
+  float dscale_big = quant_max - zero_point;
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    /*  When a for_each call is made on a TensorIterator with multiple inputs and outputs,
+        the order they are accessed follows the order they are built within the iterator.
+        For example, if an iterator is built in the following order:
+        auto iter = TensorIteratorConfig().
+          .add_output(firstOutput)
+          .add_output(secondOutput)
+          .add_input(firstInput)
+          .add_input(secondInput)
+          .build()
+        data will contain 4 pointers to pointers to values in the following order:
+        firstOutput, secondOutput, firstInput, secondInput.
+        Proper pointer referencing and dereferencing, along with the usage of strides
+        (to move onto different elements), can allow accessing of the input and assignment
+        to the right output.
+    */
+    for (int64_t i = 0; i < n; i++) {
+      float* dXOutput = (float*)(data[0] + i * strides[0]);
+      float* dScaleOutput = (float*)(data[1] + i * strides[1]);
+      float* dZeroPointOutput = (float*)(data[2] + i * strides[2]);
+      float* XInput = (float*)(data[3] + i * strides[3]);
+      float* dYInput = (float*)(data[4] + i * strides[4]);
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
+      *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
+      // Calculate gradients for scale and zero point.
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - zero_point) * scale);
+      if (xqi == quant_min || xqi == quant_max) {
+        *dZeroPointOutput = (*dYInput) * (-1) * scale;
+        *dScaleOutput = (xqi == quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big);
+      } else {
+        *dZeroPointOutput = 0;
+        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale;
+      }
+    }
+  });
+}
+
+void fake_quant_per_channel_cpu(
+    TensorIterator& iter,
+    int64_t quant_min,
+    int64_t quant_max) {
+  cpu_kernel(iter, [=](float self, float scale, int64_t zero_point) -> float {
+    float inv_scale = 1.0f / scale;
+    return (std::fmin(
                 std::fmax(
                     static_cast<int64_t>(
-                        std::nearbyint(self * inv_scale + zero_point)),
+                        zero_point + std::nearbyint(self * inv_scale)),
                     quant_min),
                 quant_max) -
             zero_point) *
         scale;
-    });
+  });
 }
 
-void fake_quant_grad_per_channel_cpu(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
-  cpu_kernel(iter,
-    [=](float x, float dy, float scale, int64_t zero_point) -> float {
-      float inv_scale = 1.0f / scale;
-      int64_t xq = static_cast<int64_t>(std::nearbyint(x * inv_scale + zero_point));
-      return dy * (xq >= quant_min && xq <= quant_max);
-    });
+void fake_quant_grad_per_channel_cpu(
+    TensorIterator& iter,
+    int64_t quant_min,
+    int64_t quant_max) {
+  cpu_kernel(
+      iter, [=](float x, float dy, float scale, int64_t zero_point) -> float {
+        float inv_scale = 1.0f / scale;
+        int64_t xq =
+            static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
+        return dy * (xq >= quant_min && xq <= quant_max);
+      });
 }
 
-template <typename T>
-void quantized_layer_norm_kernel_impl(
-    const Tensor& X,
-    const Tensor& gamma,
-    const Tensor& beta,
-    int64_t M,
-    int64_t N,
-    float eps,
-    Tensor* Y) {
+void fake_quantize_learnable_channel_grad_kernel_cpu(
+    TensorIterator& iter,
+    int64_t quant_min,
+    int64_t quant_max) {
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    /*  To see how the input and outputs are referenced and assigned,
+        please see the implemenetation of
+        fake_quantize_learnable_tensor_grad_kernel_cpu.
+    */
+    for (int64_t i = 0; i < n; i++) {
+      float* dx_output = (float*)(data[0] + i * strides[0]);
+      float* dscale_output = (float*)(data[1] + i * strides[1]);
+      float* dzero_point_output = (float*)(data[2] + i * strides[2]);
+      float* x_input = (float*)(data[3] + i * strides[3]);
+      float* dy_input = (float*)(data[4] + i * strides[4]);
+      float* scale_input = (float*)(data[5] + i * strides[5]);
+      float* zero_point_input = (float*)(data[6] + i * strides[6]);
 
+      float inv_scale = 1.0f / (*scale_input);
+      float dscale_small = quant_min - (*zero_point_input);
+      float dscale_big = quant_max - (*zero_point_input);
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint((*zero_point_input) + (*x_input) * inv_scale);
+      *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
+      // Calculate gradients for scale and zero point.
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - (*zero_point_input)) * (*scale_input));
+      if (xqi == quant_min || xqi == quant_max) {
+        *dzero_point_output = (*dy_input) * (-1) * (*scale_input);
+        *dscale_output = (xqi == quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big);
+      } else {
+        *dzero_point_output = 0;
+        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale;
+      }
+    }
+  });
 }
 
-void quantized_layer_norm_kernel(
-    const Tensor& X,
-    const Tensor& gamma,
-    const Tensor& beta,
-    int64_t M,
-    int64_t N,
+// Assumes X is composed of M groups of N elements. Normalizes each of the
+// groups and optionally applies affine scaling. Useful for LayerNorm,
+// GroupNorm, InstanceNorm.
+void quantized_normalize_kernel(
+    const Tensor& X, // input tensor
+    const Tensor& gamma, // weight (optional)
+    const Tensor& beta, // bias (optional)
+    bool affine_per_channel, // scaling applied elementwise if false, per channel if true
+    int num_channels, // only used if affine_per_channel is set
+    int num_groups, // only used if affine_per_channel is set
+    int64_t M, // number of groups
+    int64_t N, // number of elements in each group
     double eps,
     Tensor* Y) {
   AT_DISPATCH_QINT_TYPES(X.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
@@ -1924,10 +2226,17 @@ void quantized_layer_norm_kernel(
     using fVec = vec256::Vec256<float>;
 
     TORCH_INTERNAL_ASSERT(X.numel() == M * N, "Unexpected num elements in X");
-    TORCH_INTERNAL_ASSERT(!gamma.defined() || gamma.numel() == N,
+    TORCH_INTERNAL_ASSERT(
+        !gamma.defined() ||
+        (!affine_per_channel && gamma.numel() == N) ||
+        (affine_per_channel && gamma.numel() == num_channels),
         "Unexpected size of gamma");
-    TORCH_INTERNAL_ASSERT(!beta.defined() || beta.numel() == N,
+    TORCH_INTERNAL_ASSERT(
+        !beta.defined() ||
+        (!affine_per_channel && beta.numel() == N) ||
+        (affine_per_channel && beta.numel() == num_channels),
         "Unexpected size of beta");
+
     scalar_t* X_data = X.data_ptr<scalar_t>();
     const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
     const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
@@ -1950,6 +2259,10 @@ void quantized_layer_norm_kernel(
     int64_t kIntVLen = kFloatVLen * qVec::float_num_vecs();
     int64_t kNumIntVecInLayer = N / kIntVLen;
     int64_t kNonVecRemInLayer = N % kIntVLen;
+    int channels_per_group = num_channels / num_groups;
+    int64_t NPerChannel = N / channels_per_group;
+    int64_t kNumIntVecInChannel = NPerChannel / kIntVLen;
+    int64_t kNonVecRemInChannel = NPerChannel % kIntVLen;
 
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (int64_t i = start; i < end; ++i) {
@@ -1978,35 +2291,77 @@ void quantized_layer_norm_kernel(
         // Second pass: normalize
 
         // TODO replace with TensorIterator implementation once #33166 is fixed.
-        for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
-          int64_t vecStartIdx = vecIdx * kIntVLen;
-          auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
-          auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
-              x_fake_scale_zp_neg_premul_vec);
-          for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
-            int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
-            auto gammaVec = gamma_null
-              ? one_vec
-              : fVec::loadu(gamma_data + vecVecStartIdx);
-            auto betaVec = beta_null
-              ? zero_vec
-              : fVec::loadu(beta_data + vecVecStartIdx);
-            dqXVec[dqXVecIdx] =
-              (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
-                scale_x_div_layer_stdVec * gammaVec + betaVec;
-            qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
-              .store(Y_ptr + vecStartIdx);
+        if (affine_per_channel) {
+
+          // if scaling per channel, scaling parameters can be pre-multiplied
+          // with normalization parameters
+          for (int64_t chIdx = 0; chIdx < channels_per_group; chIdx++) {
+            int scalingIdx = (i * channels_per_group + chIdx) % (num_channels);
+            float gamma = gamma_null ? 1.0f : gamma_data[scalingIdx];
+            // scale_x / layer_std * gamma
+            float gamma_p = scale_x_div_layer_std * gamma;
+            float beta = beta_null ? 0.0f : beta_data[scalingIdx];
+            fVec gamma_p_vec(gamma_p);
+            fVec beta_vec(beta);
+
+            int64_t chStartIdx = chIdx * NPerChannel;
+            int64_t chEndIdx = chStartIdx + NPerChannel;
+
+            for (int64_t vecIdx = 0; vecIdx < kNumIntVecInChannel; vecIdx++) {
+              int64_t vecStartIdx = chStartIdx + vecIdx * kIntVLen;
+              auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+              auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                  x_fake_scale_zp_neg_premul_vec);
+              for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+                dqXVec[dqXVecIdx] =
+                  (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                    gamma_p_vec + beta_vec;
+                qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                  .store(Y_ptr + vecStartIdx);
+              }
+            }
+            for (int64_t remIdx = chEndIdx - kNonVecRemInChannel;
+                 remIdx < chEndIdx;
+                 remIdx++) {
+              auto qXVal = X_ptr[remIdx];
+              float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
+              float dqY =
+                (dqXVal - layer_mean_div_scale_x) * gamma_p + beta;
+              Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+            }
+          } // chIdx
+
+        } else {
+
+          for (int64_t vecIdx = 0; vecIdx < kNumIntVecInLayer; vecIdx++) {
+            int64_t vecStartIdx = vecIdx * kIntVLen;
+            auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
+            auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                x_fake_scale_zp_neg_premul_vec);
+            for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
+              int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
+              auto gammaVec = gamma_null
+                ? one_vec
+                : fVec::loadu(gamma_data + vecVecStartIdx);
+              auto betaVec = beta_null
+                ? zero_vec
+                : fVec::loadu(beta_data + vecVecStartIdx);
+              dqXVec[dqXVecIdx] =
+                (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
+                  scale_x_div_layer_stdVec * gammaVec + betaVec;
+              qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + vecStartIdx);
+            }
           }
-        }
-        for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
-          const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
-          const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
-          auto qXVal = X_ptr[remIdx];
-          float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
-          float dqY =
-            ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
-          Y_ptr[remIdx] =
-              at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+          for (int64_t remIdx = N - kNonVecRemInLayer; remIdx < N; remIdx++) {
+            const float gamma_v = gamma_null ? 1.0f : gamma_data[remIdx];
+            const float beta_v = beta_null ? 0.0f : beta_data[remIdx];
+            auto qXVal = X_ptr[remIdx];
+            float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
+            float dqY =
+              ((dqXVal - layer_mean_div_scale_x) * scale_x_div_layer_std) * gamma_v + beta_v;
+            Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+          }
         }
       }
     }); // parallel_for
@@ -2022,6 +2377,7 @@ void quantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
+        check_tensor_memory_format(rtensor, qtensor);
         const float* rd = rtensor.data_ptr<float>();
         auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams;
@@ -2031,7 +2387,7 @@ void quantize_tensor_per_tensor_affine_cpu(
         int num_tasks = at::get_num_threads();
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
           for (int task_id = begin; task_id < end; ++task_id) {
-            fbgemm::Quantize<underlying_t>(
+            fbgemm::Quantize<underlying_t, false /*LEGACY*/>(
                 rd, /*src=*/
                 qd, /*dst=*/
                 rtensor.numel(), /*len*/
@@ -2050,6 +2406,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
+        check_tensor_memory_format(qtensor, rtensor);
         const auto* qd =
             reinterpret_cast<const underlying_t*>(qtensor.data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams;
@@ -2073,7 +2430,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 }
 #else // USE_FBGEMM
 
-#ifdef __ARM_NEON__
+#if defined(__ARM_NEON__) || defined(__aarch64__)
 // Generic template defaults to naive quantize implementation
 template <typename T>
 void quantize_tensor_arm(
@@ -2105,6 +2462,7 @@ void quantize_tensor_arm<c10::quint8>(
   uint32_t i = 0;
   auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
+#if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
   // Some detail:
@@ -2140,35 +2498,47 @@ void quantize_tensor_arm<c10::quint8>(
   for (; i < N; ++i) {
     (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
   }
+#else
+  const int16x8_t vzero_point = vdupq_n_s16((int16_t)(uint16_t)zero_point);
+  for (i = 0; i + 8 < N; i += 8) {
+    const float32x4_t vin0123 = vld1q_f32(in);
+    in += 4;
+    const float32x4_t vin4567 = vld1q_f32(in);
+    in += 4;
+    const int32x4_t v0123_rounded = vcvtnq_s32_f32(vmulq_f32(vin0123, vinv_scale));
+    const int32x4_t v4567_rounded = vcvtnq_s32_f32(vmulq_f32(vin4567, vinv_scale));
+    const int16x8_t v01234567_packed = vqaddq_s16(
+        vqmovn_high_s32(vqmovn_s32(v0123_rounded), v4567_rounded), vzero_point);
+    const uint8x8_t vout01234567 = vqmovun_s16(v01234567_packed);
+    vst1_u8(out, vout01234567);
+    out += 8;
+  }
+  for (; i < N; ++i) {
+    (*out++) = at::native::quantize_val_arm(scale, zero_point, (*in++));
+  }
+#endif
 }
 
-#endif // __ARM_NEON__
+#endif // defined(__ARM_NEON__) || defined(__aarch64__)
 
 void quantize_tensor_per_tensor_affine_cpu(
     Tensor rtensor,
     Tensor qtensor,
     double scale,
     int64_t zero_point) {
-#if defined(__ARM_NEON__)
+#if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(), "Float tensor should be contiguous");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* const rdata = rtensor.data_ptr<float>();
-        // If QEngine is set to QNNPACK, use caffe2 specialized Int8Quantize
-        // implementation on ARM
-        if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-          quantize_tensor_arm<scalar_t>(
-              rdata, qtensor, rtensor.numel(), scale, zero_point);
-          return;
-        }
+        quantize_tensor_arm<scalar_t>(
+            rdata, qtensor, rtensor.numel(), scale, zero_point);
       });
-#endif // __ARM_NEON__
+#else
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(), "Float tensor should be contiguous");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* const rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
         auto numel = rtensor.numel();
@@ -2176,6 +2546,7 @@ void quantize_tensor_per_tensor_affine_cpu(
           qdata[i] = quantize_val<scalar_t>(scale, zero_point, rdata[i]);
         }
       });
+#endif // __ARM_NEON__
 }
 
 void dequantize_tensor_per_tensor_affine_cpu(
@@ -2185,6 +2556,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
+      check_tensor_memory_format(qtensor, rtensor);
         const auto* qd = qtensor.data_ptr<scalar_t>();
         float* rd = rtensor.data_ptr<float>();
         auto numel = qtensor.numel();
@@ -2202,6 +2574,15 @@ void quantize_tensor_per_channel_affine_cpu(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
+  // TODO: channels last kernel can be made faster.
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
@@ -2210,19 +2591,101 @@ void quantize_tensor_per_channel_affine_cpu(
         int64_t channel = rtensor.size(axis);
         auto scales_data = scales.data_ptr<double>();
         auto zero_points_data = zero_points.data_ptr<int64_t>();
+        check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
-        for (auto b = 0; b < batches; ++b) {
-          for (auto c = 0; c < channel; ++c) {
+        if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+            rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+          // This code handles per channel quant when axis = 1 and
+          // channels_last contig.
+          // If axis = 0 and channels_last contig, implementation
+          // for channels first (NCHW) works.
+          for (auto b = 0; b < batches; ++b) {
             for (auto e = 0; e < elements_per_channel; ++e) {
-              auto i = b * channel * elements_per_channel +
-                  c * elements_per_channel + e;
-              qdata[i] = quantize_val<scalar_t>(
-                  scales_data[c], zero_points_data[c], rdata[i]);
+              for (auto c = 0; c < channel; ++c) {
+                auto i = b * channel * elements_per_channel + e * channel + c;
+                qdata[i] = quantize_val<scalar_t>(
+                    scales_data[c], zero_points_data[c], rdata[i]);
+              }
+            }
+          }
+        } else {
+          for (auto b = 0; b < batches; ++b) {
+            for (auto c = 0; c < channel; ++c) {
+              for (auto e = 0; e < elements_per_channel; ++e) {
+                auto i = b * channel * elements_per_channel +
+                    c * elements_per_channel + e;
+                qdata[i] = quantize_val<scalar_t>(
+                    scales_data[c], zero_points_data[c], rdata[i]);
+              }
             }
           }
         }
       });
+}
+
+template<typename T, typename N, typename Q>
+void dequantize_per_channel_affine_kernel(
+      Tensor qtensor,
+      Tensor rtensor,
+      Tensor scales,
+      Tensor zero_points,
+      int64_t axis,
+      int bit_width=8) {
+
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
+  int64_t batches = size_to_dim_(axis, rtensor.sizes());
+  int64_t elements_per_channel =
+      size_from_dim_(axis + 1, rtensor.sizes());
+  int64_t channel = rtensor.size(axis);
+  auto scales_data = scales.data_ptr<T>();
+  auto zero_points_data = zero_points.data_ptr<N>();
+  check_tensor_memory_format(qtensor, rtensor);
+  const auto* qd = qtensor.data_ptr<Q>();
+  float* rd = rtensor.data_ptr<float>();
+  const auto elem_per_byte = 8 / bit_width;
+  if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+      rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+    for (auto b = 0; b < batches; ++b) {
+      for (auto e = 0; e < elements_per_channel; ++e) {
+        for (auto c = 0; c < channel; ++c) {
+          auto i = b * channel * elements_per_channel + e * channel + c;
+          // We need to convert the qint8 value to float to ensure the
+          // subtraction subexpression returns a float
+          auto qvalue = qd[i / elem_per_byte].val_;
+          if (bit_width < 8) {
+            qvalue >>= (i % elem_per_byte) * bit_width;
+            qvalue &= (1 << bit_width) - 1;
+          }
+          rd[i] = (static_cast<float>(qvalue) - zero_points_data[c]) * scales_data[c];
+        }
+      }
+    }
+  } else {
+    for (auto b = 0; b < batches; ++b) {
+      for (auto c = 0; c < channel; ++c) {
+        for (auto e = 0; e < elements_per_channel; ++e) {
+          auto i = b * channel * elements_per_channel +
+              c * elements_per_channel + e;
+          // We need to convert the qint8 value to float to ensure the
+          // subtraction subexpression returns a float
+          auto qvalue = qd[i / elem_per_byte].val_;
+          if (bit_width < 8) {
+            qvalue >>= (i % elem_per_byte) * bit_width;
+            qvalue &= (1 << bit_width) - 1;
+          }
+          rd[i] = (static_cast<float>(qvalue) - zero_points_data[c]) * scales_data[c];
+        }
+      }
+    }
+  }
 }
 
 void dequantize_tensor_per_channel_affine_cpu(
@@ -2233,65 +2696,187 @@ void dequantize_tensor_per_channel_affine_cpu(
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cpu", [&]() {
+        dequantize_per_channel_affine_kernel<double, int64_t, scalar_t>(qtensor, rtensor, scales, zero_points, axis);
+      });
+}
+
+// quantize stubs for floating point scale and zero_point.
+void quantize_tensor_per_channel_float_qparams_cpu(
+    Tensor rtensor,
+    Tensor qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+      qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
         int64_t elements_per_channel =
             size_from_dim_(axis + 1, rtensor.sizes());
         int64_t channel = rtensor.size(axis);
-        auto scales_data = scales.data_ptr<double>();
-        auto zero_points_data = zero_points.data_ptr<int64_t>();
-        const auto* qd = qtensor.data_ptr<scalar_t>();
-        float* rd = rtensor.data_ptr<float>();
-        for (auto b = 0; b < batches; ++b) {
-          for (auto c = 0; c < channel; ++c) {
+        auto scales_data = scales.data_ptr<float>();
+        auto zero_points_data = zero_points.data_ptr<float>();
+        check_tensor_memory_format(rtensor, qtensor);
+        const float* rdata = rtensor.data_ptr<float>();
+        auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+        const auto elem_per_byte = CHAR_BIT / bit_width;
+        int qvalue = 0;
+        if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+            rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+          for (auto b = 0; b < batches; ++b) {
             for (auto e = 0; e < elements_per_channel; ++e) {
-              auto i = b * channel * elements_per_channel +
-                  c * elements_per_channel + e;
-              // We need to convert the qint8 value to float to ensure the
-              // subtraction subexpression returns a float
-              rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
-                  scales_data[c];
+              for (auto c = 0; c < channel; ++c) {
+                auto i = b * channel * elements_per_channel + e * channel + c;
+                qvalue = quantize_val_float_qparams(
+                    scales_data[c], zero_points_data[c], rdata[i], quant_min, quant_max);
+                if (i % elem_per_byte == 0) {
+                  qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+                } else {
+                  qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+                }
+              }
+            }
+          }
+        } else {
+          for (auto b = 0; b < batches; ++b) {
+            for (auto c = 0; c < channel; ++c) {
+              for (auto e = 0; e < elements_per_channel; ++e) {
+                auto i = b * channel * elements_per_channel +
+                    c * elements_per_channel + e;
+                qvalue = quantize_val_float_qparams(
+                    scales_data[c], zero_points_data[c], rdata[i], quant_min, quant_max);
+                if (i % elem_per_byte == 0) {
+                  qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+                } else {
+                  qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+                }
+              }
             }
           }
         }
       });
 }
 
+void dequantize_tensor_per_channel_float_qparams_cpu(
+    Tensor qtensor,
+    Tensor rtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+      qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cpu", [&]() {
+        dequantize_per_channel_affine_kernel<float, float, scalar_t>(qtensor, rtensor, scales, zero_points, axis, bit_width);
+      });
+}
+
+void quantize_tensor_per_tensor_affine_sub_byte_cpu(
+    Tensor rtensor,
+    Tensor qtensor,
+    float scale,
+    float zero_point) {
+  // TODO Use fbgemm kernel to pack values
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+    qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
+      check_tensor_memory_format(rtensor, qtensor);
+      const float* const rdata = rtensor.data_ptr<float>();
+      auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      auto numel = rtensor.numel();
+      const auto elem_per_byte = CHAR_BIT / bit_width;
+      for (int i = 0; i < numel; ++i) {
+        float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
+        int qvalue = lrintf(std::nearbyint(rdata[i] * inv_scale) + zero_point);
+        qvalue = std::max(quant_min, std::min(qvalue, quant_max));
+
+        // We pack sub_byte values and align them to a byte.
+        // Eg. for 4-bits Index 0 is packed in the lower 4-bits
+        // and index 1 is packed in the upper 4-bits.
+        if (i % elem_per_byte == 0) {
+          qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+        } else {
+          qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+        }
+      } // for numel
+    });
+}
+
+void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
+    Tensor qtensor,
+    Tensor rtensor,
+    float scale,
+    float zero_point) {
+  // TODO Use fbgemm kernel to pack values
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+    qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
+      check_tensor_memory_format(rtensor, qtensor);
+      auto rdata = rtensor.data_ptr<float>();
+      const underlying_t* qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      auto numel = rtensor.numel();
+      const auto elem_per_byte = CHAR_BIT / bit_width;
+
+      for (int i = 0; i < numel; ++i) {
+        underlying_t qvalue = qdata[i / elem_per_byte];
+        qvalue >>= (i % elem_per_byte) * bit_width;
+        qvalue &= (1 << bit_width) - 1;
+        rdata[i] = (static_cast<float>(qvalue) - zero_point) * scale;
+      }
+  });
+
+}
+
 } // namespace
 
-REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
-REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
-REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
-REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
-REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
-REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
-REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
-REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
-REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
+                  &dequantize_tensor_per_channel_affine_cpu);
+REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
+                  &dequantize_tensor_per_tensor_affine_cpu);
+REGISTER_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
+                  &dequantize_tensor_per_channel_float_qparams_cpu);
+REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
+                  &fake_quantize_learnable_tensor_grad_kernel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_per_channel_stub,
+                  &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_tensor_stub,
+                  &fake_quantize_grad_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
+                  &qadaptive_avg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
+                  &qadaptive_avg_pool3d_ndhwc_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
-REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
 REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
-REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
-REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
-REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qadaptive_avg_pool2d_nhwc_stub,
-    &qadaptive_avg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qupsample_bilinear2d_nhwc_stub,
-    &qupsample_bilinear2d_nhwc_kernel);
+REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
+REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
+REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qclamp_min_stub, &qclamp_min_kernel);
+REGISTER_DISPATCH(qclamp_max_stub, &qclamp_max_kernel);
+REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
+REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
+REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
+REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
+REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
+REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
+REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
+REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
-REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
-REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
-REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(quantized_layer_norm_stub, &quantized_layer_norm_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub, &fake_quantize_learnable_channel_grad_kernel_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
@@ -2299,11 +2884,18 @@ REGISTER_DISPATCH(
     quantize_tensor_per_channel_affine_stub,
     &quantize_tensor_per_channel_affine_cpu);
 REGISTER_DISPATCH(
-    dequantize_tensor_per_tensor_affine_stub,
-    &dequantize_tensor_per_tensor_affine_cpu);
+    quantize_tensor_per_channel_float_qparams_stub,
+    &quantize_tensor_per_channel_float_qparams_cpu);
+REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
+REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
+                  &qupsample_bilinear2d_nhwc_kernel);
 REGISTER_DISPATCH(
-    dequantize_tensor_per_channel_affine_stub,
-    &dequantize_tensor_per_channel_affine_cpu);
+    quantize_tensor_per_tensor_affine_sub_byte_stub,
+    &quantize_tensor_per_tensor_affine_sub_byte_cpu);
+REGISTER_DISPATCH(
+    dequantize_tensor_per_tensor_affine_sub_byte_stub,
+    &dequantize_tensor_per_tensor_affine_sub_byte_cpu);
+
 
 } // namespace native
 } // namespace at

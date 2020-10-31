@@ -51,7 +51,7 @@ end
 
 # link static libraries
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 for lib in libs do
     path = "#{install_path}/lib/#{lib}"
     if File.exist?(path)
@@ -62,10 +62,13 @@ end
 project.save
 
 sdk = nil
+arch = nil
 if options[:platform] == 'SIMULATOR'
     sdk = 'iphonesimulator'
+    arch = 'x86_64'
 elsif options[:platform] == 'OS'
     sdk = 'iphoneos'
+    arch = 'arm64'
 else
     raise "unsupported platform #{options[:platform]}"
 end
@@ -76,4 +79,5 @@ if not profile and options[:platform] == 'OS'
 end
 
 # run xcodebuild
-exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release PROVISIONING_PROFILE_SPECIFIER=#{profile}"
+exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release PROVISIONING_PROFILE_SPECIFIER=#{profile} -arch #{arch}" 
+

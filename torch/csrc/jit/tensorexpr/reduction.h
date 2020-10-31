@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
@@ -26,14 +26,12 @@ class ReduceOp : public ExprNode<ReduceOp> {
  public:
   ReduceOp(
       const Buf* accum,
-      const Expr* init,
       ExprHandle body,
       ReduceInteraction c,
       const std::vector<const Expr*>& output_args,
       const std::vector<const Var*>& reduce_args)
       : ExprNodeBase(body.dtype()),
         accumulator_(accum),
-        initializer_(init),
         body_(body),
         interaction_(c),
         output_args_(output_args),
@@ -42,12 +40,6 @@ class ReduceOp : public ExprNode<ReduceOp> {
   // return the accumulation load expression.
   const Buf* accumulator() const {
     return accumulator_;
-  }
-
-  // return a Statement which stores the initializer into the accumulation
-  // buffer.
-  const Expr* initializer() const {
-    return initializer_;
   }
 
   // return the body expression which obtains the value to be reduced.
@@ -83,23 +75,23 @@ class ReduceOp : public ExprNode<ReduceOp> {
 
  private:
   const Buf* accumulator_;
-  const Expr* initializer_;
   ExprHandle body_;
   ReduceInteraction interaction_;
   std::vector<const Expr*> output_args_;
   std::vector<const Var*> reduce_args_;
 };
 
-// A Reducer is a user interface describing a particular reduction operation. It
-// has three components: An initializtion value, a way of interacting each value
-// with the accumulation, and a method for obtaining the current value to be
-// reduced. It is materialized into a ReduceOp when loop variables are known.
+// A Reducer is a user interface describing a particular reduction
+// operation. It has three components: An initialization value, a way of
+// interacting each value with the accumulation, and a method for obtaining the
+// current value to be reduced. It is materialized into a ReduceOp when loop
+// variables are known.
 class Reducer {
  public:
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Buffer& buf)
+  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>
@@ -107,18 +99,16 @@ class Reducer {
     interaction_ = interaction;
   }
 
+  const Expr* initializer() const {
+    return init_;
+  }
+
   ReduceOp* operator()(
       Buf* result_buf,
       ExprHandle body,
       std::vector<const Expr*> output,
       std::vector<const Var*> inner) const {
-    return new ReduceOp(
-        result_buf,
-        new Cast(body.dtype(), init_),
-        body,
-        interaction_,
-        output,
-        inner);
+    return new ReduceOp(result_buf, body, interaction_, output, inner);
   }
 
   // Polymorphic handling of Body functions with a variety of parameters.
@@ -184,8 +174,7 @@ class Sum : public Reducer {
         }) {}
 };
 
-namespace {
-ExprHandle maximumVal(ScalarType type) {
+inline ExprHandle maximumVal(ScalarType type) {
   switch (type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
@@ -198,7 +187,7 @@ ExprHandle maximumVal(ScalarType type) {
   return ExprHandle();
 }
 
-static ExprHandle minimumVal(ScalarType type) {
+inline ExprHandle minimumVal(ScalarType type) {
   switch (type) {
 #define MAX_BY_TYPE_CASE(Type, Name) \
   case ScalarType::Name:             \
@@ -209,7 +198,6 @@ static ExprHandle minimumVal(ScalarType type) {
       throw unsupported_dtype();
   }
 }
-} // namespace
 
 class Maximum : public Reducer {
  public:
@@ -235,6 +223,17 @@ class Minimum : public Reducer {
       : Reducer(initializer, [](ExprHandle a, ExprHandle b) {
           return Min::make(a, b, true);
         }) {}
+};
+
+class ReductionExpander : public IRMutator {
+ public:
+  Stmt* expand(Stmt* s) {
+    return s->accept_mutator(this);
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    return v->complete().node();
+  }
 };
 
 } // namespace tensorexpr

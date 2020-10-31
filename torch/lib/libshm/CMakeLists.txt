@@ -23,6 +23,10 @@ else()
 endif()
 
 add_library(shm SHARED core.cpp)
+if(HAVE_SOVERSION)
+  set_target_properties(shm PROPERTIES
+      VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
 
 target_include_directories(shm PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h

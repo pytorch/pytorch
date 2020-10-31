@@ -178,8 +178,7 @@ CircleCI creates a  final yaml file by inlining every <<* segment, so if we were
 So, CircleCI has several executor types: macos, machine, and docker are the ones we use. The 'machine' executor gives you two cores on some linux vm. The 'docker' executor gives you considerably more cores (nproc was 32 instead of 2 back when I tried in February). Since the dockers are faster, we try to run everything that we can in dockers. Thus
 
 * linux build jobs use the docker executor. Running them on the docker executor was at least 2x faster than running them on the machine executor
-* linux test jobs use the machine executor and spin up their own docker. Why this nonsense? It's cause we run nvidia-docker for our GPU tests; any code that calls into the CUDA runtime needs to be run on nvidia-docker. To run a nvidia-docker you need to install some nvidia packages on the host machine and then call docker with the '—runtime nvidia' argument. CircleCI doesn't support this, so we have to do it ourself.
-    * This is not just a mere inconvenience. **This blocks all of our linux tests from using more than 2 cores.** But there is nothing that we can do about it, but wait for a fix on circleci's side. Right now, we only run some smoke tests (some simple imports) on the binaries, but this also affects non-binary test jobs.
+* linux test jobs use the machine executor in order for them to properly interface with GPUs since docker executors cannot execute with attached GPUs
 * linux upload jobs use the machine executor. The upload jobs are so short that it doesn't really matter what they use
 * linux smoke test jobs use the machine executor for the same reason as the linux test jobs
 
@@ -419,8 +418,6 @@ You can build Linux binaries locally easily using docker.
 #    in the docker container then you will see path/to/foo/baz on your local
 #    machine. You could also clone the pytorch and builder repos in the docker.
 #
-# If you're building a CUDA binary then use `nvidia-docker run` instead, see below.
-#
 # If you know how, add ccache as a volume too and speed up everything
 docker run \
     -v your/pytorch/repo:/pytorch \
@@ -444,9 +441,7 @@ export DESIRED_CUDA=cpu
 
 **Building CUDA binaries on docker**
 
-To build a CUDA binary you need to use `nvidia-docker run` instead of just `docker run` (or you can manually pass `--runtime=nvidia`). This adds some needed libraries and things to build CUDA stuff.
-
-You can build CUDA binaries on CPU only machines, but you can only run CUDA binaries on CUDA machines. This means that you can build a CUDA binary on a docker on your laptop if you so choose (though it’s gonna take a loong time).
+You can build CUDA binaries on CPU only machines, but you can only run CUDA binaries on CUDA machines. This means that you can build a CUDA binary on a docker on your laptop if you so choose (though it’s gonna take a long time).
 
 For Facebook employees, ask about beefy machines that have docker support and use those instead of your laptop; it will be 5x as fast.
 

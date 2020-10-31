@@ -67,12 +67,7 @@ void bind_cpp_module_wrapper(
 
   // `type()` always needs a `str`, but pybind11's `str()` method always creates
   // a `unicode` object.
-#if PY_MAJOR_VERSION < 3
-  py::object name_str =
-      py::reinterpret_steal<py::object>(PyString_FromString(name));
-#else
   py::object name_str = py::str(name);
-#endif
 
   // Dynamically create the subclass of `ModuleWrapper`, which is a subclass of
   // `torch.nn.Module`, and will delegate all calls to the C++ module we're

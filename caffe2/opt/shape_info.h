@@ -95,6 +95,14 @@ struct CAFFE2_API ShapeInfo {
     }
   }
 
+  bool getShapeIsFinal() {
+    return shape_is_final;
+  }
+
+  void setShapeIsFinal(bool flag) {
+    shape_is_final = flag;
+  }
+
   TensorShape shape;
 
   // quantization related information
@@ -106,6 +114,9 @@ struct CAFFE2_API ShapeInfo {
   // dim_type.size == shape.dims.size
   std::vector<TensorBoundShape_DimType> dim_type;
   bool dim_type_is_set = false;
+  // a flag to indicate whether the shape is final and cannot be changed
+  // eg: input/output of in-place ops
+  bool shape_is_final = false;
 };
 
 using ShapeInfoMap = std::unordered_map<std::string, ShapeInfo>;
@@ -129,4 +140,26 @@ CAFFE2_API ShapeInfo constructShapeInfoWithDefaultDimType(
 
 CAFFE2_API void parseShapeInfoMapFromString(const std::string&, ShapeInfoMap&);
 
+// Extract shape info from tensorBoundShapes to a ShapeInfoMap.
+// Change shape according to new max_batch_size and max_feature_len
+// at the same time if necessary.
+CAFFE2_API ShapeInfoMap extractShapeInfoFromTensorBoundShapes(
+    TensorBoundShapes tensor_bound_shapes,
+    int64_t new_max_batch_size = -1,
+    int64_t new_max_feature_len = -1);
+
+// In-place modify TensorBoundShape to change shape size based on type
+CAFFE2_API void changeTensorBoundShapes(
+    TensorBoundShape& tensor_shape_and_type,
+    const int64_t old_batch_size,
+    const int64_t old_seq_size,
+    const int64_t new_batch_size,
+    const int64_t new_seq_size);
+
+// In-place modify TensorShape's shape at a specific dimension
+CAFFE2_API void modifyTensorShapeDimSize(
+    TensorShape* tensor_shape,
+    int dim_index,
+    const int64_t old_size,
+    const int64_t new_size);
 } // namespace caffe2

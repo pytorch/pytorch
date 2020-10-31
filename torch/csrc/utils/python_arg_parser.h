@@ -42,6 +42,7 @@
 
 #include <torch/csrc/python_headers.h>
 
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -60,6 +61,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -77,8 +79,8 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST
 };
 
 struct FunctionParameter;
@@ -97,16 +99,21 @@ struct PythonArgParser {
 
   // meant only for `torch` functions.
   template<int N>
+  inline PythonArgs parse(PyObject* self, PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+
+  template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
+
+  inline PythonArgs parse(PyObject* self, ParsedArgs<0>& dst);
 
   // Formatted strings of non-hidden signatures
   std::vector<std::string> get_signatures() const;
 
 private:
   [[noreturn]]
-  void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  void print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
   void check_deprecated(const FunctionSignature & signature);
-  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  PythonArgs raw_parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
@@ -117,7 +124,7 @@ private:
 struct PYBIND11_EXPORT FunctionSignature {
   explicit FunctionSignature(const std::string& fmt, int index);
 
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
+  bool parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
 
   std::string toString() const;
 
@@ -130,6 +137,7 @@ struct PYBIND11_EXPORT FunctionSignature {
   int index;
   bool hidden;
   bool deprecated;
+  bool disable_torch_function;
 };
 
 struct PythonArgs {
@@ -147,15 +155,18 @@ struct PythonArgs {
   inline bool has_torch_function();
   inline std::string get_func_name();
   inline at::Tensor tensor(int i);
+  inline c10::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
   inline std::vector<at::Tensor> tensorlist(int i);
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline c10::OptionalArray<int64_t> intlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
+  inline c10::Stream stream(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
@@ -163,6 +174,9 @@ struct PythonArgs {
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
+  inline c10::OptionalArray<double> doublelistOptional(int i);
+  inline std::vector<double> doublelist(int i);
+  inline std::vector<double> getDoublelist(int i);
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline c10::optional<at::Layout> layoutOptional(int i);
@@ -176,13 +190,15 @@ struct PythonArgs {
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
+  inline std::string stringWithDefault(int i, const std::string& default_str);
+  inline c10::optional<std::string> stringOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
   inline double toDoubleWithDefault(int i, double default_double);
-  inline std::complex<double> toComplex(int i);
-  inline std::complex<double> toComplexWithDefault(int i, std::complex<double> default_complex);
+  inline c10::complex<double> toComplex(int i);
+  inline c10::complex<double> toComplexWithDefault(int i, c10::complex<double> default_complex);
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
@@ -195,7 +211,7 @@ private:
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
-  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args);
+  bool check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
@@ -213,6 +229,7 @@ struct FunctionParameter {
   at::SmallVector<PyObject *, 5> numpy_python_names;
   at::Scalar default_scalar;
   std::vector<int64_t> default_intlist;
+  std::string default_string;
   union {
     bool default_bool;
     int64_t default_int;
@@ -224,12 +241,21 @@ struct FunctionParameter {
 };
 
 template<int N>
-inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
+inline PythonArgs PythonArgParser::parse(PyObject* self, PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
   if (N < max_args) {
     throw ValueError("PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
         (int)max_args, N);
   }
-  return raw_parse(args, kwargs, dst.args);
+  return raw_parse(self, args, kwargs, dst.args);
+}
+
+template<int N>
+inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
+  return parse(nullptr, args, kwargs, dst);
+}
+
+inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
+  return parse(self, nullptr, nullptr, dst);
 }
 
 inline bool PythonArgs::has_torch_function(){
@@ -245,6 +271,15 @@ inline at::Tensor PythonArgs::tensor(int i) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);
+}
+
+inline c10::optional<at::Tensor> PythonArgs::optionalTensor(int i) {
+  at::Tensor t = tensor(i);
+  if (t.defined()) {
+    return t;
+  } else {
+    return c10::nullopt;
+  }
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
@@ -270,10 +305,8 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   std::vector<at::Tensor> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
-    if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(obj)->tp_name);
-    }
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
   return res;
@@ -291,10 +324,8 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   }
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
-    if (!THPVariable_Check(obj)) {
-      throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(obj)->tp_name);
-    }
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
   return res;
@@ -337,6 +368,45 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
+inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return intlist(i);
+}
+
+inline std::vector<double> PythonArgs::getDoublelist(int i) {
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<double> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    try {
+      res[idx] = THPUtils_unpackDouble(obj);
+    } catch (const std::exception &e) {
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+          signature.name.c_str(), signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
+    }
+  }
+  return res;
+}
+
+inline c10::OptionalArray<double> PythonArgs::doublelistOptional(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return this->getDoublelist(i);
+}
+
+inline std::vector<double> PythonArgs::doublelist(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return this->getDoublelist(i);
+}
+
 inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
   if (!args[i]) return default_scalartype;
   return scalartype(i);
@@ -355,11 +425,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (obj == (PyObject*)&PyBool_Type) {
     return at::ScalarType::Bool;
   }
-  if (obj == (PyObject*)&PyLong_Type
-#if PY_MAJOR_VERSION == 2
-      || obj == (PyObject*)&PyInt_Type
-#endif
-  ) {
+  if (obj == (PyObject*)&PyLong_Type) {
     return at::ScalarType::Long;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
@@ -397,7 +463,7 @@ inline at::Device PythonArgs::device(int i) {
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CUDA, device_index);
+    return at::Device(DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
   return at::Device(device_str);
@@ -468,7 +534,16 @@ inline at::QScheme PythonArgs::toQScheme(int i) {
 }
 
 inline std::string PythonArgs::string(int i) {
-  if (!args[i]) return "";
+  return stringWithDefault(i, signature.params[i].default_string);
+}
+
+inline std::string PythonArgs::stringWithDefault(int i, const std::string& default_str) {
+  if (!args[i]) return default_str;
+  return THPUtils_unpackString(args[i]);
+}
+
+inline c10::optional<std::string> PythonArgs::stringOptional(int i) {
+  if (!args[i]) return c10::nullopt;
   return THPUtils_unpackString(args[i]);
 }
 
@@ -517,14 +592,14 @@ inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   return toDouble(i);
 }
 
-inline std::complex<double> PythonArgs::toComplex(int i) {
-  std::complex<double> default_value = *const_cast<std::complex<double> *>(
-    reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
+inline c10::complex<double> PythonArgs::toComplex(int i) {
+  c10::complex<double> default_value = *const_cast<c10::complex<double> *>(
+    reinterpret_cast<const c10::complex<double> *>(signature.params[i].default_complex));
   if (!args[i]) return default_value;
   return THPUtils_unpackComplexDouble(args[i]);
 }
 
-inline std::complex<double> PythonArgs::toComplexWithDefault(int i, std::complex<double> default_value) {
+inline c10::complex<double> PythonArgs::toComplexWithDefault(int i, c10::complex<double> default_value) {
   if (!args[i]) return default_value;
   return toDouble(i);
 }
@@ -551,6 +626,14 @@ inline c10::optional<at::Generator> PythonArgs::generator(int i) {
 inline at::Storage PythonArgs::storage(int i) {
   if (!args[i]) return at::Storage();
   return createStorage(args[i]);
+}
+
+inline c10::Stream PythonArgs::stream(int i) {
+  if (!args[i]) return c10::Stream(c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
+  if (!THPStream_Check(args[i])) {
+    throw TypeError("expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
+  }
+  return c10::Stream::unpack(((THPStream*)args[i])->cdata);
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {
@@ -624,10 +707,6 @@ static bool _is_basic_python_type(PyTypeObject *tp)
     tp == &PyUnicode_Type ||
     tp == &PyBytes_Type ||
 
-#if PY_MAJOR_VERSION == 2
-    tp == &PyString_Type ||
-#endif
-
     /* other builtins */
     tp == &PySlice_Type ||
     tp == Py_TYPE(Py_None) ||
@@ -655,14 +734,11 @@ static bool _is_basic_python_type(PyTypeObject *tp)
 
 static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
 {
-  PyTypeObject *tp = Py_TYPE(obj);
   if (THPVariable_CheckExact(obj)) {
       return py::object();
   }
+  PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
-    return py::object();
-  }
-  if(PyObject_HasAttrString(obj, name) == 0){
     return py::object();
   }
   return PyObject_FastGetAttrString((PyObject *)tp, name);
@@ -676,8 +752,11 @@ static py::object PyTorch_LookupSpecial(PyObject *obj, char* name)
  */
 static auto check_has_torch_function(PyObject* obj) -> bool
 {
+  if (!torch_function_enabled()) {
+    return false;
+  }
   py::object method = PyTorch_LookupSpecial(obj, "__torch_function__");
-  if(method.ptr() != nullptr){
+  if(method.ptr() != nullptr && method.ptr() != disabled_torch_function_impl()){
     return true;
   }
   return false;
@@ -722,8 +801,60 @@ static auto check_has_torch_function(PyObject* obj) -> bool
  *
  * 'torch_api' is a reference to a python torch API namespace.
  *
+ * 'torch_api_function' is the reference to the original torch method, usually,
+ * we can use torch_api and func_name to get torch_api_function. In some cases,
+ * e.g., torch custom op, we create the function in C++, if we still use
+ * torch_api and func_name to fetch original api, a cyclic call will happen.
+ *
+ * 'overloaded_args' is the args which have overloaded __torch_function__.
+ *
+ * 'func_name' is the named of the original torch method.
+ *
+ * TODO: we could use different names for the following 'handle_torch_function'
+ * instead of overloading.
+ *
  */
+// Used for Tensor methods with arguments.
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
 
+// Used for functions which needs to parse python args.
 auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+
+// Used for functions that accept no keyword arguments and have no argument parsing
+auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
+
+// Used for functions created in C++, e.g., C++ custom op, which doesn't use PythonArgParser to get overloaded_args.
+auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name) -> PyObject*;
+
+// Used for getters of Tensor properties
+auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject*;
+
+// Used for setters of Tensor properties.
+auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int;
+
+/*
+ * Check if the input obj is Tensor type, including its subclass, or overloaded
+ * type. If the type defines __torch_function__, it also returns true.
+ * Otherwise returns flase. If the class is not torch.Tensor, and it defines
+ * __torch_function__, we append obj to overloaded_args.
+ *
+ * 'obj': the input argument to be checked
+ * 'overloaded_args': the vector to append the overloaded args.
+ */
+bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args);
+
+/*
+ * Check if the input obj is Tensor List or Tensor Tuple type. First check
+ * whether obj is Tuple or List type, if true, iterate over each element and
+ * check whether it is Tensor type, including its subclass or overloaded type.
+ * At the same time, the overloaded arg is appended to the overloaded_args.
+ *
+ * 'obj': the input argument to be checked
+ * 'overloaded_args': the vector to append the overloaded args.
+ * 'argnum': the number of total arguments of the function being checked.
+ * 'throw_error': whether throw error if any element in the list or tuple is
+ *                not tensor type or overloaded.
+ */
+bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error);
 
 } // namespace torch

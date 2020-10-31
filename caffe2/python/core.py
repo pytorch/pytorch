@@ -1,9 +1,9 @@
 ## @package core
 # Module caffe2.python.core
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
@@ -13,6 +13,7 @@ from six import binary_type, string_types, text_type
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
+from caffe2.python.lazy import TriggerLazyImport
 from caffe2.python.control_ops_grad import \
     gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
 
@@ -57,7 +58,9 @@ def _GetRegisteredOperators():
 _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
 
-def RefreshRegisteredOperators():
+def RefreshRegisteredOperators(trigger_lazy=True):
+    if trigger_lazy:
+        TriggerLazyImport()
     global _REGISTERED_OPERATORS
     _REGISTERED_OPERATORS = _GetRegisteredOperators()
 
@@ -66,6 +69,7 @@ _GLOBAL_INIT_ARGS = []
 
 
 def GlobalInit(args):
+    TriggerLazyImport()
     _GLOBAL_INIT_ARGS.extend(args[1:])
     C.global_init(args)
 
@@ -79,6 +83,7 @@ def IsOperator(op_type):
 
 
 def IsOperatorWithEngine(op_type, engine):
+    TriggerLazyImport()
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
@@ -278,6 +283,7 @@ class BlobReference(object):
             op_type, *args, **kwargs)
 
     def __dir__(self):
+        TriggerLazyImport()
         additional_methods = [
             op
             for op in _REGISTERED_OPERATORS
@@ -722,17 +728,37 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         return input_name + '_grad'
 
     IS_AUTO_GEN_SUM_OPS_TAG = "is_auto_gen_sum_ops"
+    ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG = "only_keep_is_auto_gen_sum_ops_tag"
 
     def _SetSumOpsDeviceOption(self, sum_ops, generators):
-        # we already checked that device options are consistent so we can just
-        # use the first one we find
+        only_keep_is_auto_gen_sum_ops_tag = False
         for generator in generators:
+            # we already checked that device options are consistent so we can just
+            # break after finding the first clear_info request
+            for extra_info in generator.device_option.extra_info:
+                if extra_info == "{}:1".format(IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG):
+                    only_keep_is_auto_gen_sum_ops_tag = True
+                    break
+
+        if only_keep_is_auto_gen_sum_ops_tag:
+            # if we find that device_option in the generator that
+            # requires clear the extra info for the auto gen sum
+            # Then we will try to clear them and only leave the
+            # IS_AUTO_GEN_SUM_OPS_TAG
             for op in sum_ops:
-                op.device_option.CopyFrom(generator.device_option)
                 op.device_option.extra_info.extend([
                     "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
                 ])
-            break
+        else:
+            # we already checked that device options are consistent so we can just
+            # use the first one we find
+            for generator in generators:
+                for op in sum_ops:
+                    op.device_option.CopyFrom(generator.device_option)
+                    op.device_option.extra_info.extend([
+                        "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
+                    ])
+                break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
         new_grad_output = (
@@ -1281,7 +1307,7 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
 
 def control_op_remap(op, prefix, blob_remap):
     net_arg_names = []
-    if op.type == "If":
+    if op.type == "If" or op.type == "AsyncIf":
         net_arg_names = ['then_net', 'else_net']
     else:
         net_arg_names = ['loop_net', 'cond_net']
@@ -1301,6 +1327,7 @@ DEFAULT_REMAP_FUNCS = {
     'RecurrentNetworkGradient': recurrent_network_op_remap,
     'If': control_op_remap,
     'While': control_op_remap,
+    'AsyncIf': control_op_remap,
 }
 
 
@@ -1498,7 +1525,8 @@ class Net(object):
         ops = net.Proto().op
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
-            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+            for op in ops:
+                op.device_option.CopyFrom(device_option)
             for op in ops:
                 if op.type == "RecurrentNetwork":
                     for arg in op.arg:
@@ -2080,7 +2108,10 @@ class Net(object):
             set(self._output_record.field_blobs())), (
             'Output schema cannot be reset')
         for blob in record.field_blobs():
-            assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
+            assert self.BlobIsDefined(blob), "{} is not defined in net {}".format(
+                blob,
+                self.Proto()
+            )
         for blob in record.field_blobs():
             if blob not in self.external_outputs:
                 self.AddExternalOutput(blob)
@@ -2211,6 +2242,7 @@ class Net(object):
             op_type, *args, **kwargs)
 
     def __dir__(self):
+        TriggerLazyImport()
         additional_methods = [
             op
             for op in _REGISTERED_OPERATORS

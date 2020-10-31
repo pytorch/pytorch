@@ -56,7 +56,7 @@ static void poison_fork() {
 
 void THCPModule_setDevice(int device)
 {
-  THCudaCheck(cudaSetDevice(device));
+  c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 }
 
 PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
@@ -75,9 +75,8 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
 PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  int device;
   torch::utils::cuda_lazy_init();
-  THCudaCheck(cudaGetDevice(&device));
+  auto device = static_cast<int>(c10::cuda::current_device());
   return PyLong_FromLong(device);
   END_HANDLE_TH_ERRORS
 }
@@ -87,6 +86,19 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   poison_fork();
   return PyLong_FromLong(at::cuda::device_count());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getArchFlags(PyObject *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  poison_fork();
+#ifdef CUDA_ARCH_FLAGS
+  static const char* flags = C10_STRINGIZE(CUDA_ARCH_FLAGS);
+  return THPUtils_packString(flags);
+#else
+  Py_RETURN_NONE;
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -127,37 +139,13 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
     throw python_error();
   }
   auto stream = at::cuda::CUDAStream::unpack(bits);
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
+  auto device = static_cast<int>(c10::cuda::current_device());
   if (device != stream.device_index()) {
     THCPModule_setDevice(stream.device_index());
   }
   at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_isDriverSufficient(PyObject *self, PyObject *noargs)
-{
-  int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
-    return PyBool_FromLong(0);
-  }
-  return PyBool_FromLong(1);
-}
-
-PyObject * THCPModule_getDriverVersion(PyObject *self, PyObject *noargs)
-{
-  int driverVersion = -1;
-  cudaError_t err = cudaDriverGetVersion(&driverVersion);
-  if (err != cudaSuccess) {
-    PyErr_Format(PyExc_RuntimeError,
-                    "Error calling cudaDriverGetVersion: %d %s",
-                    err, cudaGetErrorString(err));
-    return nullptr;
-  }
-  return PyLong_FromLong((int64_t) driverVersion);
 }
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
@@ -204,7 +192,7 @@ PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObjec
 PyObject * THCPModule_cudaSynchronize(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  THCudaCheck(cudaDeviceSynchronize());
+  c10::cuda::device_synchronize();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -396,8 +384,8 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
-static void bindCudaDeviceProperties(PyObject* module) {
-  // Add class and method to torch.cuda
+static void registerCudaDeviceProperties(PyObject* module) {
+  // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
     .def_readonly("name", &cudaDeviceProp::name)
@@ -414,6 +402,11 @@ static void bindCudaDeviceProperties(PyObject* module) {
              << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
       return stream.str();
     });
+}
+
+static void bindGetDeviceProperties(PyObject* module) {
+  // Add method to torch.cuda
+  auto m = py::handle(module).cast<py::module>();
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
     return at::cuda::getDeviceProperties(device);
   }, py::return_value_policy::reference);
@@ -422,6 +415,13 @@ static void bindCudaDeviceProperties(PyObject* module) {
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
+#if C10_ASAN_ENABLED
+  TORCH_WARN(
+    "torch.cuda: your pytorch binary has address sanitizer (asan) built in, "
+    "asan is currently not compatible with torch.cuda module, "
+    "you might get unexpected behavior (eg. out of memory, crash, etc.), "
+    "please rebuild pytorch without asan if you need to use this module");
+#endif
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
   poison_fork();
@@ -441,6 +441,8 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   THCPByteStorage_postInit(m);
   THCPBoolStorage_postInit(m);
   THCPBFloat16Storage_postInit(m);
+  THCPComplexDoubleStorage_postInit(m);
+  THCPComplexFloatStorage_postInit(m);
 
   bool has_half = true;
 
@@ -467,8 +469,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
     PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
   }
   set_module_attr("default_generators", default_cuda_generators);
-
-  bindCudaDeviceProperties(m);
+  bindGetDeviceProperties(m);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -483,43 +484,42 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
 }
 
 static struct PyMethodDef _THCPModule_methods[] = {
-  {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  nullptr},
-  {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
-  {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
-  {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
-  {"_cuda_isInBadFork", (PyCFunction)THCPModule_isInBadFork, METH_NOARGS, nullptr},
+  {"_cuda_init",        THCPModule_initExtension,    METH_NOARGS,  nullptr},
+  {"_cuda_setDevice",   THCPModule_setDevice_wrap,   METH_O,       nullptr},
+  {"_cuda_getDevice",   THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
+  {"_cuda_getDeviceCount", THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
+  {"_cuda_getArchFlags", THCPModule_getArchFlags, METH_NOARGS, nullptr},
+  {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
-    (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},
+    THCPModule_getCurrentStream_wrap, METH_O, nullptr},
   {"_cuda_getDefaultStream",
-    (PyCFunction)THCPModule_getDefaultStream_wrap, METH_O, nullptr},
-  {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},
-  {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, nullptr},
-  {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, nullptr},
-  {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, nullptr},
-  {"_cuda_getCompiledVersion", (PyCFunction)THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
-  {"_cuda_hasPrimaryContext", (PyCFunction) THCPModule_hasPrimaryContext,  METH_O,  nullptr},
-  {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache, METH_NOARGS, nullptr},
-  {"_cuda_memoryStats", (PyCFunction) THCPModule_memoryStats, METH_O, nullptr},
-  {"_cuda_resetAccumulatedMemoryStats", (PyCFunction) THCPModule_resetAccumulatedMemoryStats, METH_O, nullptr},
-  {"_cuda_resetPeakMemoryStats", (PyCFunction) THCPModule_resetPeakMemoryStats, METH_O,  nullptr},
-  {"_cuda_memorySnapshot", (PyCFunction) THCPModule_memorySnapshot, METH_NOARGS, nullptr},
-  {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
-  {"_cuda_cudaCachingAllocator_raw_alloc", (PyCFunction)THCPModule_cudaCachingAllocator_raw_alloc, METH_VARARGS, nullptr},
-  {"_cuda_cudaCachingAllocator_raw_delete", (PyCFunction)THCPModule_cudaCachingAllocator_raw_delete, METH_O, nullptr},
-  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
-  {"_cuda_ipc_collect", (PyCFunction)THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
-  {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},
-  {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
-  {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
+    THCPModule_getDefaultStream_wrap, METH_O, nullptr},
+  {"_cuda_getCurrentBlasHandle", THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},
+  {"_cuda_setStream",    THCPModule_setStream_wrap,  METH_O, nullptr},
+  {"_cuda_getCompiledVersion", THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
+  {"_cuda_hasPrimaryContext", THCPModule_hasPrimaryContext,  METH_O,  nullptr},
+  {"_cuda_emptyCache", THCPModule_emptyCache, METH_NOARGS, nullptr},
+  {"_cuda_memoryStats", THCPModule_memoryStats, METH_O, nullptr},
+  {"_cuda_resetAccumulatedMemoryStats", THCPModule_resetAccumulatedMemoryStats, METH_O, nullptr},
+  {"_cuda_resetPeakMemoryStats", THCPModule_resetPeakMemoryStats, METH_O,  nullptr},
+  {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
+  {"_cuda_cudaHostAllocator", THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
+  {"_cuda_cudaCachingAllocator_raw_alloc", THCPModule_cudaCachingAllocator_raw_alloc, METH_VARARGS, nullptr},
+  {"_cuda_cudaCachingAllocator_raw_delete", THCPModule_cudaCachingAllocator_raw_delete, METH_O, nullptr},
+  {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
+  {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
+  {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
+  {"_cuda_lock_mutex",   THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
+  {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
 #ifdef USE_NCCL
-  {"_nccl_version", (PyCFunction)THCPModule_nccl_version, METH_NOARGS, nullptr},
-  {"_nccl_unique_id", (PyCFunction)THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
-  {"_nccl_init_rank", (PyCFunction)THCPModule_nccl_init_rank, METH_VARARGS, nullptr},
-  {"_nccl_reduce", (PyCFunction)THCPModule_nccl_reduce, METH_VARARGS, nullptr},
-  {"_nccl_all_reduce", (PyCFunction)THCPModule_nccl_all_reduce, METH_VARARGS, nullptr},
-  {"_nccl_broadcast", (PyCFunction)THCPModule_nccl_broadcast, METH_VARARGS, nullptr},
-  {"_nccl_all_gather", (PyCFunction)THCPModule_nccl_all_gather, METH_VARARGS, nullptr},
-  {"_nccl_reduce_scatter", (PyCFunction)THCPModule_nccl_reduce_scatter, METH_VARARGS, nullptr},
+  {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
+  {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
+  {"_nccl_init_rank", THCPModule_nccl_init_rank, METH_VARARGS, nullptr},
+  {"_nccl_reduce", THCPModule_nccl_reduce, METH_VARARGS, nullptr},
+  {"_nccl_all_reduce", THCPModule_nccl_all_reduce, METH_VARARGS, nullptr},
+  {"_nccl_broadcast", THCPModule_nccl_broadcast, METH_VARARGS, nullptr},
+  {"_nccl_all_gather", THCPModule_nccl_all_gather, METH_VARARGS, nullptr},
+  {"_nccl_reduce_scatter", THCPModule_nccl_reduce_scatter, METH_VARARGS, nullptr},
 #endif
   {nullptr}
 };
@@ -549,6 +549,7 @@ void initModule(PyObject *module) {
 #if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
   shared::initCudnnBindings(module);
 #endif
+  registerCudaDeviceProperties(module);
 }
 
 }}

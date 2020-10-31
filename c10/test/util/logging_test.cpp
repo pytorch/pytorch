@@ -34,7 +34,7 @@ TEST(LoggingTest, TestEnforceEquals) {
     // This should never be triggered.
     ADD_FAILURE();
   } catch (const ::c10::Error& err) {
-    EXPECT_NE(err.msg().find("5 vs 6"), string::npos);
+    EXPECT_NE(std::string(err.what()).find("5 vs 6"), string::npos);
   }
 
   // arguments are expanded only once

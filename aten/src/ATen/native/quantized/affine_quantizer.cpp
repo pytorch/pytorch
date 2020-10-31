@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <cfenv>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
@@ -12,10 +13,25 @@ namespace native {
 
 DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(quantize_tensor_per_channel_affine_stub);
+DEFINE_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
+DEFINE_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
+DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
+DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
 namespace {
+
+void checkRoundingMode(const std::string& fn_name) {
+// Disabling this warning message for now as it is printed incorrectly. Need to fix
+
+/*  TORCH_WARN_ONCE(
+      std::fegetround() != FE_TONEAREST,
+      fn_name,
+      " current rounding mode is not set to round-to-nearest-ties-to-even (FE_TONEAREST). This will cause accuracy issues in quantized models.");
+*/
+  return;
+}
 
 void checkCPUTensor(const std::string& fn_name, Tensor t) {
   TORCH_CHECK(
@@ -41,7 +57,8 @@ void checkQuantizedTensor(const std::string& fn_name, Tensor t) {
       fn_name,
       " expects a ",
       caffe2::TypeMeta::Make<T>(),
-      " Tensor");
+      " Tensor, got ",
+      t.scalar_type());
 }
 
 template <typename T>
@@ -83,17 +100,27 @@ Tensor quantize_tensor_per_tensor_affine(
     double scale,
     int64_t zero_point) {
   static const auto fn_name = "quantize_tensor_per_tensor_affine";
+
+  checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
-  quantize_tensor_per_tensor_affine_stub(
+  // Temporary solution to pack the tensor if dtype is torch.quint4x2
+  // Can move this into the fbgemm::Quantize op.
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+    quantize_tensor_per_tensor_affine_sub_byte_stub(
       rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  }
+  else {
+    quantize_tensor_per_tensor_affine_stub(
+      rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  }
   return qtensor;
 }
 
@@ -105,6 +132,7 @@ Tensor quantize_tensor_per_channel_affine(
     int64_t axis) {
   static const auto fn_name = "quantize_tensor_per_channel_affine";
 
+  checkRoundingMode(fn_name);
   checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);
@@ -117,7 +145,8 @@ Tensor quantize_tensor_per_channel_affine(
 
   TORCH_CHECK(
       0 <= axis && axis < rtensor.dim(),
-      "Channel axis out of range in per channel affine quantization.");
+      "Channel axis out of range in per channel affine quantization. Got: ",
+      axis, "Expected: [0, ", rtensor.dim(), ")");
   int64_t channel = rtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -131,6 +160,42 @@ Tensor quantize_tensor_per_channel_affine(
   return qtensor;
 }
 
+Tensor quantize_tensor_per_channel_float_qparams(
+    Tensor rtensor,
+    Tensor qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  static const auto fn_name = "quantize_tensor_per_channel_float_qparams";
+
+  checkRoundingMode(fn_name);
+  checkFloatTensor(fn_name, rtensor);
+  checkCPUTensor(fn_name, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
+
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    checkQuantizedTensor<scalar_t>(fn_name, qtensor);
+  });
+
+  TORCH_CHECK(
+      0 <= axis && axis < rtensor.dim(),
+      "Channel axis out of range in per channel float qparams quantization. Got: ",
+      axis, "Expected: [0, ", rtensor.dim(), ")");
+  int64_t channel = rtensor.size(axis);
+  TORCH_CHECK(
+      channel == int64_t(scales.numel()),
+      "length of scales must equal to channel");
+  TORCH_CHECK(
+      channel == int64_t(zero_points.numel()),
+      "length of zero_points must equal to channel");
+
+  quantize_tensor_per_channel_float_qparams_stub(
+      rtensor.device().type(), rtensor, qtensor, scales, zero_points, axis);
+  return qtensor;
+
+}
+
 Tensor dequantize_tensor_per_tensor_affine(
     Tensor qtensor,
     Tensor rtensor,
@@ -141,13 +206,18 @@ Tensor dequantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
-  dequantize_tensor_per_tensor_affine_stub(
-      qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+    dequantize_tensor_per_tensor_affine_sub_byte_stub(
+        qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  } else {
+    dequantize_tensor_per_tensor_affine_stub(
+        qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  }
   return rtensor;
 }
 
@@ -171,7 +241,8 @@ Tensor dequantize_tensor_per_channel_affine(
 
   TORCH_CHECK(
       0 <= axis && axis < qtensor.dim(),
-      "Channel axis out of range in per channel affine dequantization.");
+      "Channel axis out of range in per channel affine dequantization. Got:",
+      axis, " Expected: [0, ", qtensor.dim(), ")");
   int64_t channel = qtensor.size(axis);
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
@@ -181,6 +252,40 @@ Tensor dequantize_tensor_per_channel_affine(
       "length of zero_points must equal to channel");
 
   dequantize_tensor_per_channel_affine_stub(
+      qtensor.device().type(), qtensor, rtensor, scales, zero_points, axis);
+  return rtensor;
+}
+
+Tensor dequantize_tensor_per_channel_float_qparams(
+    Tensor qtensor,
+    Tensor rtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  static const auto fn_name = "dequantize_tensor_per_channel_affine";
+
+  checkFloatTensor(fn_name, rtensor);
+  checkCPUTensor(fn_name, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
+
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+    checkQuantizedTensor<scalar_t>(fn_name, qtensor);
+  });
+
+  TORCH_CHECK(
+      0 <= axis && axis < qtensor.dim(),
+      "Channel axis out of range in per channel float qparams dequantization. Got:",
+      axis, " Expected: [0, ", qtensor.dim(), ")");
+  int64_t channel = qtensor.size(axis);
+  TORCH_CHECK(
+      channel == int64_t(scales.numel()),
+      "length of scales must equal to channel");
+  TORCH_CHECK(
+      channel == int64_t(zero_points.numel()),
+      "length of zero_points must equal to channel");
+
+  dequantize_tensor_per_channel_float_qparams_stub(
       qtensor.device().type(), qtensor, rtensor, scales, zero_points, axis);
   return rtensor;
 }
@@ -198,10 +303,10 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
   int32_t qvalue;
-  qvalue = fbgemm::Quantize<typename T::underlying>(
+  qvalue = fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
       value,
       static_cast<int32_t>(zero_point),
-      static_cast<double>(scale),
+      static_cast<float>(scale),
       /*result_precision=*/CHAR_BIT * sizeof(typename T::underlying));
   return static_cast<T>(qvalue);
 }
@@ -213,7 +318,7 @@ void quantize_vec(
     const float* src,
     T* dst,
     size_t count) {
-  fbgemm::Quantize<typename T::underlying>(
+  fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
       src,
       (typename T::underlying*)dst,
       count,
@@ -257,7 +362,8 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   int64_t qvalue;
   constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
-  qvalue = static_cast<int64_t>(Round(value / scale + zero_point));
+  float inv_scale = 1.0f / static_cast<float>(scale);
+  qvalue = static_cast<int64_t>(zero_point + Round(value * inv_scale));
   qvalue = std::max<int64_t>(qvalue, qmin);
   qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
@@ -295,6 +401,23 @@ CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value) {
   return (static_cast<float>(value.val_) - zero_point) * scale;
 }
 #endif // USE_FBGEMM
+
+/*
+* Quantize value based on the following equation
+* Xq = Round(Xf * inv_scale + zero_point)
+* where zero_point is in float.
+*
+* Note: For the case of embedding quantization we will set zero_point
+* to (-Xmin/scale), where Xmin is the min value in input tensor row.
+*/
+int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax) {
+  int qvalue;
+
+  float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
+  qvalue = lrintf(value * inv_scale + zero_point);
+  qvalue = std::max(qmin, std::min(qvalue, qmax));
+  return qvalue;
+}
 
 template <typename SRC_T, typename DST_T>
 DST_T requantize_val(

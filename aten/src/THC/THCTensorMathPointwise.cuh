@@ -81,23 +81,6 @@ struct TensorCFmodOp<at::Half> {
 };
 
 template <typename T>
-struct TensorClampOp {
-  TensorClampOp(T min, T max) : minValue(min), maxValue(max) {}
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    T val = THCNumerics<T>::lt(*in, minValue) ? minValue : *in;
-    *out = THCNumerics<T>::gt(val, maxValue) ? maxValue : val;
-  }
-
-  __device__ __forceinline__ void operator()(T* v) {
-    T val = THCNumerics<T>::lt(*v, minValue) ? minValue : *v;
-    *v = THCNumerics<T>::gt(val, maxValue) ? maxValue : val;
-  }
-
-  const T minValue;
-  const T maxValue;
-};
-
-template <typename T>
 struct TensorCrossOp {
   TensorCrossOp(int64_t sx, int64_t sy, int64_t so) : sx(sx), sy(sy), so(so) {}
 
@@ -123,58 +106,6 @@ struct TensorCrossOp {
   }
 
   const int64_t sx, sy, so;
-};
-
-template <typename T>
-struct TensorMaxOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::gt(*out, *in) ? *out : *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = THCNumerics<T>::gt(*in1, *in2) ? *in1 : *in2;
-  }
-};
-
-template <typename T>
-struct TensorMinOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::lt(*out, *in) ? *out : *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = THCNumerics<T>::lt(*in1, *in2) ? *in1 : *in2;
-  }
-};
-
-template <typename T>
-struct TensorMaxValueOp {
-  TensorMaxValueOp(T v) : val(v) {}
-
-  __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::lt(*out, val) ? val : *out;  // this order propagates NaN
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::lt(*in, val) ? val : *in;  // this order propagates NaN
-  }
-
-  T val;
-};
-
-template <typename T>
-struct TensorMinValueOp {
-  TensorMinValueOp(T v) : val(v) {}
-
-  __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::gt(*out, val) ? val : *out;  // this order propagates NaN
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::gt(*in, val) ? val : *in;  // this order propagates NaN
-  }
-
-  T val;
 };
 
 #endif // THC_TENSORMATH_POINTWISE_CUH

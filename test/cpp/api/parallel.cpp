@@ -217,10 +217,10 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
   };
 
   auto m = std::make_shared<M>();
-  auto input = torch::ones({10, 3});
+  const auto device_count = torch::cuda::device_count();
+  auto input = torch::ones({std::max(10, int(2 * device_count)), 3});
   auto output = parallel::data_parallel(m, input);
 
-  const auto device_count = torch::cuda::device_count();
   ASSERT_EQ(output.numel(), device_count);
   for (size_t i = 0; i < device_count; ++i) {
     ASSERT_EQ(output[i].item<int32_t>(), i);

@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.5"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
@@ -8,6 +8,11 @@ graph {
     output: "2"
     name: "SoftmaxCrossEntropyLoss_0"
     op_type: "SoftmaxCrossEntropyLoss"
+    attribute {
+      name: "ignore_index"
+      i: -100
+      type: INT
+    }
     attribute {
       name: "reduction"
       s: "none"

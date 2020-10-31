@@ -117,24 +117,30 @@ struct TORCH_API Module : public Object {
   // register_buffer method. With this simplification, we only need to track
   // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, at::Tensor v) {
-    type()->addOrCheckAttribute(name, TensorType::get());
+    bool is_param = false;
+    bool is_buffer = true;
+    type()->addOrCheckAttribute(name, TensorType::get(), is_param, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
+
   void register_parameter(
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
-    type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer);
+    type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
+
   void register_attribute(
       const std::string& name,
       const TypePtr t,
       IValue v,
-      bool is_param = false) {
-    type()->addOrCheckAttribute(name, t, is_param);
+      bool is_param = false,
+      bool is_buffer = false) {
+    type()->addOrCheckAttribute(name, t, is_param, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
+
   void register_module(const std::string& name, const Module& module) {
     type()->addOrCheckAttribute(name, module.type());
     _ivalue()->setAttr(name, module._ivalue());
@@ -215,21 +221,23 @@ struct TORCH_API Module : public Object {
 
   void _save_for_mobile(
       std::ostream& out,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap(),
+      bool save_mobile_debug_info = false) const;
 
   void _save_for_mobile(
       const std::string& filename,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap(),
+      bool save_mobile_debug_info = false) const;
+
+  Module copy() const;
+
+  Module deepcopy() const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the
   // same data as the current instance but with the new type, shared ClassType
   // will be preserved as well
-  Module clone() const;
-
-  // Clones the module instance but shares the underlying type with the
-  // the current instance, it doesn't create new `ClassType`
-  Module clone_instance() const;
+  Module clone(bool inplace = false) const;
 
   void clone_method(const Module& orig, const std::string& name);
 
@@ -245,7 +253,10 @@ struct TORCH_API Module : public Object {
   }
 
  private:
-  Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
+  Module clone_impl(
+      std::unordered_map<TypePtr, TypePtr>& type_remap,
+      bool inplace,
+      IValue::HashAliasedIValueMap memo) const;
 
   void clone_method(
       const Module& orig,
@@ -471,7 +482,7 @@ struct TORCH_API ModulePolicy {
   }
   // are we going to return everything? If so, we can optimize the calculate
   // of the size of the list.
-  static constexpr bool all_slots = false;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
 
 struct TORCH_API ParameterPolicy {
@@ -484,7 +495,7 @@ struct TORCH_API ParameterPolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->is_parameter(i) && v.isTensor();
   }
-  static constexpr bool all_slots = false;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
 
 struct TORCH_API BufferPolicy {
@@ -498,7 +509,7 @@ struct TORCH_API BufferPolicy {
     return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
         !typ->is_parameter(i);
   }
-  static constexpr bool all_slots = false;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
 
 struct TORCH_API AttributePolicy {
@@ -511,7 +522,7 @@ struct TORCH_API AttributePolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return true;
   }
-  static constexpr bool all_slots = true;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = true;
 };
 
 // take a Policy object, and make a version of it that returns the slot.
