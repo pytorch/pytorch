@@ -35,6 +35,7 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
+        assert dag.nodes[0].logical_device_ids == [0]
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -68,40 +69,44 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
-        assert len(module_with_submodules.graph.nodes) == 7
+        for i, node in enumerate(dag.nodes):
+            assert node.logical_device_ids == [i]
 
     def test_partition_combining(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear_0 = torch.nn.Linear(4, 4)
+                self.linear = torch.nn.Linear(4, 4)
 
-            def forward(self, a, b):
+            def forward(self, a):
+                b = torch.rand(4)
                 add_1 = a + b
-                c = self.linear_0(a)
-                add_2 = c + add_1
-                return add_2
+                linear_1 = self.linear(add_1)
+                add_2 = torch.rand(4) + a
+                add_3 = add_2 + linear_1
+                return add_3
 
         m = TestModule()
         traced = symbolic_trace(m)
         a = torch.rand(4)
-        b = torch.rand(4)
         GraphManipulation.get_size_of_all_nodes(
             traced,
-            [a, b]
+            [a]
         )
         partitioner = Partitioner()
         devices = [
-            Device('dev_0', 125, 0),
-            Device('dev_1', 125, 1),
-            Device('dev_2', 125, 2)
+            Device('dev_0', 120, 0),
+            Device('dev_1', 144, 1)
         ]
-        partitioner_config = PartitionerConfig(devices)
+        partitioner_config = PartitionerConfig(devices, is_sparse_nn=False)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
-        self.assertEqual(traced(a, b), module_with_submodules(a, b))
-        assert len(module_with_submodules.graph.nodes) == 5
+        self.assertEqual(traced(a), module_with_submodules(a))
+        assert dag.nodes[0].logical_device_ids == [0]
+        assert dag.nodes[0].size_bytes == 80
+        assert dag.nodes[1].logical_device_ids == [1]
+        assert dag.nodes[1].size_bytes == 144
 
     def test_sparse_nn_partition(self):
         class MyRecommendationModule(torch.nn.Module):
@@ -266,7 +271,7 @@ terrible spacing
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):
             return torch.relu(x)
-        traced = symbolic_trace(foo)
+        traced = symbolic_trace_with_rewrite(foo)
 
 if __name__ == '__main__':
     run_tests()
