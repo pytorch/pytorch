@@ -1049,9 +1049,10 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x.is_quantized, y.is_quantized, msg=msg)
             if x.is_sparse:
                 if x.size() != y.size():
-                    debug_msg = f"Attempted to compare equality of tensors with the different sizes. Got sizes {x.size()} and {y.size()}."
+                    debug_msg_sparse = ("Attempted to compare equality of tensors with the different sizes. "
+                     f"Got sizes {x.size()} and {y.size()}.")
                     if msg is None:
-                        msg = debug_msg
+                        msg = debug_msg_sparse
                     self.assertTrue(False, msg=msg)
 
                 x = self.safeCoalesce(x)
