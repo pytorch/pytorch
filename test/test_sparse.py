@@ -2065,7 +2065,9 @@ class TestSparse(TestCase):
             if not x.is_cuda:
                 # CUDA sparse tensors currently requires the size to be
                 # specified if nDimV > 0
-                self.assertEqual(x.new(indices, values), x)
+                out = x.new(indices, values).coalesce()
+                x_c = x.coalesce()
+                self.assertEqual((out.indices(), out.values()), (x_c.indices(), x_c.values()))
             self.assertEqual(x.new(indices, values, x.size()), x)
 
         test_shape(3, 10, 100)
