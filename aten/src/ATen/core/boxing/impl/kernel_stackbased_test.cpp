@@ -74,17 +74,17 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenC
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU)
-      																	   		      .kernel<&errorKernel>(DispatchKey::CUDA))
+                                                                                      .kernel<&errorKernel>(DispatchKey::CUDA))
       .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU)
-      																	   		      .kernel<&errorKernel>(DispatchKey::CUDA));
+                                                                                      .kernel<&errorKernel>(DispatchKey::CUDA));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
   auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU)
-  									 																		   		   .kernel<&errorKernel>(DispatchKey::CUDA));
+                                                                                                                       .kernel<&errorKernel>(DispatchKey::CUDA));
   auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU)
-  										 																	   		   .kernel<&errorKernel>(DispatchKey::CUDA));
+                                                                                                                       .kernel<&errorKernel>(DispatchKey::CUDA));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
@@ -93,10 +93,10 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRuns
     auto m = MAKE_TORCH_LIBRARY(_test);
     m.def("_test::my_op(Tensor dummy, int input) -> int");
     auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
-    m_cpu.impl("my_op", DispatchKey::CPU, &incrementKernel);
+    m_cpu.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
     {
       auto m_cuda = MAKE_TORCH_LIBRARY_IMPL(_test, CUDA);
-      m_cuda.impl("my_op", DispatchKey::CUDA, &decrementKernel);
+      m_cuda.impl("my_op", DispatchKey::CUDA, torch::CppFunction::makeFromBoxedFunction<decrementKernel>());
 
       // assert that schema and cpu kernel are present
       expectCallsIncrement(DispatchKey::CPU);
