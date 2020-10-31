@@ -27,6 +27,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -960,9 +961,9 @@ Arguments:
                           int rank,
                           int size,
                           const std::chrono::milliseconds& timeout) {
-                ::c10d::ProcessGroupNCCL::Options options;
-                options.isHighPriorityStream = false;
-                options.opTimeout = timeout;
+                auto options = ::c10d::ProcessGroupNCCL::Options::create();
+                options->isHighPriorityStream = false;
+                options->opTimeout = timeout;
                 return std::make_shared<::c10d::ProcessGroupNCCL>(
                     store, rank, size, options);
               }),
