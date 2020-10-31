@@ -8,7 +8,7 @@
 PyTorch documentation
 ===================================
 
-PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
+PyTorch is an developed tensor library for deep learning using GPU's and CPU's.
 
 .. toctree::
    :glob:
