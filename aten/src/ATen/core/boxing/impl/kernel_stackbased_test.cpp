@@ -66,33 +66,37 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
   EXPECT_EQ(4, result[0].toInt());
 }
 
-TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto m = MAKE_TORCH_LIBRARY(_test);
-  m.def("_test::my_op(Tensor dummy, int input) -> int");
-  m.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(NewOperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneLibrary_thenCallsRightKernel) {
-  auto m = MAKE_TORCH_LIBRARY(_test);
-  m.def("_test::my_op(Tensor dummy, int input) -> int");
-  m.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
-  m.impl("my_op", DispatchKey::CUDA, torch::CppFunction::makeFromBoxedFunction<errorKernel>());
-  m.def("_test::error(Tensor dummy, int input) -> int");
-  m.impl("error", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<errorKernel>());
-  m.impl("error", DispatchKey::CUDA, torch::CppFunction::makeFromBoxedFunction<errorKernel>());
+TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
+  auto registrar = RegisterOperators()
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU)
+      																	   		      .kernel<&errorKernel>(DispatchKey::CUDA))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU)
+      																	   		      .kernel<&errorKernel>(DispatchKey::CUDA));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
+TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU)
+  									 																		   		   .kernel<&errorKernel>(DispatchKey::CUDA));
+  auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPU)
+  										 																	   		   .kernel<&errorKernel>(DispatchKey::CUDA));
+  expectCallsIncrement(DispatchKey::CPU);
+}
+
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto m = MAKE_TORCH_LIBRARY_FRAGMENT(_test);
+    auto m = MAKE_TORCH_LIBRARY(_test);
     m.def("_test::my_op(Tensor dummy, int input) -> int");
     auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
-    m_cpu.impl("my_op", torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
+    m_cpu.impl("my_op", DispatchKey::CPU, &incrementKernel);
     {
       auto m_cuda = MAKE_TORCH_LIBRARY_IMPL(_test, CUDA);
-      m_cuda.impl("my_op", torch::CppFunction::makeFromBoxedFunction<decrementKernel>());
+      m_cuda.impl("my_op", DispatchKey::CUDA, &decrementKernel);
 
       // assert that schema and cpu kernel are present
       expectCallsIncrement(DispatchKey::CPU);
@@ -114,12 +118,12 @@ void kernelWithoutInputs(const OperatorHandle&, Stack*) {
   called = true;
 }
 
-TEST(NewOperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
-  auto m = MAKE_TORCH_LIBRARY_FRAGMENT(_test);
-  m.def("_test::no_tensor_args() -> ()", torch::CppFunction::makeFromBoxedFunction<kernelWithoutInputs>());
+  auto registrar = RegisterOperators()
+      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel<&kernelWithoutInputs>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -133,12 +137,12 @@ void kernelWithoutTensorInputs(const OperatorHandle&, Stack* stack) {
   stack->back() = stack->back().toInt() + 1;
 }
 
-TEST(NewOperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
-  auto m = MAKE_TORCH_LIBRARY_FRAGMENT(_test);
-  m.def("_test::no_tensor_args(int arg) -> int", torch::CppFunction::makeFromBoxedFunction<kernelWithoutTensorInputs>());
+  auto registrar = RegisterOperators()
+      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel<&kernelWithoutTensorInputs>());
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
@@ -151,17 +155,14 @@ TEST(NewOperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTen
 void kernelForSchemaInference(const OperatorHandle&, Stack* stack) {
 }
 
-TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
   expectThrows<c10::Error>([] {
-      auto m = MAKE_TORCH_LIBRARY_FRAGMENT(_test);
-      m.def("_test::no_schema_specified", torch::CppFunction::makeFromBoxedFunction<kernelForSchemaInference>());
-  }, "Full schema string was not specified, and we couldn't infer schema either.  Please explicitly provide a schema string.");
+      RegisterOperators().op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel<&kernelForSchemaInference>());
+  }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::no_schema_specified");
 }
 
-TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanAlsoBeCalledUnboxed) {
-  auto m = MAKE_TORCH_LIBRARY(_test);
-  m.def("_test::my_op(Tensor dummy, int input) -> int");
-  m.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanAlsoBeCalledUnboxed) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU));
   expectCallsIncrementUnboxed(DispatchKey::CPU);
 }
 
