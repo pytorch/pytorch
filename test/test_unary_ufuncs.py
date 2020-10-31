@@ -235,8 +235,10 @@ class TestUnaryUfuncs(TestCase):
             if exact_dtype:
                 # Allows array dtype to be float32 when comparing with bfloat16 tensors
                 #   since NumPy doesn't support the bfloat16 dtype
+                # Also ops like scipy.special.erf, scipy.special.erfc, etc, promote float16
+                # to float32
                 if expected.dtype == np.float32:
-                    assert actual.dtype in (torch.bfloat16, torch.float32)
+                    assert actual.dtype in (torch.float16, torch.bfloat16, torch.float32)
                 else:
                     assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
 
