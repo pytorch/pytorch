@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <ATen/ATen.h>
+#include <torch/custom_class.h>
 
 namespace c10d {
 
