@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
@@ -24,6 +25,7 @@ class RegisterInterface {
     ptr->fn_can_fuse_n_ = &isFusableCudaFusionGroup;
 
     RegisterProfilingNode(canFuseNode);
+    RegisterProfilingValue(insertProfileIValue);
   }
 };
 

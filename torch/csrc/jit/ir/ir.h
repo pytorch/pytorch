@@ -440,7 +440,7 @@ struct TORCH_API Node {
   // instructions lowered by the interpreter and not run in the optimized graph
   bool notExecutedOp() const {
     return kind_ == prim::Constant || kind_ == prim::profile ||
-        kind_ == prim::profile_optional;
+        kind_ == prim::profile_optional || kind_ == prim::profile_ivalue;
   }
 
   // Graphs
@@ -1351,6 +1351,28 @@ struct TORCH_API ProfileOptionalOp : public Node {
       Graph* graph,
       std::function<void(std::vector<IValue>&)> callback)
       : Node(graph, ::c10::prim::profile_optional), callback_(callback) {}
+
+  void cloneFrom(Node* other_) override;
+  Node* allocNewInstance(Graph* g) override;
+
+  const std::function<void(std::vector<IValue>&)>& getCallback() const {
+    return callback_;
+  }
+
+  void setCallback(std::function<void(std::vector<IValue>&)> callback) {
+    callback_ = callback;
+  }
+
+ private:
+  std::function<void(std::vector<IValue>&)> callback_;
+};
+
+struct TORCH_API ProfileIValueOp : public Node {
+  static constexpr Symbol Kind = ::c10::prim::profile_ivalue;
+  ProfileIValueOp(
+      Graph* graph,
+      std::function<void(std::vector<IValue>&)> callback)
+      : Node(graph, ::c10::prim::profile_ivalue), callback_(callback) {}
 
   void cloneFrom(Node* other_) override;
   Node* allocNewInstance(Graph* g) override;

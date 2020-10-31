@@ -21,12 +21,17 @@ class ProfileRegistry {
 
   void registerProfileNode(const std::function<bool(const Node*)>& func) {
     std::lock_guard<std::mutex> guard(mutex_);
-    registry_funcs_.push_back(func);
+    registry_query_funcs_.push_back(func);
+  }
+
+  void registerProfileValue(const std::function<bool(ProfilingRecord*, Node*, size_t offset)>& func) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    registry_profile_funcs_.push_back(func);
   }
 
   bool shouldProfileNode(const Node* node) {
     std::lock_guard<std::mutex> guard(mutex_);
-    for (const auto& func : registry_funcs_) {
+    for (const auto& func : registry_query_funcs_) {
       if (func(node)) {
         return true;
       }
@@ -34,8 +39,21 @@ class ProfileRegistry {
     return false;
   }
 
+  // TODO: how should we resolve multiple profiling request?
+  bool profileValue(ProfilingRecord* pr, Node* node, size_t offset) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    bool ret = false;
+    for (const auto& func : registry_profile_funcs_) {
+      if (func(pr, node, offset)) {
+        ret = true;
+      }
+    }
+    return ret;
+  }
+
  private:
-  std::vector<std::function<bool(const Node*)>> registry_funcs_;
+  std::vector<std::function<bool(const Node*)>> registry_query_funcs_;
+  std::vector<std::function<bool(ProfilingRecord*, Node*, size_t offset)>> registry_profile_funcs_;
   std::mutex mutex_;
 };
 
@@ -43,6 +61,10 @@ class ProfileRegistry {
 
 void RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
   ProfileRegistry::getRegistry()->registerProfileNode(func);
+}
+
+void RegisterProfilingValue(const std::function<bool(ProfilingRecord*, Node*, size_t offset)>& func) {
+  ProfileRegistry::getRegistry()->registerProfileValue(func);
 }
 
 bool ShapeSymbolTable::bindSymbolicShapes(
@@ -271,6 +293,10 @@ void ProfilingRecord::instrumentBlock(Block* block) {
         insertShapeProfile(n, offset);
       }
 
+      if (ProfileRegistry::getRegistry()->profileValue(this, n, offset)) {
+        continue;
+      }
+
       if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
         // here we are profile the definition instead of the use,
         // because we are only optimizing in the case of a None value which is
@@ -320,7 +346,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 
 void ProfilingRecord::removeProfilingNodes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile || it->kind() == prim::profile_optional) {
+    if (it->kind() == prim::profile || it->kind() == prim::profile_optional || it->kind() == prim::profile_ivalue) {
       it->output()->replaceAllUsesWith(it->input());
       it.destroyCurrent();
     } else {

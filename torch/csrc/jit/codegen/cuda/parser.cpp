@@ -614,6 +614,71 @@ std::unordered_map<
 std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
 bool IrParser::init_registry_ = true;
 
+ProfileIValueOp* insertProfileIValueOp(Node* node, size_t offset) {
+  auto pn = new ProfileIValueOp(node->owningGraph(), nullptr);
+  auto in_val = node->input(offset);
+  pn->insertBefore(node);
+  pn->addInput(in_val);
+  auto pno = pn->addOutput();
+  pno->setType(in_val->type());
+  in_val->replaceAllUsesAfterNodeWith(pn, pno);
+  pn->ty_(attr::profiled_type, in_val->type());
+  return pn;
+}
+
+void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset);
+
+  std::function<void(Stack&)> ivalue_profiler = [pr, pn] (Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(value.isIntList(), "profiling seeing the wrong data type");
+    // TODO: get a real attribute
+    if (!pn->hasAttribute(attr::a)) {
+      pn->is_(attr::a, value.toIntList().vec());
+    } else {
+      auto profiled_ints = pn->is(attr::a);
+      auto input_ints = value.toIntList();
+      TORCH_INTERNAL_ASSERT(profiled_ints.size() == input_ints.size() &&
+          std::equal(profiled_ints.begin(), profiled_ints.end(), input_ints.begin()), "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset);
+
+  std::function<void(Stack&)> ivalue_profiler = [pr, pn] (Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(value.isBool(), "profiling seeing the wrong data type");
+    // TODO: get a real attribute
+    if (!pn->hasAttribute(attr::a)) {
+      pn->i_(attr::a, value.toBool());
+    } else {
+      auto profiled_bool = pn->i(attr::a);
+      auto input_bool = value.toBool();
+      TORCH_INTERNAL_ASSERT(input_bool == profiled_bool, "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 } // namespace
 
 bool hasReductionNode(const Block* block) {
@@ -636,6 +701,42 @@ bool isReductionNode(const Node* node) {
 
 bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
+}
+
+// TODO: we should incorporate this to our parser as well;
+bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
+
+  // is skip constant necessary?
+  if (node->input(offset)->node()->kind() == prim::Constant) {
+    return false;
+  }
+
+  // we should use `OperatorSet`
+  static auto reduction_operator = Symbol::fromQualString(getOperatorForLiteral(
+      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")->schema().name());
+  if (node->kind() == reduction_operator) {
+    switch (offset) {
+    case 1:
+      profileIntList(pr, node, offset);
+      break;
+    case 2:
+      profileBool(pr, node, offset);
+      break;
+    default:
+      return false;
+    }
+    return true;
+  }
+
+  // we should use `OperatorSet`
+  // static reduction_to_size_operator = getOperatorForLiteral(
+  //     "aten::sum_to_size(Tensor self, int[] size) -> Tensor");
+  // if (node->isMemberOf(reduction_to_size_operator) && offset == 1) {
+  //   profileIntList(pr, node, offset);
+  //   return true;
+  // }
+
+  return false;
 }
 
 std::unique_ptr<Fusion> parseJitIR(const std::shared_ptr<Graph>& graph) {

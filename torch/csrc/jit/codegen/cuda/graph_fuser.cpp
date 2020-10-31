@@ -1075,6 +1075,11 @@ void guardFusionGroups(Block* block) {
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("CudaFuseGraph");
+  GRAPH_DUMP("Before Fusion: ", graph);
+
+  // TODO: constant folding on dimensionality;
+  // TODO: extract & guard profile_ivalue; but how do we restore it???
+
   // TODO: we need to properly restore shape information after fusion.
   // shamelessly use tool from NNC.
   RemoveProfileNodesAndSpecializeTypes(graph);
