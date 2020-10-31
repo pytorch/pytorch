@@ -151,10 +151,14 @@ class DistributedDataParallel(Module):
 
     .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
         gradient will be ``M`` times smaller when compared to the same model
-        trained on a single node with ``batch=M*N`` (because the gradients
+        trained on a single node with ``batch=M*N`` if the loss is summed (NOT 
+        averaged as usual) across instances in a batch (because the gradients
         between different nodes are averaged). You should take this into
         consideration when you want to obtain a mathematically equivalent
-        training process compared to the local training counterpart.
+        training process compared to the local training counterpart. But in most 
+        cases, you can just treat a DistributedDataParallel wrapped model, a 
+        DataParallel wrapped model and an ordinary model on a single GPU as the 
+        same (E.g. using the same learning rate for equivalent batch size).
 
     .. note::
         Parameters are never broadcast between processes. The module performs
