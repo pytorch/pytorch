@@ -1050,7 +1050,7 @@ class TestCase(expecttest.TestCase):
             if x.is_sparse:
                 if x.size() != y.size():
                     debug_msg_sparse = ("Attempted to compare equality of tensors with the different sizes. "
-                     f"Got sizes {x.size()} and {y.size()}.")
+                                        f"Got sizes {x.size()} and {y.size()}.")
                     if msg is None:
                         msg = debug_msg_sparse
                     self.assertTrue(False, msg=msg)
