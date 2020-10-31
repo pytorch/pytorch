@@ -49,7 +49,6 @@ from .utils import (
 
 from collections import OrderedDict
 import warnings
-import copy
 import re
 
 from typing import Optional
@@ -312,7 +311,7 @@ class Quantizer:
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
 
-    def _prepare(self, model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module):
+    def _prepare(self, model, qconfig_dict, prepare_custom_config_dict, is_standalone_module):
         """ standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
 
@@ -328,8 +327,6 @@ class Quantizer:
         """
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
-        if not inplace:
-            model = copy.deepcopy(model)
         additional_quant_patterns = prepare_custom_config_dict.get("additional_quant_pattern", {})
         self.patterns = get_default_quant_patterns().copy()
         for k, v in additional_quant_patterns.items():
@@ -542,8 +539,8 @@ class Quantizer:
         self.patterns = observed._patterns
         self.qconfig_map = observed._qconfig_map
 
-    def prepare(self, model, qconfig_dict, inplace=False, prepare_custom_config_dict=None, is_standalone_module=False):
-        return self._prepare(model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module)
+    def prepare(self, model, qconfig_dict, prepare_custom_config_dict=None, is_standalone_module=False):
+        return self._prepare(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module)
 
     def _run_weight_observers(self, observed):
         r''' Extract the subgraph that produces the weight for dynamic quant
@@ -564,7 +561,7 @@ class Quantizer:
                             weight_observer_module()
         return
 
-    def _convert(self, model, inplace=False, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
+    def _convert(self, model, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
         """ standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
         For standalone module: the inputs will be quantized by parent module,
@@ -577,8 +574,6 @@ class Quantizer:
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         self.restore_state(model)
-        if not inplace:
-            model = copy.deepcopy(model)
         # always run weight observers in the top level forward method
         # for dynamic quant ops or weight only quant ops
         self._run_weight_observers(model)
@@ -826,8 +821,8 @@ class Quantizer:
         quantized = GraphModule(quantized_root, folded_graph)
         return quantized
 
-    def convert(self, model, inplace=False, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
-        quantized = self._convert(model, inplace, debug, convert_custom_config_dict, is_standalone_module)
+    def convert(self, model, debug=False, convert_custom_config_dict=None, is_standalone_module=False):
+        quantized = self._convert(model, debug, convert_custom_config_dict, is_standalone_module)
         if not debug:
             quantized = self._fold_weight(quantized)
         return quantized

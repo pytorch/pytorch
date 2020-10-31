@@ -339,8 +339,8 @@ Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float
 Tensor sin(const Tensor& self) { return unary_op_impl_float(self, sin_stub); }
 Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
 
-Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cos_stub); }
-Tensor cos(const Tensor& self) { return unary_op_impl(self, at::cos_out); }
+Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, cos_stub); }
+Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
 Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
@@ -452,8 +452,8 @@ Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_floa
 Tensor tanh(const Tensor& self) { return unary_op_impl_float(self, tanh_stub); }
 Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
 
-Tensor& tan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tan_stub);  }
-Tensor tan(const Tensor& self) { return unary_op_impl(self, at::tan_out);  }
+Tensor& tan_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, tan_stub);  }
+Tensor tan(const Tensor& self) { return unary_op_impl_float(self, tan_stub);  }
 Tensor& tan_(Tensor& self) { return unary_op_impl_(self, at::tan_out);  }
 
 Tensor& trunc_out(Tensor& result, const Tensor& self) {

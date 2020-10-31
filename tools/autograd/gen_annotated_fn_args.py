@@ -20,6 +20,7 @@ from .gen_python_functions import (
     get_py_variable_methods,
     op_name,
 )
+import argparse
 import textwrap
 from .gen_autograd import load_aten_declarations
 
