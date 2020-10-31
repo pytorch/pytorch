@@ -4,6 +4,8 @@ import linecache
 from typing import Type, Dict, List, Any, Union
 from .graph import Graph
 import copy
+import sys
+import traceback
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -187,16 +189,11 @@ class GraphModule(torch.nn.Module):
 
         src_forward = _forward_from_src(self.code)
 
-        def debug_forward(self, *args, **kwargs):
-            try:
-                return src_forward(self, *args, **kwargs)
-            except Exception as e:
-                import traceback
-                last_tb = traceback.format_tb(e.__traceback__)[-1]
-                e.args = (last_tb + e.args[0],)
-                raise e
+        def print_full_traceback(exctype, value, tb):
+            traceback.print_exception(exctype, value, tb)
+        sys.excepthook = print_full_traceback
 
-        cls.forward = debug_forward
+        cls.forward = _forward_from_src(self.code)
 
     def __reduce__(self):
         dict_without_graph = self.__dict__.copy()
