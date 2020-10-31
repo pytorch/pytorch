@@ -6,6 +6,7 @@ from .graph import Graph
 import copy
 import sys
 import traceback
+import math
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -30,7 +31,7 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {}
+    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan}
     exec_with_source(src, gbls)
     return gbls['forward']
 
@@ -186,8 +187,6 @@ class GraphModule(torch.nn.Module):
         """
         self.code = self._graph.python_code(root_module='self')
         cls = type(self)
-
-        src_forward = _forward_from_src(self.code)
 
         def print_full_traceback(exctype, value, tb):
             traceback.print_exception(exctype, value, tb)

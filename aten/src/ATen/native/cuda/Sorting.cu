@@ -319,7 +319,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   NoNamesGuard guard;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
-  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+  Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
 
   int64_t size = in.size(dim);
   TORCH_CHECK(
