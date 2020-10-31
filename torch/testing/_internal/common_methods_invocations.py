@@ -244,11 +244,7 @@ op_db = [
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
-                   dtypes=all_types_and_complex_and(torch.bool),
-                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
