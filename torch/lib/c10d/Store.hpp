@@ -7,7 +7,7 @@
 #include <vector>
 #include "ATen/core/ivalue.h"
 
-#include <ATen/ATen.h>
+#include <torch/custom_class.h>
 
 namespace c10d {
 
