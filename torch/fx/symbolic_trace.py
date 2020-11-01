@@ -33,9 +33,9 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     new_code = CodeType(*co_args)  # type: ignore
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
-    # we need to insert placeholder nodes for *args, and **kwargs,
-    # so we can't call this function normally, otherwise it would try to unpack them
-    # instead, let's make python think that args and kwargs are normay variables
+    # we need to insert placeholder nodes for *args and **kwargs
+    # we can't call this function normally, otherwise it would try to unpack them
+    # instead, let's make python think that args and kwargs are normal variables
 
 class Tracer(TracerBase):
     def __init__(self):
@@ -173,6 +173,21 @@ class Tracer(TracerBase):
         fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
         orig_call = torch.nn.Module.__call__
+        orig_getattr = torch.nn.Module.__getattr__
+
+        parameter_proxy_cache = {}  # Reduce number of get_attr calls
+
+        # Method dispatch on parameters is not recorded unless it's directly used.
+        # Thus, we need to insert a proxy when __getattr__ requests a parameter.
+        def module_getattr_wrapper(mod, attr):
+            attr_val = orig_getattr(mod, attr)
+            if isinstance(attr_val, torch.nn.Parameter):
+                for n, p in self.root.named_parameters():
+                    if attr_val is p:
+                        if n not in parameter_proxy_cache:
+                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                        return parameter_proxy_cache[n]
+            return attr_val
 
         def module_call_wrapper(mod, *args, **kwargs):
             def forward(*args, **kwargs):
@@ -181,11 +196,14 @@ class Tracer(TracerBase):
             return self.call_module(mod, forward, args, kwargs)
 
         try:
+            # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
+            torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
             torch.nn.Module.__call__ = orig_call
+            torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
 # Symbolic tracing API
