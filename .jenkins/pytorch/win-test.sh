@@ -38,7 +38,6 @@ export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
   file_diff_from_base "$DETERMINE_FROM"
-  cat "$DETERMINE_FROM"
 fi
 
 run tests () {
