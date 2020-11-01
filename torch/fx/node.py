@@ -20,7 +20,6 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
-
 class Node:
     def __init__(self, graph: 'Graph', name: str, op: str, target: Target,
                  args: Tuple[Argument, ...], kwargs: Dict[str, Argument],
