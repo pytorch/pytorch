@@ -41,28 +41,30 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   cat "$DETERMINE_FROM"
 fi
 
-
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-    $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"  \
-    $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"  \
-    $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat  \
-    $SCRIPT_HELPERS_DIR/test_custom_backend.bat  \
-    $SCRIPT_HELPERS_DIR/test_libtorch.bat
-else
-    if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
-        export PYTORCH_COLLECT_COVERAGE=1
-        $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"  \
-        $SCRIPT_HELPERS_DIR/test_libtorch.bat \
-        if [[ "${USE_CUDA}" == "1" ]]; then
-          $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
-        fi
-    elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-        $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"  \
-        $SCRIPT_HELPERS_DIR/test_custom_backend.bat  \
+run_tests () {
+    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+        $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
+        $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"
         $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
+        $SCRIPT_HELPERS_DIR/test_custom_backend.bat
+        $SCRIPT_HELPERS_DIR/test_libtorch.bat
+    else
+        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+            export PYTORCH_COLLECT_COVERAGE=1
+            $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
+            $SCRIPT_HELPERS_DIR/test_libtorch.bat
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
+            fi
+        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+            $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"
+            $SCRIPT_HELPERS_DIR/test_custom_backend.bat
+            $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
+        fi
     fi
-fi
+}
 
+run_tests
 assert_git_not_dirty
 echo "TEST PASSED"
 
