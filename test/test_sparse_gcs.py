@@ -82,8 +82,8 @@ class TestSparseGCS(TestCase):
     def test_gcs_segfault(self):
         side1 = 100
         side2 = 120
-        nnz = 100
-        k = 100
+        nnz = 200
+        k = 5
         
         gcs = self.gen_sparse_gcs((side1, k), nnz)
         mat = torch.randn((k, side2), dtype=torch.double)

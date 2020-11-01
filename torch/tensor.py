@@ -983,7 +983,8 @@ class Tensor(torch._C._TensorBase):
                 values.extend(v)
 
         return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
-                                       torch.tensor(co, dtype=torch.int32), torch.tensor(values),
+                                       torch.tensor(co, dtype=torch.int32),
+                                       torch.tensor(values, dtype=torch.double),
                                        torch.tensor(reduction), shape, fill_value)
 
 

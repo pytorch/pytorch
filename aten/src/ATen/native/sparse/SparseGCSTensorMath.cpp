@@ -12,6 +12,7 @@
 #include <TH/THBlasUtils.h>
 
 #include <algorithm>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -23,6 +24,7 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
     const Tensor& dense,
     Scalar beta,
     Scalar alpha) {
+  std::cout << ">>> -1 HERE\n";
   // TODO: This error message seems awfully opaque
   AT_ASSERT(!t.is_cuda());
   TORCH_CHECK(!r.is_cuda(), "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -71,6 +73,7 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     Scalar beta,
     Scalar alpha) {
    Tensor r = at::empty({0}, self.options());
+   std::cout << ">>> -2 HERE\n";
    at::addmm_out(r, self, sparse, dense, beta, alpha);
    return r;
 }
@@ -85,6 +88,7 @@ Tensor _sparse_gcs_addmm(
   // _sparse_addmm forward is functionally equivalent to addmm; it's
   // just the backward that is different.  This technically does an
   // unnecessary redispatch, I was too lazy to make it not do that
+  std::cout << ">>> -3 HERE\n";
   return at::addmm(t, sparse, dense, beta, alpha);
 }
 
@@ -109,11 +113,11 @@ Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
 }
 
-int64_t gcs_to_dense_convert(int64_t iptr, int64_t icol, Tensor& out,
+int32_t gcs_to_dense_convert(int32_t iptr, int32_t icol, Tensor& out,
                              const SparseTensor& src) {
-  int64_t drow, dcol;
-  std::vector<int64_t> dense_indices;
-  int64_t index = out.storage_offset();
+  int32_t drow, dcol;
+  std::vector<int32_t> dense_indices;
+  int32_t index = out.storage_offset();
   auto src_impl = get_sparse_impl<SparseGCSTensorImpl>(src);
   
   auto strides0 = src_impl->strides0();
@@ -126,7 +130,8 @@ int64_t gcs_to_dense_convert(int64_t iptr, int64_t icol, Tensor& out,
   }
 
   for (int i = 0; i < dims1.size(); ++i) {
-    index += out.stride(src_impl->rsplit_dim() + i) * (int(icol/strides1[i]) % src.size(src_impl->rsplit_dim() + i));
+    index += out.stride(src_impl->rsplit_dim() + i) *
+      (int(icol/strides1[i]) % src.size(src_impl->rsplit_dim() + i));
   }
 
   return index;
@@ -157,12 +162,16 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
   out.resize_as_(dense);
   Tensor resultBuffer = out;
   Tensor valuesBuffer = src_values.to(commonDtype);
+
+  std::cout << "0 HERE\n";
   
   if (out.scalar_type() != commonDtype) {
     resultBuffer = dense.to(commonDtype);
   } else if (!is_same_tensor(out, dense)) {
     resultBuffer.copy_(dense);
   }
+
+  std::cout << "1 HERE\n";
 
   AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_dense_sparse_gcs", [&] {
     auto values_accessor = src_values.accessor<scalar_t, 1>();
@@ -172,21 +181,25 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
     scalar_t *out_ptr = out.data_ptr<scalar_t>();
     scalar_t cast_value = alpha.to<scalar_t>();
 
-    for (int64_t iptr = 0; iptr < src_pointers.size(0)-1; ++iptr) {
-      int64_t start_index = pointers_accessor[iptr];
-      int64_t end_index = pointers_accessor[iptr + 1];
-      int64_t nindices = end_index - start_index;
-      int64_t icol;
-      int64_t index;
+      std::cout << "2 HERE\n";
+
+    for (int32_t iptr = 0; iptr < src_pointers.size(0)-1; ++iptr) {
+      int32_t start_index = pointers_accessor[iptr];
+      int32_t end_index = pointers_accessor[iptr + 1];
+      int32_t nindices = end_index - start_index;
+      int32_t icol;
+      int32_t index;
 
       for (int i = start_index; i < end_index; ++i) {
         icol = indices_accessor[i];
         index = gcs_to_dense_convert(iptr, icol, out, src);
+        std::cout << "3 HERE\n";
         out_ptr[index] += cast_value * values_accessor[i];
+        std::cout << "4 HERE\n";
       }
     }
   });
-  
+        std::cout << "5 HERE\n";  
   return out;
 }
 
