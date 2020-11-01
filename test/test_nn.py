@@ -10211,8 +10211,10 @@ class TestNNDeviceType(NNTestCase):
         inp1 = torch.randn(0, 10, 20)
         inp2 = torch.randn(0, 10, 30)
         output = mod(inp1, inp2)
+        output.sum().backward()
 
-        self.assertEqual(output, torch.zeros(0, 10, 40))
+        self.assertEqual(inp1, torch.zeros_like(inp1))
+        self.assertEqual(inp2, torch.zeros_like(inp2))
         
     @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
