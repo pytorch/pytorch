@@ -1033,28 +1033,114 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 void guardFusionGroup(Node* fusion) {
   // Fixup types of the subgraph inputs
   std::vector<TypePtr> guard_types;
-  std::vector<Value*> inputs_to_check;
-  for (Value* input : fusion->inputs()) {
-    // We only check inputs of the fusion group and expect NNC to infer
-    // intermediates and outputs shapes
-    if (!input->type()->cast<TensorType>()) {
-      continue;
+  std::vector<Value*> tensor_inputs_to_check;
+  std::set<size_t> profiled_ivalue_indices;
+
+  for (size_t index = 0; index < fusion->inputs().size(); index++) {
+    Value* input = fusion->inputs()[index];
+    if (input->type()->cast<TensorType>()) {
+      // We only check inputs of the fusion group and expect NNC to infer
+      // intermediates and outputs shapes
+
+      // note: modified from original implementation, we are guarding fusion
+      //       outputs
+      if (input->node()->kind() == prim::Constant) {
+        continue;
+      }
+      tensor_inputs_to_check.push_back(input);
+      guard_types.push_back(input->type());
+    } else if (input->node()->kind() == prim::profile_ivalue) {
+      // Conditional constant from profiled_ivalue, should be guarded
+      profiled_ivalue_indices.insert(index);
+    }
+  }
+  // we should assert on non-tensor inputs
+  TORCH_INTERNAL_ASSERT(tensor_inputs_to_check.size(), "CudaFusionGuard expects at least one tensor input");
+
+  // insert the if block first;
+  auto versioning_if =
+      fusion->owningGraph()
+          ->create(prim::If, fusion->outputs().size());
+          //->create(prim::If, {typecheck_result}, fusion->outputs().size())
+          //->insertAfter(typecheck_node);
+  for (size_t idx = 0; idx < fusion->outputs().size(); ++idx) {
+    versioning_if->output(idx)->setType(fusion->output(idx)->type());
+    fusion->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
+  }
+  auto true_block = versioning_if->addBlock();
+  auto false_block = versioning_if->addBlock();
+
+
+  // Fill in the false block. It should contain the unoptimized
+  // copy of the fused subgraph, unless we have conditional constants from
+  // profiled_ivalue;
+  auto fusion_graph = fusion->g(attr::Subgraph);
+  std::shared_ptr<Graph> fb_graph; // resource holder;
+  // Restore the dependency for constant introduced by profiled_ivalue within the graph.
+  if (!profiled_ivalue_indices.empty()) {
+    // This is necessary as it cleans up the fallback graph, which was copied from subgraph, since the two graph would differ as we cannot use conditional constant in fallback
+
+    // 1. RESTORE conditional constant dependency in fallback group;
+    fb_graph = fusion_graph->copy();
+    GRAPH_DUMP("re-wiring fallback graph", fb_graph);
+
+    for (const auto& offset : profiled_ivalue_indices) {
+      auto val = fb_graph->inputs()[offset];
+      for (auto use : val->uses()) {
+        // re-wire inputs and remove conditional constant nodes;
+        TORCH_INTERNAL_ASSERT(use.user->kind() == prim::Constant, "profile_ivalue at index: ", offset, " can only be used by conditional constant, instead got: ", use.user->kind().toDisplayString());
+        use.user->output()->replaceAllUsesWith(val);
+        use.user->destroy();
+      }
     }
 
-    // note: modified from original implementation, we are guarding fusion
-    //       outputs
-    if (input->node()->kind() == prim::Constant) {
-      continue;
+    WithInsertPoint guard(false_block->return_node());
+    const auto subgraph_outputs =
+        insertGraph(*fusion->owningGraph(), *fb_graph, fusion->inputs());
+    for (Value* output : subgraph_outputs) {
+      false_block->registerOutput(output);
     }
-    inputs_to_check.push_back(input);
-    guard_types.push_back(input->type());
-  }
-  if (!inputs_to_check.size()) {
-    return;
+    // types get copied to the fallback graph, so remove specializations before
+    // replacing
+    // TODO: this is not exposed here, I need to remove that before inserting the
+    //       graph
+    // removeTensorTypeSpecializations(false_block);
+    replaceBlockWithFallbackGraph(false_block, fusion->inputs());
+
+    // 2. REMOVE conditional constant dependency in fusion group;
+    size_t compensation = 0;
+    for (const auto& offset : profiled_ivalue_indices) {
+      // do NOT remove inputs from fusion yet, as we needed the dependency to
+      // build logic for fallback
+      // fusion->removeInput(offset);
+
+      // let's remove the extra dependency inside fusion;
+      for (auto use : fusion_graph->inputs()[offset - compensation]->uses()) {
+        TORCH_INTERNAL_ASSERT(use.user->kind() == prim::Constant, "profile_ivalue at index: ", offset, " can only be used by conditional constant, instead got: ", use.user->kind().toDisplayString());
+        use.user->removeAllInputs();
+      }
+      fusion_graph->eraseInput(offset - compensation);
+      compensation++;
+    }
+    // update graph in fusion node
+    fusion->g_(attr::Subgraph, fusion_graph);
+  } else {
+    WithInsertPoint guard(false_block->return_node());
+    const auto subgraph_outputs =
+        insertGraph(*fusion->owningGraph(), *fusion_graph, fusion->inputs());
+    for (Value* output : subgraph_outputs) {
+      false_block->registerOutput(output);
+    }
+    // types get copied to the fallback graph, so remove specializations before
+    // replacing
+    // TODO: this is not exposed here, I need to remove that before inserting the
+    //       graph
+    // removeTensorTypeSpecializations(false_block);
+    replaceBlockWithFallbackGraph(false_block, fusion->inputs());
   }
 
   Node* typecheck_node = fusion->owningGraph()
-                             ->create(prim::CudaFusionGuard, inputs_to_check, 1)
+                             ->create(prim::CudaFusionGuard, tensor_inputs_to_check, 1)
                              ->insertBefore(fusion);
   // fix output to BoolType
   typecheck_node->output()->setType(BoolType::get());
@@ -1063,34 +1149,37 @@ void guardFusionGroup(Node* fusion) {
 
   std::unordered_map<Value*, Value*> typechecked_inputs;
 
-  // Insert if block
-  auto versioning_if =
-      fusion->owningGraph()
-          ->create(prim::If, {typecheck_result}, fusion->outputs().size())
-          ->insertAfter(typecheck_node);
-  for (size_t idx = 0; idx < fusion->outputs().size(); ++idx) {
-    versioning_if->output(idx)->setType(fusion->output(idx)->type());
-    fusion->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
-  }
-  auto true_block = versioning_if->addBlock();
-  auto false_block = versioning_if->addBlock();
+  // Things gets messy here due to `prim::profile_ivalue`
+  // We need to add ivalue check here with combination to typecheck_result.
+  
 
-  // Fill in the false block. It should contain the unoptimized
-  // copy of the fused subgraph.
-  auto& subgraph = *fusion->g(attr::Subgraph);
-  WithInsertPoint guard(false_block->return_node());
-  const auto subgraph_outputs =
-      insertGraph(*fusion->owningGraph(), subgraph, fusion->inputs());
-  for (Value* output : subgraph_outputs) {
-    false_block->registerOutput(output);
-  }
+  // wiring up if block
+  versioning_if->addInput(typecheck_result);
+  versioning_if->insertAfter(typecheck_node);
+  //auto versioning_if =
+  //    fusion->owningGraph()
+  //        ->create(prim::If, {typecheck_result}, fusion->outputs().size())
+  //        ->insertAfter(typecheck_node);
+  //for (size_t idx = 0; idx < fusion->outputs().size(); ++idx) {
+  //  versioning_if->output(idx)->setType(fusion->output(idx)->type());
+  //  fusion->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
+  //}
+  //auto true_block = versioning_if->addBlock();
+  //auto false_block = versioning_if->addBlock();
+
+  // WithInsertPoint guard(false_block->return_node());
+  // const auto subgraph_outputs =
+  //     insertGraph(*fusion->owningGraph(), *fallback_subgraph_ptr, fusion->inputs());
+  // for (Value* output : subgraph_outputs) {
+  //   false_block->registerOutput(output);
+  // }
 
   // types get copied to the fallback graph, so remove specializations before
   // replacing
   // TODO: this is not exposed here, I need to remove that before inserting the
   //       graph
   // removeTensorTypeSpecializations(false_block);
-  replaceBlockWithFallbackGraph(false_block, fusion->inputs());
+  //replaceBlockWithFallbackGraph(false_block, fusion->inputs());
 
   // Fill in the true block. It has all inputs type-checked and its
   // body should be the fusion group node.
@@ -1111,8 +1200,13 @@ void guardFusionGroups(Block* block) {
     }
   }
   for (Node* fusion : fusions) {
+    // step 1: a. add prim::CudaFusionGuard and fallback logic 
+    //         b. insert guard logic of profile_ivalue with if block
+    //         c. restore conditional constant to non-constant for fallback 
     guardFusionGroup(fusion);
   }
+
+  // step 2: restore conditional constant to non-constant outside of 
 }
 
 void ExtractProfileIValue(Node* profile_ivalue) {
