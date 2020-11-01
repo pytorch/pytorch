@@ -98,13 +98,15 @@ class NativeFunction:
     # registrations don't participate in codegen-based selective build!
     manual_kernel_registration: bool
 
-    # Distinguish between a missing dispatch dict (historically, this
-    # means to register a catch-all kernel) and a present but empty
-    # dispatch dict (this means register nothing; arguably, this should
-    # subsume manual_kernel_registration).
+    # A mapping of dispatch keys to names of functions implementing
+    # them.  In native_functions.yaml, the dispatch entry is optional; in that
+    # case, that is equivalent to having written:
+    #
+    #   dispatch:
+    #       Math: $operator_name
     #
     # TODO: str key could be replaced with more explicit enum
-    dispatch: Optional[Dict[str, str]]
+    dispatch: Dict[str, str]
 
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
@@ -162,9 +164,8 @@ class NativeFunction:
 
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Optional[Dict[str, str]] = None
+        dispatch: Dict[str, str] = {}
         if raw_dispatch is not None:
-            dispatch = {}
             for ks, v in raw_dispatch.items():
                 if ks == '__line__':
                     continue  # not worth tracking line numbers for dispatch entries
@@ -172,9 +173,14 @@ class NativeFunction:
                 assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
+        else:
+            from tools.codegen.api import cpp
+            dispatch['Math'] = cpp.name(func)
 
-        # Throws if both DefaultBackend and Math are provided
-        assert not (dispatch is not None and 'DefaultBackend' in dispatch and 'Math' in dispatch)
+        assert not ('DefaultBackend' in dispatch and 'Math' in dispatch), \
+            "cannot specify both DefaultBackend and Math on a single kernel; each " \
+            "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
+            "implementation, specify DefaultBackend; otherwise specify Math only"
 
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
@@ -378,8 +384,7 @@ class FunctionSchema:
                     '_foreach_addcmul_.Scalar',
                     '_foreach_addcdiv_.Scalar',
                     '_foreach_addcmul_.ScalarList',
-                    '_foreach_addcdiv_.ScalarList',
-                    '_foreach_zero_']:
+                    '_foreach_addcdiv_.ScalarList']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
