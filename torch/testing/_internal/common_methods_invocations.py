@@ -445,6 +445,7 @@ if TEST_SCIPY:
                        decorators=(precisionOverride({torch.float16: 1e-2,
                                                       torch.bfloat16: 1e-2}),),
                        dtypes=floating_types(),
+                       domain=(-0.99, 0.99),
                        dtypesIfCPU=floating_types_and(torch.bfloat16),
                        dtypesIfCUDA=floating_types_and(torch.half)),
     ]
