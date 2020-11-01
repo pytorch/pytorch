@@ -40,7 +40,7 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-run tests () {
+run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
         $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"
