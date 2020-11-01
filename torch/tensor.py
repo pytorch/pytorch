@@ -10,6 +10,7 @@ from torch._C import _add_docstr
 from typing import Any, Dict, Tuple, Union
 from numbers import Number
 import functools
+from functools import reduce
 from typing import Optional
 import itertools
 from collections import defaultdict
@@ -959,21 +960,23 @@ class Tensor(torch._C._TensorBase):
         strides2 = make_strides(shape[l:])
         # <row>: <list of (colindex, value)>
         col_value = defaultdict(list)
+        num = 0
         for index in itertools.product(*map(range, shape)):
             v = self
             for i in index:
                 v = v[i]
-            if v == fill_value or math.isnan(v):
+            if (v == fill_value) or math.isnan(v):
                 continue
-            # print(index)
+
+            num += 1
             p1 = apply_reduction(index, strides1, dims1)
             p2 = apply_reduction(index, strides2, dims2)
             col_value[p1].append((p2, v))
         ro = [0]
         co = []
         values = []
-        
-        for i in range(max(col_value)+1):
+
+        for i in range(reduce((lambda x, y: x * y), shape[:l])):
             cv = col_value.get(i, [])
             ro.append(ro[-1] + len(cv))
             cv.sort()

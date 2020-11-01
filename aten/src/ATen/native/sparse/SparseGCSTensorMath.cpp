@@ -24,7 +24,6 @@ Tensor& s_addmm_out_sparse_gcs_dense_cpu(
     const Tensor& dense,
     Scalar beta,
     Scalar alpha) {
-  std::cout << ">>> -1 HERE\n";
   // TODO: This error message seems awfully opaque
   AT_ASSERT(!t.is_cuda());
   TORCH_CHECK(!r.is_cuda(), "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -73,7 +72,6 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     Scalar beta,
     Scalar alpha) {
    Tensor r = at::empty({0}, self.options());
-   std::cout << ">>> -2 HERE\n";
    at::addmm_out(r, self, sparse, dense, beta, alpha);
    return r;
 }
@@ -88,7 +86,6 @@ Tensor _sparse_gcs_addmm(
   // _sparse_addmm forward is functionally equivalent to addmm; it's
   // just the backward that is different.  This technically does an
   // unnecessary redispatch, I was too lazy to make it not do that
-  std::cout << ">>> -3 HERE\n";
   return at::addmm(t, sparse, dense, beta, alpha);
 }
 
@@ -162,16 +159,12 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
   out.resize_as_(dense);
   Tensor resultBuffer = out;
   Tensor valuesBuffer = src_values.to(commonDtype);
-
-  std::cout << "0 HERE\n";
   
   if (out.scalar_type() != commonDtype) {
     resultBuffer = dense.to(commonDtype);
   } else if (!is_same_tensor(out, dense)) {
     resultBuffer.copy_(dense);
   }
-
-  std::cout << "1 HERE\n";
 
   AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_dense_sparse_gcs", [&] {
     auto values_accessor = src_values.accessor<scalar_t, 1>();
@@ -180,8 +173,6 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
 
     scalar_t *out_ptr = out.data_ptr<scalar_t>();
     scalar_t cast_value = alpha.to<scalar_t>();
-
-      std::cout << "2 HERE\n";
 
     for (int32_t iptr = 0; iptr < src_pointers.size(0)-1; ++iptr) {
       int32_t start_index = pointers_accessor[iptr];
@@ -193,13 +184,10 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
       for (int i = start_index; i < end_index; ++i) {
         icol = indices_accessor[i];
         index = gcs_to_dense_convert(iptr, icol, out, src);
-        std::cout << "3 HERE\n";
         out_ptr[index] += cast_value * values_accessor[i];
-        std::cout << "4 HERE\n";
       }
     }
   });
-        std::cout << "5 HERE\n";  
   return out;
 }
 

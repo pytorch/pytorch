@@ -69,27 +69,6 @@ namespace at { namespace native {
       int retval = mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1,
                               indices, values);
       TORCH_CHECK(retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
-      // std::cout << "retval: " << retval << std::endl;
-      // std::cout << "values: \n";
-      // for (int i = 0; i < 200; ++i) {
-      //   std::cout << values[i] << ",";
-      // }
-      // std::cout << std::endl;
-
-      // std::cout << "indices: \n";
-      // for (int i = 0; i < 200; ++i) {
-      //   std::cout << indices[i] << ",";
-      // }
-      // std::cout << std::endl;
-
-      // std::cout << "col idx len: " << (pointers+1)[nrows-1] << std::endl;
-      // std::cout << "pointers: \n";
-      // for (int i = 0; i < nrows+1; ++i) {
-      //   std::cout << pointers[i] << ",";
-        
-      // }
-      // std::cout << std::endl;
-
 
       mkl_sparse_d_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
                       SPARSE_LAYOUT_ROW_MAJOR, dense, dense_ncols, dense_ncols,
@@ -103,7 +82,6 @@ namespace at { namespace native {
                                               const IntTensor& pointers, const Tensor& values,
                                               const Tensor& dense, const Tensor& t, Scalar alpha,
                                               Scalar beta, IntArrayRef size, IntArrayRef dense_size) {
-      std::cout << ">>> 1 HERE\n";
       sparse_mm_mkl_impl(res.data_ptr<scalar_t>(),
                          indices.data_ptr<int>(),
                          pointers.data_ptr<int>(),
@@ -118,7 +96,6 @@ namespace at { namespace native {
 
   Tensor& sparse_mm_mkl(Tensor& res, const SparseTensor& sparse_, const Tensor& dense,
                         const Tensor& t, Scalar alpha, Scalar beta) {
-    std::cout << ">>> 0 HERE\n";
     AT_DISPATCH_FLOATING_TYPES(
       dense.scalar_type(), "addmm_sparse_gcs_dense", [&] {
         sparse_mm_mkl_template<scalar_t>(res, sparse_.indices(),

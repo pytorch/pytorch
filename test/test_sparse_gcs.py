@@ -16,6 +16,7 @@ import random
 import unittest
 import operator
 import numpy as np
+import math
 from collections import defaultdict
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 
@@ -32,7 +33,6 @@ class TestSparseGCS(TestCase):
         for f in fills:
             dense[f] = fill_value
         dense = torch.from_numpy(dense.reshape(shape))
-        print(dense.shape)
 
         return dense.to_sparse_gcs(None, fill_value)
     
@@ -50,27 +50,29 @@ class TestSparseGCS(TestCase):
         self.assertEqual(type(torch.sparse_gcs), torch.layout)
 
     def test_sparse_gcs_from_dense(self):
-        sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_gcs(None, None)
-
-        self.assertEqual(torch.tensor([0, 2, 4]), sp.pointers())
-        self.assertEqual(torch.tensor([0, 1, 0, 1]), sp.indices())
-        self.assertEqual(torch.tensor([1, 2, 3, 4]), sp.values())
+        sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_gcs(None, -999)
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32), sp.pointers())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32), sp.indices())
+        self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=torch.double), sp.values())
 
     def test_dense_convert(self):
-        ones = np.ones((5, 5, 5, 5, 5))
-        sparse = self.make_sparse_gcs(ones)
-        self.assertEqual(sparse.to_dense(), ones)
+        size = (5, 5, 5, 5, 5)
+        dense = torch.randn(size)
+        sparse = dense.to_sparse_gcs(None, -999)
+        self.assertEqual(sparse.to_dense(), dense)
         
-        rand = np.random.randn(4, 6)
-        sparse = self.make_sparse_gcs(rand)
-        self.assertEqual(sparse.to_dense(), rand)
+        size = (4, 6)
+        dense = torch.randn(size)
+        sparse = dense.to_sparse_gcs(None, -999)
+        self.assertEqual(sparse.to_dense(), dense)
 
-        multi_dim = np.random.randn(3, 2, 2, 2, 6)
-        sparse = self.make_sparse_gcs(multi_dim)
-        self.assertEqual(sparse.to_dense(), multi_dim)
+        size = (3, 2, 2, 2, 6)
+        dense = torch.randn(size)
+        sparse = dense.to_sparse_gcs(None, -999)
+        self.assertEqual(sparse.to_dense(), dense)
 
     def test_gcs_matvec(self):
-        side = 1000
+        side = 100
         gcs = self.gen_sparse_gcs((side, side), 1000)
         vec = torch.randn(side, dtype=torch.double)
 
