@@ -156,7 +156,8 @@ struct CudaGraphFuser {
     std::unordered_map<Value*, Value*> inputs_map;
     size_t i = 0;
     size_t tensor_insert_idx = 0;
-    AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
+    // TODO: update this to exclude inputs from profile_ivalue;
+    //AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
       if (input->type()->isSubtypeOf(TensorType::get()))
@@ -167,6 +168,7 @@ struct CudaGraphFuser {
     // we insert tensors first because the fuser assumes that to be the case
     // (as a legacy from tensors only)
     WithInsertPoint guard(*subgraph.nodes().begin());
+    //std::vector<Node*> profiled_ivalue_list;
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         // TODO: we are following the convention for no good reason;
@@ -189,10 +191,27 @@ struct CudaGraphFuser {
           group->addInput(input);
         } else if (input->node()->kind() == prim::Constant) {
           // inline the constants directly in the body of the fused group.
+          Node* out_const = input->node();
+          // we'll only merge constant into a non-empty graph, which will always have inputs
+          //Value* dummy_input = subgraph.inputs()[0];
+
           Node* in_const =
-              subgraph.createClone(input->node(), [](Value*) -> Value* {
-                throw std::runtime_error("unexpected input");
+              subgraph.createClone(input->node(), [&](Value* v) -> Value* {
+                if (v->node()->kind() != prim::profile_ivalue) {
+                  throw std::runtime_error(std::string("merging constant with unexpected input from node") + v->node()->kind().toDisplayString());
+                }
+                group->addInput(v->node()->output());
+
+                // we are doing this just to keep alias_analysis silent with their checks
+                auto in_group = subgraph.addInput();
+                in_group->setType(v->type());
+                return in_group;
               });
+          //if (!in_const->inputs().empty()) {
+          //  profiled_ivalue_list.push_back(out_const->input()->node());
+          //  in_const->removeAllInputs();
+          //}
+
           subgraph.insertNode(in_const);
           inputs_map[input] = in_const->output();
         } else {
@@ -204,6 +223,15 @@ struct CudaGraphFuser {
         }
       }
     }
+
+    // no need to map dummy inputs from prim::profile_ivalue
+    // for (const auto& n : profiled_ivalue_list) {
+    //   group->addInput(n->output());
+    //   // we are doing this just to keep alias_analysis silent with their checks
+    //   auto in_group = subgraph.addInput();
+    //   in_group->setType(n->output()->type());
+    // }
+    
     // copy n into the graph, remapping its inputs to internal nodes
     Node* in_graph = subgraph.createClone(
         n, [&](Value* k) -> Value* { return inputs_map[k]; });
@@ -750,13 +778,25 @@ struct CudaGraphFuser {
 
         // hmmm, do I need to setInsertPoint...
         Node* in1_const =
-            graph->createClone(n->input(1)->node(), [](Value*) -> Value* {
-              throw std::runtime_error("unexpected input");
+            graph->createClone(n->input(1)->node(), [&](Value* v) -> Value* {
+                // if constant ever has an input, it has to come from profile_ivalue dependency
+                if (v->node()->kind() == prim::Param && fusion_group->input(v->offset())->node()->kind() == prim::profile_ivalue) {
+                  // we need to map it along profile_ivalue dependency
+                  return fusion_group->input(v->offset());
+                } else {
+                  throw std::runtime_error(std::string("unexpected input from node") + v->node()->kind().toDisplayString());
+                }
             });
         graph->insertNode(in1_const);
         Node* in2_const =
-            graph->createClone(n->input(2)->node(), [](Value*) -> Value* {
-              throw std::runtime_error("unexpected input");
+            graph->createClone(n->input(2)->node(), [&](Value* v) -> Value* {
+                // if constant ever has an input, it has to come from profile_ivalue dependency
+                if (v->node()->kind() == prim::Param && fusion_group->input(v->offset())->node()->kind() == prim::profile_ivalue) {
+                  // we need to map it along profile_ivalue dependency
+                  return fusion_group->input(v->offset());
+                } else {
+                  throw std::runtime_error(std::string("unexpected input from node") + v->node()->kind().toDisplayString());
+                }
             });
         graph->insertNode(in2_const);
 
@@ -788,7 +828,9 @@ struct CudaGraphFuser {
 
     // TODO: failure in buildShapeExpressions should not break fusion execution,
     // we can add a try/catch here to bailout from removeOutputsUsedOnlyInSize.
+    GRAPH_DUMP("before build shape expression: ", graph_);
     auto shape_of = buildShapeExpressions(fusion_group);
+    GRAPH_DUMP("after build shape expression: ", graph_);
     auto outputs = fusion_group->outputs().vec();
     auto soutputs = subgraph->outputs().vec();
     // XXX: Iterating in this order is not only good for performance reasons!
@@ -808,9 +850,11 @@ struct CudaGraphFuser {
         subgraph->eraseOutput(i);
       }
     }
+    GRAPH_DUMP("after build shape expression and re-wiring: ", graph_);
   }
 
   void refreshAliasDb() {
+    GRAPH_DUMP("refresh aliasDb: ", graph_);
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
@@ -1071,6 +1115,44 @@ void guardFusionGroups(Block* block) {
   }
 }
 
+void ExtractProfileIValue(Node* profile_ivalue) {
+  auto type = profile_ivalue->ty(attr::profiled_type);
+  auto graph = profile_ivalue->owningGraph();
+
+  IValue val; // default to None
+  if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(ListType::ofInts()))) {
+    // int[]
+    val = IValue(profile_ivalue->is(attr::a));
+  } else if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(BoolType::get()))) {
+    // bool
+    val = IValue(static_cast<bool>(profile_ivalue->i(attr::a)));
+  } else {
+    TORCH_INTERNAL_ASSERT(false, __func__, " gets unidentified type: ", profile_ivalue->ty(attr::profiled_type));
+  }
+
+  auto const_o = graph->insertConstant(val);
+  auto const_n = const_o->node();
+  const_n->moveAfter(profile_ivalue);
+  profile_ivalue->output()->replaceAllUsesAfterNodeWith(const_n, const_o);
+  // special wiring, we add this input to constant simply in order to create dependency, which we can trace and remove later;
+  const_n->addInput(profile_ivalue->output());
+}
+
+void ExtractProfileIValues(Block* block) {
+  std::vector<Node*> profile_ivalues;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      ExtractProfileIValues(b);
+    }
+    if (n->kind() == prim::profile_ivalue) {
+      profile_ivalues.push_back(n);
+    }
+  }
+  for (Node* profile_ivalue: profile_ivalues) {
+    ExtractProfileIValue(profile_ivalue);
+  }
+}
+  
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
@@ -1078,14 +1160,25 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before Fusion: ", graph);
 
   // TODO: constant folding on dimensionality;
+
   // TODO: extract & guard profile_ivalue; but how do we restore it???
+  // I don't know how to store edge/node in attribute. so let's abuse data flow dependency and add inputs to conditional constant generated by aten::profile_ivalue
+  ExtractProfileIValues(graph->block());
+  GRAPH_DUMP("insert conditional constant from profile_ivalue: ", graph);
 
   // TODO: we need to properly restore shape information after fusion.
   // shamelessly use tool from NNC.
+  // TODO: switch to our own stuff and combine this with ExtractProfileIValues
   RemoveProfileNodesAndSpecializeTypes(graph);
 
   CudaGraphFuser(graph->block(), graph).run();
+
+  GRAPH_DUMP("After Fusion: ", graph);
+
+  // guard input types as well as conditional constants from aten::profile_ivalue
   guardFusionGroups(graph->block());
+  GRAPH_DUMP("After CudaFusionGuard: ", graph);
+
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so

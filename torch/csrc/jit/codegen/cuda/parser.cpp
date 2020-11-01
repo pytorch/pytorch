@@ -640,7 +640,8 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
     TORCH_INTERNAL_ASSERT(value.isIntList(), "profiling seeing the wrong data type");
     // TODO: get a real attribute
     if (!pn->hasAttribute(attr::a)) {
-      pn->is_(attr::a, value.toIntList().vec());
+      //pn->is_(attr::a, value.toIntList().vec());
+      pn->is_(attr::a, value.toIntVector());
     } else {
       auto profiled_ints = pn->is(attr::a);
       auto input_ints = value.toIntList();
