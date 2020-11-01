@@ -2946,7 +2946,7 @@ struct to_ir {
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       case TK_SUBSCRIPT: {
-        return emitSubscript(Subscript(tree));
+        return emitSubscript(Subscript(tree), type_hint);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
@@ -3805,7 +3805,9 @@ struct to_ir {
         ->output();
   }
 
-  std::shared_ptr<SugaredValue> emitSubscript(const Subscript& subscript) {
+  std::shared_ptr<SugaredValue> emitSubscript(
+      const Subscript& subscript,
+      TypePtr type_hint = nullptr) {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
@@ -3875,7 +3877,7 @@ struct to_ir {
         return std::make_shared<SimpleValue>(
             emitMultidimSlicing(range, sliceable, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx);
+        return sv->getitem(range, method, idx, std::move(type_hint));
       }
     }
   }
