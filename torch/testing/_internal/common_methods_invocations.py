@@ -443,9 +443,10 @@ if TEST_SCIPY:
         UnaryUfuncInfo('erfinv',
                        ref=scipy.special.erfinv,
                        decorators=(precisionOverride({torch.float16: 1e-2,
-                                                      torch.bfloat16: 1e-2}),),
+                                                      torch.bfloat16: 1e-2,
+                                                      torch.float32: 1e-4}),),
                        dtypes=floating_types(),
-                       domain=(-0.99, 0.99),
+                       domain=(-1, 1),
                        dtypesIfCPU=floating_types_and(torch.bfloat16),
                        dtypesIfCUDA=floating_types_and(torch.half)),
     ]
