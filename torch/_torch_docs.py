@@ -3116,13 +3116,20 @@ Keyword args:
 add_docstr(torch.inner, r"""
 inner(input, other, *, out=None) -> Tensor
 
-This functions computes the inner product of :attr:`input` and :attr:`other`
-if they are 1-D Tensors, otherwise computes a sum-product over the last dimensions.
+Computes the vector inner product for 1D tensors. In higher dimensions, computes the sum
+of products over the last dimensions after reshaping :attr:`input` and :attr:`other` to
+have shape :math:`input.shape[:-1] + other.shape`.
 
 .. note:: 
 
-    If either input is a scalar, then a elemnt-wise multiplication is performed.
-    If both input tensors are non-scalar, their last dimensions must match.
+    If either :attr:`input` or :attr:`other` is a scalar, the result is equivalent
+    to `torch.mul(input, other)`.
+
+    If both :attr:`input` and :attr:`other` are non-scalar, the size of their last
+    dimensions must match and the result is a contraction of :attr:`input` and :attr:`other`
+    over the last dimension, explicitly defined below:
+    
+    :math:`torch.inner(a, b)[i0,...,in-1,j0,...,jm-1] = sum(a[i0,...,in-1,:]*b[j0,..,jm-1,:])`
 
 Args:
     input (Tensor): First input tensor
@@ -3145,7 +3152,7 @@ Example::
 
         [[-0.0667, -0.9676,  1.5111, -1.9444],
          [-2.9197, -0.2519, -0.2990, -0.7924]]])
-    
+
     # Scalar input
     >>> a = torch.randn(2, 3)
     >>> a

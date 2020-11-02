@@ -19,8 +19,7 @@ if TEST_NUMPY:
 class TestLinalg(TestCase):
     exact_dtype = True
 
-    @dtypes(torch.float, torch.double)
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.float)
     def test_inner(self, device, dtype):        
         def check(a_sizes_, b_sizes_):
             for a_sizes, b_sizes in ((a_sizes_, b_sizes_), (b_sizes_, a_sizes_)):
@@ -31,24 +30,31 @@ class TestLinalg(TestCase):
                 self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
                 self.assertEqual(res, torch.inner(a, b, out=torch.zeros_like(res)))
 
-        check([], [])               # scalar x scalar
-        check([], [0])              # scalar x empty
-        check([], [3])              # scalar x 1D
-        check([], [2, 3, 4])        # scalar x 3D
+        check([], [])                       # scalar x scalar
+        check([], [0])                      # scalar x empty
+        check([], [3])                      # scalar x 1D
+        check([], [2, 3, 4])                # scalar x 3D
 
-        check([0], [0])             # empty x empty
-        check([0], [2, 0])          # empty x 2D
+        check([0], [0])                     # empty x empty
+        check([0], [2, 0])                  # empty x 2D
 
-        check([2], [2])             # 1D x 1D
-        check([2], [3, 1, 2])       # 1D x 3D
-        check([2], [3, 0, 2])       # 1D x 3D empty
+        check([2], [2])                     # 1D x 1D
+        check([2], [3, 1, 2])               # 1D x 3D
+        check([2], [3, 0, 2])               # 1D x 3D empty
 
-        check([1, 2], [3, 2])       # 2D x 2D
-        check([1, 2], [3, 4, 2])    # 2D x 3D
+        check([1, 2], [3, 2])               # 2D x 2D
+        check([1, 2], [3, 4, 2])            # 2D x 3D
+        check([2, 1, 3, 2], [1, 3, 2, 2])   # 4D x 4D
+
+        # Test complex numbers
+        a = torch.tensor([2 + 1j, 3 - 2j])
+        b = torch.tensor([4 - 2j, 2 + 3j])
+        self.assertEqual(a.inner(b).cpu().numpy(), np.inner(a.cpu().numpy(), b.cpu().numpy()))
 
         # Test discontiguous input
         a = torch.randn(3, 2, device=device, dtype=dtype).transpose_(0, 1)
         b = torch.randn(4, 3, device=device, dtype=dtype)[::2, :]
+        self.assertFalse(a.is_contiguous() or b.is_contiguous())
         self.assertEqual(a.inner(b).cpu().numpy(), np.inner(a.cpu().numpy(), b.cpu().numpy()))
 
         # Test error message

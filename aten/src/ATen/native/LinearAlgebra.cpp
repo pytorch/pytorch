@@ -204,23 +204,24 @@ Tensor& inner_out(Tensor& out, const Tensor& self, const Tensor& other) {
       " and ",
       other.sizes());
 
-  // Out shape is self dims (except last) + other dims (except last)
-  std::vector<int64_t> out_shape(
+  // out_shape = self_shape[:-1] + other_shape[:-1]
+  std::vector<int64_t> shape(
       self.sizes().begin(), self.sizes().begin() + self.dim() - 1);
-  out_shape.insert(
-      out_shape.end(),
+  shape.insert(
+      shape.end(),
       other.sizes().begin(),
       other.sizes().begin() + other.dim() - 1);
-  resize_output(out, out_shape);
+  at::native::resize_output(out, shape);
 
-  // Broadcast all but the last dimension
-  Tensor input = self;
-  for (int64_t i = other.dim() - 1; i > 0; --i) {
-    input = input.unsqueeze(-2);
-  }
+  // Reshape self to include dimensions other_shape[:-1] so it broadcasts with other in
+  // torch.mul resulting in the correct out_shape after summing last dimension
+  std::vector<int64_t> sizes = self.sizes().vec();
+  sizes.insert(sizes.begin() + self.dim() - 1, other.dim() - 1, 1);
+  Tensor input = self.reshape(sizes);
 
   // Compute result
   at::sum_out(out, input * other, -1);
+
   return out;
 }
 
@@ -240,14 +241,15 @@ Tensor inner(const Tensor& self, const Tensor& other) {
       " and ",
       other.sizes());
 
-  // Broadcast all but the last dimension
-  Tensor input = self;
-  for (int64_t i = other.dim() - 1; i > 0; --i) {
-    input = input.unsqueeze(-2);
-  }
+  // out_shape = self_shape[:-1] + other_shape[:-1]
+  // Reshape self to include dimensions other_shape[:-1] so it broadcasts with other in
+  // torch.mul resulting in the correct out_shape after summing last dimension
+  std::vector<int64_t> sizes = self.sizes().vec();
+  sizes.insert(sizes.begin() + self.dim() - 1, other.dim() - 1, 1);
+  Tensor input = self.reshape(sizes);
 
   // Compute result
-  return input.mul(other).sum(-1);
+  return (input * other).sum(-1);
 }
 
 Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
