@@ -36,6 +36,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
         "3.6m",
         "3.7m",
         "3.8m",
+        "3.9m"
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
     libtorch=[
