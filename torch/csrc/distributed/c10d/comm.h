@@ -19,8 +19,16 @@ void broadcast_coalesced(
 // mappings as well.
 class GradBucket {
  public:
-  explicit GradBucket(const std::vector<at::Tensor>& tensors)
-      : tensors_(tensors) {}
+  explicit GradBucket(
+      const std::vector<at::Tensor>& tensors,
+      const std::vector<size_t>& offsets = {},
+      const std::vector<size_t>& lengths = {},
+      const std::vector<c10::IntArrayRef>& sizes_vec = {})
+      : tensors_(tensors),
+        offsets_(offsets),
+        lengths_(lengths),
+        sizes_vec_(sizes_vec) {}
+
   // Each tensor in the list that getTensors returns refers to the replica on
   // each device. There will be multiple replicas only in the case of single
   // process multiple device mode. In the single process single device mode,
@@ -33,14 +41,30 @@ class GradBucket {
     return tensors_;
   }
 
+  const std::vector<size_t>& getOffsets() const {
+    return offsets_;
+  }
+
+  const std::vector<size_t>& getLengths() const {
+    return lengths_;
+  }
+
+  const std::vector<c10::IntArrayRef>& getSizesVec() const {
+    return sizes_vec_;
+  }
+
  private:
   std::vector<at::Tensor> tensors_;
+
+  std::vector<size_t> offsets_;
+  std::vector<size_t> lengths_;
+  std::vector<c10::IntArrayRef> sizes_vec_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.
 // Requires implementing 1) `runHook` method that communicates gradients
-// asynchronously, and 2) `parseHookResult` method that converts the hook result
-// into a tensor vector.
+// asynchronously, and 2) `parseHookResult` method that converts the hook
+// result into a tensor vector.
 class TORCH_PYTHON_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
@@ -51,9 +75,9 @@ class TORCH_PYTHON_API CommHookInterface {
   virtual c10::intrusive_ptr<c10::ivalue::Future> runHook(
       GradBucket& bucket) = 0;
 
-  // Returns the resulting tensors once the communication hook result is ready.
-  // The resulting tensors will then be copied to the grads of individual
-  // parameters.
+  // Returns the resulting tensors once the communication hook result is
+  // ready. The resulting tensors will then be copied to the grads of
+  // individual parameters.
   virtual std::vector<at::Tensor> parseHookResult(
       const c10::IValue& result) = 0;
 };
