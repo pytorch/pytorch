@@ -769,6 +769,19 @@ void hypot_kernel(TensorIterator& iter) {
   });
 }
 
+void igamma_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igamma_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return calc_igamma(a, b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a.igamma(b);
+        });
+  });
+}
+
 void nextafter_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
@@ -827,6 +840,7 @@ REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
+REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
 
