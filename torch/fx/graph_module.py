@@ -4,6 +4,7 @@ import linecache
 from typing import Type, Dict, List, Any, Union
 from .graph import Graph
 import copy
+import math
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -28,9 +29,7 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {
-        'torch': torch
-    }
+    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan}
     exec_with_source(src, gbls)
     return gbls['forward']
 
@@ -107,7 +106,9 @@ class GraphModule(torch.nn.Module):
         forward : The Python method generated from `graph`
 
     Note that when `graph` is reassigned, `code` and `forward` will be automatically
-    regenerated.
+    regenerated. However, if you edit the contents of the `graph` without reassigning
+    the `graph` attribute itself, you must call `recompile()` to update the generated
+    code.
     """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
@@ -174,6 +175,14 @@ class GraphModule(torch.nn.Module):
     @graph.setter
     def graph(self, val) -> None:
         self._graph = val
+        self.recompile()
+
+    def recompile(self) -> None:
+        """
+        Recompile this GraphModule from its `graph` attribute. This should be
+        called after editing the contained `graph`, otherwise the generated
+        code of this `GraphModule` will be out of date.
+        """
         self.code = self._graph.python_code(root_module='self')
         cls = type(self)
         cls.forward = _forward_from_src(self.code)

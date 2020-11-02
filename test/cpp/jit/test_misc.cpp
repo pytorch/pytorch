@@ -65,6 +65,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -1118,6 +1119,33 @@ TEST(RecordFunctionTest, Basic) {
   clearCallbacks();
 }
 
+TEST(RecordFunctionTest, OperatorNameOverload) {
+  std::set<std::string> operator_names;
+
+  at::addGlobalCallback(at::RecordFunctionCallback(
+                            [&operator_names](const at::RecordFunction& fn) {
+                              c10::optional<c10::OperatorName> op_name =
+                                  fn.operator_name();
+                              if (op_name.has_value()) {
+                                operator_names.insert(c10::toString(*op_name));
+                              } else {
+                                operator_names.insert("No Operator Name");
+                              }
+                            })
+                            .scopes({at::RecordScope::FUNCTION}));
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(false);
+  auto t2 = t.pow(2);
+
+  at::clearCallbacks();
+  EXPECT_TRUE(operator_names.count("No Operator Name") == 0)
+      << "Expected that all traced operators had an associated OperatorName object";
+  EXPECT_TRUE(operator_names.count("aten::randn") == 1)
+      << "Expected aten::randn to have been called and recorded, but it was not";
+  EXPECT_TRUE(operator_names.count("aten::pow.Tensor_Scalar") == 1)
+      << "Expected aten::pow.Tensor_Scalar to have been called and recorded, but it was not";
+}
+
 class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
  public:
   int getModelId() const {
@@ -1756,8 +1784,8 @@ TEST(ProfilerTest, Basic) {
   is.run(stack);
 
   // profiled types are stored as attributes and show up in the dump, e.g.
-  // Tensor = prim::profile[profiled_type=Double(4:256, 256:1, requires_grad=0,
-  // device=cpu)
+  // Tensor = prim::profile[profiled_type=Double(4, 256, strides=[256, 1],
+  // requires_grad=0, device=cpu)
   testing::FileCheck()
       .check("Tensor = prim::profile[profiled_type")
       ->check_same("256")

@@ -194,6 +194,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return dims_.size();
   }
   const Expr* dim(size_t index) const {
+    if (index >= ndim()) {
+      throw out_of_range_index();
+    }
     return dims_[index];
   }
   std::vector<const Expr*> dims() const {

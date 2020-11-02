@@ -349,7 +349,7 @@ class Module:
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
-            raise KeyError("module name can't contain \".\"")
+            raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
@@ -540,8 +540,8 @@ class Module:
         .. function:: to(memory_format=torch.channels_last)
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
-        floating point desired :attr:`dtype` s. In addition, this method will
-        only cast the floating point parameters and buffers to :attr:`dtype`
+        floating point or complex :attr:`dtype`s. In addition, this method will
+        only cast the floating point or complex parameters and buffers to :attr:`dtype`
         (if given). The integral parameters and buffers will be moved
         :attr:`device`, if that is given, but with dtypes unchanged. When
         :attr:`non_blocking` is set, it tries to convert/move asynchronously
@@ -556,8 +556,8 @@ class Module:
         Args:
             device (:class:`torch.device`): the desired device of the parameters
                 and buffers in this module
-            dtype (:class:`torch.dtype`): the desired floating point type of
-                the floating point parameters and buffers in this module
+            dtype (:class:`torch.dtype`): the desired floating point or complex dtype of
+                the parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
             memory_format (:class:`torch.memory_format`): the desired memory
@@ -567,7 +567,7 @@ class Module:
         Returns:
             Module: self
 
-        Example::
+        Examples::
 
             >>> linear = nn.Linear(2, 2)
             >>> linear.weight
@@ -595,19 +595,36 @@ class Module:
             tensor([[ 0.1914, -0.3420],
                     [-0.5112, -0.2324]], dtype=torch.float16)
 
+            >>> linear = nn.Linear(2, 2, bias=None).to(torch.cdouble)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.3741+0.j,  0.2382+0.j],
+                    [ 0.5593+0.j, -0.4443+0.j]], dtype=torch.complex128)
+            >>> linear(torch.ones(3, 2, dtype=torch.cdouble))
+            tensor([[0.6122+0.j, 0.1150+0.j],
+                    [0.6122+0.j, 0.1150+0.j],
+                    [0.6122+0.j, 0.1150+0.j]], dtype=torch.complex128)
+
         """
 
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
-            if not dtype.is_floating_point:
-                raise TypeError('nn.Module.to only accepts floating point '
+            if not (dtype.is_floating_point or dtype.is_complex):
+                raise TypeError('nn.Module.to only accepts floating point or complex '
                                 'dtypes, but got desired dtype={}'.format(dtype))
+            if dtype.is_complex:
+                warnings.warn(
+                    "Complex modules are a new feature under active development whose design may change, "
+                    "and some modules might not work as expected when using complex tensors as parameters or buffers. "
+                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+                    "if a complex module does not work as expected.")
 
         def convert(t):
             if convert_to_format is not None and t.dim() == 4:
-                return t.to(device, dtype if t.is_floating_point() else None, non_blocking, memory_format=convert_to_format)
-            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+                return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None,
+                            non_blocking, memory_format=convert_to_format)
+            return t.to(device, dtype if t.is_floating_point() or t.is_complex() else None, non_blocking)
 
         return self._apply(convert)
 
@@ -965,18 +982,20 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
-
+                # This is used to avoid copying uninitialized parameters into
+                # non-lazy modules, since they dont have the hook to do the checks
+                # in such case, it will error when accessing the .shape attribute.
+                is_param_lazy = isinstance(param, torch.nn.parameter.UninitializedParameter)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
-                if len(param.shape) == 0 and len(input_param.shape) == 1:
+                if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
                     input_param = input_param[0]
 
-                if input_param.shape != param.shape:
+                if not is_param_lazy and input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
-
                 try:
                     with torch.no_grad():
                         param.copy_(input_param)

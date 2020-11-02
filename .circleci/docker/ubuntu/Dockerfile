@@ -33,7 +33,7 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda
+# Install conda and other packages (e.g., numpy, coverage, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -43,6 +43,10 @@ RUN bash ./install_conda.sh && rm install_conda.sh
 ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
+
+# Install lcov for C++ code coverage
+ADD ./common/install_lcov.sh install_lcov.sh
+RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # Install non-standard Python versions (via Travis binaries)
 ARG TRAVIS_PYTHON_VERSION

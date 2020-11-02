@@ -252,6 +252,9 @@ public:
   Vec256<c10::complex<double>> hypot(const Vec256<c10::complex<double>> &b) const {
     AT_ERROR("not supported for complex numbers");
   }
+  Vec256<c10::complex<double>> igamma(const Vec256<c10::complex<double>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
@@ -414,32 +417,6 @@ Vec256<c10::complex<double>> inline minimum(const Vec256<c10::complex<double>>& 
   // Exploit the fact that all-ones is a NaN.
   auto isnan = _mm256_cmp_pd(abs_a, abs_b, _CMP_UNORD_Q);
   return _mm256_or_pd(min, isnan);
-}
-
-template <>
-Vec256<c10::complex<double>> inline clamp(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& min, const Vec256<c10::complex<double>>& max) {
-  auto abs_a = a.abs_2_();
-  auto abs_min = min.abs_2_();
-  auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
-  auto abs_max = max.abs_2_();
-  auto min_mask = _mm256_cmp_pd(abs_a, abs_max, _CMP_GT_OQ);
-  return _mm256_blendv_pd(_mm256_blendv_pd(a, min, max_mask), max, min_mask);
-}
-
-template <>
-Vec256<c10::complex<double>> inline clamp_min(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& min) {
-  auto abs_a = a.abs_2_();
-  auto abs_min = min.abs_2_();
-  auto max_mask = _mm256_cmp_pd(abs_a, abs_min, _CMP_LT_OQ);
-  return _mm256_blendv_pd(a, min, max_mask);
-}
-
-template <>
-Vec256<c10::complex<double>> inline clamp_max(const Vec256<c10::complex<double>>& a, const Vec256<c10::complex<double>>& max) {
-  auto abs_a = a.abs_2_();
-  auto abs_max = max.abs_2_();
-  auto min_mask = _mm256_cmp_pd(abs_a, abs_max, _CMP_GT_OQ);
-  return _mm256_blendv_pd(a, max, min_mask);
 }
 
 template <>

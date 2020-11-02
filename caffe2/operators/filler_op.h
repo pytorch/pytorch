@@ -92,6 +92,7 @@ class FillerOp : public Operator<Context> {
       }
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
+      shape_ = shape;
     } else {
       output->Resize(shape_);
     }
