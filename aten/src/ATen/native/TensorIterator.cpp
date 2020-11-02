@@ -535,22 +535,25 @@ void TensorIterator::coalesce_dimensions() {
     return;
   }
 
-  int o = noutputs();
-
   // We can coalesce two adjacent dimensions if either dim has size 1 or if:
   // shape[n] * stride[n] == shape[n + 1].
   auto can_coalesce = [&](int dim0, int dim1) {
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
+    if (is_reduction_) {
+      // The dimension being reduced should not be coalesced
+      for (int i = 0; i < noutputs(); i++) {
+        auto& stride = operands_[i].stride_bytes;
+        if (stride[dim0] == 0 || stride[dim1] == 0) {
+          return false;
+        }
+      }
+    }
     if (shape0 == 1 || shape1 == 1) {
       return true;
     }
     for (int i = 0; i < ntensors(); i++) {
       auto& stride = operands_[i].stride_bytes;
-      if (is_reduction_ && i < o && (stride[dim0] == 0 || stride[dim1] == 0)) {
-        // The dimension being reduced should not be coalesced
-        return false;
-      }
       if (shape0 * stride[dim0] != stride[dim1]) {
         return false;
       }
