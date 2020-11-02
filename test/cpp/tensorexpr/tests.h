@@ -194,6 +194,7 @@ namespace jit {
   _(SimplifyMuls)                                   \
   _(SimplifySubs)                                   \
   _(SimplifyDiv)                                    \
+  _(SimplifyMod)                                    \
   _(SimplifyMultiOp)                                \
   _(SimplifyManyOps)                                \
   _(SimplifyFactorization)                          \
@@ -214,6 +215,8 @@ namespace jit {
   _(SimplifyConstantBranches)                       \
   _(SimplifyConstantCond)                           \
   _(SimplifyEliminateEmptyCond)                     \
+  _(SimplifyConstantComparisons)                    \
+  _(SimplifySymbolicComparisons)                    \
   _(SimplifyEliminateZeroLengthFor)                 \
   _(SimplifyOneLoopFor)                             \
   _(SimplifyForWontLoseLoopOptions)                 \
@@ -357,6 +360,7 @@ namespace jit {
   _(Kernel_2)                                       \
   _(Kernel_3)                                       \
   _(Kernel_4)                                       \
+  _(KernelCatInputTypesPromotion)                   \
   _(KernelSumAllAxes)                               \
   _(KernelSumOneAxis)                               \
   _(KernelSumMultipleAxes)                          \

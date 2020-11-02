@@ -107,7 +107,7 @@ struct WriteableTensorData {
 
  private:
   friend TORCH_API WriteableTensorData
-  getWriteableTensorData(const at::Tensor& tensor);
+  getWriteableTensorData(const at::Tensor& tensor, bool to_cpu);
   at::Tensor tensor_;
   uint64_t size_;
 };
@@ -265,8 +265,9 @@ class TORCH_API Pickler {
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
-// if necessary
-TORCH_API WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
+// if it was CUDA and to_cpu is True.
+TORCH_API WriteableTensorData
+getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
 
 // return the value of the tensor's storage pointer
 uint64_t getStorageKey(const at::Tensor& tensor);

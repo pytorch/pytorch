@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -1652,6 +1653,21 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenLocking_thenReturnsCorrectObject) {
   EXPECT_EQ(var.ptr.get(), locked.get());
 }
 
+TEST(WeakIntrusivePtrTest, expiredPtr_whenLocking_thenReturnsNullType) {
+  IntrusiveAndWeak<SomeClass> var = make_weak_intrusive<SomeClass>();
+  // reset the intrusive_ptr to test if weak pointer still valid
+  var.ptr.reset();
+  EXPECT_TRUE(var.weak.expired());
+  intrusive_ptr<SomeClass> locked = var.weak.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
+TEST(WeakIntrusivePtrTest, weakNullPtr_locking) {
+  auto weak_ptr = make_invalid_weak<SomeClass>();
+  intrusive_ptr<SomeClass> locked = weak_ptr.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigning_thenPointsToSameObject) {
@@ -1671,6 +1687,15 @@ TEST(
   EXPECT_TRUE(obj1.weak.expired());
 }
 
+TEST(
+    WeakIntrusivePtrTest,
+    vector_insert_weak_intrusive) {
+  std::vector<weak_intrusive_ptr<SomeClass>> priorWorks;
+  std::vector<intrusive_ptr<SomeClass>> wips;
+  wips.push_back(make_intrusive<SomeClass>());
+  priorWorks.insert(priorWorks.end(), wips.begin(), wips.end());
+  EXPECT_EQ(priorWorks.size(), 1);
+}
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigning_thenNewInstanceIsValid) {
