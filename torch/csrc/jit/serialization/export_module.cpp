@@ -53,9 +53,11 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
-std::string getModulePath(Node* node, std::unordered_map<Node*, std::string>& node_module_paths) {
+std::string getModulePath(
+    Node* node,
+    std::unordered_map<Node*, std::string>& node_module_paths) {
   auto callStack = node->callstack();
-  for (auto it: node_module_paths) {
+  for (auto it : node_module_paths) {
     std::cout << "node: " << it.first << " value: " << it.second << std::endl;
   }
   return callStack.has_value() ? callStack->get()->getModulePath() : "";
@@ -70,7 +72,10 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
   return prefix + "(" + moduleType + ")";
 }
 
-void setModulePath(Node* node, const std::string& root_scope_string, std::unordered_map<Node*, std::string>& node_module_paths) {
+void setModulePath(
+    Node* node,
+    const std::string& root_scope_string,
+    std::unordered_map<Node*, std::string>& node_module_paths) {
   if (!node->callstack()) {
     std::string root = root_scope_string + ".forward";
     InlinedCallStackPtr inlineCallStack =
@@ -112,7 +117,8 @@ void setModulePath(Node* node, const std::string& root_scope_string, std::unorde
 
 void setModulePaths(
     std::shared_ptr<Graph> graph,
-    const std::string& root_scope_string, std::unordered_map<Node*, std::string>& node_module_paths) {
+    const std::string& root_scope_string,
+    std::unordered_map<Node*, std::string>& node_module_paths) {
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
