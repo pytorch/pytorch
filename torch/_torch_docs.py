@@ -1821,6 +1821,40 @@ clip(input, min, max, *, out=None) -> Tensor
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
+add_docstr(torch.column_stack,
+           r"""
+column_stack(tensors, *, out=None) -> Tensor
+
+Creates a new tensor by horizontally stacking the tensors in :attr:`tensors`.
+
+Equivalent to ``torch.hstack(tensors)``, except each zero or one dimensional tensor ``t``
+in :attr:`tensors` is first reshaped into a ``(t.numel(), 1)`` column before being stacked horizontally.
+
+Args:
+    tensors (sequence of Tensors): sequence of tensors to concatenate
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5, 6])
+    >>> torch.column_stack((a, b))
+    tensor([[1, 4],
+        [2, 5],
+        [3, 6]])
+    >>> a = torch.arange(5)
+    >>> b = torch.arange(10).reshape(5, 2)
+    >>> torch.column_stack((a, b, b))
+    tensor([[0, 0, 1, 0, 1],
+            [1, 2, 3, 2, 3],
+            [2, 4, 5, 4, 5],
+            [3, 6, 7, 6, 7],
+            [4, 8, 9, 8, 9]])
+
+""".format(**common_args))
+
 add_docstr(torch.complex,
            r"""
 complex(real, imag, *, out=None) -> Tensor
@@ -3316,6 +3350,47 @@ Example::
 
     >>> torch.i0(torch.arange(5, dtype=torch.float32))
     tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
+
+""".format(**common_args))
+
+add_docstr(torch.igamma,
+           r"""
+igamma(input, other, *, out=None) -> Tensor
+
+Computes the regularized lower incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.lgamma` for a related function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    tensor([0.3528, 0.5665, 0.7350])
 
 """.format(**common_args))
 
@@ -6682,6 +6757,12 @@ Example::
     torch.uint8
 """)
 
+add_docstr(torch.row_stack,
+           r"""
+row_stack(tensors, *, out=None) -> Tensor
+
+Alias of :func:`torch.vstack`.
+""".format(**common_args))
 
 add_docstr(torch.round,
            r"""
