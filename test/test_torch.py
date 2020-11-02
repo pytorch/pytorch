@@ -21266,6 +21266,7 @@ instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
+
 instantiate_device_type_tests(TestTorchMathOps, globals(), only_for='cpu')
 
 if __name__ == '__main__':
