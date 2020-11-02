@@ -149,7 +149,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         elif needs_observation(child) and type(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type(child)].from_float(child)
             setattr(module, name, observed_child)
-            insert_activation_post_process(observed_child)
+            # insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 

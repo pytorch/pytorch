@@ -285,4 +285,10 @@ class LSTM(nn.Module):
             observed.layers[idx] = LSTMLayer.from_float(other, idx, qconfig,
                                                         batch_first=False)
         observed.eval()
+        # observed = torch.quantization.prepare(observed, inplace=True)
+        # print(observed._modules)
         return observed
+
+    def from_observed(self, other):
+        return torch.quantization.convert(self, inplace=False,
+                                          remove_qconfig=True)
