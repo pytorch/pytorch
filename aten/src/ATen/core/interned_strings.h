@@ -338,6 +338,7 @@ namespace c10 {
   _(attr, df_input_captured_outputs) \
   _(attr, df_output_vjps)            \
   _(attr, axes)                      \
+  _(attr, profiled_axes)             \
   _(attr, axis)                      \
   _(attr, broadcast)                 \
   _(attr, direction)                 \

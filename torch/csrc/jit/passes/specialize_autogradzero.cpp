@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -93,12 +94,24 @@ struct AutogradZeroSpecializer {
     std::vector<Node*> profiled_opt_uses;
     for (const Use& use : v->uses()) {
       if (use.user->kind() == prim::profile_optional) {
+        GRAPH_DEBUG("user = ", *use.user);
         profiled_opt_uses.push_back(use.user);
       }
     }
-    for (Node* n : profiled_opt_uses) {
-      n->output()->replaceAllUsesWith(v);
+
+
+    for (auto user : profiled_opt_uses) {
+
+      auto optional_users = user->output()->uses();
+      TORCH_INTERNAL_ASSERT(optional_users.size() == 1);
+      auto n = optional_users[0].user;
+      // Transfer properties onto the actual source
+      n->i_(attr::num_none, user->i(attr::num_none));
+      n->i_(attr::num_present, user->i(attr::num_present));
+      n->is_(attr::profiled_axes, user->is(attr::profiled_axes));
+      user->output()->replaceAllUsesWith(v);
     }
+    
   }
 
   Node* guardSpecializations() {

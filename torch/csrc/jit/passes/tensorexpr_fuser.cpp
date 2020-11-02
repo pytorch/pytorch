@@ -13,6 +13,8 @@
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
+#include "ATen/core/interned_strings.h"
+#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -152,6 +154,8 @@ bool isSupported(Node* node) {
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
+      //TODO add check that we have profiling info on profiled_axes or clear up the profiling info on output types
+      "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
   };
   // clang-format on
 
@@ -824,6 +828,36 @@ class TensorExprFuser {
   }
 #undef REQ
 
+
+  std::set<int64_t> removeIntListArgToGradSum(std::shared_ptr<Graph> graph) {
+    std::set<Value*> shapes;
+    WithInsertPoint wip{*graph->block()->nodes().begin()};
+    auto noneConst = graph->insertConstant(IValue{});
+    noneConst->setType(OptionalType::create(ListType::ofInts()));
+    //graph->block()->prependNode(noneConst->node());
+    for (auto n : graph->block()->nodes()) {
+      if (n->kind() == aten::_grad_sum_to_size) {
+        GRAPH_DEBUG("Adding %", n->input(1)->debugName());
+        shapes.insert(n->input(1));
+        n->replaceInput(1, noneConst);
+        //n->removeInput(1);
+      }
+    }
+
+    std::set<int64_t> indices;
+    for (int64_t i = graph->inputs().size() - 1; i >= 0; i--) {
+      if (shapes.count(graph->inputs()[i]) != 0) {
+        GRAPH_DEBUG("Removing ", i, " ,%", graph->inputs()[i]->debugName());
+        graph->eraseInput(i);
+        indices.insert(i);
+      }
+    }
+
+    GRAPH_DUMP("Modified fusion group: ", graph);
+
+    return indices;
+  }
+
   void guardFusionGroup(Node* fusion_group) {
     GRAPH_DEBUG("Inserting a typecheck guard for a node", *fusion_group);
     auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
@@ -914,6 +948,16 @@ class TensorExprFuser {
     }
     for (Value* output : fusion_group->outputs()) {
       true_block->registerOutput(output);
+    }
+
+    auto indices = removeIntListArgToGradSum(SubgraphUtils::getSubgraph(fusion_group));
+    //TODO: guard
+    GRAPH_DEBUG("Before removeIntListArgToGradSum");
+    for (int64_t i = fusion_group->inputs().size() - 1; i >= 0; i--) {
+      if (indices.count(i) != 0) {
+        GRAPH_DEBUG("Removing ", i, " ,%", subgraph->inputs()[i]->debugName());
+        fusion_group->removeInput(i);
+      }
     }
   }
 

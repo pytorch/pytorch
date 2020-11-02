@@ -6,6 +6,10 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include "ATen/core/interned_strings.h"
+#include "c10/util/StringUtil.h"
+#include "jit/tensorexpr/expr.h"
+
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -1347,6 +1351,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::sum: {
       return computeSum(v);
     }
+    case aten::_grad_sum_to_size: {
+      return computeGradSumToSize(v);
+    }
 
     case aten::softmax: {
       return computeSoftmax(v);
@@ -1453,6 +1460,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   }
 
   Stmt* stmt = l.root_stmt();
+  GRAPH_DEBUG("stmt = ", *stmt);
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
   GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
@@ -1590,6 +1598,67 @@ std::vector<VarHandle> squeezeIndices(
 }
 
 } // namespace
+
+enum class AXIS_TYPE {
+  REDUCTION,
+  OUTPUT,
+  SKIP
+};
+
+Tensor* TensorExprKernel::computeGradSumToSize(const torch::jit::Value* v) {
+  
+  auto output_shape = v->node()->is(attr::profiled_axes);
+  auto output_shape_dims = dimsFromSizes(sizesForValue(v));
+  std::vector<ExprHandle> squeezed_output_shape_exprs;
+      
+  std::vector<AXIS_TYPE> axis_types;
+  std::vector<ExprHandle> reduce_exprs;
+  auto sizes = *v->node()->input(0)->type()->cast<TensorType>()->sizes().concrete_sizes();
+  const int64_t leading_dims = sizes.size() - output_shape.size();
+    for (int64_t i = 0; i < leading_dims; ++i) {
+      axis_types.push_back(AXIS_TYPE::REDUCTION);
+      reduce_exprs.push_back(IntImm::make(sizes[i]));
+    }
+    for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
+      if (output_shape[i - leading_dims] == 1 && sizes[i] != 1) {        
+        axis_types.push_back(AXIS_TYPE::SKIP);
+        axis_types.push_back(AXIS_TYPE::REDUCTION);
+        reduce_exprs.push_back(IntImm::make(sizes[i]));
+        squeezed_output_shape_exprs.push_back(IntImm::make(1));
+      }
+      else {
+        axis_types.push_back(AXIS_TYPE::OUTPUT);
+        squeezed_output_shape_exprs.push_back(IntImm::make(sizes[i]));
+      }
+    }
+
+    auto reduce_dims = dimsFromSizes(reduce_exprs);
+    auto squeezed_output_dims = dimsFromSizes(squeezed_output_shape_exprs);
+    auto sum = Reduce("grad_sum_to_size", 
+      squeezed_output_dims, Sum(), [&](ParameterList& indices) {
+
+        std::vector<ExprHandle> indices_exprs;
+        size_t reduction_axes_it = indices.size() - reduce_exprs.size();
+        size_t output_axes_it = 0;
+        size_t i = 0;
+        for (size_t i = 0; i < indices.size(); i++) {
+          if (axis_types[i] == AXIS_TYPE::SKIP) {
+            output_axes_it++;
+            continue;
+          }
+          if (axis_types[i] == AXIS_TYPE::REDUCTION) {
+            indices_exprs.push_back(indices[reduction_axes_it++]);
+          }
+          else {
+            indices_exprs.push_back(indices[output_axes_it++]);
+          }
+        }
+        return tensorOrConstant(v->node()->input(0), indices_exprs);        
+      }, reduce_dims);
+
+      return sum;
+   
+}
 
 Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
   auto reduction_info = getReductionInfo(v->node());

@@ -92,7 +92,6 @@ ProfileOptionalOp* ProfilingRecord::createProfileOptionalNode(
   auto pn = new ProfileOptionalOp(profiled_graph_.get(), fp);
   pn->i_(attr::num_present, 0);
   pn->i_(attr::num_none, 0);
-
   for (auto in : inputs) {
     pn->addInput(in);
   }
@@ -288,6 +287,18 @@ void ProfilingRecord::instrumentBlock(Block* block) {
             opt_pn->i_(attr::num_none, opt_pn->i(attr::num_none) + 1);
           } else {
             opt_pn->i_(attr::num_present, opt_pn->i(attr::num_present) + 1);
+            auto axes = value.toIntVector();
+            if (opt_pn->hasAttribute(attr::profiled_axes)) {
+              const auto profiled_axes = opt_pn->is(attr::profiled_axes);
+              if (!profiled_axes.empty()) {
+                
+                if (axes != profiled_axes) {
+                  opt_pn->is_(attr::profiled_axes, std::vector<int64_t>());
+                }
+              }
+            } else {
+              opt_pn->is_(attr::profiled_axes, axes);
+            }
           }
           push(stack, value);
         };
