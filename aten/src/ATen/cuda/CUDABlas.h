@@ -124,27 +124,6 @@ void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
 
-
-#define CUDABLAS_GER_ARGTYPES(Dtype)                                         \
-  int64_t m, int64_t n, Dtype alpha, const Dtype *x, int64_t incx,           \
-  Dtype *y, int64_t incy, Dtype *a, int64_t lda
-
-template <typename Dtype>
-inline void ger(CUDABLAS_GER_ARGTYPES(Dtype)) {
-  AT_ERROR("at::cuda::blas::ger: not implemented for ", typeid(Dtype).name());
-}
-
-template <>
-void ger<double>(CUDABLAS_GER_ARGTYPES(double));
-template <>
-void ger<float>(CUDABLAS_GER_ARGTYPES(float));
-#ifndef __HIP_PLATFORM_HCC__
-template <>
-void ger<c10::complex<double>>(CUDABLAS_GER_ARGTYPES(c10::complex<double>));
-template <>
-void ger<c10::complex<float>>(CUDABLAS_GER_ARGTYPES(c10::complex<float>));
-#endif
-
 /* LEVEL 1 BLAS FUNCTIONS */
 
 #define CUDABLAS_DOT_ARGTYPES(Dtype)                                      \

@@ -133,6 +133,56 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
+#ifndef __HIP_PLATFORM_HCC__
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11200
+#define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
+#else
+// Workaround for https://github.com/pytorch/pytorch/issues/45724
+cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
+  cublasOperation_t transa,
+  cublasOperation_t transb,
+  int m,
+  int n,
+  int k,
+  const void    *alpha,
+  const void     *A,
+  cudaDataType Atype,
+  int lda,
+  long long int strideA,
+  const void     *B,
+  cudaDataType Btype,
+  int ldb,
+  long long int strideB,
+  const void    *beta,
+  void           *C,
+  cudaDataType Ctype,
+  int ldc,
+  long long int strideC,
+  int64_t batchCount,
+  cudaDataType computeType,
+  cublasGemmAlgo_t algo)
+{
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major != 7) {
+    return cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
+  }
+  cublasStatus_t result;
+  constexpr int64_t split = 63 * 1024;
+  for(int64_t i = 0; i < batchCount; i += split) {
+    int64_t count = std::min<int64_t>(split, batchCount - i);
+    result = cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha,
+      (char *)A + i * strideA * 2, Atype, lda, strideA,
+      (char *)B + i * strideB * 2, Btype, ldb, strideB,
+      beta,
+      (char *)C + i * strideC * 2, Ctype, ldc, strideC,
+      (int)count, computeType, algo);
+  }
+  TORCH_CUDABLAS_CHECK(result);
+  return result;
+}
+#endif
+#endif
+
 #define GEMM_CHECK_ARGVALUES(Dtype)           \
   do {                                        \
     CUDABLAS_NONNEGINT_CHECK(gemm<Dtype>, m); \
@@ -226,10 +276,20 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
 #endif  // CUDA_VERSION < 11000
-  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
+cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+if (prop->major >= 5){
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(
       handle, opa, opb, m, n, k, (void*)(&alpha), a, CUDA_R_16F, lda, stridea,
       b, CUDA_R_16F, ldb, strideb, (void*)(&beta), c, CUDA_R_16F, ldc, stridec, num_batches,
       CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+} else {
+  for (int64_t i = 0; i < num_batches; ++i) {
+    cublasHgemm(handle, opa, opb, m, n, k, reinterpret_cast<const __half*>(&alpha),
+                  reinterpret_cast<const __half*>(a + i * stridea), lda,
+                  reinterpret_cast<const __half*>(b + i * strideb), ldb, reinterpret_cast<const __half*>(&beta),
+                  reinterpret_cast<__half*>(c + i * stridec), ldc);
+  }
+}
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
   // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
@@ -249,13 +309,29 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   float falpha = alpha;
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
+
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major < 8) {
+      TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
+    }
+    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
+                                    opa, opb, (int)m, (int)n, (int)k,
+                                    (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
+                                    b, CUDA_R_16BF, (int)ldb, strideb,
+                                    (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
+                                    (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  #elif defined(__HIP_PLATFORM_HCC__)
+    TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&falpha, a, rocblas_datatype_bf16_r, (int)lda, stridea,
                                    b, rocblas_datatype_bf16_r, (int)ldb, strideb,
                                    (void*)&fbeta, c, rocblas_datatype_bf16_r, (int)ldc, stridec,
                                    c, rocblas_datatype_bf16_r, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
+#else
+  TORCH_CHECK(false, "THCudaBlas_BgemmStridedBatched is only available on CUDA_VERSION >= 11");
+#endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
 #endif
 
@@ -611,69 +687,6 @@ void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
   char trans_flipped = (trans_bool ? 'n' : 't');
   gemm<at::BFloat16>(
       'n', trans_flipped, 1, m, n, alpha, x, incx, a, lda, beta, y, incy);
-}
-#endif
-
-#define GER_CHECK_ARGVALUES(Dtype)           \
-  do {                                        \
-    CUDABLAS_NONNEGINT_CHECK(gemv<Dtype>, m); \
-    CUDABLAS_NONNEGINT_CHECK(gemv<Dtype>, n); \
-    CUDABLAS_POSINT_CHECK(gemv<Dtype>, lda);  \
-    CUDABLAS_POSINT_CHECK(gemv<Dtype>, incx); \
-    CUDABLAS_POSINT_CHECK(gemv<Dtype>, incy); \
-  } while (0)
-
-template <>
-void ger<float>(CUDABLAS_GER_ARGTYPES(float)) {
-  NoTF32Guard disable_tf32;
-  // See Note [Writing Nondeterministic Operations]
-  globalContext().alertCuBLASConfigNotDeterministic();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  _cublasAdjustLdLevel2(m, n, &lda);
-  GER_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(
-      cublasSger(handle, m, n, &alpha, x, incx, y, incy, a, lda));
-}
-
-template <>
-void ger<double>(CUDABLAS_GER_ARGTYPES(double)) {
-  // See Note [Writing Nondeterministic Operations]
-  globalContext().alertCuBLASConfigNotDeterministic();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  _cublasAdjustLdLevel2(m, n, &lda);
-  GER_CHECK_ARGVALUES(double);
-  TORCH_CUDABLAS_CHECK(
-      cublasDger(handle, m, n, &alpha, x, incx, y, incy, a, lda));
-}
-
-#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
-template <>
-void ger<c10::complex<float>>(CUDABLAS_GER_ARGTYPES(c10::complex<float>)) {
-  NoTF32Guard disable_tf32;
-  // See Note [Writing Nondeterministic Operations]
-  globalContext().alertCuBLASConfigNotDeterministic();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  _cublasAdjustLdLevel2(m, n, &lda);
-  GER_CHECK_ARGVALUES(c10::complex<float>);
-  TORCH_CUDABLAS_CHECK(
-      cublasCgeru(handle, m, n, reinterpret_cast<const cuComplex*>(&alpha),
-      reinterpret_cast<const cuComplex*>(x), incx,
-      reinterpret_cast<const cuComplex*>(y), incy,
-      reinterpret_cast<cuComplex*>(a), lda));
-}
-
-template <>
-void ger<c10::complex<double>>(CUDABLAS_GER_ARGTYPES(c10::complex<double>)) {
-  // See Note [Writing Nondeterministic Operations]
-  globalContext().alertCuBLASConfigNotDeterministic();
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  _cublasAdjustLdLevel2(m, n, &lda);
-  GER_CHECK_ARGVALUES(c10::complex<double>);
-  TORCH_CUDABLAS_CHECK(
-      cublasZgeru(handle, m, n, reinterpret_cast<const cuDoubleComplex*>(&alpha),
-      reinterpret_cast<const cuDoubleComplex*>(x), incx,
-      reinterpret_cast<const cuDoubleComplex*>(y), incy,
-      reinterpret_cast<cuDoubleComplex*>(a), lda));
 }
 #endif
 
