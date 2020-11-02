@@ -2924,6 +2924,70 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2])
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
+    def test_coo_format_api(self):
+        i, v, s = torch.tensor([[0, 0], [1, 1]], device=self.device), torch.tensor([1, 2], device=self.device), (2, 2)
+        nse = 2
+
+        t = torch.sparse_coo_tensor(i, v, s)
+        i_coalesced = torch.tensor([[0], [1]], device=self.device)
+        v_coalesced = torch.tensor([3], device=self.device)
+        nse_coalesced = 1
+
+        if not self.is_uncoalesced:
+            t = t.coalesce()
+            i = i_coalesced
+            v = v_coalesced
+            nse = nse_coalesced
+
+        # Public API
+        self.assertEqual(t.indices(coalesce=True), i_coalesced)
+        self.assertEqual(t.values(coalesce=True), v_coalesced)
+        self.assertEqual(t.nse(coalesce=True), nse_coalesced)
+
+        self.assertEqual(t.indices(coalesce=False), i)
+        self.assertEqual(t.values(coalesce=False), v)
+        self.assertEqual(t.nse(coalesce=False), nse)
+
+        # Unsafe API
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.assertEqual(t._indices(), i)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "The usage of '_indices()' method is deprecated. Please use 'indices(False)' instead.")
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.assertEqual(t._values(), v)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "The usage of '_values()' method is deprecated. Please use 'values(False)' instead.")
+
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.assertEqual(t._nse(), nse)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "The usage of '_nse()' method is deprecated. Please use 'nse(False)' instead.")
+
+        # Private API
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.assertEqual(t._values_coalesce(), [3])
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "The usage of '_values_coalesce()' method is deprecated. Please use 'values(True)' instead.")
+
+        # Deprecated API
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.assertEqual(t._nnz(), nse)
+            if len(w) == 1:
+                # The warning from `_nnz` is triggered only once
+                wm = str(w[0].message)
+                wm = wm[:wm.index(' (Triggered internally at')]
+                self.assertEqual(wm, "The _nnz() method is deprecated and will be removed in a future PyTorch release. Please use nse(False) instead.")
+            else:
+                self.assertEqual(len(w), 0)
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

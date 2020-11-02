@@ -1029,15 +1029,20 @@ class Tensor(torch._C._TensorBase):
         warnings.warn("The usage of '_nse()' method is deprecated. Please use 'nse(False)' instead.")
         return super(Tensor, self)._nse()
 
+    def _indices(self):
+        r"""See :func:`torch.Tensor.indices`"""
+        warnings.warn("The usage of '_indices()' method is deprecated. Please use 'indices(False)' instead.")
+        return super(Tensor, self)._indices()
+
     def _values(self):
         r"""See :func:`torch.Tensor.values`"""
         warnings.warn("The usage of '_values()' method is deprecated. Please use 'values(False)' instead.")
         return super(Tensor, self)._values()
 
-    def _indices(self):
-        r"""See :func:`torch.Tensor.indices`"""
-        warnings.warn("The usage of '_indices()' method is deprecated. Please use 'indices(False)' instead.")
-        return super(Tensor, self)._indices()
+    def _values_coalesce(self):
+        r"""See :func:`torch.Tensor.values`"""
+        warnings.warn("The usage of '_values_coalesce()' method is deprecated. Please use 'values(True)' instead.")
+        return super(Tensor, self)._values_coalesce()
 
     __module__ = 'torch'
 
