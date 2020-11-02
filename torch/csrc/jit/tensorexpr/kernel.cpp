@@ -411,6 +411,16 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   return scalars_.at(v->unique());
 }
 
+ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  if (!c10::isIntegralType(scalarType)) {
+    return e;
+  }
+  auto defaultType = static_cast<tensorexpr::ScalarType>(
+      c10::typeMetaToScalarType(c10::get_default_dtype()));
+  return Cast::make(Dtype(defaultType, e.dtype().lanes()), e);
+}
+
 void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   if (inputs.empty()) {
     return;
@@ -925,13 +935,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log: {
-      return computeOneOperand(
-          "aten_log", v, [](const ExprHandle& a) { return log(a); });
+      return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
+        return log(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log10: {
-      return computeOneOperand(
-          "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
+      return computeOneOperand("aten_log10", v, [](const ExprHandle& a) {
+        return log10(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log1p: {
@@ -940,8 +952,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log2: {
-      return computeOneOperand(
-          "aten_log2", v, [](const ExprHandle& a) { return log2(a); });
+      return computeOneOperand("aten_log2", v, [](const ExprHandle& a) {
+        return log2(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::exp: {
@@ -965,18 +978,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::cos: {
-      return computeOneOperand(
-          "aten_cos", v, [](const ExprHandle& a) { return cos(a); });
+      return computeOneOperand("aten_cos", v, [](const ExprHandle& a) {
+        return cos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sin: {
-      return computeOneOperand(
-          "aten_sin", v, [](const ExprHandle& a) { return sin(a); });
+      return computeOneOperand("aten_sin", v, [](const ExprHandle& a) {
+        return sin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::tan: {
-      return computeOneOperand(
-          "aten_tan", v, [](const ExprHandle& a) { return tan(a); });
+      return computeOneOperand("aten_tan", v, [](const ExprHandle& a) {
+        return tan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::type_as: {
@@ -1357,14 +1373,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   }
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
-      // For every output tensor we've created a flattened 1D tensor - let's
-      // mark the original output tensor with computeInline
-      l.computeInline(tensor->buf());
-
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
-      For* flattened;
+      For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
+      assert(flattened);
 
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
@@ -1417,15 +1430,15 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
       if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-      l.computeInline(l.getLoopBodyFor(tensor));
 
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
-      For* flattened;
+      For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
+      assert(flattened);
 
-      For* outer;
-      For* inner;
+      For* outer = nullptr;
+      For* inner = nullptr;
       l.splitWithMask(flattened, blockSize, &outer, &inner);
       l.setGPUBlockIndex(outer, 0);
       l.setGPUThreadIndex(inner, 0);

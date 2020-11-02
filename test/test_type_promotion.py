@@ -919,8 +919,8 @@ class TestTypePromotion(TestCase):
         t = torch.tensor((1), dtype=dtypes[0], device=device)
         out = torch.empty(0, dtype=dtypes[1], device=device)
 
-        ops = (torch.neg, torch.floor, torch.ceil, torch.cos, torch.erf, torch.log)
-        float_only_ops = {torch.floor, torch.ceil, torch.cos, torch.erf, torch.log}
+        ops = (torch.neg, torch.floor, torch.ceil, torch.erf)
+        float_only_ops = {torch.floor, torch.ceil, torch.erf}
         real_only_ops = {torch.floor, torch.ceil, torch.erf}
         for op in ops:
             if dtypes[0] is not dtypes[1]:

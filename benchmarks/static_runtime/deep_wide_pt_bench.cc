@@ -91,8 +91,8 @@ static void BM_deep_wide_static(benchmark::State& state) {
   }
 }
 
-const std::shared_ptr<torch::jit::Graph>& getStaticGraph() {
-  static const std::shared_ptr<torch::jit::Graph> g =
+const std::shared_ptr<torch::jit::InferenceModule>& getStaticGraph() {
+  static const std::shared_ptr<torch::jit::InferenceModule> g =
       torch::jit::PrepareForStaticRuntime(getDeepAndWideSciptModel());
   return g;
 }
