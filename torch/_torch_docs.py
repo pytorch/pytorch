@@ -3614,8 +3614,8 @@ If one tensor has fewer dimensions than the other it is unsqueezed until it has 
 Supports real-valued and complex-valued inputs.
 
 .. note::
-    The Kronecker product is commonly defined only for matrices.
-    If :attr:`input` is a :math:`(m \times n)` matrix and :attr:`other` is a
+    This function generalizes the typical definition of the Kronecker product for two matrices to two tensors,
+    as described above. When :attr:`input` is a :math:`(m \times n)` matrix and :attr:`other` is a
     :math:`(p \times q)` matrix, the result will be a :math:`(p*m \times q*n)` block matrix:
 
     .. math::
