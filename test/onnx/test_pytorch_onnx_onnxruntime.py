@@ -3788,6 +3788,7 @@ class TestONNXRuntime(unittest.TestCase):
                          'Please try opset version 11.', the_exception.args[0])
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfONNXShapeInference(False)
     def test_uninitialized(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, y):
