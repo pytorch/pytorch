@@ -80,7 +80,7 @@ class Timer(object):
 
         label:
             String which summarizes `stmt`. For instance, if `stmt` is
-              "torch.nn.functional.relu(torch.add(x, 1, out=out))"
+            "torch.nn.functional.relu(torch.add(x, 1, out=out))"
             one might set label to "ReLU(x + 1)" to improve readability.
 
         sub_label:
@@ -88,9 +88,9 @@ class Timer(object):
             with identical stmt or label. For instance, in our example
             above sub_label might be "float" or "int", so that it is easy
             to differentiate:
-                "ReLU(x + 1): (float)"
+            "ReLU(x + 1): (float)"
 
-                "ReLU(x + 1): (int)"
+            "ReLU(x + 1): (int)"
             when printing Measurements or summarizing using `Compare`.
 
         description:
@@ -291,6 +291,7 @@ class Timer(object):
         Note the variable `block_size` in the inner loop. The choice of block
         size is important to measurement quality, and must balance two
         competing objectives:
+
             1) A small block size results in more replicates and generally
                better statistics.
 
