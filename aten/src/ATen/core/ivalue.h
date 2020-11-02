@@ -422,7 +422,7 @@ struct CAFFE2_API IValue final {
   }
 
   // Bool
-  IValue(bool b) : tag(Tag::Bool), is_intrusive_ptr(false) {
+  explicit IValue(bool b) : tag(Tag::Bool), is_intrusive_ptr(false) {
 #if defined(__clang__) && defined(__x86_64__)
     // Initializing entire payload stops valgrind's from reporting
     // "jump or move depends on uninitialised value" in IValue copy constructor
