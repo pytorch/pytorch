@@ -84,6 +84,12 @@ std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
         range.value()[0] < range.value()[1], "max must be larger than min");
     min = static_cast<input_t>(range.value()[0]);
     max = static_cast<input_t>(range.value()[1]);
+    // If the values in range cannot be represented by input dtype, we avoid promoting the tensor
+    // and instead output a warning. 
+    if (static_cast<double>(min) != range.value()[0] ||
+        static_cast<double>(max) != range.value()[1]) {
+      TORCH_WARN_ONCE("Value in range cannot be represented by tensor's scalar type, casting to ", self.scalar_type());
+    }
   } else {
     min = *self.min().data_ptr<input_t>();
     max = *self.max().data_ptr<input_t>();
@@ -197,6 +203,27 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
                 density);
           case ScalarType::Double:
             return _histogram_cpu_template_uniform_bins<scalar_t, double>(
+                self.flatten(0).contiguous(),
+                nbins,
+                flattened_weights,
+                range,
+                density);
+          case ScalarType::Byte:
+            return _histogram_cpu_template_uniform_bins<scalar_t, uint8_t>(
+                self.flatten(0).contiguous(),
+                nbins,
+                flattened_weights,
+                range,
+                density);
+          case ScalarType::Char:
+            return _histogram_cpu_template_uniform_bins<scalar_t, int8_t>(
+                self.flatten(0).contiguous(),
+                nbins,
+                flattened_weights,
+                range,
+                density);
+          case ScalarType::Short:
+            return _histogram_cpu_template_uniform_bins<scalar_t, int16_t>(
                 self.flatten(0).contiguous(),
                 nbins,
                 flattened_weights,
