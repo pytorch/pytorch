@@ -3992,3 +3992,93 @@ class DistributedTest:
 
             inp = TestNamedTupleInput_1(a, b)
             model(inp, type(inp))
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_control_flow_same_across_ranks(self):
+            # Control flow that is the same across ranks.
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    self.lin1 = nn.Linear(10, 10, bias=False)
+                    self.lin2 = nn.Linear(10, 10, bias=False)
+                    self.counter = 0
+
+                def forward(self, x):
+                    self.counter += 1
+                    if self.counter % 2 == 0:
+                        return self.lin2(F.relu(self.lin1(x)))
+                    else:
+                        return F.relu(self.lin1(x))
+
+            torch.cuda.set_device(self.rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                ToyModel().cuda(self.rank), device_ids=[self.rank], find_unused_parameters=True
+            )
+            batch = 20
+            dim = 10
+            inp = torch.randn(batch, dim, device=self.rank)
+            for i in range(6):
+                out = model(inp)
+                loss = out.sum()
+                loss.backward()
+                # On even iterations, 2nd param goes unused, on odd iterations,
+                # it is used.
+                local_used_maps = model.reducer._get_local_used_maps()
+                if i % 2 == 0:
+                    expected = torch.tensor([2, 0], device=self.rank, dtype=torch.int32)
+                else:
+                    expected = torch.tensor([2, 2], device=self.rank, dtype=torch.int32)
+
+                # Validate parameter usage.
+                variable_usage_tensor = local_used_maps[0]
+                self.assertEqual(variable_usage_tensor, expected)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_control_flow_different_across_ranks(self):
+            # Control flow that is different across ranks.
+            class ToyModel(nn.Module):
+                def __init__(self, rank):
+                    super(ToyModel, self).__init__()
+                    self.lin1 = nn.Linear(10, 10, bias=False)
+                    self.lin2 = nn.Linear(10, 10, bias=False)
+                    self.counter = 0
+                    self.rank = rank
+
+                def forward(self, x):
+                    self.counter += 1
+                    # Unused parameter on even iterations for rank 1.
+                    if self.counter % 2 == 0 and self.rank == 1:
+                        return self.lin2(F.relu(self.lin1(x)))
+                    else:
+                        return F.relu(self.lin1(x))
+
+            torch.cuda.set_device(self.rank)
+            model = torch.nn.parallel.DistributedDataParallel(
+                ToyModel(self.rank).cuda(self.rank), device_ids=[self.rank], find_unused_parameters=True
+            )
+            batch = 20
+            dim = 10
+            inp = torch.randn(batch, dim, device=self.rank)
+            for i in range(6):
+                out = model(inp)
+                loss = out.sum()
+                loss.backward()
+                # On even iterations, 2nd param goes unused, on odd iterations,
+                # it is used only on rank 1.
+                local_used_maps = model.reducer._get_local_used_maps()
+
+                if i % 2 == 0:
+                    expected = torch.tensor([2, 0], device=self.rank, dtype=torch.int32)
+                else:
+                    expected = torch.tensor([2, 1], device=self.rank, dtype=torch.int32)
+
+                variable_usage_tensor = local_used_maps[0]
+                # Validate parameter usage. On odd iterations, 2nd param is only
+                # used on rank 1.
+                self.assertEqual(variable_usage_tensor, expected)
