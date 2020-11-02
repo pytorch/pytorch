@@ -1170,7 +1170,8 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(aliasDb_, sub_block, callback_, kind_, strict_fuser_check).run();
+        GraphFuser(aliasDb_, sub_block, callback_, kind_, strict_fuser_check)
+            .run();
       }
     }
   }
