@@ -1108,7 +1108,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
             vmap(op)(torch.randn(B0, 2, 2, 2), torch.randn(B0, 2))
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(op, in_dims=(0, None))(torch.randn(B0, 3, 3, 2), torch.randn(2, 2))
-        with self.assertRaisesRegex(RuntimeError, msg): vmap(op, in_dims=(None, 0))(torch.randn(2, 2), torch.randn(B0, 2, 2, 2))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(None, 0))(torch.randn(2, 2), torch.randn(B0, 2, 2, 2))
 
         # left arg is vmapped
         test(op, (torch.rand(B0, 2, 3, 5), torch.rand(2, 5, 3)), in_dims=(0, None))
@@ -2011,7 +2012,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             base = leaf * leaf
             view = base.transpose(0, 2)
             view = view[1]
-            view = base.diagonal()
+            view = view.diagonal()
             view = view[::2]
             view.cos_()
             return view
