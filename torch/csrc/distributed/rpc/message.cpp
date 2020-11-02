@@ -4,6 +4,16 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+enum MessageIValueIdx {
+  PAYLOAD = 0,
+  TENSORS,
+  TYPE,
+  ID,
+  SIZE // must be last in list
+};
+}
+
 Message::Message() = default;
 
 Message::Message(
@@ -137,21 +147,24 @@ at::IValue Message::toIValueTuple() const {
   TORCH_INTERNAL_ASSERT(
       messageTuple.isTuple(), "Expected messageTuple to be of type tuple.");
   std::vector<at::IValue> values = messageTuple.toTuple()->elements();
-  auto payloadIValue = values[0];
+  TORCH_INTERNAL_ASSERT(
+      values.size() == MessageIValueIdx::SIZE,
+      c10::str("Expected ", MessageIValueIdx::SIZE, " elements in tuple."));
+  auto payloadIValue = values[MessageIValueIdx::PAYLOAD];
   TORCH_INTERNAL_ASSERT(
       payloadIValue.isString(), "Expected payload to be string");
   auto payloadString = payloadIValue.toStringRef();
   std::vector<char> payload(payloadString.begin(), payloadString.end());
-  auto tensorsIValue = values[1];
+  auto tensorsIValue = values[MessageIValueIdx::TENSORS];
   TORCH_INTERNAL_ASSERT(
       tensorsIValue.isList(), "Expected tensorsIValue to be list");
   std::vector<torch::Tensor> tensors = tensorsIValue.toTensorVector();
 
-  auto messageTypeIValue = values[2];
+  auto messageTypeIValue = values[MessageIValueIdx::TYPE];
   TORCH_INTERNAL_ASSERT(
       messageTypeIValue.isInt(), "Expected messageTypeIValue to be int.");
   MessageType messageType = static_cast<MessageType>(messageTypeIValue.toInt());
-  auto messageIdIValue = values[3];
+  auto messageIdIValue = values[MessageIValueIdx::ID];
   TORCH_INTERNAL_ASSERT(
       messageIdIValue.isInt(), "Expected messageIdIValue to be int.");
   int64_t messageId = messageIdIValue.toInt();
