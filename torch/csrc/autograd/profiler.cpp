@@ -326,6 +326,29 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
     return config_.profile_memory;
   }
 
+  void reportKinetoClientActivity(const at::RecordFunction& fn) {
+#ifdef USE_KINETO
+    if (config_.state == ProfilerState::KINETO) {
+      libkineto::ClientTraceActivity op;
+      op.startTime = libkineto::timeSinceEpoch(fc.startTime);
+      op.endTime = libkineto::timeSinceEpoch(now);
+      op.opType = fc.name;
+      op.device = fc.deviceType;
+      op.correlation = fc.correlationId;
+      op.threadId = pthread_self();
+      op.inputDims = folly::toJson(fc.input_shapes);
+      op.inputTypes = folly::toJson(fc.input_types);
+      op.outputDims = "null";
+      op.arguments = "null";
+      op.outputTypes = "null";
+      op.inputNames = "null";
+      op.outputNames = "null";
+      return;
+    }
+#endif
+    TORCH_CHECK(false, "Supported only in Kineto profiler");
+  }
+
  private:
   std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs) {
     std::vector<FileLineFunc> entries;
@@ -423,6 +446,10 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
   at::CallbackHandle handle_ = 0;
   c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
+
+#ifdef USE_KINETO
+  std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
+#endif
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -479,7 +506,7 @@ void pushProfilingCallbacks() {
         }
 #ifdef USE_KINETO
         if (state_ptr->config().state == ProfilerState::KINETO) {
-                    // push new cpu trace event
+          state_ptr->reportKinetoClientActivity(fn);
           libkineto::api().popCorrelationId();
           return;
         }
