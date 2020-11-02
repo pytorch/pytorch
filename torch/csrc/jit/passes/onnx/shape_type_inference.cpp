@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 
@@ -68,6 +69,7 @@ TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
 }
 
 namespace {
+
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
@@ -444,30 +446,109 @@ void ONNXSetDynamicInputShape(
   }
 }
 
-void ONNXAssignOutputShape(
-    std::shared_ptr<Graph>& graph,
-    at::ArrayRef<at::Tensor> outputs,
+bool HasSequenceTypeOutput(Node* node) {
+  if (node->kind() == ::c10::onnx::SplitToSequence ||
+      node->kind() == ::c10::onnx::SequenceInsert ||
+      node->kind() == ::c10::onnx::SequenceEmpty ||
+      node->kind() == ::c10::onnx::SequenceErase ||
+      node->kind() == ::c10::onnx::SequenceConstruct)
+    return true;
+  return false;
+}
+
+void ONNXUpdateTypeFromTensor(
+    Value* graph_output,
+    at::Tensor output,
     bool onnx_shape_inference) {
-  TORCH_INTERNAL_ASSERT(graph->outputs().size() == outputs.size());
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    if (onnx_shape_inference) {
-      graph->outputs()[i]->setType(MergeInferredType(
-          TensorType::create(outputs[i]), graph->outputs()[i]->type()));
-    } else {
-      graph->outputs()[i]->inferTypeFrom(outputs[i]);
-    }
+  if (onnx_shape_inference) {
+    graph_output->setType(
+        MergeInferredType(TensorType::create(output), graph_output->type()));
+  } else {
+    graph_output->inferTypeFrom(output);
   }
 }
 
-// Check if subblock output is output of prim::Uninitialized,
+void ONNXAssignOutputShape(
+    std::shared_ptr<Graph>& graph,
+    at::ArrayRef<at::Tensor> outputs,
+    const python::IODescriptor& desc,
+    bool onnx_shape_inference) {
+  size_t outputs_index = 0;
+
+  auto py_obj = unflatten(outputs, desc);
+
+  TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
+
+  for (size_t i = 0; i < PyTuple_GET_SIZE(py_obj); ++i) {
+    PyObject* elem = PyTuple_GET_ITEM(py_obj, i);
+
+    if (PyList_Check(elem)) {
+      size_t list_len = PyList_GET_SIZE(elem);
+      if (HasSequenceTypeOutput(graph->outputs()[i]->node())) {
+        if (list_len > 0) {
+          auto& var =
+              reinterpret_cast<THPVariable*>(PyList_GET_ITEM(elem, 0))->cdata;
+          for (size_t j = 1; j < list_len; ++j) {
+            PyObject* list_elem = PyList_GET_ITEM(elem, j);
+            auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+            TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
+            TORCH_INTERNAL_ASSERT(var.scalar_type() == new_var.scalar_type());
+          }
+          outputs_index += list_len;
+          graph->outputs()[i]->setType(ListType::create(
+              TensorType::create(var.scalar_type(), at::kCPU, {}, {})));
+          ONNXUpdateTypeFromTensor(
+              graph->outputs()[i], var, onnx_shape_inference);
+        }
+      } else {
+        for (size_t j = 0; j < list_len; ++j) {
+          ONNXUpdateTypeFromTensor(
+              graph->outputs()[i + j],
+              outputs[outputs_index],
+              onnx_shape_inference);
+          outputs_index++;
+        }
+      }
+    } else if (PyTuple_Check(elem)) {
+      size_t tuple_len = PyTuple_GET_SIZE(elem);
+      if (tuple_len > 0) {
+        at::Tensor var =
+            reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(elem, 0))->cdata;
+        ONNXUpdateTypeFromTensor(
+            graph->outputs()[i], var, onnx_shape_inference);
+        outputs_index += tuple_len;
+      }
+    } else if (THPVariable_Check(elem)) {
+      at::Tensor var = reinterpret_cast<THPVariable*>(elem)->cdata;
+      ONNXUpdateTypeFromTensor(graph->outputs()[i], var, onnx_shape_inference);
+      outputs_index++;
+    } else { // Dict
+      TORCH_INTERNAL_ASSERT(PyDict_Check(elem));
+      auto dict_items = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
+      for (size_t j = 0; j < dict_items.size(); ++j) {
+        ONNXUpdateTypeFromTensor(
+            graph->outputs()[i + j],
+            outputs[outputs_index],
+            onnx_shape_inference);
+        outputs_index++;
+      }
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      outputs_index == outputs.size(),
+      "Incorrect number of elements provided as example outputs.");
+}
+
+// Check if node is prim::Uninitialized,
 // or output of prim::Uninitialized->onnx::Identity
-bool IsUninitializedBlockOutput(Node* n) {
+Node* IsUninitializedNode(Node* n) {
   if (n->kind() == ::c10::onnx::Identity &&
       n->inputs()[0]->node()->kind() == prim::Uninitialized)
-    return true;
+    return n->inputs()[0]->node();
   if (n->kind() == prim::Uninitialized)
-    return true;
-  return false;
+    return n;
+  return nullptr;
 }
 
 Node* CreateCastToBoolNode(Value* val, Graph* graph) {
@@ -494,13 +575,13 @@ void InferShapeTypeForUninitializedOutput(
     auto size = output_type->sizes().concrete_sizes().value();
     const_node->t_(attr::value, at::zeros(size, elem_type));
     const_node->output()->setType(other_output->type());
+    const_node->output()->copyMetadata(other_output);
   } else {
     const_node->t_(attr::value, at::zeros({}, elem_type));
     const_node->output()->setType(
         TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
   }
   const_node->insertBefore(block->return_node());
-  const_node->output()->copyMetadata(other_output);
   uninitialized_output->replaceAllUsesWith(const_node->output());
   uninitialized_output->node()->destroy();
 }
@@ -563,19 +644,26 @@ void ONNXIfShapeTypeInference(Node* node) {
 
     // If both subblocks have an uninitialized output, shape and type cannot
     // be inferred.
-    TORCH_INTERNAL_ASSERT(
-        !(IsUninitializedBlockOutput(then_block_output->node()) &&
-          IsUninitializedBlockOutput(else_block_output->node())),
+    TORCH_CHECK(
+        !(IsUninitializedNode(then_block_output->node()) &&
+          IsUninitializedNode(else_block_output->node())),
         "Cannot infer shape and type for ONNX If with uninitialized output in both subblocks. Please check the model graph.");
 
-    if (IsUninitializedBlockOutput(then_block_output->node())) {
+    if (auto uninitialized_node =
+            IsUninitializedNode(then_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
           graph, then_block, then_block_output, else_block_output);
       if_node->outputs()[i]->setType(then_block->outputs()[i]->type());
-    } else if (IsUninitializedBlockOutput(else_block_output->node())) {
+      if (!uninitialized_node->hasUses())
+        uninitialized_node->destroy();
+    } else if (
+        auto uninitialized_node =
+            IsUninitializedNode(else_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
           graph, else_block, else_block_output, then_block_output);
       if_node->outputs()[i]->setType(else_block->outputs()[i]->type());
+      if (!uninitialized_node->hasUses())
+        uninitialized_node->destroy();
     }
   }
 }
