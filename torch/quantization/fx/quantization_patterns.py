@@ -292,7 +292,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         supported_dtypes = [
             (torch.quint8, torch.qint8, None),
             (torch.float32, torch.qint8, torch.quint8),
-            (torch.float32, torch.float16, None),
+            (torch.float16, torch.float16, None),
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
