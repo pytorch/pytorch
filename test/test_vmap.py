@@ -135,7 +135,7 @@ class TestVmapAPI(TestCase):
             r"fallback path doesn't work on out= or view ops"
         )
         with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
+            vmap(torch.ravel)(tensor)
 
         def out_op(x, y):
             return torch.abs(x, out=y)
@@ -1065,6 +1065,38 @@ class TestVmapOperators(Namespace.TestVmapBase):
             # self._test_unary(lambda t: op(number, t), getter, device='cuda')
             # self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
+    def test_as_strided(self):
+        def _test(sizes, strides, offset, tensor, lambd):
+            result = vmap(lambda t: t.as_strided(sizes, strides, offset))(tensor)
+            expected = vmap(lambd)(tensor)
+            self.assertTrue(result._base is expected._base)
+            self.assertEqual(result, expected)
+
+        B0 = 5
+        tensors = [
+            # contiguous
+            torch.randn(B0, 2, 3),
+            # non-contiguous
+            torch.randn(2, B0, 3).movedim(1, 0),
+            # non-zero storage offset
+            torch.randn(2, B0, 2, 3)[1],
+            # non-contiguous strides, zero storage offset
+            torch.randn(B0, 2, 4, 3, 7)[:, :, 0, :, 0],
+            # non-contiguous strides, non-zero storage offset
+            torch.randn(B0, 2, 4, 3, 7)[:, :, 2, :, 1],
+        ]
+
+        for x in tensors:
+            S0, S1 = x.stride()[1:]
+            offset = x.storage_offset()
+
+            # Broadcast
+            _test([5, 5, 2, 3], [0, 0, S0, S1], offset, x, lambda x: x.expand(5, 5, 2, 3))
+            # transpose
+            _test([3, 2], [S1, S0], offset, x, lambda x: x.transpose(0, 1))
+            # select
+            _test([2], [S0], offset + S1, x, lambda x: x[:, 1])
+
     def test_bmm(self):
         op = torch.bmm
         test = self._vmap_test
@@ -1076,8 +1108,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
             vmap(op)(torch.randn(B0, 2, 2, 2), torch.randn(B0, 2))
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(op, in_dims=(0, None))(torch.randn(B0, 3, 3, 2), torch.randn(2, 2))
-        with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(op, in_dims=(None, 0))(torch.randn(2, 2), torch.randn(B0, 2, 2, 2))
+        with self.assertRaisesRegex(RuntimeError, msg): vmap(op, in_dims=(None, 0))(torch.randn(2, 2), torch.randn(B0, 2, 2, 2))
 
         # left arg is vmapped
         test(op, (torch.rand(B0, 2, 3, 5), torch.rand(2, 5, 3)), in_dims=(0, None))
