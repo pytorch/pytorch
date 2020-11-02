@@ -6353,9 +6353,6 @@ with the same number of elements as :attr:`input`.
     \text{out}_i = x_i ^ {\text{exponent}_i}
 """ + r"""
 
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
-:ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
-
 .. note:: 
     This function always computes in double precision, unlike :func:`torch.pow`, 
     which implements more typical :ref:`type promotion <type-promotion-doc>`.
