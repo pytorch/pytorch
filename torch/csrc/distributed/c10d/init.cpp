@@ -1200,11 +1200,6 @@ Arguments:
 static auto StoreTorchBind = torch::class_<::c10d::Store>("dist_c10d", "Store");
 
 // Torchbind the ProcessGroup to make it available in TorchScript
-static auto ProcessGroupNCCLOptionsTorchBind =
-    torch::class_<::c10d::ProcessGroupNCCL::Options>(
-        "dist_c10d",
-        "ProcessGroupNCCL.Options");
-
 static auto ProcessGroupWorkTorchBind =
     torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
         .def(torch::init<>())
@@ -1220,6 +1215,13 @@ static auto ProcessGroupWorkTorchBind =
 
 static auto ProcessGroupTorchBind =
     torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+
+#ifdef USE_C10D_NCCL
+
+static auto ProcessGroupNCCLOptionsTorchBind =
+    torch::class_<::c10d::ProcessGroupNCCL::Options>(
+        "dist_c10d",
+        "ProcessGroupNCCL.Options");
 
 static auto ProcessGroupNCCLTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
@@ -1242,6 +1244,7 @@ static auto ProcessGroupNCCLTorchBind =
                   inputSplitSizes,
                   ::c10d::AllToAllOptions());
             });
+#endif
 
 } // namespace
 

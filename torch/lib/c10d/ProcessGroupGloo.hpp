@@ -111,7 +111,7 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    int64_t sourceRank() const override;
+    int sourceRank() const override;
 
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 

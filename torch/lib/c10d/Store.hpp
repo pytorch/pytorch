@@ -5,7 +5,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include "ATen/core/ivalue.h"
 
 #include <torch/custom_class.h>
 

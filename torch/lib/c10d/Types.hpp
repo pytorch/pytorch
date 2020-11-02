@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include "ATen/core/ivalue.h"
 #include <torch/custom_class.h>
 
 namespace c10d {

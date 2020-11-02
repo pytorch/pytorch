@@ -94,7 +94,7 @@ class ProcessGroup : public torch::CustomClassHolder{
     virtual std::exception_ptr exception() const;
 
     // Returns source rank if this objects represents a recv-from-any.
-    virtual int64_t sourceRank() const;
+    virtual int sourceRank() const;
 
     // Returns result tensors, if applicable.
     virtual std::vector<at::Tensor> result();
