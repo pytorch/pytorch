@@ -20,8 +20,8 @@ std::vector<TensorGroup> take_tensors(
   for (const auto & tensor : tensors) {
     size_t tensor_size;
     if (tensor.is_sparse()) {
-      const auto& indices = tensor.indices(false);
-      const auto& values = tensor.values(false);
+      const auto& indices = tensor._indices();
+      const auto& values = tensor._values();
       tensor_size = indices.numel() * indices.element_size() +
                     values.numel() * indices.element_size();
     } else {
@@ -83,11 +83,11 @@ void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
 namespace {
 
 at::Tensor get_indices(const at::Tensor& t) {
-  return t.indices(false);
+  return t._indices();
 }
 
 at::Tensor get_values(const at::Tensor& t) {
-  return t.values(false);
+  return t._values();
 }
 
 }

@@ -36,6 +36,12 @@ int64_t _nnz_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->nse();
 }
 
+// nse(false) and _nse() are equivalent but are the methods of the
+// safe and dangerous APIs, respectively.
+int64_t _nse_sparse(const SparseTensor& self) {
+  return get_sparse_impl(self)->nse();
+}
+
 int64_t nse_sparse(const SparseTensor& self, bool coalesce) {
   if (!coalesce || self.is_coalesced()) {
     return get_sparse_impl(self)->nse();
@@ -46,22 +52,13 @@ int64_t nse_sparse(const SparseTensor& self, bool coalesce) {
 // Why are there so many methods to get indices and value?
 // See Note [ Sparse: different methods to get indices and values ] in native_functions.yaml
 
+// indices(false) and _indices() are equivalent but are the methods of
+// the safe and dangerous APIs, respectively.
 Tensor _indices_sparse(const SparseTensor& self) {
-  TORCH_WARN_ONCE("The _indices() method is deprecated and will be removed in a future PyTorch release. Please use indices(False) instead.");
   return get_sparse_impl(self)->indices();
 }
 
-Tensor _values_sparse(const SparseTensor& self) {
-  TORCH_WARN_ONCE("The _values() method is deprecated and will be removed in a future PyTorch release. Please use values(False) instead.");
-  return get_sparse_impl(self)->values();
-}
-
-Tensor &_coalesced_sparse_(SparseTensor& self, bool coalesced) {
-  get_sparse_impl(self)->set_coalesced(coalesced);
-  return self;
-}
-
-Tensor indices_sparse(const Tensor& self, bool coalesce) {
+Tensor indices_sparse(const SparseTensor& self, bool coalesce) {
   if (!coalesce) {
     return get_sparse_impl(self)->indices();
   }
@@ -71,14 +68,31 @@ Tensor indices_sparse(const Tensor& self, bool coalesce) {
   return get_sparse_impl(self.coalesce())->indices();
 }
 
-Tensor values_sparse(const Tensor& self, bool coalesce) {
-  if (!coalesce) {
-    return get_sparse_impl(self)->values();
-  }
+/*
+  The values(coalesce) call is split into calling
+  _values_no_coalesce() (when coalesce=False) and _values() (when
+  coalesce=True) because values(False) needs to be not differentiable,
+  see NOTE [ Sparse: autograd and API ] in native_functions.yaml
+*/
+
+Tensor _values_sparse(const SparseTensor& self) {
+  return get_sparse_impl(self)->values();
+}
+
+Tensor _values_coalesce(const SparseTensor& self) {
   if (self.is_coalesced()) {
     return get_sparse_impl(self)->values().alias();
   }
   return get_sparse_impl(self.coalesce())->values();
+}
+
+Tensor values(const SparseTensor& self, bool coalesce) {
+  return (coalesce ? self._values_coalesce() : self._values());
+}
+
+Tensor &_coalesced_sparse_(SparseTensor& self, bool coalesced) {
+  get_sparse_impl(self)->set_coalesced(coalesced);
+  return self;
 }
 
 /******************************************************************************
@@ -279,7 +293,7 @@ SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFor
       "unsupported memory format option ",
       optional_memory_format.value());
   SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
-  copy_into_sparse(other, self.indices(false), self.values(false), true);
+  copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());
 }
 
@@ -366,7 +380,7 @@ Tensor sparse_to_dense(const SparseTensor& self) {
 SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non_blocking) {
   if (is_same_tensor(self, src)) return self;
   get_sparse_impl(self)->resize_(src.sparse_dim(), src.dense_dim(), src.sizes());
-  copy_into_sparse(self, src.indices(false), src.values(false), non_blocking);
+  copy_into_sparse(self, src._indices(), src._values(), non_blocking);
   return self._coalesced_(src.is_coalesced());
 }
 
@@ -386,8 +400,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     return dst;
   }
 
-  LongTensor indices = self.indices(false);
-  Tensor values = self.values(false).contiguous();
+  LongTensor indices = self._indices();
+  Tensor values = self._values().contiguous();
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
   int64_t nse = self.nse(false);
@@ -487,9 +501,9 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   }
   int64_t dim = t.dim();
   int64_t sparse_dim = mask.sparse_dim();
-  LongTensor mask_indices = mask.indices(false);
-  Tensor mask_values = mask.values(false);
-  Tensor r_values = at::empty(mask_values.sizes(), r.values(false).options());
+  LongTensor mask_indices = mask._indices();
+  Tensor mask_values = mask._values();
+  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   alias_into_sparse(r, mask_indices.clone(), r_values);
   r._coalesced_(mask.is_coalesced());
   int64_t r_nse = mask.nse(false);

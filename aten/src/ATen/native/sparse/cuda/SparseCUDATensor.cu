@@ -46,16 +46,16 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // For indices, a simple sort + unique suffices
   // For values, we use a custom kernel for segmented reduction (can't use Thrust due to indirection).
 
-  Tensor values = self.values(false);
+  Tensor values = self._values();
 
   int64_t sparse_dim = self.sparse_dim();
 
   // indices will be modified by Thrust, so we have to clone or use new storage
   // here.
-  LongTensor indices1D = flatten_indices(self.indices(false), self.sizes(), true);
+  LongTensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
 
-  LongTensor origIndices = at::empty({nse}, self.indices(false).options());
-  LongTensor uniqueOffsets = at::empty({nse}, self.indices(false).options());
+  LongTensor origIndices = at::empty({nse}, self._indices().options());
+  LongTensor uniqueOffsets = at::empty({nse}, self._indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
   thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());

@@ -22,9 +22,9 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   if (mask.nse(false) == 0) {
     return r.zero_();
   }
-  LongTensor mask_indices = mask.indices(false);
-  Tensor mask_values = mask.values(false);
-  Tensor r_values = at::empty(mask_values.sizes(), r.values(false).options());
+  LongTensor mask_indices = mask._indices();
+  Tensor mask_values = mask._values();
+  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   alias_into_sparse(r, mask_indices.clone(at::MemoryFormat::Contiguous), r_values);
   r._coalesced_(mask.is_coalesced());
   if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements

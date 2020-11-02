@@ -108,12 +108,12 @@ struct TORCH_API AccumulateGrad : public Node {
         update_grad(new_grad.detach());
       } else if (
           !GradMode::is_enabled() && new_grad.is_sparse() &&
-          new_grad.indices(false).is_contiguous() &&
-          new_grad.values(false).is_contiguous() &&
+          new_grad._indices().is_contiguous() &&
+          new_grad._values().is_contiguous() &&
           // Use count for indices and values should always be <=1 since the
           // SparseTensor should be the only one holding a reference to these.
-          new_grad.indices(false).use_count() <= 1 &&
-          new_grad.values(false).use_count() <= 1 &&
+          new_grad._indices().use_count() <= 1 &&
+          new_grad._values().use_count() <= 1 &&
           new_grad.use_count() <= num_expected_refs) {
         // Can't detach sparse tensor (since metadata changes are not allowed
         // after detach), so just create a new one for the grad which is a
@@ -125,8 +125,8 @@ struct TORCH_API AccumulateGrad : public Node {
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.
         update_grad(at::_sparse_coo_tensor_unsafe(
-            new_grad.indices(false),
-            new_grad.values(false),
+            new_grad._indices(),
+            new_grad._values(),
             new_grad.sizes(),
             new_grad.options()));
       } else {

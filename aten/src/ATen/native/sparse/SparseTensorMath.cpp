@@ -73,14 +73,14 @@ SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   AT_ASSERT(value.dim() == 0);
 
   if (is_same_tensor(r, t)) {
-    r.values(false).mul_(value);
+    r._values().mul_(value);
   } else {
     r.resize_as_(t);
-    auto indices = r.indices(false);
-    indices.resize_as_(t.indices(false));
-    indices.copy_(t.indices(false));
-    Tensor r_values = r.values(false); // Sigh... needed because mul_out takes Tensor&
-    at::mul_out(r_values, t.values(false), value);
+    auto indices = r._indices();
+    indices.resize_as_(t._indices());
+    indices.copy_(t._indices());
+    Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
+    at::mul_out(r_values, t._values(), value);
     get_sparse_impl(r)->set_nse_and_narrow(t.nse(false));
     r._coalesced_(t.is_coalesced());
   }
@@ -110,7 +110,7 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   else {
     copy_sparse_to_sparse_(r, t.coalesce());
   }
-  r.values(false).log1p_();
+  r._values().log1p_();
   return r;
 }
 
@@ -128,7 +128,7 @@ SparseTensor& neg_out_sparse(SparseTensor& r, const SparseTensor& t) {
 
   // copy_sparse_ does not perform the copy if it is the same tensor
   copy_sparse_to_sparse_(r, t);
-  r.values(false).neg_();
+  r._values().neg_();
   return r;
 }
 
@@ -154,7 +154,7 @@ SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
   } else {
     copy_sparse_to_sparse_(r, t.coalesce());
   }
-  r.values(false).asin_();
+  r._values().asin_();
   return r;
 }
 
@@ -177,11 +177,11 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Sca
   SparseTensor t = t_.coalesce();
 
   r.resize_as_(t);
-  auto indices = r.indices(false);
-  indices.resize_as_(t.indices(false));
-  indices.copy_(t.indices(false));
-  Tensor r_values = r.values(false); // Sigh... needed because pow_out takes Tensor&
-  at::pow_out(r_values, t.values(false), value);
+  auto indices = r._indices();
+  indices.resize_as_(t._indices());
+  indices.copy_(t._indices());
+  Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
+  at::pow_out(r_values, t._values(), value);
   get_sparse_impl(r)->set_nse_and_narrow(t.nse(false));
   return r._coalesced_(t.is_coalesced());
 }
@@ -198,10 +198,10 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
 
 static SparseTensor& coalesce_(SparseTensor& tensor) {
   SparseTensor coalesced = tensor.coalesce();
-  tensor.values(false).resize_as_(coalesced.values(false));
-  tensor.indices(false).resize_as_(coalesced.indices(false));
-  tensor.values(false).copy_(coalesced.values(false));
-  tensor.indices(false).copy_(coalesced.indices(false));
+  tensor._values().resize_as_(coalesced._values());
+  tensor._indices().resize_as_(coalesced._indices());
+  tensor._values().copy_(coalesced._values());
+  tensor._indices().copy_(coalesced._indices());
   tensor._coalesced_(true);
   return tensor;
 }
@@ -231,18 +231,18 @@ SparseTensor& div_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
     if (!r.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
       coalesce_(r);
     }
-    r.values(false).div_(value);
+    r._values().div_(value);
   } else {
     Tensor t_tmp = t;
     if (!t.is_coalesced() && isIntegralType(r.scalar_type(), /*includeBool=*/true)) {
       t_tmp = t.coalesce();
     }
     r.resize_as_(t_tmp);
-    auto indices = r.indices(false);
-    indices.resize_as_(t_tmp.indices(false));
-    indices.copy_(t_tmp.indices(false));
-    Tensor r_values = r.values(false); // Sigh... needed because div_out takes Tensor&
-    at::div_out(r_values, t_tmp.values(false), value);
+    auto indices = r._indices();
+    indices.resize_as_(t_tmp._indices());
+    indices.copy_(t_tmp._indices());
+    Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
+    at::div_out(r_values, t_tmp._values(), value);
     get_sparse_impl(r)->set_nse_and_narrow(t_tmp.nse(false));
     r._coalesced_(t_tmp.is_coalesced());
   }
@@ -291,7 +291,7 @@ SparseTensor& floor_divide_out_sparse_zerodim(
       coalesce_(result);
     }
 
-    result.values(false).floor_divide_(divisor);
+    result._values().floor_divide_(divisor);
     return result;
   }
 
@@ -305,12 +305,12 @@ SparseTensor& floor_divide_out_sparse_zerodim(
 
   // Resizes and indexes result like dividend_tmp
   result.resize_as_(dividend_tmp);
-  result.indices(false).resize_as_(dividend_tmp.indices(false));
-  result.indices(false).copy_(dividend_tmp.indices(false));
+  result._indices().resize_as_(dividend_tmp._indices());
+  result._indices().copy_(dividend_tmp._indices());
 
   // Computes result
-  Tensor result_values = result.values(false);
-  at::floor_divide_out(result_values, dividend_tmp.values(false), divisor);
+  Tensor result_values = result._values();
+  at::floor_divide_out(result_values, dividend_tmp._values(), divisor);
   get_sparse_impl(result)->set_nse_and_narrow(dividend_tmp.nse(false));
   result._coalesced_(dividend_tmp.is_coalesced());
   return result;
@@ -365,7 +365,7 @@ Tensor norm_sparse(const SparseTensor& self, optional<Scalar> p, IntArrayRef dim
   TORCH_CHECK(keepdim == false, "norm_sparse currently does not support keepdim=True");
   TORCH_CHECK(!dtype.has_value(), "norm_sparse currently does not support 'dtype' argument");
   auto p_ = p.value_or(2.0);
-  return self.coalesce().values(false).norm(p_);
+  return self.coalesce()._values().norm(p_);
 }
 
 // --------------------------------------------------------------------
@@ -429,18 +429,18 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     bool coalesced = t.is_coalesced() && src.is_coalesced();
     int64_t sparse_dim = src.sparse_dim();
 
-    LongTensor r_indices = at::empty({src.sparse_dim(), max_nse}, t.indices(false).options());
+    LongTensor r_indices = at::empty({src.sparse_dim(), max_nse}, t._indices().options());
 
-    Tensor t_values = t.values(false).to(commonDtype);
-    Tensor s_values = src.values(false).to(commonDtype);
+    Tensor t_values = t._values().to(commonDtype);
+    Tensor s_values = src._values().to(commonDtype);
 
     Tensor r_values = new_values_with_size_of(s_values, max_nse).zero_();
 
     int64_t blockSize = r_values.stride(0);
     int64_t cmp, d;
     int64_t r_i = 0, t_i = 0, s_i = 0;
-    auto t_indices = t.indices(false);
-    auto src_indices = src.indices(false);
+    auto t_indices = t._indices();
+    auto src_indices = src._indices();
 
     // NB: relies on nse tests above
     auto t_indices_accessor = t_indices.accessor<int64_t, 2>();
@@ -512,8 +512,8 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
 }
 
 SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value, ScalarType commonDtype) {
-    Tensor t_values = t.values(false).to(commonDtype);
-    Tensor s_values = src.values(false).to(commonDtype);
+    Tensor t_values = t._values().to(commonDtype);
+    Tensor s_values = src._values().to(commonDtype);
 
     // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
     // and we concat the indices and values tensors instead.
@@ -524,7 +524,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
           }
         });
 
-    LongTensor r_indices = at::cat({t.indices(false), src.indices(false)}, 1);
+    LongTensor r_indices = at::cat({t._indices(), src._indices()}, 1);
     Tensor r_values = at::cat({t_values, s_values}, 0).to(r.scalar_type());
     alias_into_sparse(r, r_indices, r_values);
 
@@ -532,7 +532,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
     // TODO: Improved heuristic on when to coalesce or remove need to coalesce
     if (r.nse(false) > r.numel()) {
       auto c = r.coalesce();
-      alias_into_sparse(r, c.indices(false), c.values(false));
+      alias_into_sparse(r, c._indices(), c._values());
     }
 
     return r;
@@ -567,7 +567,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 
   r.resize_as_(src);
 
-  if (src.values(false).is_contiguous() && t.values(false).is_contiguous()) {
+  if (src._values().is_contiguous() && t._values().is_contiguous()) {
     return add_out_sparse_contiguous(r, t, src, value, commonDtype);
   } else {
     return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
@@ -616,8 +616,8 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
   r.resize_as_(dense);
   SparseTensor sparse = sparse_.coalesce();
 
-  LongTensor indices = sparse.indices(false);
-  Tensor values = sparse.values(false);
+  LongTensor indices = sparse._indices();
+  Tensor values = sparse._values();
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse.sparse_dim();
 
@@ -697,8 +697,8 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   int64_t t_nse = t.nse(false), s_nse = src.nse(false);
   int64_t max_nse = std::min(t_nse, s_nse);  // multiply by zero is zero, and can be dropped
   int64_t sparse_dim = src.sparse_dim();
-  LongTensor t_indices = t.indices(false);
-  LongTensor src_indices = src.indices(false);
+  LongTensor t_indices = t._indices();
+  LongTensor src_indices = src._indices();
   LongTensor r_indices = at::empty({sparse_dim, max_nse}, t_indices.options());
 
   int64_t match, d;
@@ -707,8 +707,8 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   auto commonDtype = promoteTypes(t_.scalar_type(), src_.scalar_type());
   TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in mul operation");
 
-  Tensor t_values = t.values(false).to(commonDtype);
-  Tensor s_values = src.values(false).to(commonDtype);
+  Tensor t_values = t._values().to(commonDtype);
+  Tensor s_values = src._values().to(commonDtype);
 
   Tensor r_buffer = new_values_with_size_of(t_values, max_nse).zero_();
 
@@ -865,8 +865,8 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     return r;
   }
 
-  LongTensor indices = sparse_.indices(false);
-  Tensor values      = sparse_.values(false);
+  LongTensor indices = sparse_._indices();
+  Tensor values      = sparse_._values();
 
   AT_DISPATCH_ALL_TYPES(
       values.scalar_type(), "addmm_sparse_dense", [&] {
@@ -1002,7 +1002,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   // Initialize the sparse matrix that will be used with spaddmm to send rows
   // from the dense matrix to rows of the output's value tensor
   SparseTensor newSparse = sparse.clone();
-  LongTensor spIndices = newSparse.indices(false);
+  LongTensor spIndices = newSparse._indices();
   LongTensor valueIndices = spIndices.select(0, 0);
 
   // Compute output indices
@@ -1085,8 +1085,8 @@ SparseTensor& _sspaddmm_out_cpu(
 
   int64_t nse        = sparse.nse(false);
   // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage  
-  LongTensor indices = sparse.indices(false).contiguous();
-  Tensor values      = sparse.values(false);
+  LongTensor indices = sparse._indices().contiguous();
+  Tensor values      = sparse._values();
 
   LongTensor csr = _to_csr(indices.data_ptr<int64_t>(), dim_i, nse);
 
@@ -1099,8 +1099,8 @@ SparseTensor& _sspaddmm_out_cpu(
     LongTensor narrowi = newi.narrow(1, 0, t_nse);
     Tensor narrowv = newv.narrow(0, 0, t_nse);
 
-    narrowi.copy_(t.indices(false));
-    narrowv.copy_(t.values(false));
+    narrowi.copy_(t._indices());
+    narrowv.copy_(t._values());
     newv.mul_(beta);
   }
 
@@ -1206,8 +1206,8 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   auto dims_to_sum_v = dims_to_sum.vec();
   maybe_wrap_dims(dims_to_sum_v, input_dim);
 
-  LongTensor indices = input.indices(false);
-  Tensor values = input.values(false);
+  LongTensor indices = input._indices();
+  Tensor values = input._values();
   IntArrayRef sizes = input.sizes();
   const int64_t sparse_dim = input.sparse_dim();
   // const int64_t dense_dim = input.dense_dim();
@@ -1324,8 +1324,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   auto dims_to_sum_v = dims_to_sum.vec();
   maybe_wrap_dims(dims_to_sum_v, input_dim);
 
-  LongTensor input_indices = input.indices(false);
-  Tensor input_values = input.values(false);
+  LongTensor input_indices = input._indices();
+  Tensor input_values = input._values();
   IntArrayRef input_sizes = input.sizes();
   const int64_t input_sparse_dim = input.sparse_dim();
   const int64_t input_dense_dim = input.dense_dim();
@@ -1365,8 +1365,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   else {
     TORCH_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be sparse, but got dense");
     auto grad = grad_.coalesce();
-    LongTensor grad_indices = grad.indices(false);
-    Tensor grad_values = grad.values(false);
+    LongTensor grad_indices = grad._indices();
+    Tensor grad_values = grad._values();
     const int64_t grad_sparse_dim = grad.sparse_dim();
     const int64_t grad_nse = grad.nse(false);
 
@@ -1425,12 +1425,12 @@ Tensor isnan_sparse(const Tensor & self){
   TORCH_INTERNAL_ASSERT(self.is_sparse());
   SparseTensor out =  at::sparse_coo_tensor({0}, self.options().dtype(at::kBool));
   out.resize_as_(self);
-  auto indices = out.indices(false);
-  indices.resize_as_(self.indices(false));
-  indices.copy_(self.indices(false));
-  Tensor out_values = out.values(false);
-  out_values.resize_as_(self.values(false));
-  Tensor nan_values = at::isnan(self.values(false));
+  auto indices = out._indices();
+  indices.resize_as_(self._indices());
+  indices.copy_(self._indices());
+  Tensor out_values = out._values();
+  out_values.resize_as_(self._values());
+  Tensor nan_values = at::isnan(self._values());
   out_values.copy_(nan_values);
   return out;
 }
@@ -1438,7 +1438,7 @@ Tensor isnan_sparse(const Tensor & self){
 Tensor any_sparse(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.is_sparse());
 
-  return at::any(self.values(false));
+  return at::any(self._values());
 }
 
 Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
@@ -1509,8 +1509,8 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   SparseTensor self_coalesced = self.coalesce();
 
   int64_t nse =        self_coalesced.nse(false);
-  LongTensor indices = self_coalesced.indices(false);
-  Tensor values =      self_coalesced.values(false);
+  LongTensor indices = self_coalesced._indices();
+  Tensor values =      self_coalesced._values();
 
   LongTensor indices_dim0 = indices[0];
   auto indices_dim0_accessor = indices_dim0.accessor<int64_t, 1>();

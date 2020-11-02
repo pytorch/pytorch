@@ -31,10 +31,10 @@ std::vector<int64_t> get_offsets(const Tensor& indices, const IntArrayRef& sizes
     for the entries in the equivalent dense tensor:
 
       If
-        offsets = get_offsets(A.indices(false), A.sizes(), -1)
+        offsets = get_offsets(A._indices(), A.sizes(), -1)
         data = A.to_dense().resize((nse,))
       then
-        data[offsets[n]] == A.values(false)[n]
+        data[offsets[n]] == A._values()[n]
 
     `indices` must be a contiguous 2-d tensor with int64_t entries.
     `sizes` must be a vector with at least ndim entries.
@@ -281,10 +281,10 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     log_softmax.
   */
   auto sparse_dim = input.sparse_dim();
-  auto indices = input.indices(false).contiguous();
-  auto values = input.values(false).contiguous();
-  auto out_values = output.values(false);
-  auto out_indices = output.indices(false);
+  auto indices = input._indices().contiguous();
+  auto values = input._values().contiguous();
+  auto out_values = output._values();
+  auto out_indices = output._indices();
   out_values.resize_as_(values);
   out_indices.resize_as_(indices);
   out_indices.copy_(indices);
@@ -394,12 +394,12 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
   */
   auto sparse_dim = output.sparse_dim();
   auto sizes = output.sizes().vec();
-  auto grad_indices = grad.indices(false).contiguous();
-  auto grad_values = grad.values(false).contiguous();
-  auto out_indices = output.indices(false).contiguous();
-  auto out_values = output.values(false).contiguous();
-  auto values = grad_input.values(false);
-  auto indices = grad_input.indices(false);
+  auto grad_indices = grad._indices().contiguous();
+  auto grad_values = grad._values().contiguous();
+  auto out_indices = output._indices().contiguous();
+  auto out_values = output._values().contiguous();
+  auto values = grad_input._values();
+  auto indices = grad_input._indices();
   auto out_nse = out_values.size(0);
   auto grad_nse = grad_values.size(0);
 
