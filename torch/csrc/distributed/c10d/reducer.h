@@ -12,6 +12,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
 
 namespace c10d {
 
@@ -58,7 +59,13 @@ class Reducer {
   // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
+ // Cannot combine with the call of `register_builtin_comm_hook`.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
+
+  // Registers a built-in C++ comm hook to the reducer. This function can only
+  // be called once before calling backward.
+  // Cannot combine with the call of `register_comm_hook`.
+  void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
   // Returns a vector of tensors in each bucket in sequential order.
   std::vector<std::vector<at::Tensor>> get_bucket_tensors() const;
@@ -122,8 +129,8 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, VariableIndex>
-      gradAccToVariableMap_;
+  std::unordered_map<torch::autograd::Node*, std::vector<VariableIndex>>
+      gradAccToVariablesMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 

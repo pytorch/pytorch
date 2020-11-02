@@ -8,7 +8,7 @@ import keyword
 import re
 
 def _shadows_builtin_name(name: str) -> bool:
-    return name in builtins.__dict__ or name in keyword.kwlist
+    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan'}
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
@@ -271,11 +271,12 @@ class Graph:
             sanitized_name = node.name
             if '_' in node.name:
                 base, maybe_idx = node.name.rsplit('_', 1)
-                try:
-                    int(maybe_idx)
-                    sanitized_name = base
-                except ValueError:
-                    pass
+                if base != '':
+                    try:
+                        int(maybe_idx)
+                        sanitized_name = base
+                    except ValueError:
+                        pass
             name = self._name(sanitized_name)
         return self.create_node(node.op, node.target, args, kwargs, name, node.type)
 
@@ -380,7 +381,10 @@ class Graph:
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
-        import_block = '\n'.join(f'import {name}' for name in sorted(modules_used))
+        # repr() for inf and nan floating point values aren't parseable by
+        # python as literals. Explicitly import the names from the `math` module.
+        import_strs = [f'import {name}' for name in sorted(modules_used)]
+        import_block = '\n'.join(import_strs)
 
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
