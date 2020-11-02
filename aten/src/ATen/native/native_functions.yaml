@@ -8883,12 +8883,12 @@
     CPU: _syevd_helper_cpu
     CUDA: _syevd_helper_cuda
 
-- func: linalg_eigh(Tensor self, str uplo="L") -> (Tensor eigenvalues, Tensor eigenvectors)
+- func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
   use_c10_dispatcher: full
   variants: function
 
-- func: linalg_eigvalsh(Tensor self, str uplo="L") -> Tensor
+- func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   python_module: linalg
   use_c10_dispatcher: full
   variants: function

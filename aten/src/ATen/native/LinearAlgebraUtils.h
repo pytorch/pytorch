@@ -333,4 +333,10 @@ static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
   return std::max(5 * mn * mn + 5 * mn, 2 * mx * mn + 2 * mn * mn + mn);
 }
 
+static inline void checkUplo(std::string uplo) {
+  char uplo_uppercase = std::toupper(uplo[0]);
+  TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
+    "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
+}
+
 }}  // namespace at::native

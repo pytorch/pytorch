@@ -977,11 +977,13 @@ std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_ei
 
 std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
   squareCheckInputs(self);
+  checkUplo(uplo);
   return at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
 }
 
 Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
   squareCheckInputs(self);
+  checkUplo(uplo);
   Tensor eigvals, eigvecs;
   std::tie(eigvals, eigvecs) = at::_syevd_helper(self, /*compute_eigenvectors=*/false, uplo);
   return eigvals;

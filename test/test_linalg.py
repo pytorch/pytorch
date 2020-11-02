@@ -186,13 +186,14 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
-        def run_test(shape, batch):
+        def run_test(shape, batch, uplo):
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            expected_w, expected_v = np.linalg.eigh(matrix.cpu().numpy())
-            actual_w, actual_v = torch.linalg.eigh(matrix)
+            expected_w, expected_v = np.linalg.eigh(matrix.cpu().numpy(), UPLO=uplo)
+            actual_w, actual_v = torch.linalg.eigh(matrix, UPLO=uplo)
             self.assertEqual(actual_w, expected_w)
             # sign of eigenvectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual_v), abs(expected_v))
@@ -209,66 +210,79 @@ class TestLinalg(TestCase):
 
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
-        for shape, batch in itertools.product(shapes, batches):
-            run_test(shape, batch)
+        uplos = ["U", "L"]
+        for shape, batch, uplo in itertools.product(shapes, batches, uplos):
+            run_test(shape, batch, uplo)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_eigh(self, device, dtype):
+    def test_eigh_errors(self, device, dtype):
         # eigh requires a square matrix
         t = torch.randn(2, 3, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.linalg.eigh(t)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_eigh_non_contiguous(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
-        def run_test(matrix):
-            self.assertFalse(matrix.is_contiguous())
-            expected_w, expected_v = np.linalg.eigh(matrix.cpu().numpy())
-            actual_w, actual_v = torch.linalg.eigh(matrix)
-            self.assertEqual(actual_w, expected_w)
-            # sign of eigenvectors is not unique and therefore absolute values are compared
-            self.assertEqual(abs(actual_v), abs(expected_v))
-
-        def run_test_permuted(shape, batch):
-            # check for permuted / transposed inputs
-            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix.transpose(-2, -1)
-            run_test(matrix)
-
-        def run_test_skipped_elements(shape, batch):
-            # check for inputs with skipped elements
-            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix[::2]
-            run_test(matrix)
-
-        shapes = (3, 5)
-        batches = ((4, ), (4, 2))
-        for shape, batch in itertools.product(shapes, batches):
-            run_test_permuted(shape, batch)
-            run_test_skipped_elements(shape, batch)
+        # eigh requires 'uplo' parameter to be 'U' or 'L'
+        t = torch.randn(3, 3, device=device, dtype=dtype)
+        for uplo in ["a", "wrong"]:
+            with self.assertRaisesRegex(RuntimeError, "be \'L\' or \'U\'"):
+                torch.linalg.eigh(t, UPLO=uplo)
+            with self.assertRaisesRegex(ValueError, "be \'L\' or \'U\'"):
+                np.linalg.eigh(t.cpu().numpy(), UPLO=uplo)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    def test_eigh_non_contiguous(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def run_test(matrix, uplo):
+            self.assertFalse(matrix.is_contiguous())
+            expected_w, expected_v = np.linalg.eigh(matrix.cpu().numpy(), UPLO=uplo)
+            actual_w, actual_v = torch.linalg.eigh(matrix, UPLO=uplo)
+            self.assertEqual(actual_w, expected_w)
+            # sign of eigenvectors is not unique and therefore absolute values are compared
+            self.assertEqual(abs(actual_v), abs(expected_v))
+
+        def run_test_permuted(shape, batch, uplo):
+            # check for permuted / transposed inputs
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            matrix = matrix.transpose(-2, -1)
+            run_test(matrix, uplo)
+
+        def run_test_skipped_elements(shape, batch, uplo):
+            # check for inputs with skipped elements
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            matrix = matrix[::2]
+            run_test(matrix, uplo)
+
+        shapes = (3, 5)
+        batches = ((4, ), (4, 2))
+        uplos = ["U", "L"]
+        for shape, batch, uplo in itertools.product(shapes, batches, uplos):
+            run_test_permuted(shape, batch, uplo)
+            run_test_skipped_elements(shape, batch, uplo)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigvalsh(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
-        def run_test(shape, batch):
+        def run_test(shape, batch, uplo):
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy())
-            actual_w = torch.linalg.eigvalsh(matrix)
+            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy(), UPLO=uplo)
+            actual_w = torch.linalg.eigvalsh(matrix, UPLO=uplo)
             self.assertEqual(actual_w, expected_w)
 
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
-        for shape, batch in itertools.product(shapes, batches):
-            run_test(shape, batch)
+        uplos = ["U", "L"]
+        for shape, batch, uplo in itertools.product(shapes, batches, uplos):
+            run_test(shape, batch, uplo)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -279,35 +293,45 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.linalg.eigvalsh(t)
 
+        # eigvalsh requires 'uplo' parameter to be 'U' or 'L'
+        t = torch.randn(3, 3, device=device, dtype=dtype)
+        for uplo in ["a", "wrong"]:
+            with self.assertRaisesRegex(RuntimeError, "be \'L\' or \'U\'"):
+                torch.linalg.eigvalsh(t, UPLO=uplo)
+            with self.assertRaisesRegex(ValueError, "be \'L\' or \'U\'"):
+                np.linalg.eigvalsh(t.cpu().numpy(), UPLO=uplo)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigvalsh_non_contiguous(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
-        def run_test(matrix):
+        def run_test(matrix, uplo):
             self.assertFalse(matrix.is_contiguous())
-            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy())
-            actual_w = torch.linalg.eigvalsh(matrix)
+            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy(), UPLO=uplo)
+            actual_w = torch.linalg.eigvalsh(matrix, UPLO=uplo)
             self.assertEqual(actual_w, expected_w)
 
-        def run_test_permuted(shape, batch):
+        def run_test_permuted(shape, batch, uplo):
             # check for permuted / transposed inputs
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
             matrix = matrix.transpose(-2, -1)
-            run_test(matrix)
+            run_test(matrix, uplo)
 
-        def run_test_skipped_elements(shape, batch):
+        def run_test_skipped_elements(shape, batch, uplo):
             # check for inputs with skipped elements
             matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
             matrix = matrix[::2]
-            run_test(matrix)
+            run_test(matrix, uplo)
 
         shapes = (3, 5)
         batches = ((4, ), (4, 2))
-        for shape, batch in itertools.product(shapes, batches):
-            run_test_permuted(shape, batch)
-            run_test_skipped_elements(shape, batch)
+        uplos = ["U", "L"]
+        for shape, batch, uplo in itertools.product(shapes, batches, uplos):
+            run_test_permuted(shape, batch, uplo)
+            run_test_skipped_elements(shape, batch, uplo)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
