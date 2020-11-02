@@ -46,13 +46,13 @@ VmaAllocator create_allocator(
 }
 
 VmaAllocationCreateInfo create_allocation_create_info(
-    const VmaMemoryUsage usage) {
+    const Resource::Memory::Descriptor& descriptor) {
   return VmaAllocationCreateInfo{
     0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
         /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
-    usage,
-    0u,
-    0u,
+    descriptor.usage,
+    descriptor.required,
+    descriptor.preferred,
     0u,
     VK_NULL_HANDLE,
     nullptr,
@@ -101,7 +101,7 @@ void* map(const Resource::Memory& memory) {
 Resource::Memory::Scope::Scope(
     const VmaAllocator allocator,
     const VmaAllocation allocation,
-    const Access access)
+    const Access::Flags access)
   : allocator_(allocator),
     allocation_(allocation),
     access_(access) {
@@ -121,7 +121,7 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
 
   vmaUnmapMemory(allocator_, allocation_);
 
-  if (Access::Write == access_) {
+  if (access_ & Access::Write) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
     // we want.
@@ -175,6 +175,23 @@ Resource::Image::Sampler::Factory::operator()(
     sampler,
     Deleter(device_),
   };
+}
+
+VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
+  if (!pool) {
+    return VK_NULL_HANDLE;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      id < pool->fence_.pool.size(),
+      "Invalid Vulkan fence!");
+
+  const VkFence fence = pool->fence_.pool[id].get();
+  if (add_to_waitlist) {
+    pool->fence_.waitlist.push_back(fence);
+  }
+
+  return fence;
 }
 
 void Resource::Fence::wait(const uint64_t timeout_nanoseconds) {
