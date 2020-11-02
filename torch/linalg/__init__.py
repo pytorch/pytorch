@@ -3,8 +3,6 @@ import sys
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore
 
-import functools
-
 Tensor = torch.Tensor
 
 # Note: This not only adds doc strings for functions in the linalg namespace, but
@@ -142,7 +140,7 @@ Using the :attr:`dim` argument to compute matrix norms::
     (tensor(3.7417), tensor(11.2250))
 """)
 
-_add_docstr(_linalg.linalg_eigh, r"""
+eigh = _add_docstr(_linalg.linalg_eigh, r"""
 linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
@@ -150,7 +148,8 @@ of a complex Hermitian (conjugate symmetric) or real symmetric matrix :attr:`inp
 represented by a namedtuple (eigenvalues, eigenvectors).
 
 This function calculates all eigenvalues (and vectors) of :attr:`input`
-such that :math:`\text{input} = V \text{diag}(e) V^H`.
+such that :math:`\text{input} = V \text{diag}(e) V^H`, where :math:`e` is eigenvalues tensor
+and :math:`V` is eigenvectors tensor.
 
 Since the input matrix :attr:`input` is supposed to be Hermitian,
 only the lower triangular portion is used by default
@@ -158,7 +157,7 @@ and the imaginary part of the diagonal will always be treated as zero.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK routines ``_syevd``, ``_heevd``.
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian
@@ -176,9 +175,8 @@ Returns:
 
 Examples::
 
-    >>> import torch
     >>> a = torch.randn(2, 2, dtype=torch.complex128)
-    >>> a = a + a.t().conj()  # To make a Hermitian
+    >>> a = a + a.t().conj()  # creates a Hermitian matrix
     >>> a
     tensor([[2.9228+0.0000j, 0.2029-0.0862j],
             [0.2029+0.0862j, 0.3464+0.0000j]], dtype=torch.complex128)
@@ -188,19 +186,26 @@ Examples::
     >>> v
     tensor([[-0.0846+-0.0000j, -0.9964+0.0000j],
             [ 0.9170+0.3898j, -0.0779-0.0331j]], dtype=torch.complex128)
-    >>> torch.allclose(torch.matmul(v, torch.matmul(w.to(v.dtype).diag_embed(), v.transpose(-2, -1).conj())), a)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.to(v.dtype).diag_embed(), v.t().conj())), a)
+    True
+
+    >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
+    >>> a = a + a.transpose(-2, -1)  # creates a symmetric matrix
+    >>> w, v = torch.linalg.eigh(a)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.diag_embed(), v.transpose(-2, -1))), a)
     True
 """)
 
-_add_docstr(_linalg.linalg_eigvalsh, r"""
+eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
 linalg.eigvalsh(input, UPLO='L') -> Tensor
 
 This function returns eigenvalues of a complex Hermitian (conjugate symmetric)
-or real symmetric matrix :attr:`input`.
+or real symmetric matrix :attr:`input`. The eigenvalues are returned in ascending order,
+each repeated according to its multiplicity.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
-.. note:: The eigenvalues are computed using LAPACK routines ``_syevd``, ``_heevd``.
+.. note:: The eigenvalues are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian
@@ -208,29 +213,34 @@ Args:
     UPLO ('L', 'U', optional): controls whether to consider upper-triangular or lower-triangular part.
         Default: ``'L'``
 
-Returns:
-    (Tensor): Shape :math:`(*, m)`. The eigenvalues in ascending order, each repeated according to its multiplicity.
-
 Examples::
 
-    >>> import torch
     >>> a = torch.randn(2, 2, dtype=torch.complex128)
-    >>> a = a + a.t().conj()  # To make a Hermitian
+    >>> a = a + a.t().conj()  # creates a Hermitian matrix
     >>> a
     tensor([[2.9228+0.0000j, 0.2029-0.0862j],
             [0.2029+0.0862j, 0.3464+0.0000j]], dtype=torch.complex128)
     >>> w = torch.linalg.eigvalsh(a)
     >>> w
     tensor([0.3277, 2.9415], dtype=torch.float64)
+
+    >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
+    >>> a = a + a.transpose(-2, -1)  # creates a symmetric matrix
+    >>> a
+    tensor([[[ 2.8050, -0.3850],
+            [-0.3850,  3.2376]],
+
+            [[-1.0307, -2.7457],
+            [-2.7457, -1.7517]],
+
+            [[ 1.7166,  2.2207],
+            [ 2.2207, -2.0898]]], dtype=torch.float64)
+    >>> w = torch.linalg.eigvalsh(a)
+    >>> w
+    tensor([[ 2.5797,  3.4629],
+            [-4.1605,  1.3780],
+            [-3.1113,  2.7381]], dtype=torch.float64)
 """)
-
-@functools.wraps(_linalg.linalg_eigh)
-def eigh(a, UPLO="L"):
-    return _linalg.linalg_eigh(a, UPLO)
-
-@functools.wraps(_linalg.linalg_eigh)
-def eigvalsh(a, UPLO="L"):
-    return _linalg.linalg_eigvalsh(a, UPLO)
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
