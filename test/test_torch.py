@@ -17293,8 +17293,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.compare_with_numpy(torch.reciprocal, np.reciprocal, vals, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(*product([torch.bool] + torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(), 
-                     [torch.bool] + torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False),
+                     torch.testing.get_all_dtypes(include_complex=False)))
     def test_copysign(self, device, dtypes):
         def _test_copysign_numpy(a, b):
             torch_result = torch.copysign(a, b)
@@ -17309,7 +17309,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             else:
                 np_b = b.cpu().numpy()
             expected = torch.from_numpy(np.copysign(np_a, np_b))
-
             # To handle inconsistencies of type promotion between PyTorch and Numpy
             # Applied for both arguments having integral precision and bfloat16
             types = [torch.bool, torch.bfloat16] + torch.testing.get_all_int_dtypes()
@@ -17343,11 +17342,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         _test_copysign_numpy(a, b)
 
         # 0.0/-0.0/inf/-inf/nan
+        cases = [0.0, -0.0, float('inf'), float('-inf'), float('nan')]
+        if dtypes[0] in torch.testing.get_all_fp_dtypes(include_bfloat16=False):
+            b = make_tensor((10, 10), device=device, dtype=dtypes[1], low=-9, high=9)
+            for case in cases:
+                _test_copysign_numpy(torch.tensor([case], dtype=dtypes[0]), b)
+
         if dtypes[1] in torch.testing.get_all_fp_dtypes():
             a = make_tensor((10, 10), device=device, dtype=dtypes[0], low=-9, high=9)
-            b_s = [0.0, -0.0, float('inf'), float('-inf'), float('nan')]
-            for b in b_s:
-                _test_copysign_numpy(a, torch.tensor(b, dtype=dtypes[1]))
+            for case in cases:
+                _test_copysign_numpy(a, torch.tensor([case], dtype=dtypes[1]))
 
     @dtypes(torch.bfloat16, torch.float)
     def test_div(self, device, dtype):
