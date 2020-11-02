@@ -1401,6 +1401,47 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(vmap(lambda x: op(x, [2, 3])))(torch.randn(B0, B1))
         self.assertEqual(result.shape, [B0, B1, 2, 3])
 
+    def test_new_empty_strided(self):
+        # Empty is non-deterministic so we just check that the size and shape
+        # of the output are what we expect and that the vmap fallback isn't used
+        B0, B1 = 7, 11
+
+        def _test_single_vmap(size, stride, B0):
+            x = torch.randn(B0)
+            result = vmap(lambda x: x.new_empty_strided(size, stride))(x)
+            S = torch.empty_strided(size, stride).storage().size()
+            self.assertEqual(result.shape, [B0] + size)
+            self.assertEqual(result.stride(), [S] + stride)
+
+        def _test_double_vmap(size, stride, B0, B1):
+            x = torch.randn(B0, B1)
+            result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)))(x)
+            S = torch.empty_strided(size, stride).storage().size()
+            self.assertEqual(result.shape, [B0, B1] + size)
+            self.assertEqual(result.stride(), [B1 * S, S] + stride)
+
+            x = torch.randn(B1, B0)
+            result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)), in_dims=1)(x)
+            S = x.new_empty_strided(size, stride).storage().size()
+            self.assertEqual(result.shape, [B0, B1] + size)
+            self.assertEqual(result.stride(), [B1 * S, S] + stride)
+
+        # contiguous case
+        _test_single_vmap([2, 3, 5], [3 * 5, 5, 1], B0)
+        _test_double_vmap([2, 3, 5], [3 * 5, 5, 1], B0, B1)
+
+        # expanded
+        _test_single_vmap([2, 3, 5], [0, 5, 1], B0)
+        _test_double_vmap([2, 3, 5], [0, 5, 1], B0, B1)
+
+        # some of these cases are pretty strange, just verifying that if
+        # empty_strided allows them then BatchedTensor.new_empty_strided
+        # can as well
+        for shape in [[2, 3, 4], [0, 2, 0]]:
+            for strides in [[12, 4, 1], [2, 4, 6], [0, 0, 0]]:
+                _test_single_vmap(shape, strides, B0)
+                _test_double_vmap(shape, strides, B0, B1)
+
     def test_new_zeros(self):
         op = Tensor.new_zeros
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
