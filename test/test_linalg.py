@@ -1003,42 +1003,6 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    @dtypesIfCUDA(torch.float64)
-    def test_solve_autograd(self, device, dtype):
-        def run_test(a_shape, b_shape):
-            b, A = self.solve_test_helper(a_shape, b_shape, device, dtype)
-            A.requires_grad_()
-            b.requires_grad_()
-
-            gradcheck(torch.solve, [b, A])
-            gradgradcheck(torch.solve, [b, A])
-
-        a_shapes = ((3, ), (3, 2), (3, 2, 4))
-        b_shapes = ((3, 1), (2, 3, 5), (2, 4, 3, 5))
-        for (a_shape, b_shape) in zip(a_shapes, b_shapes):
-            run_test(a_shape, b_shape)
-
-    # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex128)
-    def test_solve_autograd_xfailed(self, device, dtype):
-        def run_test(a_shape, b_shape):
-            b, A = self.solve_test_helper(a_shape, b_shape, device, dtype)
-            A.requires_grad_()
-            b.requires_grad_()
-
-            gradcheck(torch.solve, [b, A])
-            gradgradcheck(torch.solve, [b, A])
-
-        a_shape = (3, 2)
-        b_shape = (3, 1)
-        run_test(a_shape, b_shape)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float, torch.double)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
