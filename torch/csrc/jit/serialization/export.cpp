@@ -342,9 +342,9 @@ void EncoderBase::EncodeValueInfo(
             if (n->node()->kind() == prim::Param) {
               symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
             } else {
-              std::string op_type = n->node()->kind().toQualString();
+              std::string op_type = n->node()->kind().toUnqualString();
               symbol_dim_map_[sizes[i]] =
-                  op_type.erase(0, 6) + name + "_dim_" + std::to_string(i);
+                  op_type + name + "_dim_" + std::to_string(i);
             }
           }
           shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
