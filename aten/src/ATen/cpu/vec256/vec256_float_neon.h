@@ -259,12 +259,12 @@ public:
   // Only required because vec256_qint refers to this.
   // Once we specialize that implementation for ARM
   // this should be removed. TODO (kimishpatel)
-  float operator[](int idx) const {
+  const float operator[](int idx) const {
     __at_align32__ float tmp[size()];
     store(tmp);
     return tmp[idx];
-  }
-  float operator[](int idx) {
+  };
+  const float operator[](int idx) {
     __at_align32__ float tmp[size()];
     store(tmp);
     return tmp[idx];

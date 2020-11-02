@@ -1307,7 +1307,7 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
 
 def control_op_remap(op, prefix, blob_remap):
     net_arg_names = []
-    if op.type == "If" or op.type == "AsyncIf":
+    if op.type == "If":
         net_arg_names = ['then_net', 'else_net']
     else:
         net_arg_names = ['loop_net', 'cond_net']
@@ -1327,7 +1327,6 @@ DEFAULT_REMAP_FUNCS = {
     'RecurrentNetworkGradient': recurrent_network_op_remap,
     'If': control_op_remap,
     'While': control_op_remap,
-    'AsyncIf': control_op_remap,
 }
 
 
@@ -1525,8 +1524,7 @@ class Net(object):
         ops = net.Proto().op
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
-            for op in ops:
-                op.device_option.CopyFrom(device_option)
+            map(lambda x: x.device_option.CopyFrom(device_option), ops)
             for op in ops:
                 if op.type == "RecurrentNetwork":
                     for arg in op.arg:

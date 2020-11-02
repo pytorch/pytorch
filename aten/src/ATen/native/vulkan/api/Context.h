@@ -47,6 +47,7 @@ class Context final {
       Command::Buffer& command_buffer,
       const Shader::Layout::Signature& shader_layout_signature,
       const Shader::Descriptor& shader_descriptor,
+      const Shader::WorkGroup& local_work_group,
       const Shader::WorkGroup& global_work_group,
       Arguments&&... arguments);
 
@@ -139,19 +140,22 @@ inline void Context::dispatch(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
     const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& local_work_group,
     const Shader::WorkGroup& global_work_group,
     Arguments&&... arguments) {
   // Forward declaration
   Descriptor::Set dispatch_prologue(
       Command::Buffer&,
       const Shader::Layout::Signature&,
-      const Shader::Descriptor&);
+      const Shader::Descriptor&,
+      const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
   Descriptor::Set descriptor_set = dispatch_prologue(
       command_buffer,
       shader_layout_signature,
-      shader_descriptor);
+      shader_descriptor,
+      local_work_group);
 
   detail::bind(
       descriptor_set,

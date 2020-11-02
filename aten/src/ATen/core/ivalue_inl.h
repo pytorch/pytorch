@@ -10,11 +10,9 @@
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/core/Scalar.h>
-#include <c10/core/Stream.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/util/hash.h>
 
 namespace torch {
 namespace jit {
@@ -140,7 +138,7 @@ inline at::Tensor IValue::toTensor() const& {
 inline c10::Stream IValue::toStream() && {
   return c10::Stream::unpack(payload.as_int);
 }
-inline c10::Stream IValue::toStream() const& {
+inline c10::Stream IValue::toStream() const & {
   return c10::Stream::unpack(payload.as_int);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
@@ -240,10 +238,6 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return std::move(elements_);
   }
   std::shared_ptr<TupleType> type() const;
-
-  static size_t hash(const Tuple& t) {
-    return c10::get_hash(t.elements());
-  }
 
   CAFFE2_API friend bool operator==(
       const ivalue::Tuple& lhs,
@@ -416,13 +410,6 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         std::move(callback)));
     return fut;
   }
-
-  // Since this file cannot import CUDA depedency, the type of the seocond arg
-  // in the callback is c10::Stream instead of at::cuda::CUDAStream, and
-  // CUDAStream is constructed on the fly. The default implementation
-  // is a no-op, since it does not deal with any CUDA streams.
-  virtual void setRecordStreamCallback(
-      std::function<void(const at::IValue&, const c10::Stream&)> record_stream_cb) {}
 
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {

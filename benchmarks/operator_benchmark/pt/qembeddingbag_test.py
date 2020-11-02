@@ -3,7 +3,7 @@ import operator_benchmark as op_bench
 import torch
 import torch.nn.quantized as nnq
 import numpy
-from pt import configs
+from . import configs
 
 """
 Microbenchmarks for qEmbeddingBag operators.

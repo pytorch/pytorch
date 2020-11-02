@@ -112,7 +112,11 @@ struct Shader final {
   // Work Group
   //
 
-  typedef VkExtent3D WorkGroup;
+  struct WorkGroup final {
+    uint32_t x;
+    uint32_t y;
+    uint32_t z;
+  };
 
   /*
     Descriptor
@@ -224,9 +228,9 @@ inline void Shader::Layout::Cache::purge() {
 inline bool operator==(
     const Shader::WorkGroup& _1,
     const Shader::WorkGroup& _2) {
-  return (_1.width == _2.width) &&
-         (_1.height == _2.height) &&
-         (_1.depth == _2.depth);
+  return (_1.x == _2.x) &&
+         (_1.y == _2.y) &&
+         (_1.z == _2.z);
 }
 
 inline Shader::Descriptor::Descriptor(const char* const glsl)

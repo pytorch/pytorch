@@ -353,9 +353,7 @@ void Reducer::check_grad_layout(
   }
 }
 
-void Reducer::copy_grad_to_bucket(
-    const at::Tensor& grad,
-    at::Tensor& bucket_view) {
+void Reducer::copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view) {
   // See Note [DDP Communication Hook]
   if (comm_hook_ == nullptr) {
     // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
@@ -700,8 +698,7 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     if (comm_hook_ == nullptr) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
-      GradBucket grad_bucket(tensors);
-      bucket.future_work = comm_hook_->runHook(grad_bucket);
+      bucket.future_work = comm_hook_->runHook(GradBucket(tensors));
     }
   }
 }
@@ -856,8 +853,8 @@ void Reducer::initialize_buckets(
       TORCH_CHECK(
           variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
-      variable_locators_[variable_index] =
-          VariableLocator(bucket_index, intra_bucket_index++);
+      variable_locators_[variable_index] = VariableLocator(
+        bucket_index, intra_bucket_index++);
     }
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
@@ -1166,7 +1163,7 @@ void Reducer::finalize_backward() {
       bucket.future_work->wait();
 
       auto future_result =
-          comm_hook_->parseHookResult(bucket.future_work->value());
+          comm_hook_->processFuture(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
         auto& replica = bucket.replicas[i];
@@ -1392,6 +1389,7 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. ",
         "list, dict, iterable).");
   }
+
 }
 
 namespace {

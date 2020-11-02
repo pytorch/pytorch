@@ -5,7 +5,7 @@ import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 
-from pt import configs
+from . import configs
 
 """
 Microbenchmarks for Quantized Linear operators.

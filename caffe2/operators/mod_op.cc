@@ -25,6 +25,8 @@ bool ModOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
+namespace {
+
 REGISTER_CPU_OPERATOR(Mod, ModOp<CPUContext>);
 OPERATOR_SCHEMA(Mod)
     .NumInputs(1)
@@ -93,4 +95,5 @@ X after running op:
     .Output(0, "Y", "*(type: Tensor`<int>`)* Output tensor of data with modulo operation applied.");
 
 SHOULD_NOT_DO_GRADIENT(ModOp);
+} // namespace
 } // namespace caffe2

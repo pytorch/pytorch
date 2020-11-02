@@ -12,7 +12,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-
 struct Resource final {
   class Pool;
 
@@ -30,49 +29,22 @@ struct Resource final {
       VkAccessFlags dst;
     };
 
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      VmaMemoryUsage usage;
-      VkMemoryPropertyFlags /* optional */ required;
-      VkMemoryPropertyFlags /* optional */ preferred;
-    };
-
     VmaAllocator allocator;
     VmaAllocation allocation;
 
-    struct Access final {
-      typedef uint8_t Flags;
-
-      enum Type : Flags {
-        Read = 1u << 0u,
-        Write = 1u << 1u,
-      };
-
-      template<typename Type, Flags access>
-      using Pointer = std::add_pointer_t<
-          std::conditional_t<
-              0u != (access & Write),
-              Type,
-              std::add_const_t<Type>>>;
-    };
-
     class Scope;
     template<typename Type>
-    using Handle = Handle<Type, Scope>;
+    using Data = Handle<Type, Scope>;
 
     template<
         typename Type,
-        typename Pointer = Access::Pointer<Type, Access::Read>>
-    Handle<Pointer> map() const &;
+        typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
+    Data<Pointer> map() const &;
 
     template<
         typename Type,
-        Access::Flags kAccess,
-        typename Pointer = Access::Pointer<Type, kAccess>>
-    Handle<Pointer> map() &;
+        typename Pointer = std::add_pointer_t<Type>>
+    Data<Pointer> map() &;
 
    private:
     // Intentionally disabed to ensure memory access is always properly
@@ -82,10 +54,10 @@ struct Resource final {
     // for seemingly ineffective memory writes and hard to hunt down bugs.
 
     template<typename Type, typename Pointer>
-    Handle<Pointer> map() const && = delete;
+    Data<Pointer> map() const && = delete;
 
-    template<typename Type, Access::Flags kAccess, typename Pointer>
-    Handle<Pointer> map() && = delete;
+    template<typename Type, typename Pointer>
+    Data<Pointer> map() && = delete;
   };
 
   //
@@ -102,7 +74,7 @@ struct Resource final {
 
       struct {
         VkBufferUsageFlags buffer;
-        Memory::Descriptor memory;
+        VmaMemoryUsage memory;
       } usage;
     };
 
@@ -199,7 +171,7 @@ struct Resource final {
 
       struct {
         VkImageUsageFlags image;
-        Memory::Descriptor memory;
+        VmaMemoryUsage memory;
       } usage;
 
       struct {
@@ -269,17 +241,10 @@ struct Resource final {
     Pool& operator=(Pool&&);
     ~Pool();
 
-    // Primary
-
     Buffer buffer(const Buffer::Descriptor& descriptor);
     Image image(const Image::Descriptor& descriptor);
     Fence fence();
     void purge();
-
-    // Helper
-
-    template <typename Block>
-    Buffer uniform(const Block& block);
 
    private:
     friend struct Fence;
@@ -319,42 +284,37 @@ struct Resource final {
 
 class Resource::Memory::Scope final {
  public:
-  Scope(
-      VmaAllocator allocator,
-      VmaAllocation allocation,
-      Access::Flags access);
+  enum class Access {
+    Read,
+    Write,
+  };
 
+  Scope(VmaAllocator allocator, VmaAllocation allocation, Access access);
   void operator()(const void* data) const;
 
  private:
   VmaAllocator allocator_;
   VmaAllocation allocation_;
-  Access::Flags access_;
+  Access access_;
 };
 
 template<typename, typename Pointer>
-inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() const & {
   void* map(const Memory& memory);
 
-  return Handle<Pointer>{
+  return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, Access::Read),
+    Scope(allocator, allocation, Scope::Access::Read),
   };
 }
 
-template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
-inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
+template<typename, typename Pointer>
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() & {
   void* map(const Memory& memory);
 
-  static_assert(
-      (kAccess == Access::Read) ||
-      (kAccess == Access::Write) ||
-      (kAccess == (Access::Read | Access::Write)),
-      "Invalid memory access!");
-
-  return Handle<Pointer>{
+  return Data<Pointer>{
     reinterpret_cast<Pointer>(map(*this)),
-    Scope(allocator, allocation, kAccess),
+    Scope(allocator, allocation, Scope::Access::Write),
   };
 }
 
@@ -396,29 +356,21 @@ inline Resource::Fence::operator bool() const {
   return pool;
 }
 
-template<typename Block>
-inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
-  Buffer uniform = this->buffer({
-      sizeof(Block),
-      {
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        {
-          VMA_MEMORY_USAGE_CPU_TO_GPU,
-          0u,
-          0u,
-        },
-      },
-    });
-
-  {
-    Memory::Handle<Block*> memory = uniform.memory.template map<
-        Block,
-        Memory::Access::Write>();
-
-    *memory.get() = block;
+inline VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
+  if (!pool) {
+    return VK_NULL_HANDLE;
   }
 
-  return uniform;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      id < pool->fence_.pool.size(),
+      "Invalid Vulkan fence!");
+
+  const VkFence fence = pool->fence_.pool[id].get();
+  if (add_to_waitlist) {
+    pool->fence_.waitlist.push_back(fence);
+  }
+
+  return fence;
 }
 
 } // namespace api

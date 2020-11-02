@@ -60,21 +60,13 @@ void logit_backward_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
 }
 
 void tanh_backward_kernel_cuda(TensorIterator& iter) {
-  if(isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_complex_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "tanh_backward_cuda", [&]() {
+    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "tanh_backward_cuda", [&] {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a * std::conj(scalar_t{1.} - b * b);
+        return a * (scalar_t{1.} - b * b);
       });
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "tanh_backward_cuda", [&]() {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "tanh_backward_cuda", [&] {
-        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a * (scalar_t{1.} - b * b);
-        });
-      });
-    });
-  }
+  });
 }
 
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel_cuda);
