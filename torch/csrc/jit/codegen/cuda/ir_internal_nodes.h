@@ -253,18 +253,12 @@ class TORCH_CUDA_API IterDomain : public Val {
 
   //! Return if this iter domain is mapped to a grid dimension
   bool isBlockDim() const {
-    return (
-        getParallelType() == ParallelType::BIDz ||
-        getParallelType() == ParallelType::BIDy ||
-        getParallelType() == ParallelType::BIDx);
+    return isParallelTypeBlockDim(getParallelType());
   }
 
   //! Return if this iter domain is mapped to a block dimension
   bool isThreadDim() const {
-    return (
-        getParallelType() == ParallelType::TIDz ||
-        getParallelType() == ParallelType::TIDy ||
-        getParallelType() == ParallelType::TIDx);
+    return isParallelTypeThreadDim(getParallelType());
   }
 
   //! Return if this iter domain is either mapped to a block or grid dimension

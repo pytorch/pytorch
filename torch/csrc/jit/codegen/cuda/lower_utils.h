@@ -5,6 +5,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 #include <bitset>
 #include <map>
@@ -76,46 +77,6 @@ Expr* asExpr(Statement*);
 
 // TODO(kir): Remove in favor of ->as<TensorView>()
 TensorView* asTV(Val*);
-
-// Represents mapping to bool from BIDx, BIDy, BIDz, TIDx, TIDy and TIDz.
-class ParallelTypeBitmap {
- public:
-  static constexpr int num_p_type = 6;
-
-  ParallelTypeBitmap() = default;
-
-  bool get(ParallelType pt) const;
-  bool set(ParallelType pt, bool);
-  ParallelTypeBitmap operator&=(const ParallelTypeBitmap& other);
-  ParallelTypeBitmap operator|=(const ParallelTypeBitmap& other);
-  ParallelTypeBitmap operator^=(const ParallelTypeBitmap& other);
-  ParallelTypeBitmap operator~() const;
-  bool none() const;
-  bool any() const;
-  bool all() const;
-  bool operator[](size_t pos) const;
-  std::map<ParallelType, bool> getMap() const;
-
- private:
-  ParallelTypeBitmap(const std::bitset<num_p_type>& bs) : bitset_(bs) {}
-
- private:
-  std::bitset<num_p_type> bitset_;
-  const static std::unordered_map<ParallelType, int, TypeHash> pt_to_offset_;
-  const static std::unordered_map<int, ParallelType> offset_to_pt_;
-};
-
-ParallelTypeBitmap operator&(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs);
-
-ParallelTypeBitmap operator|(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs);
-
-ParallelTypeBitmap operator^(
-    const ParallelTypeBitmap& lhs,
-    const ParallelTypeBitmap& rhs);
 
 //! Returns a ParallelTypeBitmap representing which domain needs
 //! blockBroadcast.

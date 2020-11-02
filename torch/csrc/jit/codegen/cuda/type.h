@@ -162,6 +162,10 @@ TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const IterType);
 std::string stringifyThreadSize(const ParallelType);
 std::string stringifyThread(const ParallelType);
 
+bool isParallelTypeThreadDim(ParallelType);
+bool isParallelTypeBlockDim(ParallelType);
+bool isParallelTypeThread(ParallelType);
+
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 

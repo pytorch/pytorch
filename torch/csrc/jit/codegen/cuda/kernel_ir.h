@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -1096,6 +1097,14 @@ class TORCH_CUDA_API GridReduction final : public Expr {
     return sync_buffer_;
   }
 
+  const ParallelTypeBitmap& threadPredicate() const {
+    return thread_predicate_;
+  }
+
+  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    thread_predicate_ = thread_predicate;
+  }
+
   static std::string getPredicateFlagName(const TensorView* val);
   static std::string getPredicateFlagName(const fuser::cuda::TensorView* val);
 
@@ -1103,6 +1112,10 @@ class TORCH_CUDA_API GridReduction final : public Expr {
   ReductionOp* reduction_op_ = nullptr;
   Allocate* reduction_buffer_ = nullptr;
   Allocate* sync_buffer_ = nullptr;
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
+  ParallelTypeBitmap thread_predicate_;
 };
 
 } // namespace kir

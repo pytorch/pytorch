@@ -13,7 +13,9 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-IndexLowering::IndexLowering() : ir_builder_(GpuLower::current()->kernel()) {}
+IndexLowering::IndexLowering(const ThreadPredicateMap& thread_predicates)
+    : ir_builder_(GpuLower::current()->kernel()),
+      thread_predicates_(thread_predicates) {}
 
 kir::Val* IndexLowering::lowerSrcIndex(kir::Val* val, kir::Val* dst) const {
   if (auto tv = dynamic_cast<kir::TensorView*>(val)) {
@@ -168,14 +170,16 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
   const auto out = lowerDstIndex(rop->out());
   const auto in = lowerSrcIndex(rop->in(), rop->out());
 
-  const auto pred = PredicateCompute::getInlinePredicate(
-      rop, scope_utils::getLoops(active_scope_expr_), nullptr, false);
-
   kir::ReductionOp* block_reduction_op = nullptr;
 
   if (is_block_reduce) {
     block_reduction_op = ir_builder_.create<kir::ReductionOp>(
         rop->operation(), rop->init(), out, in);
+    const auto pred = PredicateCompute::getInlinePredicate(
+        rop,
+        scope_utils::getLoops(active_scope_expr_),
+        thread_predicates_.getExpr(out_tv->fuserTv()),
+        false);
     block_reduction_op->setPredicate(pred);
     pushBack(block_reduction_op);
   }
@@ -247,8 +251,15 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
               rop->operation(), rop->init(), out, in)
         : block_reduction_op;
 
+    // The thread predicate for GridReduction needs to be set
+    // separately from the main predicate. Do not combine them like
+    // other expressions.
+    const auto& thread_pred = thread_predicates_.at(out_tv->fuserTv()).pred;
     auto grid_reduction = ir_builder_.create<kir::GridReduction>(
         grid_reduction_op, reduce_buffer, sync_buffer);
+    grid_reduction->setThreadPredicate(thread_pred);
+    const auto pred = PredicateCompute::getInlinePredicate(
+        rop, scope_utils::getLoops(active_scope_expr_), nullptr, false);
     grid_reduction->setPredicate(pred);
 
     pushBack(reduce_buffer);

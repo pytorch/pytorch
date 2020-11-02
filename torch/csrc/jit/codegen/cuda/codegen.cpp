@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
+#include <array>
 #include <sstream>
 #include <vector>
 
@@ -375,9 +376,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
     TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
     const auto tensor_index = node->out()->as<kir::TensorIndex>();
 
-    const ir_utils::ParallelTypeBitmap domains =
-        ir_utils::getParallelBroadcastDomains(
-            tensor_index->view()->fuserTv(), kernel_->predicateMap());
+    const ParallelTypeBitmap domains = ir_utils::getParallelBroadcastDomains(
+        tensor_index->view()->fuserTv(), kernel_->predicateMap());
 
     const bool thread_x = domains.get(ParallelType::TIDx);
     const bool thread_y = domains.get(ParallelType::TIDy);
@@ -461,6 +461,41 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
+  std::string generateGridReduceTemplateFlags(
+      const kir::ReductionOp* rop,
+      const ParallelTypeBitmap& thread_pred) {
+    const auto par_domains = rop->getParallelReductionDomains();
+    const std::array<ParallelType, 6> ptypes{ParallelType::BIDx,
+                                             ParallelType::BIDy,
+                                             ParallelType::BIDz,
+                                             ParallelType::TIDx,
+                                             ParallelType::TIDy,
+                                             ParallelType::TIDz};
+    std::stringstream flags;
+    for (const ParallelType pt : ptypes) {
+      const bool parallel_reduction = par_domains.find(pt) != par_domains.end();
+      const bool pred = thread_pred.get(pt);
+      TORCH_INTERNAL_ASSERT(
+          !(parallel_reduction && pred), "Cannot reduce predicated axis: ", pt);
+      bool flag = false;
+      // Currently assumed that no dimensions parallelized with blocks
+      // are predicated. This assumption may be lifted, but
+      // gridReduction would need some changes.
+      if (isParallelTypeBlockDim(pt)) {
+        TORCH_INTERNAL_ASSERT(
+            !pred, "Predication on block dimensions not allowed: ", pt);
+        flag = parallel_reduction;
+      } else {
+        flag = !pred && !parallel_reduction;
+      }
+      if (pt != ptypes[0]) {
+        flags << ", ";
+      }
+      flags << (flag ? "true" : "false");
+    }
+    return flags.str();
+  }
+
   void visit(const kir::GridReduction* node) final {
     const auto rop = node->reduction_op();
     TORCH_INTERNAL_ASSERT(rop->out()->isA<kir::TensorIndex>());
@@ -468,14 +503,6 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const auto out = rop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
     TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
-
-    const auto par_domains = rop->getParallelReductionDomains();
-    const bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
-    const bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
-    const bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
-    const bool bidx = par_domains.find(ParallelType::BIDx) != par_domains.end();
-    const bool bidy = par_domains.find(ParallelType::BIDy) != par_domains.end();
-    const bool bidz = par_domains.find(ParallelType::BIDz) != par_domains.end();
 
     const auto data_type = rop->out()->dtype();
     const auto op_type = rop->operation();
@@ -489,14 +516,13 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const auto sync_buffer =
         node->sync_buffer()->buffer()->as<kir::TensorView>();
 
+    const std::string flags_str =
+        generateGridReduceTemplateFlags(rop, node->threadPredicate());
+
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
     indent() << kir::GridReduction::getPredicateFlagName(out->view()) << " = "
-             << "reduction::gridReduce<" << (bidx ? "true" : "false") << ", "
-             << (bidy ? "true" : "false") << ", " << (bidz ? "true" : "false")
-             << ", " << (!tidx ? "true" : "false") << ", "
-             << (!tidy ? "true" : "false") << ", " << (!tidz ? "true" : "false")
-             << ">(\n";
+             << "reduction::gridReduce<" << flags_str << ">(\n";
     indent() << kTab << gen(rop->out()) << ",\n";
     if (domain->hasBlockReduction()) {
       indent() << kTab << "block_result"

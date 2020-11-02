@@ -34,7 +34,7 @@ kir::Val* getPredicatePerParallelType(
 }
 
 kir::Bool* getPredicate(
-    const ir_utils::ParallelTypeBitmap& bits,
+    const ParallelTypeBitmap& bits,
     const ThreadPredicateMap::SourceMap& source_map) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
@@ -73,7 +73,7 @@ void mergeSourceMap(
 void addToSouceMap(
     ThreadPredicateMap::SourceMap& dst,
     const TensorView* tv,
-    const ir_utils::ParallelTypeBitmap& reducton_pred) {
+    const ParallelTypeBitmap& reducton_pred) {
   for (const auto& kv : reducton_pred.getMap()) {
     if (kv.second) {
       ParallelType ptype = kv.first;
@@ -84,7 +84,7 @@ void addToSouceMap(
 
 void maskSouceMap(
     ThreadPredicateMap::SourceMap& src_map,
-    const ir_utils::ParallelTypeBitmap& mask) {
+    const ParallelTypeBitmap& mask) {
   for (const auto& kv : mask.getMap()) {
     if (!kv.second) {
       ParallelType ptype = kv.first;
@@ -95,9 +95,9 @@ void maskSouceMap(
 
 // A bit of a hack for now for GEMM tiling so we don't fetch tiles multiple
 // times. It's safe to do, there may simply be a better place to do it.
-ir_utils::ParallelTypeBitmap avoidRedundantWritesToSmem(
+ParallelTypeBitmap avoidRedundantWritesToSmem(
     const TensorView* out_tv,
-    const ir_utils::ParallelTypeBitmap& pred) {
+    const ParallelTypeBitmap& pred) {
   auto new_pred = pred;
   if (out_tv->getMemoryType() == MemoryType::Shared) {
     for (size_t i = 0; i < out_tv->nDims(); i++) {
@@ -117,13 +117,13 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   FUSER_PERF_SCOPE("ThreadPredicateMap::updateBitSet");
 
   // Which predicates were set for the inputs
-  ir_utils::ParallelTypeBitmap input_preds;
+  ParallelTypeBitmap input_preds;
 
   // Which dims are reductions in inputs
-  ir_utils::ParallelTypeBitmap input_reductions;
+  ParallelTypeBitmap input_reductions;
 
   // Which dims are bcast in inputs
-  ir_utils::ParallelTypeBitmap input_bcasts;
+  ParallelTypeBitmap input_bcasts;
 
   SourceMap src_map;
 
@@ -144,9 +144,9 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
 
     mergeSourceMap(src_map, pred_and_src.source_map);
 
-    ir_utils::ParallelTypeBitmap id_reductions;
-    ir_utils::ParallelTypeBitmap id_bcasts;
-    ir_utils::ParallelTypeBitmap id_ptypes;
+    ParallelTypeBitmap id_reductions;
+    ParallelTypeBitmap id_bcasts;
+    ParallelTypeBitmap id_ptypes;
 
     for (auto id : tv_inp->domain()->domain()) {
       if (id->isThread()) {
@@ -159,7 +159,7 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
     }
 
     // Validate the combination of ptypes, reductions, bcasts
-    for (size_t i = 0; i < ir_utils::ParallelTypeBitmap::num_p_type; i++) {
+    for (size_t i = 0; i < ParallelTypeBitmap::num_p_type; i++) {
       if (input_reductions[i]) {
         if (id_ptypes[i]) {
           TORCH_INTERNAL_ASSERT(
@@ -212,7 +212,7 @@ ThreadPredicateMap::ThreadPredicateMap(Fusion* fusion) : fusion_(fusion) {
   // Initialize mapping for input tensors
   for (auto inp : fusion_->inputs()) {
     if (auto tv = dynamic_cast<const TensorView*>(inp)) {
-      insert(tv, ir_utils::ParallelTypeBitmap(), SourceMap());
+      insert(tv, ParallelTypeBitmap(), SourceMap());
     }
   }
   for (auto expr : fusion_->exprs(true)) {
@@ -241,7 +241,7 @@ ThreadPredicateMap::PredAndSource& ThreadPredicateMap::at(
 
 void ThreadPredicateMap::insert(
     const TensorView* tv,
-    const ir_utils::ParallelTypeBitmap& pred,
+    const ParallelTypeBitmap& pred,
     const SourceMap& src_map) {
   insert(tv, {pred, src_map});
 }
@@ -263,7 +263,7 @@ void ThreadPredicateMap::print() const {
   std::cout << "--------------------------------\n";
   for (const auto& kv : thread_predicates_) {
     std::cout << "T" << kv.first->name() << " {";
-    // ir_utils::ParallelTypeBitmap
+    // ParallelTypeBitmap
     for (auto ptkv : kv.second.pred.getMap()) {
       if (ptkv.second) {
         std::cout << " " << ptkv.first;

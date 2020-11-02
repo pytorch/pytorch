@@ -464,6 +464,20 @@ std::string stringifyThread(const ParallelType ptype) {
   return parallel_type2string(ptype);
 }
 
+bool isParallelTypeThreadDim(ParallelType ptype) {
+  return ptype == ParallelType::TIDx || ptype == ParallelType::TIDy ||
+      ptype == ParallelType::TIDz;
+}
+
+bool isParallelTypeBlockDim(ParallelType ptype) {
+  return ptype == ParallelType::BIDx || ptype == ParallelType::BIDy ||
+      ptype == ParallelType::BIDz;
+}
+
+bool isParallelTypeThread(ParallelType ptype) {
+  return isParallelTypeBlockDim(ptype) || isParallelTypeThreadDim(ptype);
+}
+
 c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>& cast) {
   const char* str = supported_casts2string(cast);

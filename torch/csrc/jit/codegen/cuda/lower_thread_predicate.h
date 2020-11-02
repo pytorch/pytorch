@@ -5,6 +5,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -34,7 +35,7 @@ class TORCH_CUDA_API ThreadPredicateMap {
       TypeHash>;
 
   struct PredAndSource {
-    ir_utils::ParallelTypeBitmap pred;
+    ParallelTypeBitmap pred;
     SourceMap source_map;
   };
 
@@ -61,7 +62,7 @@ class TORCH_CUDA_API ThreadPredicateMap {
 
   void insert(
       const TensorView* tv,
-      const ir_utils::ParallelTypeBitmap& pred,
+      const ParallelTypeBitmap& pred,
       const SourceMap& src_map);
 
   void insert(const TensorView* tv, const PredAndSource& pred_and_src);

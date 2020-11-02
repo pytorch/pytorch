@@ -131,7 +131,7 @@ void GpuLower::lower() {
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
   const auto sync_exprs = insertThreadSynchronization(reuse_mem_exprs);
 
-  const auto indexed_loops = IndexLowering::getIndexedExprs(sync_exprs);
+  const auto indexed_loops = IndexLowering::getIndexedExprs(sync_exprs, preds);
 
   // We now have the lowered expressions, finalize the kernel IR
   kernel_->finalize(indexed_loops, preds);
