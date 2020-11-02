@@ -710,7 +710,7 @@ def group_overloads(declarations, is_python_method):
             raise RuntimeError(
                 "While identifying overloads, we found an out schema {} without a corresponding non-out variant. "
                 "We expected the non-out variant to have schema: \n- {}\nPlease check that you spelled the schema "
-                "correctly or in native_functions.yaml. We discovered the following candidate(s): \n"
+                "correctly in native_functions.yaml. We discovered the following candidate(s): \n"
                 .format(dictionary['signature'], x) + "\n".join("- {}".format(candidate) for candidate in candidates))
         result.append(dictionary)
     return sort_declarations(result)
