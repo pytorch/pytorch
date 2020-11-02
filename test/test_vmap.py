@@ -1988,6 +1988,37 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(lambda x: x[:, 1:3], (x,), {})
         self._batched_grad_test(lambda x: x[..., 1:3], (x,), {})
 
+    @allowVmapFallbackUsage
+    def test_inplace_view(self, device):
+        leaf = torch.randn(4, 5, requires_grad=True)
+
+        def func(leaf):
+            # Make sure the function is non-trivially twice differentiable
+            base = leaf * leaf
+            view = base[0]
+            view.cos_()
+            return view
+
+        self._batched_grad_test(func, (leaf,), {})
+        self._batched_grad_grad_test(func, (leaf,), {})
+
+    @allowVmapFallbackUsage
+    def test_inplace_manyview(self, device):
+        leaf = torch.randn(4, 4, 5, requires_grad=True)
+
+        def func(leaf):
+            # Make sure the function is non-trivially twice differentiable
+            base = leaf * leaf
+            view = base.transpose(0, 2)
+            view = view[1]
+            view = base.diagonal()
+            view = view[::2]
+            view.cos_()
+            return view
+
+        self._batched_grad_test(func, (leaf,), {})
+        self._batched_grad_grad_test(func, (leaf,), {})
+
     def test_diagonal(self, device):
         x = torch.randn(4, 5, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: x.diagonal(1, 0, 1), (x,), {})
