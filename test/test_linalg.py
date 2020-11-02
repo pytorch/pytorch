@@ -11,7 +11,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
      onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
-from torch.autograd import gradcheck, gradgradcheck
+from torch.autograd import gradcheck
 
 if TEST_NUMPY:
     import numpy as np
