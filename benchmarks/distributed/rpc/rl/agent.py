@@ -13,22 +13,23 @@ from Observer import ObserverBase
 
 OBSERVER_NAME = "observer{}"
 
+gamma = 0.99
+
 
 class Policy(nn.Module):
-    def __init__(self):
+    def __init__(self, n_layers=0, in_features=10, out_features=10):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(4, 128)
-        self.dropout = nn.Dropout(p=0.6)
-        self.affine2 = nn.Linear(128, 2)
+        self.n_layers = n_layers
+        self.in_features = in_features
+        self.out_features = out_features
 
+        self.model = nn.Sequential(
+            *[nn.Linear(in_features, out_features) for _ in range(n_layers + 1)])
         self.saved_log_probs = []
         self.rewards = []
 
     def forward(self, x):
-        x = self.affine1(x)
-        x = self.dropout(x)
-        x = F.relu(x)
-        action_scores = self.affine2(x)
+        action_scores = self.model(x)
         return F.softmax(action_scores, dim=1)
 
 
@@ -44,14 +45,16 @@ class AgentBase:
         self.rewards = {}
         self.saved_log_probs = {}
 
-        for rank in range(2, 3):
+    def set_world(self, world_size):
+        self.world_size = world_size
+
+        for rank in range(2, world_size):
             ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank))
             self.ob_rrefs.append(remote(ob_info, ObserverBase))
             self.rewards[ob_info.id] = []
             self.saved_log_probs[ob_info.id] = []
 
     def select_action(self, observer_id, state, reward):
-        print("select action ", observer_id, reward)
         self.rewards[observer_id].append(reward)
 
         state = torch.from_numpy(state).float().unsqueeze(0)
@@ -63,9 +66,6 @@ class AgentBase:
         return action.item()
 
     def finish_episode(self):
-        print("\n------------------\n")
-        print(self.rewards)
-
         R, probs, rewards = 0, [], []
         for ob_id in self.rewards:
             probs.extend(self.saved_log_probs[ob_id])
@@ -83,7 +83,7 @@ class AgentBase:
 
         policy_loss, returns = [], []
         for r in rewards[::-1]:
-            R = r + args.gamma * R
+            R = r + gamma * R   # args.gamma
             returns.insert(0, R)
         returns = torch.tensor(returns)
         returns = (returns - returns.mean()) / (returns.std() + self.eps)

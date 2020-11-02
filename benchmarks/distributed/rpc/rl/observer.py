@@ -1,33 +1,33 @@
 import gym
 
 import torch.distributed.rpc as rpc
+from torch.distributed.rpc import rpc_async, rpc_sync, remote
 
-import Coordinator
-from Agent import AgentBase
+import random
+import numpy as np
 
 
 class ObserverBase:
     def __init__(self):
         self.id = rpc.get_worker_info().id
-        self.env = gym.make('CartPole-v1')
 
     def reset(self):
-        state, reward = self.env.reset(), 0
+        state, reward = np.random.uniform(low=-1, high=1, size=(10,)), 0
         return state, reward
 
     def step(self, action):
-        state, reward, done, info = self.env.step(action)
-        print("-->", state, reward, done, info)
+        state = np.random.uniform(low=-1, high=1, size=(10,))
+        reward = random.randint(0, 1)
+        done = False
+
         return state, reward, done
 
-    def run_episode(self, agent_rref, n_steps):
+    def run_ob_episode(self, agent_rref, n_steps):
         state, reward = self.reset()
 
         for step in range(n_steps):
             # send the state to the agent to get an action, also updating the reward in same call to save network overhead
-            action = Coordinator.remote_method(
-                AgentBase.select_action, agent_rref, self.id, state, reward)
-
+            action = agent_rref.rpc_sync().select_action(self.id, state, reward)
             state, reward, done = self.step(action)
 
             if done:
