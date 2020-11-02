@@ -134,4 +134,4 @@
 [submodule "third_party/kineto"]
 	path = third_party/kineto
 	url = https://github.com/ilia-cher/kineto
-	branch = ic_branch_2
+	branch = cmake_fix
