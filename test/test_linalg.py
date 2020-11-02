@@ -212,10 +212,46 @@ class TestLinalg(TestCase):
         for shape, batch in itertools.product(shapes, batches):
             run_test(shape, batch)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_eigh(self, device, dtype):
         # eigh requires a square matrix
         t = torch.randn(2, 3, device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.linalg.eigh(t)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_eigh_non_contiguous(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def run_test(matrix):
+            self.assertFalse(matrix.is_contiguous())
+            expected_w, expected_v = np.linalg.eigh(matrix.cpu().numpy())
+            actual_w, actual_v = torch.linalg.eigh(matrix)
+            self.assertEqual(actual_w, expected_w)
+            # sign of eigenvectors is not unique and therefore absolute values are compared
+            self.assertEqual(abs(actual_v), abs(expected_v))
+
+        def run_test_permuted(shape, batch):
+            # check for permuted / transposed inputs
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            matrix = matrix.transpose(-2, -1)
+            run_test(matrix)
+
+        def run_test_skipped_elements(shape, batch):
+            # check for inputs with skipped elements
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            matrix = matrix[::2]
+            run_test(matrix)
+
+        shapes = (3, 5)
+        batches = ((4, ), (4, 2))
+        for shape, batch in itertools.product(shapes, batches):
+            run_test_permuted(shape, batch)
+            run_test_skipped_elements(shape, batch)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -234,10 +270,44 @@ class TestLinalg(TestCase):
         for shape, batch in itertools.product(shapes, batches):
             run_test(shape, batch)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_eigvalsh_errors(self, device, dtype):
         # eigvalsh requires a square matrix
         t = torch.randn(2, 3, device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.linalg.eigvalsh(t)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_eigvalsh_non_contiguous(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def run_test(matrix):
+            self.assertFalse(matrix.is_contiguous())
+            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy())
+            actual_w = torch.linalg.eigvalsh(matrix)
+            self.assertEqual(actual_w, expected_w)
+
+        def run_test_permuted(shape, batch):
+            # check for permuted / transposed inputs
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            matrix = matrix.transpose(-2, -1)
+            run_test(matrix)
+
+        def run_test_skipped_elements(shape, batch):
+            # check for inputs with skipped elements
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            matrix = matrix[::2]
+            run_test(matrix)
+
+        shapes = (3, 5)
+        batches = ((4, ), (4, 2))
+        for shape, batch in itertools.product(shapes, batches):
+            run_test_permuted(shape, batch)
+            run_test_skipped_elements(shape, batch)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
