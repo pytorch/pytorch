@@ -309,7 +309,7 @@ class DispatcherSignature:
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
-        dispatcher_args_types_str = ', '.join(map(lambda a: a.type, self._arguments))
+        dispatcher_args_types_str = ', '.join(a.type for a in self._arguments)
         return f'{self._returns_type} ({dispatcher_args_types_str})'
 
     @staticmethod
@@ -341,12 +341,8 @@ class NativeExpr:
 class NativeArgument:
     type: str
     name: str
-    # Native function arguments have defaults for some reasons (e.g.,
-    # the function prototypes in CPUType.h are defaulted).  There isn't
-    # really any good reason to do this, as these functions are only
-    # ever called from a context where all defaulted arguments are
-    # guaranteed to be given explicitly.
-    # TODO: Remove this
+    # Native function arguments have defaults to make it a little
+    # easier to call them directly to bypass dispatch.
     default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
 

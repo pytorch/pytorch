@@ -123,6 +123,15 @@ inline std::bitset<kVmapMaxTensorDims> createBatchDimBitset(BatchDimsRef bdims) 
   return is_bdim;
 }
 
+// Creates a bitset for all of the levels present in `bdims`
+inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(BatchDimsRef bdims) {
+  std::bitset<kVmapNumLevels> result;
+  for (const auto& bdim : bdims) {
+    result.set(bdim.level());
+  }
+  return result;
+}
+
 inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
   out << "(lvl=" << bdim.level() << ", dim=" << bdim.dim() << ")";
   return out;

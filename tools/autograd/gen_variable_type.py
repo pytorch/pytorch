@@ -101,17 +101,17 @@ DONT_PROFILE = {
     'size', 'storage_offset', 'stride',
 }
 
-# Note [Manual catchAll kernels]
-# For these ops, we want to manually register to dispatch key catchAll and
-# skip codegen-ed registeration to all keys before catchAll.
+# Note [Manual Backend kernels]
+# For these ops, we want to manually register to dispatch key Backend and
+# skip codegen-ed registeration to all keys before Backend.
 # For codegen this means:
 #   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
-#     where we skip codegen catchall kernels
+#     where we skip codegen backend kernels
 #   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
 #   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
 # Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_CATCHALL = set([
+MANUAL_BACKEND = set([
     'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
     'backward', 'requires_grad_',
 ])
@@ -123,9 +123,9 @@ MANUAL_AUTOGRAD_AND_TRACER = set([
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
-#   union(MANUAL_CATCHALL, MANUAL_AUTOGRAD_AND_TRACER)
+#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_CATCHALL | MANUAL_AUTOGRAD_AND_TRACER
+MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -164,7 +164,10 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky'
+    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
+    'bmm', 'diagonal', 'cholesky', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
+    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
+    'exp'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -282,9 +285,6 @@ grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
-CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${type_wrapper_name}(${args})""")
-
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
 
@@ -391,12 +391,6 @@ RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
 #ifndef NDEBUG
 ${statements}
 #endif
-""")
-
-# Generate a file that lists all functions and their schema string. Used for XLA
-REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${declaration_formals}); \
-// {"schema": "${schema_string}", "compound": "${compound}", "has_math_kernel": "${has_math_kernel}"}
 """)
 
 # TraceType templates
@@ -690,31 +684,6 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
-    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
-    registration_declarations = []
-
-    for declaration in aten_declarations:
-        if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-            declaration_formals = declaration['schema_order_formals']
-        else:
-            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-            declaration_formals = declaration['formals']
-        if dispatch_strategy(declaration) == 'use_derived':
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='False'))
-        else:
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='True'))
-
-    env = {
-        'registration_declarations': registration_declarations,
-    }
-    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
-
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -748,13 +717,16 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='VariableType'))
 
-        # See Note [Manual catchAll kernels]
-        assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
+        # See Note [Manual Backend kernels]
+        assert (declaration['name'] in MANUAL_BACKEND) == declaration['manual_kernel_registration']
         # If you want to register a kernel to Autograd, you must make the op abstract.
         # In other words, this op must have dispatch section in native_functions.yaml.
         if declaration['name'] in MANUAL_AUTOGRAD_AND_TRACER or declaration['derivative']:
-            msg = (f'Did you add a formula for {declaration["name"]}(or its functional variant) in derivatives.yaml?'
-                   f'If so please add a dispatch section for it with DefaultBackend in native_functions.yaml.')
+            msg = (f'There\'s a formula for {declaration["name"]}(or its functional variant) in derivatives.yaml. '
+                   f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
+                   f'or DefaultBackend in native_functions.yaml. Please see '
+                   f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
+                   f'for instructions to choose the right dispatch keyword.')
             assert declaration['abstract'], msg
 
         # Emit TraceType code
@@ -834,7 +806,7 @@ def emit_trace_body(declaration):
 
 
 def emit_body(declaration):
-    strategy = dispatch_strategy(declaration)
+    assert dispatch_strategy(declaration) == 'use_derived'
 
     arguments = declaration['arguments']
     returns = declaration['returns']
@@ -891,8 +863,7 @@ def emit_body(declaration):
 
     requires_derivative = (
         base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
-        len(differentiable_inputs) > 0 and len(differentiable_outputs) > 0 and
-        strategy == 'use_derived')
+        len(differentiable_inputs) > 0 and len(differentiable_outputs) > 0)
 
     if func is not None and not requires_derivative:
         raise RuntimeError('ERROR: derivative ignored for {} -- specified an autograd function without derivative'
@@ -1176,28 +1147,20 @@ def emit_body(declaration):
 
     def emit_call(env, tie_return_values):
         combined = nested_dict(env, declaration)
-        if strategy == 'use_derived':
-            # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
-            # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
-            # the baseType operations still dispatch to non-Variable type, even if the arguments passed
-            # in are now Variables.
-            # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
-            if not modifies_arguments and not returns_void:
-                call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
-                    base_type_call=base_type_call)
+        # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
+        # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
+        # the baseType operations still dispatch to non-Variable type, even if the arguments passed
+        # in are now Variables.
+        # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
+        base_type_call = emit_dispatch_call(combined['api_name'], 'self_', combined['unpacked_args'])
+        if not modifies_arguments and not returns_void:
+            call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
+                base_type_call=base_type_call)
 
-                call += wrap_output(tie_return_values, 'tmp')
-            else:
-                call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
-                    base_type_call=base_type_call)
+            call += wrap_output(tie_return_values, 'tmp')
         else:
-            args = maybe_unwrap_optional_tensors(declaration, declaration['arguments'], declaration['args'])
-
-            call = CALL_DEFAULT.substitute(declaration, args=args)
-            if not modifies_arguments and not returns_void:
-                call = '{} = {}'.format(tie_return_values, call)
-            call = call + ';'
+            call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
+                base_type_call=base_type_call)
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
 
@@ -1237,16 +1200,14 @@ def emit_body(declaration):
 
     declare_returned_variables, tie_return_values, get_return_value = format_return_variables(declaration)
 
-    if strategy != 'use_type':
-        body.extend(unpack_args(env, declaration))
+    body.extend(unpack_args(env, declaration))
     if requires_derivative:
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables)
 
     body.append(emit_call(env, tie_return_values))
-    if strategy == 'use_derived':
-        body.extend(emit_increment_version())
+    body.extend(emit_increment_version())
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
