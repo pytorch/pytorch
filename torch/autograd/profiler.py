@@ -428,18 +428,23 @@ class profile(object):
         self.entered = True
         if self.use_kineto:
             torch.autograd._prepare_profiler(self.config, self.kineto_activities)
-
-        torch.autograd._enable_profiler(self.config, self.kineto_activities)
+            torch.autograd._enable_profiler(self.config, self.kineto_activities)
+        else:
+            torch.autograd._enable_profiler_legacy(self.config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        records = torch.autograd._disable_profiler()
-        self.function_events = EventList(
-            parse_event_records(records),
-            use_cuda=self.use_cuda,
-            profile_memory=self.profile_memory)
+        if self.use_kineto:
+            result = torch.autograd._disable_profiler()
+            self.function_events = parse_profiler_result(result)
+        else:
+            records = torch.autograd._disable_profiler_legacy()
+            self.function_events = EventList(
+                parse_event_records(records),
+                use_cuda=self.use_cuda,
+                profile_memory=self.profile_memory)
         if self.with_stack:
             self.function_events.set_backward_stacktraces()
         return False

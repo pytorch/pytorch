@@ -70,9 +70,22 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId);
 
+  py::class_<KinetoEvent>(m, "KinetoEvent")
+      .def("name", &KinetoEvent::name)
+      .def("thread_id", &KinetoEvent::threadId)
+      .def("device_index", &KinetoEvent::deviceIndex)
+      .def("start_us", &KinetoEvent::startUs)
+      .def("duration", &KinetoEvent::duration)
+      .def("correlation_id", &KinetoEvent::correlationId)
+      .def("fwd_thread_id", &KinetoEvent::fwdThreadId)
+      .def("shapes", &KinetoEvent::shapes)
+      .def("sequence_nr", &KinetoEvent::sequenceNr)
+      .def("stack", &KinetoEvent::stack)
+      .def("scope", &KinetoEvent::scope);
+
   py::class_<ProfilerResult>(m, "ProfilerResult")
-      .def("kind", &LegacyEvent::kindStr)
-      .def("scope", &LegacyEvent::scope);
+      .def("events", &ProfilerResult::events)
+      .def("legacy_events", &ProfilerResult::legacy_events);
 
   m.def("kineto_available", kinetoAvailable);
   m.def("_enable_profiler", enableProfiler);

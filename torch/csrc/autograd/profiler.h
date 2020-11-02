@@ -23,6 +23,10 @@
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
+namespace libkineto {
+class TraceActivity;
+}
+
 namespace torch { namespace autograd {
 
 struct Node;
@@ -148,32 +152,10 @@ enum class C10_API_ENUM EventKind : uint16_t {
   PushRange,
   PopRange,
   MemoryAlloc,
-  //
-  Kineto,
 };
 
-struct TORCH_API Event {
-  explicit Event(EventKind kind) : kind_(kind) {}
-  EventKind kind() const {
-    return kind_;
-  }
-
-  std::string kindStr() const {
-    switch (kind_) {
-      case EventKind::Mark: return "mark";
-      case EventKind::PushRange: return "push";
-      case EventKind::PopRange: return "pop";
-      case EventKind::MemoryAlloc: return "memory_alloc";
-    }
-    throw std::runtime_error("unknown event kind");
-  }
-
- protected:
-  EventKind kind_;
-}
-
 // To be deprecated, once we switch to Kineto profiling
-struct TORCH_API LegacyEvent : public Event {
+struct TORCH_API LegacyEvent {
   LegacyEvent(
       EventKind kind,
       at::StringView name,
@@ -352,7 +334,18 @@ struct TORCH_API LegacyEvent : public Event {
     scope_ = scope;
   }
 
+  std::string kindStr() const {
+    switch (kind_) {
+      case EventKind::Mark: return "mark";
+      case EventKind::PushRange: return "push";
+      case EventKind::PopRange: return "pop";
+      case EventKind::MemoryAlloc: return "memory_alloc";
+    }
+    throw std::runtime_error("unknown event kind");
+  }
+
  private:
+  EventKind kind_;
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
@@ -431,14 +424,117 @@ TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
-struct TORCH_API KinetoEvent : public Event {
+enum class C10_API_ENUM KinetoDeviceType : uint16_t {
+  CPU = 0,
+  CUDA,
+  NUM_KINETO_DEVICE_TYPES, // must be the last one
+};
 
+struct TORCH_API KinetoEvent {
+  KinetoEvent(TraceActivity*) : activity_(activity) {}
+
+  std::string name() const;
+  uint64_t deviceIndex() const;
+  uint64_t startUs() const;
+  uint64_t durationUs() const;
+  uint64_t correlationId() const;
+
+  int64_t threadId() const {
+    return thread_id_;
+  }
+
+  KinetoDeviceType deviceType() const {
+    return device_type_;
+  }
+
+  int64_t fwdThreadId() const {
+    return fwd_thread_id_;
+  }
+
+  const std::vector<std::vector<int64_t>>& shapes() const {
+    return shapes_;
+  }
+
+  int64_t sequenceNr() const {
+    return sequence_nr_;
+  }
+
+  const std::vector<std::string>& stack() const {
+    return stack_;
+  }
+
+  uint8_t scope() const {
+    return scope_;
+  }
+
+  KinetoEvent& threadId(int64_t thread_id) {
+    thread_id_ = thread_id;
+    return *this;
+  }
+
+  KinetoEvent& deviceType(KinetoDeviceType device_type) {
+    device_type_ = device_type;
+    return *this;
+  }
+
+  KinetoEvent& fwdThreadId(int64_t fwd_thread_id) {
+    fwd_thread_id_ = fwd_thread_id;
+    return *this;
+  }
+
+  KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
+    shapes_ = shapes;
+    return *this;
+  }
+
+  KinetoEvent& sequenceNr(int64_t sequence_nr) {
+    sequence_nr_ = sequence_nr_;
+    return *this;
+  }
+
+  KinetoEvent& stack(const std::vector<std::string>& st) {
+    stack_ = st;
+    return *this;
+  }
+
+  KinetoEvent& scope(uint8_t scope_id) {
+    scope_id_ = scope_id;
+    return *this;
+  }
+
+ private:
+  //std::string name_;
+  //uint64_t device_index_;
+  //uint64_t start_us_;
+  //uint64_t duration_;
+  //uint64_t correlation_id_;
+
+  TraceActivity* activity_ = nullptr;
+  int64_t thread_id_ = -1;
+  KinetoDeviceType device_type_ = KinetoDeviceType::CPU,
+  int64_t fwd_thread_id_ = -1;
+  std::vector<std::vector<int64_t>> shapes_;
+  int64_t sequence_nr_ = -1;
+  std::vector<std::string> stack_;
+  uint8_t scope_ = 0;
 };
 
 struct TORCH_API ProfilerResult {
-  thread_event_lists legacy_events_; // tensor mem alloc, start/stop
+  ProfilerResult(
+      const std::vector<std::vector<KinetoEvent>>& events,
+      const thread_event_lists& legacy_events)
+    : events_(events), legacy_events_(legacy_events) {}
 
+  const std::vector<std::vector<KinetoEvent>> events() const {
+    return events_;
+  }
+
+  const thread_event_lists& legacy_events() const {
+    return legacy_events_;
+  }
+ private:
   std::vector<std::vector<KinetoEvent>> events_;
+  thread_event_lists legacy_events_; // tensor mem alloc, start/stop
 };
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
