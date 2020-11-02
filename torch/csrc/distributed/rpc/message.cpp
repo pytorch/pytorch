@@ -136,10 +136,8 @@ at::IValue Message::toIValueTuple() const {
 /* static */ Message Message::fromIValueTuple(at::IValue messageTuple) {
   TORCH_INTERNAL_ASSERT(
       messageTuple.isTuple(), "Expected messageTuple to be of type tuple.");
-  // std::vector<at::IValue> values
   std::vector<at::IValue> values = messageTuple.toTuple()->elements();
   auto payloadIValue = values[0];
-  // TODO: Check string
   TORCH_INTERNAL_ASSERT(
       payloadIValue.isString(), "Expected payload to be string");
   auto payloadString = payloadIValue.toStringRef();
@@ -152,7 +150,6 @@ at::IValue Message::toIValueTuple() const {
   auto messageTypeIValue = values[2];
   TORCH_INTERNAL_ASSERT(
       messageTypeIValue.isInt(), "Expected messageTypeIValue to be int.");
-  // TODO: check int
   MessageType messageType = static_cast<MessageType>(messageTypeIValue.toInt());
   auto messageIdIValue = values[3];
   TORCH_INTERNAL_ASSERT(
