@@ -279,6 +279,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.clip: lambda input, min=None, max=None, out=None: -1,
         torch.clamp_min: lambda input, min, out=None: -1,
         torch.clamp_max: lambda input, max, out=None: -1,
+        torch.column_stack: lambda tensors, out=None: -1,
         torch.clone: lambda input: -1,
         torch.combinations: lambda input, r=2, with_replacement=False: -1,
         torch.complex: lambda real, imag: -1,
@@ -388,6 +389,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hstack: lambda tensors, out=None: -1,
         torch.hypot: lambda input, other, out=None: -1,
         torch.ifft: lambda input, signal_ndim, normalized=False: -1,
+        torch.igamma: lambda input, other, out=None: -1,
         torch.imag: lambda input, out=None: -1,
         torch.index_add: lambda input, dim, index, source: -1,
         torch.index_copy: lambda input, dim, index, source: -1,
@@ -693,6 +695,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.roll: lambda input, shifts, dims=None: -1,
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
+        torch.row_stack: lambda tensors, out=None: -1,  # alias for torch.vstack
         torch.rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1,
         torch.rsqrt: lambda input, out=None: -1,

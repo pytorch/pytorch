@@ -103,6 +103,32 @@ TEST(VulkanAPITest, mul_scalar_) {
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
+TEST(VulkanAPITest, clamp) {
+  const auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const float min_value = 0.2f;
+  const float max_value = 0.8f;
+
+  const auto c_cpu = at::clamp(a_cpu, min_value, max_value);
+  const auto c_vulkan = at::clamp(a_vulkan, min_value, max_value);
+
+  ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
+}
+
+TEST(VulkanAPITest, clamp_) {
+  const auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const float min_value = 0.2f;
+  const float max_value = 0.8f;
+
+  a_cpu.clamp_(min_value, max_value);
+  a_vulkan.clamp_(min_value, max_value);
+
+  ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
+}
+
 TEST(VulkanAPITest, copy) {
   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
   ASSERT_TRUE(exactlyEqual(cpu, cpu.vulkan().cpu()));
