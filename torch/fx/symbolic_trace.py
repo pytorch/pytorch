@@ -6,7 +6,7 @@ import torch
 from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import Proxy, TracerBase
+from .proxy import TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -205,9 +205,6 @@ class Tracer(TracerBase):
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
-
-    def _proxy_placeholder(self, name: str, type_expr: Optional[Any] = None) -> Proxy:
-        return Proxy(self.create_node('placeholder', name, (), {}, type_expr=type_expr), self)
 
 
 # Symbolic tracing API
