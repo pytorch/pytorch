@@ -15,3 +15,4 @@ Functions
 .. autofunction:: cholesky
 .. autofunction:: det
 .. autofunction:: norm
+.. autofunction:: tensorsolve

@@ -1,6 +1,7 @@
 import torch
 import unittest
 import itertools
+import warnings
 from math import inf, nan, isnan
 from random import randrange
 
@@ -916,6 +917,126 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double)
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    def test_tensorsolve(self, device, dtype):
+        def run_test(a_shape, dims):
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            b = torch.randn(a_shape[:2], dtype=dtype, device=device)
+            result = torch.linalg.tensorsolve(a, b, dims=dims)
+            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty_like(result)
+            ans = torch.linalg.tensorsolve(a, b, dims=dims, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
+        dims = [None, (0, 2)]
+        for a_shape, d in itertools.product(a_shapes, dims):
+            run_test(a_shape, d)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double)
+    def test_tensorsolve_empty(self, device, dtype):
+        # Check for empty inputs. NumPy does not work for these cases.
+        a = torch.empty(0, 0, 1, 2, 3, 0, dtype=dtype, device=device)
+        b = torch.empty(a.shape[:2], dtype=dtype, device=device)
+        x = torch.linalg.tensorsolve(a, b)
+        self.assertEqual(torch.tensordot(a, x, dims=len(x.shape)), b)
+
+    # TODO: once "solve_cuda" supports complex dtypes, they shall be added to above tests
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_tensorsolve_xfailed(self, device, dtype):
+        a_shape = (2, 3, 6)
+        a = torch.randn(a_shape, dtype=dtype, device=device)
+        b = torch.randn(a_shape[:2], dtype=dtype, device=device)
+        result = torch.linalg.tensorsolve(a, b)
+        expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy())
+        self.assertEqual(result, expected)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double)
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    def test_tensorsolve_non_contiguous(self, device, dtype):
+        def run_test_permuted(a_shape, dims):
+            # check for permuted / transposed inputs
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            a = a.movedim((0, 2), (-2, -1))
+            self.assertFalse(a.is_contiguous())
+            b = torch.randn(a.shape[:2], dtype=dtype, device=device)
+            b = b.t()
+            self.assertFalse(b.is_contiguous())
+            result = torch.linalg.tensorsolve(a, b, dims=dims)
+            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
+            self.assertEqual(result, expected)
+
+        def run_test_skipped_elements(a_shape, dims):
+            # check for inputs with skipped elements
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            a = a[::2]
+            self.assertFalse(a.is_contiguous())
+            b = torch.randn(a_shape[:2], dtype=dtype, device=device)
+            b = b[::2]
+            self.assertFalse(b.is_contiguous())
+            result = torch.linalg.tensorsolve(a, b, dims=dims)
+            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
+            self.assertEqual(result, expected)
+
+            # check non-contiguous out
+            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
+            self.assertFalse(out.is_contiguous())
+            ans = torch.linalg.tensorsolve(a, b, dims=dims, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
+        dims = [None, (0, 2)]
+        for a_shape, d in itertools.product(a_shapes, dims):
+            run_test_permuted(a_shape, d)
+
+        a_shapes = [(4, 3, 6), (6, 4, 4, 3)]
+        dims = [None, (0, 2)]
+        for a_shape, d in itertools.product(a_shapes, dims):
+            run_test_skipped_elements(a_shape, d)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32)
+    def test_tensorsolve_errors_and_warnings(self, device, dtype):
+        # tensorsolve expects the input that can be reshaped to a square matrix
+        a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
+        b = torch.randn(8, 4)
+        self.assertTrue(np.prod(a.shape[2:]) != np.prod(b.shape))
+        with self.assertRaisesRegex(RuntimeError, r'Expected self to satisfy the requirement'):
+            torch.linalg.tensorsolve(a, b)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        out = torch.empty_like(a)
+        b = torch.randn(6, 4)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.tensorsolve(a, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            torch.linalg.tensorsolve(a, b, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
