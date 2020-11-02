@@ -121,6 +121,13 @@ class TORCH_API Message final {
   int64_t id() const;
   void setId(int64_t id);
 
+  // Converts a message to an IValue representation of the message.
+  at::IValue toIValueTuple() const;
+
+  // Given an IValue representation of a message from toIValueTuple(),
+  // constructs a Message.
+  static Message fromIValueTuple(at::IValue messageTuple);
+
  private:
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;

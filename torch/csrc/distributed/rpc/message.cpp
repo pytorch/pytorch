@@ -120,6 +120,48 @@ void Message::setId(int64_t id) {
   id_ = id;
 }
 
+at::IValue Message::toIValueTuple() const {
+  // Message has a std::vector<char> payload_ that is represented via a
+  // string, list of tensors, integer message type, and int64 id.
+  std::string payload(payload_.begin(), payload_.end());
+  c10::impl::GenericList messageTensors(at::TensorType::get());
+  messageTensors.reserve(tensors_.size());
+  for (const auto& tensor : tensors_) {
+    messageTensors.emplace_back(tensor);
+  }
+  return at::IValue(
+      c10::ivalue::Tuple::create(payload, messageTensors, type_, id_));
+}
+
+/* static */ Message Message::fromIValueTuple(at::IValue messageTuple) {
+  TORCH_INTERNAL_ASSERT(
+      messageTuple.isTuple(), "Expected messageTuple to be of type tuple.");
+  // std::vector<at::IValue> values
+  std::vector<at::IValue> values = messageTuple.toTuple()->elements();
+  auto payloadIValue = values[0];
+  // TODO: Check string
+  TORCH_INTERNAL_ASSERT(
+      payloadIValue.isString(), "Expected payload to be string");
+  auto payloadString = payloadIValue.toStringRef();
+  std::vector<char> payload(payloadString.begin(), payloadString.end());
+  auto tensorsIValue = values[1];
+  TORCH_INTERNAL_ASSERT(
+      tensorsIValue.isList(), "Expected tensorsIValue to be list");
+  std::vector<torch::Tensor> tensors = tensorsIValue.toTensorVector();
+
+  auto messageTypeIValue = values[2];
+  TORCH_INTERNAL_ASSERT(
+      messageTypeIValue.isInt(), "Expected messageTypeIValue to be int.");
+  // TODO: check int
+  MessageType messageType = static_cast<MessageType>(messageTypeIValue.toInt());
+  auto messageIdIValue = values[3];
+  TORCH_INTERNAL_ASSERT(
+      messageIdIValue.isInt(), "Expected messageIdIValue to be int.");
+  int64_t messageId = messageIdIValue.toInt();
+  return Message(
+      std::move(payload), std::move(tensors), messageType, messageId);
+}
+
 Message createExceptionResponse(const std::exception& e, int64_t id) {
   return createExceptionResponse(e.what(), id);
 }
