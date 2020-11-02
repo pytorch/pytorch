@@ -3800,6 +3800,21 @@ class TestONNXRuntime(unittest.TestCase):
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(UninitializedModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfONNXShapeInference(False)
+    def test_uninitialized_dynamic(self):
+        class UninitializedModel(torch.nn.Module):
+            def forward(self, y):
+                if y.shape[1] < 5:
+                    if y.size(0) == 1:
+                        y = y + 4
+                    else:
+                        return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
         y = torch.ones((6, 7), dtype=torch.int)
         self.run_test(UninitializedModel(), x, test_with_inputs=[y],
                       input_names=['input_1'],
