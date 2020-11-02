@@ -204,12 +204,13 @@ class LambdaLR(_LRScheduler):
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
-        NOTE: When saving or loading the scheduler, make sure to also save / load the state of the optimizer.
 
         It contains an entry for every variable in self.__dict__ which
         is not the optimizer.
         The learning rate lambda functions will only be saved if they are callable objects
         and not if they are functions or lambdas.
+
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
         """
 
         state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
@@ -223,7 +224,8 @@ class LambdaLR(_LRScheduler):
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
-        NOTE: When saving or loading the scheduler, make sure to also save / load the state of the optimizer.
+
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
 
         Arguments:
             state_dict (dict): scheduler state. Should be an object returned
