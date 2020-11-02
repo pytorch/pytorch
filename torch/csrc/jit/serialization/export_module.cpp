@@ -53,8 +53,11 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
-std::string getModulePath(Node* node) {
+std::string getModulePath(Node* node, std::unordered_map<Node*, std::string>& node_module_paths) {
   auto callStack = node->callstack();
+  for (auto it: node_module_paths) {
+    std::cout << "node: " << it.first << " value: " << it.second << std::endl;
+  }
   return callStack.has_value() ? callStack->get()->getModulePath() : "";
 }
 
@@ -67,13 +70,14 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
   return prefix + "(" + moduleType + ")";
 }
 
-void setModulePath(Node* node, const std::string& root_scope_string) {
+void setModulePath(Node* node, const std::string& root_scope_string, std::unordered_map<Node*, std::string>& node_module_paths) {
   if (!node->callstack()) {
     std::string root = root_scope_string + ".forward";
     InlinedCallStackPtr inlineCallStack =
         c10::make_intrusive<InlinedCallStack>();
     node->setCallStack(inlineCallStack);
     node->setModulePathStr(root);
+    node_module_paths[node] = root;
   } else {
     std::string module_info = root_scope_string;
     auto callstack_ptr = *(node->callstack());
@@ -102,19 +106,20 @@ void setModulePath(Node* node, const std::string& root_scope_string) {
     }
 
     node->setModulePathStr(module_info);
+    node_module_paths[node] = module_info;
   }
 }
 
 void setModulePaths(
     std::shared_ptr<Graph> graph,
-    const std::string& root_scope_string) {
+    const std::string& root_scope_string, std::unordered_map<Node*, std::string>& node_module_paths) {
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* block = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* node : block->nodes()) {
-      setModulePath(node, root_scope_string);
+      setModulePath(node, root_scope_string, node_module_paths);
       for (Block* subblock : node->blocks()) {
         blocks_to_visit.push(subblock);
       }
@@ -129,9 +134,10 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   auto graph = func.graph()->copy();
 
   Inline(*graph);
+  std::unordered_map<Node*, std::string> node_module_paths;
   if (save_mobile_debug_info) {
     std::string root_scope_string = getModuleTypeName(module, "top");
-    setModulePaths(graph, root_scope_string);
+    setModulePaths(graph, root_scope_string, node_module_paths);
   }
 
   torch::jit::Code code(graph, func.name());
@@ -147,7 +153,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
-        op_module_paths.emplace_back(getModulePath(node));
+        op_module_paths.emplace_back(getModulePath(node, node_module_paths));
       }
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)

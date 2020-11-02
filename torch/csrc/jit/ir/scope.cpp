@@ -134,7 +134,6 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   return r;
 }
 
-<<<<<<< HEAD
 void InlinedCallStack::setModulePath(std::string path) {
   modulePath_ = path;
 }
@@ -143,8 +142,6 @@ std::string InlinedCallStack::getModulePath() {
   return modulePath_;
 }
 
-=======
->>>>>>> 84bec65c5b... [Pytorch][Annotation] Update inlined callstack with module instance info
 ModuleInstanceInfo::ModuleInstanceInfo(
     c10::ClassTypePtr module_type,
     std::string instance_name)
