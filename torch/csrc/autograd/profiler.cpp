@@ -181,6 +181,41 @@ size_t cur_correlation_id() {
   return corr_id_;
 }
 
+#ifdef USE_KINETO
+struct KinetoEventImpl : public KinetoEvent {
+  static void fromClientActivity(const libkineto::ClientTraceActivity* activity) {
+
+  }
+
+  static void fromDeviceActivity(const libkineto::TraceActivity* activity) {
+
+  }
+
+  std::string name() const override  {
+
+  }
+
+  uint64_t deviceIndex() const override {
+
+  }
+
+  uint64_t startUs() const override {
+
+  }
+
+  uint64_t durationUs() const override {
+
+  }
+
+  uint64_t correlationId() const override {
+
+  }
+
+ private:
+  libkineto::TraceActivity* activity_ptr_;
+}
+#endif
+
 // Profiler state
 struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   explicit ProfilerThreadLocalState(const ProfilerConfig& config)
@@ -340,7 +375,10 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       op.inputTypes = folly::toJson(fc.input_types);*/
       {
         std::lock_guard<std::mutex> guard(state_mutex_);
-        kineto_client_activities_.emplace_back(std::move(op));
+        kineto_client_activities_.emplace_back(op);
+        kineto_events_.emplace_back(
+            KinetoEventImpl::fromClientActivity(
+                &(kineto_client_activities_.back())));
       }
       return;
     }
@@ -448,7 +486,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
 
 #ifdef USE_KINETO
   std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
-  std::vector<KinetoEvent> kineto_events_;
+  std::vector<KinetoEventImpl> kineto_events_;
 #endif
 };
 

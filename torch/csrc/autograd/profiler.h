@@ -23,10 +23,6 @@
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
-namespace libkineto {
-class TraceActivity;
-}
-
 namespace torch { namespace autograd {
 
 struct Node;
@@ -431,13 +427,11 @@ enum class C10_API_ENUM KinetoDeviceType : uint16_t {
 };
 
 struct TORCH_API KinetoEvent {
-  KinetoEvent(TraceActivity*) : activity_(activity) {}
-
-  std::string name() const;
-  uint64_t deviceIndex() const;
-  uint64_t startUs() const;
-  uint64_t durationUs() const;
-  uint64_t correlationId() const;
+  virtual std::string name() const = 0;
+  virtual uint64_t deviceIndex() const = 0;
+  virtual uint64_t startUs() const = 0;
+  virtual uint64_t durationUs() const = 0;
+  virtual uint64_t correlationId() const = 0;
 
   int64_t threadId() const {
     return thread_id_;
