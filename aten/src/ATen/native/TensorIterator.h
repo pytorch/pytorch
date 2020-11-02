@@ -297,7 +297,7 @@ struct CAFFE2_API TensorIterator {
     return true;
   }
 
-  friend std::ostream& operator<<(std::ostream& os, const TensorIterator& iter);
+  friend CAFFE2_API std::ostream& operator<<(std::ostream& os, const TensorIterator& iter);
 
 protected:
   void build(TensorIteratorConfig&);
