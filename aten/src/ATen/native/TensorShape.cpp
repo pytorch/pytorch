@@ -335,7 +335,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     int64_t cumulative_offset = 0;
     for (size_t i = 0; i < tensors.size(); ++i) {
       auto const &t = tensors[i];
-      int64_t this_piece_size = t.nse(false);
+      int64_t this_piece_size = t._nse();
       // cumulative_offset is zero for the first piece, so
       // don't waste time doing this operation unless i > 0.
       if (i > 0) {

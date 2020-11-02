@@ -955,7 +955,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           data_[i + 4] = tensor.size(sparse_dim + i);
         }
       }
-      data_[8] = tensor.nse(false);
+      data_[8] = tensor._nse();
     }
 
     std::vector<int64_t> sizes() const {

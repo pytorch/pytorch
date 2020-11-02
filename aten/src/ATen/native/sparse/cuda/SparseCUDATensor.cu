@@ -29,7 +29,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   if (self.is_coalesced()) {
     return self;
   }
-  int64_t nse = self.nse(false);
+  int64_t nse = self._nse();
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nse < 2) {

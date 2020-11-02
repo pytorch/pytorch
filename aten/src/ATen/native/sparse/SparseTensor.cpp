@@ -394,7 +394,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   }
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
-  if (self.nse(false) < 2) {
+  if (self._nse() < 2) {
     SparseTensor dst = self.clone();
     dst._coalesced_(true);
     return dst;
@@ -404,7 +404,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   Tensor values = self._values().contiguous();
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
-  int64_t nse = self.nse(false);
+  int64_t nse = self._nse();
 
   LongTensor indices_scalar = flatten_indices(indices, self.sizes());
 
@@ -418,7 +418,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
   std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
-  // NB: The accessor accesses here rely on self.nse(false) > 0 (tested earlier in this function)
+  // NB: The accessor accesses here rely on self._nse() > 0 (tested earlier in this function)
   auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
   auto indicesAccessor = indices.accessor<int64_t, 2>();
   auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
@@ -496,7 +496,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   TORCH_CHECK(!r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
   TORCH_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
   resize_as_sparse_(r, mask);
-  if (mask.nse(false) == 0) {
+  if (mask._nse() == 0) {
     return r.zero_();
   }
   int64_t dim = t.dim();
@@ -506,7 +506,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   alias_into_sparse(r, mask_indices.clone(), r_values);
   r._coalesced_(mask.is_coalesced());
-  int64_t r_nse = mask.nse(false);
+  int64_t r_nse = mask._nse();
   get_sparse_impl(r)->set_nse_and_narrow(r_nse);
 
   if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
@@ -517,7 +517,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
 
     // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices ].
     // Keeping this implementation because it is faster than flatten_indices()
-    LongTensor indices = at::zeros({mask.nse(false)}, mask_indices.options());
+    LongTensor indices = at::zeros({mask._nse()}, mask_indices.options());
     for (int64_t d = 0; d < mask.sparse_dim(); d++) {
       indices.mul_(mask.size(d));
       indices.add_(mask_indices.select(0, d));

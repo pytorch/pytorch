@@ -4449,10 +4449,11 @@
 # Goals: 1. Flexible API for users to write custom sparse ops
 #        2. ctor and member accessor with autograd support
 #
-# To achieve 1, we need to provide a set of *dangerous* APIs (dangerous in the
-# sense that misusing them will break sparse tensor invariant and may out in
-# unexpected behavior, e.g., crash).
-# We provide:
+# To achieve 1, we need to provide a set of *dangerous* APIs
+# (dangerous in the sense that misusing them will break sparse tensor
+# invariant and may out in unexpected behavior, e.g., crash). These
+# methods are all prefixed with underscore "_" to indicate that they
+# should be used with care.  We provide:
 #
 #   + `_indices()`: returns the *raw* indices within the sparse tensor
 #                   (not just sharing storage). Any inplace operation
