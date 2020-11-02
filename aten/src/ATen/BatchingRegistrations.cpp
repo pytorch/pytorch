@@ -337,11 +337,16 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 }
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor unary_pointwise_batching_rule(const Tensor& input, ExtraArgs... args) {
+Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
   auto* input_batched = unsafeGetBatchedImpl(input);
   auto output_physical = Func(input_batched->value(), args...);
   auto old_bdims = input_batched->bdims();
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+}
+
+template <typename F, F Func, typename... ExtraArgs>
+Tensor unary_pointwise_batching_rule(const Tensor& input, ExtraArgs... args) {
+  return unwrap_and_call<F, Func, ExtraArgs...>(input, args...);
 }
 
 template <typename F, F Func, typename... ExtraArgs>
@@ -567,7 +572,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
-  m.impl("conj", native::conj);
 
   // view operations
   m.impl("chunk", chunk_batching_rule);
@@ -682,6 +686,17 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
 #undef BINARY_POINTWISE_VA
 #undef BINARY_POINTWISE
+
+
+#define TRIVIAL_OP(op) m.impl(#op, \
+    unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
+  // complex number view operators
+  TRIVIAL_OP(imag)
+  TRIVIAL_OP(conj);
+  TRIVIAL_OP(real);
+  TRIVIAL_OP(view_as_complex);
+  TRIVIAL_OP(view_as_real);
+#undef TRIVIAL
 
   // matmul-like operators
   m.impl("mv", mv_batching_rule);

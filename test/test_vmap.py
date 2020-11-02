@@ -1210,6 +1210,45 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
+    def _test_complex_views(self, op, dtypes, shape_postfix=()):
+        test = self._vmap_view_test
+
+        def run_test(op, dtype):
+            def get(shape):
+                shape = shape + list(shape_postfix)
+                return torch.randn(shape, dtype=dtype)
+
+            B0, B1 = 7, 11
+            test = self._vmap_view_test
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3])])
+            test(op, [get([2, 5, B0, 3])], in_dims=2)
+            test(op, [get([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1])])
+            test(vmap(op), [get([B1, 2, 5, B0, 3])], in_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
+        for dtype in dtypes:
+            run_test(op, dtype)
+
+    def test_real(self):
+        self._test_complex_views(torch.real, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_imag(self):
+        self._test_complex_views(torch.imag, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_view_as_real(self):
+        self._test_complex_views(torch.view_as_real, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_view_as_complex(self):
+        self._test_complex_views(torch.view_as_complex,
+                                 dtypes=[torch.float, torch.double],
+                                 shape_postfix=[2])
+
     def test_is_complex(self):
         ctensor = torch.randn(3, dtype=torch.cfloat)
         tensor = torch.randn(3)
