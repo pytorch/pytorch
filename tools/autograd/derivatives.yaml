@@ -434,7 +434,7 @@
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 
 - name: exp(Tensor self) -> Tensor
-  self: grad * result
+  self: grad * result.conj()
 
 - name: exp2(Tensor self) -> Tensor
   self: grad * result * M_LN2
@@ -539,6 +539,10 @@
 
 - name: i0(Tensor self) -> Tensor
   self: not_implemented("i0")
+
+- name: igamma(Tensor self, Tensor other) -> Tensor
+  self: 'not_implemented("igamma: input")'
+  other: grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
@@ -1182,7 +1186,7 @@
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
-  grad_output: embedding_dense_double_backward(grad, indices)
+  grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
   indices: non_differentiable
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
