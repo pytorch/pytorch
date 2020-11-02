@@ -141,7 +141,6 @@ struct TORCH_API ProfilerConfig {
 
   // Reconstructs a ProfilerConfig from IValues given by toIValue.
   static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
-
 };
 
 enum class C10_API_ENUM EventKind : uint16_t {
@@ -149,10 +148,22 @@ enum class C10_API_ENUM EventKind : uint16_t {
   PushRange,
   PopRange,
   MemoryAlloc,
+  //
+  Kineto,
 };
 
-struct TORCH_API Event final {
-  Event(
+struct TORCH_API Event {
+  explicit Event(EventKind kind) : kind_(kind) {}
+  EventKind kind() const {
+    return kind_;
+  }
+
+ protected:
+  EventKind kind_;
+}
+
+struct TORCH_API LegacyEvent : public Event {
+  LegacyEvent(
       EventKind kind,
       at::StringView name,
       uint16_t thread_id,
@@ -169,8 +180,8 @@ struct TORCH_API Event final {
     record(record_cuda);
   }
 
-  // Constructor to be used in conjunction with Event::fromIValue.
-  Event(
+  // Constructor to be used in conjunction with v::fromIValue.
+  LegacyEvent(
       EventKind kind,
       at::StringView name,
       uint16_t thread_id,
@@ -209,22 +220,17 @@ struct TORCH_API Event final {
   at::IValue toIValue() const;
 
   // Reconstructs an event from IValues given by toIValue.
-  static Event fromIValue(const at::IValue& eventIValue);
+  static LegacyEvent fromIValue(const at::IValue& eventIValue);
 
   void record(bool record_cuda);
-  std::string kind() const {
-    switch(kind_) {
+  std::string kindStr() const {
+    switch (kind_) {
       case EventKind::Mark: return "mark";
       case EventKind::PushRange: return "push";
       case EventKind::PopRange: return "pop";
       case EventKind::MemoryAlloc: return "memory_alloc";
     }
     throw std::runtime_error("unknown EventKind");
-  }
-
-  // Get enum kind of this event.
-  EventKind eventKind() const {
-    return kind_;
   }
 
   const char* name() const {
@@ -239,7 +245,7 @@ struct TORCH_API Event final {
     return shapes_;
   }
 
-  double cpuElapsedUs(const Event& e) const {
+  double cpuElapsedUs(const LegacyEvent& e) const {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
 
@@ -247,22 +253,14 @@ struct TORCH_API Event final {
     return cpu_ns_ / (1000.0);
   }
 
-  void setCpuUS(double cpu_us) {
+  void setCpuUs(double cpu_us) {
     cpu_ns_ = (int64_t)(cpu_us * 1000);
   }
 
-  double cudaElapsedUs(const Event& e) const;
+  double cudaElapsedUs(const LegacyEvent& e) const;
 
   bool hasCuda() const {
     return cuda_event != nullptr || (isRemote() && device_ != -1);
-  }
-
-  int device() const {
-    return device_;
-  }
-
-  void setDevice(int device) {
-    device_ = device;
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
@@ -356,7 +354,6 @@ struct TORCH_API Event final {
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
-  EventKind kind_;
   uint64_t thread_id_;
   uint64_t fwd_thread_id_;
   at::RecordFunctionHandle handle_ {0};
@@ -376,6 +373,10 @@ struct TORCH_API Event final {
   uint64_t correlation_id_;
 };
 
+struct TORCH_API KinetoEvent : public Event {
+
+};
+
 // a linked-list of fixed sized vectors, to avoid
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
@@ -390,9 +391,9 @@ struct RangeEventList {
     events_.emplace_back(std::forward<Args>(args)...);
   }
 
-  std::vector<Event> consolidate() {
+  std::vector<LegacyEvent> consolidate() {
     std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<Event> result;
+    std::vector<LegacyEvent> result;
     result.insert(
         result.begin(),
         std::make_move_iterator(events_.begin()),
@@ -410,29 +411,40 @@ struct RangeEventList {
   // This mutex is used to serialize access when different threads are writing
   // to the same instance of RangeEventList.
   std::mutex mutex_;
-  std::vector<Event> events_;
+  std::vector<LegacyEvent> events_;
 
   static const size_t kReservedCapacity = 1024;
 };
 
-using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
-TORCH_API void enableProfiler(const ProfilerConfig&);
-TORCH_API thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profilerDisableOptions = c10::nullopt);
+TORCH_API void enableProfilerLegacy(const ProfilerConfig&);
+
+using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
+TORCH_API thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions = c10::nullopt);
+
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
-TORCH_API void addEventList(std::vector<Event>&& profiledEvents);
+TORCH_API void addEventList(std::vector<LegacyEvent>&& profiledEvents);
 // Returns if the profiler is currently enabled in the current thread.
 TORCH_API bool profilerEnabled();
 // Retrieve the thread_local ProfilerConfig.
 TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
-TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& events);
+TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
+
+
+struct TORCH_API ProfilerResult {
+  thread_event_lists legacy_events_; // mem alloc, start/stop
+
+  std::vector<std::vector<KinetoEvent>> events_;
+};
+TORCH_API void enableProfiler(const ProfilerConfig&);
+TORCH_API ProfilerResult disableProfiler();
 
 TORCH_API bool kinetoAvailable();
 TORCH_API void prepareProfiler(
-    const ProfilerConfig& new_config,
+    const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 
 // Usage:
@@ -450,7 +462,7 @@ private:
   void init();
   std::unique_ptr<std::ofstream> file_;
   std::ostream& out_;
-  void processEvents(const std::vector<Event*>& events);
+  void processEvents(const std::vector<LegacyEvent*>& events);
 };
 
 // A guard that enables the profiler, taking in an optional callback to process

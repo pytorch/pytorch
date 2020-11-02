@@ -80,7 +80,7 @@ std::shared_ptr<FutureMessage> RequestCallbackNoPython::processMessage(
           if (serverProcessGlobalProfilerStateStackEntryPtr) {
             // Initialize thread-local profiler state from process-global
             // profiler state.
-            ::torch::autograd::profiler::enableProfiler(
+            ::torch::autograd::profiler::enableProfilerLegacy(
                 serverProcessGlobalProfilerStateStackEntryPtr->statePtr()
                     ->config());
           }
@@ -529,7 +529,7 @@ void RequestCallbackNoPython::processRpc(
                                              responseFuture,
                                              profilingKeyId,
                                              profilingConfig] {
-              std::vector<torch::autograd::profiler::Event> profiledEvents;
+              std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents;
               // Defer consolidation of profiler events until async work has
               // completed (such as async UDF)
 

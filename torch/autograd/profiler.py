@@ -380,16 +380,13 @@ class profile(object):
         self.profiler_kind = None
         self.kineto_activities = []
         if self.use_kineto:
+            self.profiler_kind = torch.autograd.ProfilerState.KINETO
+            self.kineto_activities = [torch.autograd.ProfilerActivity.CPU]
             if self.use_cuda:
-                self.profiler_kind = torch.autograd.ProfilerState.KINETO
-                self.kineto_activities = [
-                    torch.autograd.ProfilerActivity.CPU,
+                self.kineto_activities += [
                     # uses CUPTI
                     torch.autograd.ProfilerActivity.CUDA_RUNTIME,
                     torch.autograd.ProfilerActivity.CUDA]
-            else:
-                # intially we're not using Kineto for CPU only case
-                self.profiler_kind = torch.autograd.ProfilerState.CPU
         elif self.use_cuda:
             # legacy CUDA mode
             self.profiler_kind = torch.autograd.ProfilerState.CUDA
@@ -398,7 +395,10 @@ class profile(object):
         self.kineto_activities = set(self.kineto_activities)
 
         if self.profiler_kind == torch.autograd.ProfilerState.KINETO:
-            assert torch.autograd.kineto_available()
+            assert (
+                torch.autograd.kineto_available()
+            ), """Requested Kineto profiling but Kineto is not available,
+                  make sure PyTorch is built with USE_KINETO=1"""
 
         self.config = torch.autograd.ProfilerConfig(
             self.profiler_kind,

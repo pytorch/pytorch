@@ -50,36 +50,40 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<ProfilerState, bool, bool, bool>());
 
-  py::class_<Event>(m, "ProfilerEvent")
-      .def("kind", &Event::kind)
-      .def("name", [](const Event& e) { return e.name(); })
-      .def("thread_id", &Event::threadId)
-      .def("fwd_thread_id", &Event::fwdThreadId)
-      .def("device", &Event::device)
-      .def("cpu_elapsed_us", &Event::cpuElapsedUs)
-      .def("cuda_elapsed_us", &Event::cudaElapsedUs)
-      .def("has_cuda", &Event::hasCuda)
-      .def("shapes", &Event::shapes)
-      .def("cpu_memory_usage", &Event::cpuMemoryUsage)
-      .def("cuda_memory_usage", &Event::cudaMemoryUsage)
-      .def("handle", &Event::handle)
-      .def("node_id", &Event::nodeId)
-      .def("is_remote", &Event::isRemote)
-      .def("sequence_nr", &Event::sequenceNr)
-      .def("stack", &Event::stack)
-      .def("scope", &Event::scope)
-      .def("device_id", &Event::device);
+  py::class_<LegacyEvent>(m, "ProfilerEvent")
+      .def("kind", &LegacyEvent::kindStr)
+      .def("name", [](const LegacyEvent& e) { return e.name(); })
+      .def("thread_id", &LegacyEvent::threadId)
+      .def("fwd_thread_id", &LegacyEvent::fwdThreadId)
+      .def("device", &LegacyEvent::device)
+      .def("cpu_elapsed_us", &LegacyEvent::cpuElapsedUs)
+      .def("cuda_elapsed_us", &LegacyEvent::cudaElapsedUs)
+      .def("has_cuda", &LegacyEvent::hasCuda)
+      .def("shapes", &LegacyEvent::shapes)
+      .def("cpu_memory_usage", &LegacyEvent::cpuMemoryUsage)
+      .def("cuda_memory_usage", &LegacyEvent::cudaMemoryUsage)
+      .def("handle", &LegacyEvent::handle)
+      .def("node_id", &LegacyEvent::nodeId)
+      .def("is_remote", &LegacyEvent::isRemote)
+      .def("sequence_nr", &LegacyEvent::sequenceNr)
+      .def("stack", &LegacyEvent::stack)
+      .def("scope", &LegacyEvent::scope);
 
-  py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
-    .def(py::init<bool, bool>());
+  py::class_<ProfilerResult>(m, "ProfilerResult")
+      .def("kind", &LegacyEvent::kindStr)
+      .def("scope", &LegacyEvent::scope);
 
   m.def("kineto_available", kinetoAvailable);
-
-  m.def("_prepare_profiler", prepareProfiler);
   m.def("_enable_profiler", enableProfiler);
+  m.def("_disable_profiler", disableProfiler);
+  m.def("_prepare_profiler", prepareProfiler);
+
+  m.def("_enable_profiler_legacy", enableProfilerLegacy);
+  py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
+      .def(py::init<bool, bool>());
   m.def(
-      "_disable_profiler",
-      disableProfiler,
+      "_disable_profiler_legacy",
+      disableProfilerLegacy,
       py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
   m.def("_enable_record_function", [](bool enable) {

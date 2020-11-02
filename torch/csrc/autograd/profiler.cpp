@@ -173,7 +173,7 @@ struct FileLineFunc {
   std::string funcname;
 };
 
-static std::atomic<size_t> corr_id_ {};
+thread_local size_t corr_id_ = 0;
 size_t next_correlation_id() {
   return corr_id_++;
 }
