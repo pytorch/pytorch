@@ -92,6 +92,14 @@ void hypot_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void igamma_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return calc_igamma(a, b);
+    });
+  });
+}
+
 void nextafter_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "nextafter_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -102,7 +110,7 @@ void nextafter_kernel_cuda(TensorIterator& iter) {
 
 void heaviside_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(), "heaviside_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a == 0 ? b : static_cast<scalar_t>(a > 0);
     });
   });
@@ -116,6 +124,7 @@ REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
+REGISTER_DISPATCH(igamma_stub, &igamma_kernel_cuda);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda);
 

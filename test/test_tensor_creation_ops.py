@@ -702,6 +702,23 @@ class TestTensorCreation(TestCase):
         for dtype in torch.testing.get_all_dtypes():
             if dtype == torch.bfloat16:
                 continue
+            # Test the RuntimeError is raised when either m or n is a negative number
+            for n, m in ((-1, 1), (1, -1), (-1, -1)):
+                with self.assertRaisesRegex(RuntimeError, 'must be greater or equal to'):
+                    torch.eye(n, m, device=device, dtype=dtype)
+
+            # Test when the `m` parameter is not provided
+            for n in (3, 5, 7):
+                res1 = torch.eye(n, device=device, dtype=dtype)
+                naive_eye = torch.zeros(n, n, dtype=dtype, device=device)
+                naive_eye.diagonal(dim1=-2, dim2=-1).fill_(1)
+                self.assertEqual(naive_eye, res1)
+
+                # Check eye_out outputs
+                res2 = torch.empty(0, device=device, dtype=dtype)
+                torch.eye(n, out=res2)
+                self.assertEqual(res1, res2)
+
             for n, m in product([3, 5, 7], repeat=2):
                 # Construct identity using diagonal and fill
                 res1 = torch.eye(n, m, device=device, dtype=dtype)
