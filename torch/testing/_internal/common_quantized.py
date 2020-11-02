@@ -21,27 +21,16 @@ def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                      * (dilation - 1)) / stride) + 2 * output_padding + 1
 
 # Quantization references
-def _quantize(x, scale=None, zero_point=None, qmin=None, qmax=None,
-              dtype=np.uint8):
+def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
     """Quantizes a numpy array."""
     if qmin is None:
         qmin = np.iinfo(dtype).min
     if qmax is None:
         qmax = np.iinfo(dtype).max
-    if scale is None:
-        fmin = min(x.min().item(), 0)
-        fmax = max(x.max().item(), 0)
-        if fmin == fmax:
-            scale = 1.0
-        else:
-            scale = (fmax - fmin) / (qmax - qmin)
-    if zero_point is None:
-        zero_point = int(round(qmin - fmin / scale))
-        zero_point = np.clip(zero_point, qmin, qmax)
     qx = np.round(x / scale + zero_point).astype(np.int64)
     qx = np.clip(qx, qmin, qmax)
     qx = qx.astype(dtype)
-    return qx, scale, zero_point
+    return qx
 
 
 def _dequantize(qx, scale, zero_point):

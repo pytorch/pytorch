@@ -128,13 +128,26 @@ else()
       torch
       torch_cpu
       c10
-      nnpack
-      XNNPACK
-      pytorch_qnnpack
-      pthreadpool
       cpuinfo
       clog
   )
+
+  if(USE_NNPACK)
+    list(APPEND pytorch_jni_LIBS nnpack)
+  endif()
+
+  if(USE_XNNPACK)
+    list(APPEND pytorch_jni_LIBS XNNPACK)
+  endif()
+
+  if(USE_SYSTEM_PTHREADPOOL)
+    list(APPEND pytorch_jni_LIBS pthreadpool)
+  endif()
+
+  if(USE_PYTORCH_QNNPACK)
+    list(APPEND pytorch_jni_LIBS pytorch_qnnpack)
+  endif()
+
 endif()
 
 if(USE_VULKAN)

@@ -80,9 +80,7 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     )
     if b_q is not None:
         Prod_XqWq_ref += b_q
-    Y_q_ref, _, _ = _quantize(Prod_XqWq_ref,
-                              Y_scale / (X_scale * W_scale),
-                              Y_zp)
+    Y_q_ref = _quantize(Prod_XqWq_ref, Y_scale / (X_scale * W_scale), Y_zp)
     return Y_q_ref
 
 """Computes the output shape given pooling parameters."""
@@ -93,9 +91,9 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
     output_size = (
         (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
          + (stride - 1 if ceiling_mode else 0)) // stride + 1)
-    if (padding > 0 and
+    if (ceiling_mode and
             ((output_size - 1) * stride >= input_size + padding)):
-        output_size += 1
+        output_size -= 1
     return output_size
 
 """
@@ -754,7 +752,7 @@ class TestQuantizedOps(TestCase):
 
             # Add ReLU ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            qC, _, _ = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -768,8 +766,7 @@ class TestQuantizedOps(TestCase):
             # Add + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu, _, _ = _quantize(Crelu, scale, zero_point,
-                                     dtype=np_dtype[dtype])
+            qCrelu = _quantize(Crelu, scale, zero_point, dtype=np_dtype[dtype])
             qCrelu_hat = add_relu(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized addition with ReLU failed.")
@@ -810,8 +807,7 @@ class TestQuantizedOps(TestCase):
 
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            qC, _, _ = _quantize(C, scale_C, zero_point_C,
-                                 dtype=np_dtype[dtype])
+            qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -825,8 +821,7 @@ class TestQuantizedOps(TestCase):
             # Add + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu, _, _ = _quantize(Crelu, scale_C, zero_point_C,
-                                     dtype=np_dtype[dtype])
+            qCrelu = _quantize(Crelu, scale_C, zero_point_C, dtype=np_dtype[dtype])
             qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized addition with ReLU failed.")
@@ -857,7 +852,7 @@ class TestQuantizedOps(TestCase):
 
             # mul ReLU ground truth
             C = (qA.dequantize() * qB.dequantize()).numpy()
-            qC, _, _ = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
             qC_hat = mul(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized mulition failed.")
@@ -871,8 +866,7 @@ class TestQuantizedOps(TestCase):
             # mul + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu, _, _ = _quantize(Crelu, scale, zero_point,
-                                     dtype=np_dtype[dtype])
+            qCrelu = _quantize(Crelu, scale, zero_point, dtype=np_dtype[dtype])
             qCrelu_hat = mul_relu(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized mulition with ReLU failed.")
@@ -924,7 +918,7 @@ class TestQuantizedOps(TestCase):
 
             # mul ground truth
             C = (qA.dequantize() * qB.dequantize()).numpy()
-            qC, _, _ = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
             qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized multiplication failed.")
@@ -938,8 +932,7 @@ class TestQuantizedOps(TestCase):
             # mul + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu, _, _ = _quantize(Crelu, scale_C, zero_point_C,
-                                     dtype=np_dtype[dtype])
+            qCrelu = _quantize(Crelu, scale_C, zero_point_C, dtype=np_dtype[dtype])
             qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized multiplication with ReLU failed.")
@@ -977,7 +970,7 @@ class TestQuantizedOps(TestCase):
 
         # mul ground truth
         C = (qA.dequantize() * qB.dequantize()).numpy()
-        qC, _, _ = _quantize(C, scale_C, zero_point_C)
+        qC = _quantize(C, scale_C, zero_point_C)
         qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized multiplication failed.")
@@ -3153,12 +3146,14 @@ class TestQuantizedConv(TestCase):
 
         W = torch.from_numpy(W).float()
         bias = torch.from_numpy(bias).float()
-
+        if channelwise and transposed:
+            # currently transposed conv and per-channel per quantization does not work
+            return
         if channelwise:
             if transposed:
-                output_channels = W.shape[1]
+                output_channels = W.shape[1]  # IC OC/G
             else:
-                output_channels = W.shape[0]
+                output_channels = W.shape[0]  # OC IC/G
             W_scale = torch.tensor([W_scale] * output_channels)
             W_zero_point = torch.tensor([W_zero_point] * output_channels)
             W_q = torch.quantize_per_channel(
@@ -3559,8 +3554,6 @@ class TestQuantizedConv(TestCase):
             Y_scale,
             Y_zero_point,
             use_bias):
-        if not qengine_is_qnnpack():
-            return  # Currently only QNNPACK is supported
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
         assume(o_pad_h < stride_h or o_pad_h < dilation)
@@ -3597,6 +3590,122 @@ class TestQuantizedConv(TestCase):
 
         # Test the module implementation
         qconv_op = torch.nn.quantized.ConvTranspose2d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        qconv_op.scale = Y_scale
+        qconv_op.zero_point = Y_zero_point
+        qconv_op.set_weight_bias(W_q, bias_float)
+
+        Y_dq_ref = conv_op(X_q.dequantize())
+        Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                            zero_point=Y_zero_point,
+                                            dtype=torch.quint8)
+        Y_q = qconv_op(X_q)
+        self.assertEqual(Y_q_ref, Y_q)
+
+    """Tests the correctness of quantized convolution op."""
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           time=st.integers(2, 5),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 3),
+           kernel_t=st.integers(1, 7),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_t=st.integers(1, 2),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_t=st.integers(0, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           o_pad_t=st.integers(0, 2),
+           o_pad_h=st.integers(0, 2),
+           o_pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans())
+    @override_qengines
+    def test_qconv_transpose3d(
+            self,
+            batch_size,
+            input_channels_per_group,
+            time,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_t,
+            kernel_h,
+            kernel_w,
+            stride_t,
+            stride_h,
+            stride_w,
+            pad_t,
+            pad_h,
+            pad_w,
+            o_pad_t,
+            o_pad_h,
+            o_pad_w,
+            dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_zero_point,
+            Y_scale,
+            Y_zero_point,
+            use_bias):
+        if qengine_is_qnnpack():
+            return  # QNNPACK doesn't support this
+        assume(o_pad_t < stride_t or o_pad_t < dilation)
+        assume(o_pad_h < stride_h or o_pad_h < dilation)
+        assume(o_pad_w < stride_w or o_pad_w < dilation)
+
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_t, kernel_h, kernel_w)
+        strides = (stride_t, stride_h, stride_w)
+        pads = (pad_t, pad_h, pad_w)
+        o_pads = (o_pad_t, o_pad_h, o_pad_w)
+        dilations = (dilation, dilation, dilation)
+
+        qconv = torch.ops.quantized.conv_transpose3d
+        qconv_prepack = torch.ops.quantized.conv_transpose3d_prepack
+        conv_op = torch.nn.ConvTranspose3d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        X_q, W_q, bias_float = self._test_qconv_impl(
+            qconv, qconv_prepack, conv_op, batch_size,
+            input_channels_per_group, (time, height, width),
+            output_channels_per_group, groups, kernels, strides, pads, o_pads,
+            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, use_relu=False,
+            use_channelwise=False, use_transpose=True)
+
+        # Test the module implementation
+        qconv_op = torch.nn.quantized.ConvTranspose3d(
             in_channels=input_channels,
             out_channels=output_channels,
             kernel_size=kernels,
@@ -3686,8 +3795,6 @@ class TestQuantizedConv(TestCase):
             return
         if qengine == 'qnnpack':
             assume(not channelwise)  # QNNPACK doesn't support channelwise
-        else:
-            assume(not transposed)  # Only QNNPACK supports transposed conv
         if transposed:
             qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
             qconv_unpack = torch.ops.quantized.conv_transpose2d_unpack
@@ -3872,22 +3979,26 @@ class TestQuantizedConv(TestCase):
         stride_w=st.integers(1, 2),
         pad_d=st.integers(1, 2), pad_h=st.integers(1, 2),
         pad_w=st.integers(1, 2),
-        channelwise=st.booleans(),
-        qengine=st.sampled_from(("fbgemm",)))
+        o_pad=st.integers(0, 2),
+        channelwise=st.booleans())
+    @override_qengines
     def test_qconv3d_unpack(
-        self, inputs, stride_d, stride_h, stride_w, pad_d, pad_h, pad_w,
-        channelwise, qengine
+        self, inputs, stride_d, stride_h, stride_w, pad_d, pad_h, pad_w, o_pad,
+        channelwise
     ):
-        if qengine not in supported_qengines:
-            return
-
-        with override_quantized_engine(qengine):
-            qconv3d_prepack = torch.ops.quantized.conv3d_prepack
-            qconv3d_unpack = torch.ops.quantized.conv3d_unpack
-            self._test_qconv_unpack_impl(
-                qconv3d_prepack, qconv3d_unpack, inputs,
-                (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), None,
-                channelwise)
+        if qengine_is_qnnpack():
+            return  # QNNPACK doesn't support this
+        transposed = inputs[-1]
+        if transposed:
+            qconv_prepack = torch.ops.quantized.conv_transpose3d_prepack
+            qconv_unpack = torch.ops.quantized.conv_transpose3d_unpack
+        else:
+            qconv_prepack = torch.ops.quantized.conv3d_prepack
+            qconv_unpack = torch.ops.quantized.conv3d_unpack
+        self._test_qconv_unpack_impl(
+            qconv_prepack, qconv_unpack, inputs,
+            (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w), (o_pad, o_pad, o_pad),
+            channelwise)
 
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
@@ -4092,7 +4203,7 @@ class TestQNNPackOps(TestCase):
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
 
-            qC, _, _ = _quantize(C, scale_C, zero_point_C)
+            qC = _quantize(C, scale_C, zero_point_C)
 
             qC_qnnp = torch.ops.quantized.add(qA, qB, scale_C, zero_point_C)
 
