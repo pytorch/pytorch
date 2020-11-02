@@ -178,9 +178,6 @@ if(INTERN_BUILD_ATEN_OPS)
       --force_schema_registration
       --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
-  if(USE_VULKAN)
-    set(GEN_VULKAN_FLAGS --vulkan)
-  endif()
 
   set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
