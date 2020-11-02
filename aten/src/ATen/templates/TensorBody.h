@@ -523,6 +523,14 @@ class CAFFE2_API Tensor {
   ///     be constructed, allowing to compute higher order derivative
   ///     products. Defaults to ``false``.
 
+  void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
+    if (inputs.has_value()) {
+      this->_backward(inputs.value(), gradient, retain_graph, create_graph);
+    } else {
+      this->_backward({}, gradient, retain_graph, create_graph);
+    }
+  }
+
   /// \fn Tensor detach() const;
   ///
   /// Returns a new Tensor, detached from the current graph.
