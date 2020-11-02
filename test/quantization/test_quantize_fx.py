@@ -7,11 +7,14 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.multiprocessing as mp
 
+from torch.fx import GraphModule  # type: ignore
+
 # graph mode quantization based on fx
 from torch.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
+    QuantizationFXTraceable,
 )
 
 from torch.quantization import (
@@ -960,6 +963,52 @@ class TestQuantizeFx(QuantizationTestCase):
         prepared_copy = copy.deepcopy(prepared)
         # quantize, should run with no errors
         quantized = convert_fx(prepared_copy)
+
+    def test_fx_traceable_marker(self):
+        """Tests that the QuantizationFXTraceable marker works correctly."""
+        class Child(nn.Module, QuantizationFXTraceable):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                # non traceable
+                if x.dim() == 1:
+                    raise NotImplementedError
+                # traceable
+                x = self.child(x)
+                return x
+        m = M()
+        m.eval()
+
+        # ensure that the parent is not symbolically traceable
+        with self.assertRaises(torch.fx.proxy.TraceError):
+            gm = torch.fx.symbolic_trace(m)
+
+        # prepare
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepare_custom_config_dict = {'use_fx_traceable_marker': True}
+        prepared = prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        self.assertTrue(not isinstance(prepared, GraphModule))
+        self.assertTrue(isinstance(prepared.child, GraphModule))
+
+        # calibrate
+        prepared(torch.randn(4, 1, 4, 4))
+
+        # convert
+        convert_custom_config_dict = {'use_fx_traceable_marker': True}
+        converted = convert_fx(prepared, convert_custom_config_dict=convert_custom_config_dict)
+        self.assertTrue(not isinstance(converted, GraphModule))
+        self.assertTrue(isinstance(converted.child, GraphModule))
 
 
 @skipIfNoFBGEMM

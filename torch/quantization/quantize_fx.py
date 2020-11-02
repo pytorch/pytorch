@@ -3,6 +3,7 @@ from torch.fx import GraphModule  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
+from .fx.markers import QuantizationFXTraceable  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 
@@ -61,8 +62,20 @@ forward graph of the parent module,
       the way we quantize standalone module is described in:
       :func:`~torch.quantization._prepare_standalone_module_fx`
     """
+
+    # TODO(future PR): change to {} default and remove this
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
+
+    use_fx_traceable_marker = prepare_custom_config_dict.get('use_fx_traceable_marker', False)
+    if use_fx_traceable_marker:
+        # call the top level API on the marked children only
+        if not isinstance(model, QuantizationFXTraceable):
+            for name, child in model.named_children():
+                # recursive call
+                prepared_child = _prepare_fx(child, qconfig_dict, prepare_custom_config_dict, is_standalone_module)
+                setattr(model, name, prepared_child)
+            return model
 
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
@@ -210,7 +223,11 @@ def prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None):
         "additional_quant_pattern": {
            torch.nn.Conv2d: ConvReluQuantizeHandler,
            (torch.nn.ReLU, torch.nn.Conv2d): ConvReluQuantizeHandler,
-        }
+        },
+
+        # Enables the use of QuantizationFXTraceable marker
+        # TODO(before land): more context
+        "use_fx_traceable_marker": False,
       }
 
 
@@ -278,9 +295,23 @@ def prepare_qat_fx(model, qconfig_dict, prepare_custom_config_dict=None):
         'train mode'
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
+# TODO(before land): rename graph_module to model
 def _convert_fx(graph_module, debug, convert_custom_config_dict=None, is_standalone_module=False):
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
     """
+
+    # TODO(future PR): change to {} default and remove this
+    if convert_custom_config_dict is None:
+        convert_custom_config_dict = {}
+
+    use_fx_traceable_marker = convert_custom_config_dict.get('use_fx_traceable_marker', False)
+    if use_fx_traceable_marker:
+        if not isinstance(graph_module, GraphModule):
+            for name, child in graph_module.named_children():
+                converted_child = _convert_fx(child, debug, convert_custom_config_dict, is_standalone_module)
+                setattr(graph_module, name, converted_child)
+            return graph_module
+
     _check_is_graph_module(graph_module)
     quantizer = Quantizer()
     return quantizer.convert(graph_module, debug, convert_custom_config_dict, is_standalone_module)
@@ -318,6 +349,11 @@ def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
                  ObservedCustomModule: QuantizedCustomModule
              }
           }
+
+          # Enables the use of QuantizationFXTraceable marker
+          # TODO(before land): more context
+          "use_fx_traceable_marker": False,
+
         }
 
     Return:
