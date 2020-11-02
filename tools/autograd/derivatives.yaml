@@ -434,7 +434,7 @@
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 
 - name: exp(Tensor self) -> Tensor
-  self: grad * result
+  self: grad * result.conj()
 
 - name: exp2(Tensor self) -> Tensor
   self: grad * result * M_LN2
