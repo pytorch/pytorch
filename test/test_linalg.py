@@ -244,7 +244,8 @@ class TestLinalg(TestCase):
 
         # if non-empty out tensor with wrong shape is passed a warning is given
         a = random_hermitian_matrix(3, dtype=dtype, device=device)
-        out_w = torch.empty(7, 7, dtype=dtype, device=device)
+        real_dtype = a.real.dtype if dtype.is_complex else dtype
+        out_w = torch.empty(7, 7, dtype=real_dtype, device=device)
         out_v = torch.empty(7, 7, dtype=dtype, device=device)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
@@ -253,6 +254,12 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 2)
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out_w = torch.empty_like(a).to(torch.int)
+        out_v = torch.empty_like(a)
+        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match self dtype"):
+            torch.linalg.eigh(a, out=(out_w, out_v))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -390,13 +397,19 @@ class TestLinalg(TestCase):
                 np.linalg.eigvalsh(t.cpu().numpy(), UPLO=uplo)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
-        out = torch.empty_like(t)
+        real_dtype = t.real.dtype if dtype.is_complex else dtype
+        out = torch.empty_like(t).to(real_dtype)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
             torch.linalg.eigvalsh(t, out=out)
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(t).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            torch.linalg.eigvalsh(t, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

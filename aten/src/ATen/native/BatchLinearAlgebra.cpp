@@ -983,11 +983,14 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
-  squareCheckInputs(self);
-  checkUplo(uplo);
+  TORCH_CHECK(eigvecs.scalar_type() == self.scalar_type(),
+    "eigvecs dtype ", eigvecs.scalar_type(), " does not match self dtype ", self.scalar_type());
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(eigvals.scalar_type() == real_dtype,
+    "eigvals dtype ", eigvals.scalar_type(), " does not match self dtype ", real_dtype);
 
   Tensor eigvals_tmp, eigvecs_tmp;
-  std::tie(eigvals_tmp, eigvecs_tmp) = at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
+  std::tie(eigvals_tmp, eigvecs_tmp) = at::linalg_eigh(self, uplo);
 
   at::native::resize_output(eigvals, eigvals_tmp.sizes());
   eigvals.copy_(eigvals_tmp);
@@ -1006,10 +1009,11 @@ Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
 }
 
 Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
-  squareCheckInputs(self);
-  checkUplo(uplo);
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(result.scalar_type() == real_dtype,
+    "result dtype ", result.scalar_type(), " does not match self dtype ", real_dtype);
 
-  Tensor result_tmp = std::get<0>(at::_syevd_helper(self, /*compute_eigenvectors=*/false, uplo));
+  Tensor result_tmp = at::linalg_eigvalsh(self, uplo);
 
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
