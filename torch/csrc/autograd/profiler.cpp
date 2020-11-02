@@ -330,19 +330,18 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
 #ifdef USE_KINETO
     if (config_.state == ProfilerState::KINETO) {
       libkineto::ClientTraceActivity op;
-      op.startTime = libkineto::timeSinceEpoch(fc.startTime);
+      /*op.startTime = libkineto::timeSinceEpoch(fc.startTime);
       op.endTime = libkineto::timeSinceEpoch(now);
-      op.opType = fc.name;
+      op.opType = std::string(fn.name());
       op.device = fc.deviceType;
       op.correlation = fc.correlationId;
       op.threadId = pthread_self();
       op.inputDims = folly::toJson(fc.input_shapes);
-      op.inputTypes = folly::toJson(fc.input_types);
-      op.outputDims = "null";
-      op.arguments = "null";
-      op.outputTypes = "null";
-      op.inputNames = "null";
-      op.outputNames = "null";
+      op.inputTypes = folly::toJson(fc.input_types);*/
+      {
+        std::lock_guard<std::mutex> guard(state_mutex_);
+        kineto_client_activities_.emplace_back(std::move(op));
+      }
       return;
     }
 #endif
@@ -449,6 +448,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
 
 #ifdef USE_KINETO
   std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
+  std::vector<KinetoEvent> kineto_events_;
 #endif
 };
 
