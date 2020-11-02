@@ -777,7 +777,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=True, sequence_nr=-1, device_id=-1):
+            is_remote=True, sequence_nr=-1):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -796,7 +796,6 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_async: bool = is_async
         self.is_remote: bool = is_remote
         self.sequence_nr: int = sequence_nr
-        self.device_id: int = device_id
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -848,21 +847,15 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def cuda_time_total(self):
-        if self.device_id >= 0:
-            return self.cpu_interval.elapsed_us()
         return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
 
     @property
     def self_cuda_time_total(self):
-        if self.device_id >= 0:
-            return self.cuda_time_total - sum([child.cuda_time_total for child in self.cpu_children])
         return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) - \
             sum([child.cuda_time_total for child in self.cpu_children])
 
     @property
     def cpu_time_total(self):
-        if self.device_id >= 0:
-            return 0
         return self.cpu_interval.elapsed_us()
 
     @property
@@ -1097,7 +1090,6 @@ def parse_event_records(thread_records):
                     is_async=is_async,
                     is_remote=is_remote_event,
                     sequence_nr=start.sequence_nr(),
-                    device_id=start.device_id(),
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
