@@ -329,11 +329,21 @@ void IndexCompute::handle(Merge* merge) {
 
     extent_map_[inner_id] = getExtent(out_id);
   } else if (hasZeroMerged(out_id)) {
-    index_map_[inner_id] = out_ind;
-    extent_map_[inner_id] = getExtent(out_id);
-
-    index_map_[outer_id] = zero;
-    extent_map_[outer_id] = zero;
+    // Don't propagate to inner id if it's comprised of only broadcast root
+    // domains, unless outer is also all broadcast domains. Index shouldn't be
+    // anything but zero if both inner and outer are all broadcast domains, but
+    // didn't add a hard check for this. See FusionAdvancedIndexing5_CUDA
+    if (inner_id->isBroadcast() && !outer_id->isBroadcast()) {
+      index_map_[outer_id] = out_ind;
+      extent_map_[outer_id] = getExtent(out_id);
+      index_map_[inner_id] = zero;
+      extent_map_[inner_id] = zero;
+    } else {
+      index_map_[inner_id] = out_ind;
+      extent_map_[inner_id] = getExtent(out_id);
+      index_map_[outer_id] = zero;
+      extent_map_[outer_id] = zero;
+    }
 
     zero_merged_in_.emplace(inner_id);
     zero_merged_in_.emplace(outer_id);
@@ -433,6 +443,10 @@ IndexCompute IndexCompute::updateIndexCompute(
 
     if (extent_map_.find(prev_id) != extent_map_.end()) {
       updated_extent_map[new_id] = extent_map_.at(prev_id);
+    } else {
+      if (prev_id->isReduction() && !new_id->isReduction()) {
+        updated_extent_map[new_id] = getExtent(prev_id);
+      }
     }
 
     if (zero_merged_in_.find(prev_id) != zero_merged_in_.end()) {
