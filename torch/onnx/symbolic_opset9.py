@@ -2228,7 +2228,7 @@ def _var_mean(g, input, dim, unbiased, keepdim):
         num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
     sub_v = g.op("Sub", input, mean)
     sqr_sub = g.op("Mul", sub_v, sub_v)
-    var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=0)
+    var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim)
     # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
     if unbiased:
         num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
