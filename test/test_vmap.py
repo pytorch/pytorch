@@ -1417,6 +1417,22 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
 
+    def test_sum_dim(self):
+        test = self._vmap_test
+        B0, B1 = 5, 7
+
+        # Single vmap, various in_dims / out_dims
+        test(lambda x: x.sum(0), [torch.randn([B0])])
+        test(lambda x: x.sum(0), [torch.randn([B0, 3])])
+        test(lambda x: x.sum(-1), [torch.randn([2, 5, B0, 3])], in_dims=2)
+        test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+        # Doubly nested vmap
+        test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
+        test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
+        test(vmap(lambda x: x.sum(2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
+             in_dims=2, out_dims=2)
+
     def test_reshape(self):
         test = self._vmap_test
         B0, B1, B2 = 7, 11, 13

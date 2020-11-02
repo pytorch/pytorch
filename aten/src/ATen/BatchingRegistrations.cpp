@@ -49,6 +49,14 @@ namespace at {
 // do some refactoring.
 
 Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
+  // PyTorch has a special case where sum(scalar_tensor, dim=0) does not fail
+  // and instead returns a new scalar tensor. If the following happens:
+  // >>> x = torch.randn(B0)  # the per-examples are all scalars
+  // >>> vmap(partial(torch.sum, dim=0), x)
+  // then we replicate the behavior of sum(scalar_tensor, dim=0).
+  if (/*logical*/self.dim() == 0 && dims.size() == 1 && dims[0] == 0) {
+    return self.clone();
+  }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dims_physical = self_physical.getPhysicalDims(dims);
   auto result = at::sum(self_physical.tensor(), dims_physical, keepdim, dtype);
@@ -648,6 +656,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
   m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
 #undef TO_BATCHING_RULE
+#define UNARY_POINTWISE_VA(op, ...) m.impl(#op, \
+    unary_pointwise_batching_rule<Tensor (*)(const Tensor&, __VA_ARGS__), at::op, __VA_ARGS__>);
+  UNARY_POINTWISE_VA(clone, optional<MemoryFormat>);
+#undef UNARY_POINTWISE_VA
 
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
