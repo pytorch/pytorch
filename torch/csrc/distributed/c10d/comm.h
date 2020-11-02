@@ -1,10 +1,8 @@
 #pragma once
 
-#include <memory>
-
 #include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 
@@ -31,62 +29,59 @@ class GradBucket {
     return tensors_;
   }
 
+  std::vector<at::Tensor>& getTensorsRef() {
+    return tensors_;
+  }
+
  private:
   std::vector<at::Tensor> tensors_;
 };
 
-// DDP's c10d reducer allows communication hooks defined as a sub class
-// of CommHookInterface. CommHookInterface is an abstract class and can
-// be used to implement both Python and CPP hooks.
-struct TORCH_PYTHON_API CommHookInterface {
+// Base class of both `PythonCommHook` and `CppCommHook`.
+// Requires implementing 1) `runHook` method that communicates gradients
+// asynchronously, and 2) `parseHookResult` method that converts the hook result
+// into a tensor vector.
+class TORCH_PYTHON_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
-  // runHook takes a GradBucket type bucket and passes the tensors of
-  // this grad bucket to hook's callback. This function is called once
-  // the bucket is ready. The hook can perform whatever processing is
-  // needed and return a Future that will hold the new value of the grad
-  // bucket's tensors once ready.
-  virtual c10::intrusive_ptr<torch::jit::Future> runHook(
-      const GradBucket& bucket) = 0;
+  // Passes the input grad bucket to the registered communication hook.
+  // Once the tensors in the bucket are ready, kicks off the hook asynchronously
+  // and returns a future that holds the communication results.
+  virtual c10::intrusive_ptr<c10::ivalue::Future> runHook(
+      GradBucket& bucket) = 0;
 
-  // Once the grad bucket of Future is ready, c10d reducer will call this
-  // function to get the resulting tensors of the grad bucket. Then c10d
-  // reducer will use these tensors and copy grads to the grads of individual
+  // Returns the resulting tensors once the communication hook result is ready.
+  // The resulting tensors will then be copied to the grads of individual
   // parameters.
-  virtual std::vector<at::Tensor> processFuture(c10::IValue future_value) = 0;
+  virtual std::vector<at::Tensor> parseHookResult(
+      const c10::IValue& result) = 0;
 };
 
-// PythonCommHook enables registering a python hook to c10d reducer and is a
-// sub class of CommHookInterface.
-class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
+// This CppCommHook interface only requires implementing runHook method that
+// potentially uses a state.
+// Still need TORCH_PYTHON_API instead of TORCH_API to support Windows platform.
+template <typename T>
+class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
  public:
-  // The constructor takes a state and a callable hook. Inputs are Python
-  // objects. The state is passed to the hook in runHook function can be used to
-  // maintain and update any state information that users would like to maintain
-  // as part of the training process. The hook can perform whatever processing
-  // user specified and return a Future indicating completion of any async work.
-  PythonCommHook(py::object state, py::object hook);
+  explicit CppCommHookInterface(T& state) : state_(state) {}
 
-  ~PythonCommHook() override {
-    py::gil_scoped_acquire ag;
-    state_.dec_ref();
-    hook_.dec_ref();
-    // explicitly setting PyObject* state_ and hook_ to nullptr to prevent
-    // py::object's dtor to decref on the PyObject again.
-    // See Note [Destructing py::object] in python_ivalue.h
-    state_.ptr() = nullptr;
-    hook_.ptr() = nullptr;
+  virtual ~CppCommHookInterface() {}
+
+  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
+    TORCH_INTERNAL_ASSERT(
+        result.isTensor() || result.isTensorList(),
+        "expected the hook result is either a Tensor or a TensorList");
+
+    if (result.isTensor()) {
+      return {result.toTensor()};
+    }
+
+    return result.toTensorVector();
   }
 
-  c10::intrusive_ptr<torch::jit::Future> runHook(
-      const GradBucket& bucket) override;
-
-  std::vector<at::Tensor> processFuture(c10::IValue future_value) override;
-
- private:
-  py::object state_;
-  py::object hook_;
+ protected:
+  T state_; // Not owned.
 };
 
 } // namespace c10d

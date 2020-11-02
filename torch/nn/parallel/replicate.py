@@ -80,6 +80,9 @@ def replicate(network, devices, detach=False):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
 
+    if not devices:
+        return []
+
     devices = [_get_device_index(x, True) for x in devices]
     num_replicas = len(devices)
 

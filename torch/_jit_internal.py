@@ -839,7 +839,7 @@ def _get_named_tuple_properties(obj):
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
-            annotations.append(torch._C.TensorType.get())
+            annotations.append(torch._C.TensorType.getInferred())
     return type(obj).__name__, fields, annotations
 
 

@@ -36,6 +36,14 @@ inline Tensor& tensorinv_out(Tensor& result,const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv_out(result, self, ind);
 }
 
+inline Tensor tensorsolve(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+  return torch::linalg_tensorsolve(self, other, dims);
+}
+
+inline Tensor& tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+  return torch::linalg_tensorsolve_out(result, self, other, dims);
+}
+
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
@@ -77,6 +85,24 @@ inline Tensor tensorinv(const Tensor& self, int64_t ind) {
 
 inline Tensor& tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
   return detail::tensorinv_out(result, self, ind);
+}
+
+/// Computes a tensor `x` such that `tensordot(input, x, dims=x.dim()) = other`.
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.tensorsolve
+///
+/// Example:
+/// ```
+/// auto a = torch::eye(2*3*4).reshape({2*3, 4, 2, 3, 4});
+/// auto b = torch::randn(2*3, 4);
+/// auto x = torch::linalg::tensorsolve(a, b);
+/// ```
+inline Tensor tensorsolve(const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
+  return detail::tensorsolve(input, other, dims);
+}
+
+inline Tensor& tensorsolve_out(Tensor& result, const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
+  return detail::tensorsolve_out(result, input, other, dims);
 }
 
 }} // torch::linalg
