@@ -285,7 +285,7 @@ struct TORCH_API Engine {
       std::shared_ptr<Node> graph_root);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
-    return nullptr;
+    return std::make_unique<AnomalyMetadata>();
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows

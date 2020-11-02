@@ -2939,6 +2939,14 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    def test_igamma(self):
+        # 1e-3 offset to avoid zeros
+        # NOTE: derivative for s is not implemented
+        s = (torch.rand(100, dtype=torch.double) + 1e-3)
+        x = (torch.rand(100, dtype=torch.double) + 1e-3).requires_grad_()
+        gradcheck(torch.igamma, (s, x))
+        gradgradcheck(torch.igamma, (s, x))
+
     @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
@@ -4988,7 +4996,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
-                'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub'] + separate_complex_tests
+                'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
+                'exp'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
 skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
