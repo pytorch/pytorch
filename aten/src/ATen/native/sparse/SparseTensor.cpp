@@ -32,7 +32,7 @@ bool is_coalesced_sparse(const SparseTensor& self) {
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {
-  TORCH_WARN_ONCE("The _nnz() method is deprecated and will be removed in a future PyTorch release. Please use nse(False) instead.");
+  TORCH_WARN_ONCE("The _nnz() method is deprecated and will be removed in a future PyTorch release. Please use _nse() instead.");
   return get_sparse_impl(self)->nse();
 }
 
