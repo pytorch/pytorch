@@ -97,8 +97,10 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a), module_with_submodules(a))
-        for i, node in enumerate(dag.nodes):
-            assert node.logical_device_ids == [i]
+        assert dag.nodes[0].logical_device_ids == [0]
+        assert dag.nodes[0].size_bytes == 80
+        assert dag.nodes[1].logical_device_ids == [1]
+        assert dag.nodes[1].size_bytes == 144
 
     def test_sparse_nn_partition(self):
         class MyRecommendationModule(torch.nn.Module):
