@@ -7,12 +7,12 @@ from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
 from .conv import Conv1d, Conv2d, Conv3d
-from .conv import ConvTranspose1d, ConvTranspose2d
+from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .linear import Linear
 from .rnn import LSTMCell, LSTM
 from .embedding_ops import Embedding, EmbeddingBag
 
-from .functional_modules import FloatFunctional, QFunctional
+from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
 
 class Quantize(torch.nn.Module):
@@ -92,6 +92,7 @@ __all__ = [
     'Conv3d',
     'ConvTranspose1d',
     'ConvTranspose2d',
+    'ConvTranspose3d',
     'DeQuantize',
     'ELU',
     'Embedding',
@@ -113,5 +114,6 @@ __all__ = [
     'Sigmoid',
     # Wrapper modules
     'FloatFunctional',
+    'FXFloatFunctional',
     'QFunctional',
 ]

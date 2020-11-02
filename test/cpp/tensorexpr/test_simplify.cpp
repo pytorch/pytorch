@@ -1120,12 +1120,130 @@ void testSimplifyDiv() {
 
     IS_VAR_WITH_NAME(simplified.node(), "x");
   }
+}
+
+void testSimplifyMod() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
 
   {
-    ExprHandle body = x / x;
+    // Constant folding works.
+    ExprHandle body = ExprHandle(10) % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
 
-    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  {
+    // x % x => 0
+    ExprHandle body = x % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // 0 % x => 0
+    ExprHandle body = ExprHandle(0) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // x % 1 => 0
+    ExprHandle body = x % 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Doesn't change unknown mods.
+    // x % y => x % y
+    ExprHandle body = x % y;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_VAR_WITH_NAME(mod->rhs(), "y");
+  }
+
+  {
+    // don't touch if RHS is unknown.
+    // 4 % x => 4 % x
+    ExprHandle body = ExprHandle(4) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_IMM_WITH_VAL(Int, mod->lhs(), 4);
+    IS_VAR_WITH_NAME(mod->rhs(), "x");
+  }
+
+  {
+    // don't touch if LHS is unknown.
+    // x % 4 => x % 4
+    ExprHandle body = x % 4;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 4);
+  }
+
+  {
+    // if LHS is a multiple of RHS, mod is zero.
+    // 2 * x % x => 0
+    ExprHandle body = (x * 2) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true even if the multiple is not constant.
+    // x * y % x => 0
+    ExprHandle body = (x * y) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true with multiple unknown values in LHS.
+    // x * y * z % x => 0
+    ExprHandle body = (x * y * z) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true if the denom is compound.
+    // x * y * z % y * z => 0
+    ExprHandle body = (x * y * z) % (y * z);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Sanity check true with scalars that are multiples.
+    // 12 * x % 4 => 0
+    ExprHandle body = (x * 12) % 4;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Sanity check not true if the smaller scalar is on LHS.
+    // 4 * x % 12 => 4 * x % 12
+    ExprHandle body = (x * 4) % 12;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Mul, mod->lhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 4);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 12);
+  }
+
+  {
+    // Both scalar and symbolic in multiple.
+    // (6 * x * y) % (3 * x * y) => 0
+    ExprHandle body = (ExprHandle(6) * x * y) % (x * y * 3);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
   }
 }
 
@@ -2805,6 +2923,189 @@ void testSimplifyEliminateEmptyCond() {
     ASSERT_NE(block, nullptr);
     ASSERT_EQ(block->nstmts(), 0);
   }
+}
+
+void testSimplifyConstantComparisons() {
+  KernelScope kernel_scope;
+
+  auto ComparisonTest =
+      [](ExprHandle a, ExprHandle b, CompareSelectOperation op, int result) {
+        ExprHandle body = CompareSelect::make(a, b, op);
+        ExprHandle simplified = IRSimplifier::simplify(body);
+        IS_IMM_WITH_VAL(Int, simplified.node(), result);
+      };
+
+  // Equals.
+  ComparisonTest(2, 2, kEQ, 1);
+  ComparisonTest(1, 2, kEQ, 0);
+  ComparisonTest(2, 1, kEQ, 0);
+
+  // Greater than.
+  ComparisonTest(2, 2, kGT, 0);
+  ComparisonTest(1, 2, kGT, 0);
+  ComparisonTest(2, 1, kGT, 1);
+
+  // Greater or Equal.
+  ComparisonTest(2, 2, kGE, 1);
+  ComparisonTest(1, 2, kGE, 0);
+  ComparisonTest(2, 1, kGE, 1);
+
+  // Less Than.
+  ComparisonTest(2, 2, kLT, 0);
+  ComparisonTest(1, 2, kLT, 1);
+  ComparisonTest(2, 1, kLT, 0);
+
+  // Less or Equal.
+  ComparisonTest(2, 2, kLE, 1);
+  ComparisonTest(1, 2, kLE, 1);
+  ComparisonTest(2, 1, kLE, 0);
+
+  // Not equal.
+  ComparisonTest(2, 2, kNE, 0);
+  ComparisonTest(1, 2, kNE, 1);
+  ComparisonTest(2, 1, kNE, 1);
+
+  // With specified results:
+  ExprHandle body = CompareSelect::make(2, 2, 5, 42, kNE);
+  ExprHandle simplified = IRSimplifier::simplify(body);
+  IS_IMM_WITH_VAL(Int, simplified.node(), 42);
+}
+
+void testSimplifySymbolicComparisons() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+
+  auto TookTrueBranch = [](ExprHandle a) { IS_IMM_WITH_VAL(Int, a.node(), 1); };
+  auto TookFalseBranch = [](ExprHandle a) {
+    IS_IMM_WITH_VAL(Int, a.node(), 0);
+  };
+
+  // EQ
+
+  // x == x => 1
+  ExprHandle body = CompareSelect::make(x, x, kEQ);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x == x+1 => 0
+  body = CompareSelect::make(x, x + 1, kEQ);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x == x * 2 cannot simplify since we don't know x is nonzero.
+  body = CompareSelect::make(x, x * 2, kEQ);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // x == x * 1 => 1
+  body = CompareSelect::make(x, x * 1, kEQ);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  {
+    // x == y => x == y
+    body = CompareSelect::make(x, y, kEQ);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(CompareSelect, simplified.node(), cmp);
+    ASSERT_EQ(cmp->compare_select_op(), kEQ);
+    IS_VAR_WITH_NAME(cmp->lhs(), "x");
+    IS_VAR_WITH_NAME(cmp->rhs(), "y");
+  }
+
+  {
+    // x == 5 => x == 5
+    body = CompareSelect::make(x, 5, kEQ);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(CompareSelect, simplified.node(), cmp);
+    ASSERT_EQ(cmp->compare_select_op(), kEQ);
+    IS_VAR_WITH_NAME(cmp->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, cmp->rhs(), 5);
+  }
+
+  // GT
+
+  // x+1 > x => 1
+  body = CompareSelect::make(x + 1, x, kGT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x > x + 1 => 0
+  body = CompareSelect::make(x, x + 1, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x > x - 1 => 1
+  body = CompareSelect::make(x, x - 1, kGT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x - 1 > x => 0
+  body = CompareSelect::make(x - 1, x, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x > x => 0
+  body = CompareSelect::make(x, x, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x * 2 > x => x * 2 > x
+  // since we don't know the sign of x.
+  body = CompareSelect::make(x * 2, x, kGT);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // GE
+
+  // x+1 >= x => 1
+  body = CompareSelect::make(x + 1, x, kGE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x >= x + 1 => 0
+  body = CompareSelect::make(x, x + 1, kGE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x >= x => 1
+  body = CompareSelect::make(x, x, kGE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x * 2 >= x => x * 2 >= x
+  // since we don't know the sign of x.
+  body = CompareSelect::make(x * 2, x, kGE);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // LT
+
+  // x+1 < x => 0
+  body = CompareSelect::make(x + 1, x, kLT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x < x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kLT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x < x => 0
+  body = CompareSelect::make(x, x, kLT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // LE
+
+  // x+1 <= x => 0
+  body = CompareSelect::make(x + 1, x, kLE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x <= x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kLE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x <= x => 1
+  body = CompareSelect::make(x, x, kLE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // NE
+
+  // x+1 != x => 1
+  body = CompareSelect::make(x + 1, x, kNE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x != x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kNE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x != x => 0
+  body = CompareSelect::make(x, x, kNE);
+  TookFalseBranch(IRSimplifier::simplify(body));
 }
 
 void testSimplifyEliminateZeroLengthFor() {

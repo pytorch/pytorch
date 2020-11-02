@@ -1296,6 +1296,89 @@ void LoopNest::normalize(For* f, For** normalized) {
   p->replace_stmt(f, *normalized);
 }
 
+// This function expects that there are 'num' loops perfectly nested within
+// and including 'f'.
+std::vector<For*> LoopNest::getLoopStmtsInLoopNest(For* f, size_t num) {
+  std::vector<For*> loops(num);
+  For* curr_for = f;
+  loops[0] = curr_for;
+  for (size_t i = 1; i < num; ++i) {
+    TORCH_INTERNAL_ASSERT(curr_for->body()->nstmts() == 1);
+    curr_for = dynamic_cast<For*>(curr_for->body()->front());
+    TORCH_INTERNAL_ASSERT(curr_for);
+    loops[i] = curr_for;
+  }
+  return loops;
+}
+
+bool LoopNest::flatten(const std::vector<For*>& loops, For** flattened) {
+  if (loops.empty()) {
+    throw malformed_input("flatten attempted on empty set of loops");
+  }
+  Block* p = dynamic_cast<Block*>(loops[0]->get_parent());
+  if (!p) {
+    throw malformed_input("flatten attempted on loops with no parent");
+  }
+
+  if (loops.size() == 1) {
+    // This loop nest is already flattened.
+    *flattened = loops[0];
+    return false;
+  }
+
+  // Check if all the loops correspond to a perfect loopnest:
+  //  * every loop except the inner-most should have only one stmt, the For.
+  // Do not flatten, otherwise.
+  // This check also ensures we do not flatten reduction loops.
+  for (size_t i = 0; i < loops.size() - 1; ++i) {
+    if ((loops[i]->body()->nstmts() != 1) ||
+        (loops[i]->body()->front() != loops[i + 1])) {
+      *flattened = loops[0];
+      return false;
+    }
+  }
+
+  // Normalize the loops before flattening.
+  // We need to normalize them from inner-most to outer because once the outer
+  // loop is normalized, the given pointers to inner loops point to old code.
+  // For the same reason, we can't store the normalized inner loops until after
+  // the outer-most loop is normalized.
+  For* normalized;
+  for (size_t i = 0; i < loops.size(); ++i) {
+    size_t idx = loops.size() - i - 1;
+    LoopNest::normalize(loops[idx], &normalized);
+  }
+
+  // 'normalized' points to the outer-most loop in the normalized loopnest.
+  // Collect all the normalized loops.
+  auto normalized_loops = getLoopStmtsInLoopNest(normalized, loops.size());
+
+  auto flat_var = new Var(
+      normalized_loops[0]->var()->name_hint() + "_flat",
+      normalized_loops[0]->var()->dtype());
+  VarMapping var_mapping;
+  Expr* stop = new IntImm(1);
+  for (size_t i = 0; i < normalized_loops.size(); ++i) {
+    size_t idx = normalized_loops.size() - i - 1;
+    auto curr_loop = normalized_loops[idx];
+    Expr* div = new Div(flat_var, stop);
+    Expr* sub_expr = idx == 0 ? div : new Mod(div, curr_loop->stop());
+    var_mapping.push_back(std::make_pair(curr_loop->var(), sub_expr));
+    stop = new Mul(curr_loop->stop(), stop);
+  }
+  auto flattened_body =
+      Substitute(Stmt::clone(normalized_loops.back()->body()), var_mapping);
+
+  *flattened = new For(
+      flat_var,
+      new IntImm(0),
+      stop,
+      flattened_body,
+      normalized_loops[0]->loop_options());
+  p->replace_stmt(normalized_loops[0], *flattened);
+  return true;
+}
+
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   Stmt* cur_stmt = getLoopBodyFor(t);
   return getLoopStmtsFor(cur_stmt);
