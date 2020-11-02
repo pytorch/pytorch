@@ -24,7 +24,7 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda
+# Install conda and other packages (e.g., numpy, coverage, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -82,6 +82,11 @@ RUN bash ./install_jni.sh && rm install_jni.sh
 ADD ./common/install_nccl.sh install_nccl.sh
 RUN if [ "${CUDA_VERSION}" = 10.1 ]; then bash ./install_nccl.sh; fi
 RUN rm install_nccl.sh
+
+# Install Open MPI for CUDA
+ADD ./common/install_openmpi.sh install_openmpi.sh
+RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
+RUN rm install_openmpi.sh
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT

@@ -152,7 +152,7 @@ void quantile_impl(
   } else if (dim == self.dim() - 1) {
     sorted = std::get<0>(self.sort());
   } else {
-    sorted = std::get<0>(self.unsqueeze(-1).transpose_(dim, -1).sort());
+    sorted = std::get<0>(self.unsqueeze(-1).transpose(dim, -1).sort());
   }
 
   // Treat q as a 1D tensor for the following computations
