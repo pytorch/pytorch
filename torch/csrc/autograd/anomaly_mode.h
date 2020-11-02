@@ -24,9 +24,13 @@ private:
 
 struct TORCH_API AnomalyMetadata {
   virtual ~AnomalyMetadata();
-  virtual void store_stack() = 0;
-  virtual void print_stack(const std::string& current_node_name) = 0;
-  virtual void assign_parent(const std::shared_ptr<Node>& parent_node) = 0;
+  virtual void store_stack();
+  virtual void print_stack(const std::string& current_node_name);
+  virtual void assign_parent(const std::shared_ptr<Node>& parent_node);
+
+ private:
+  std::string traceback_;
+  std::shared_ptr<Node> parent_;
 };
 
 }}

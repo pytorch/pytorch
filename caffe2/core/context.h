@@ -131,7 +131,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     if (meta.copy()) {
       meta.copy()(src, dst, n);
     } else {
