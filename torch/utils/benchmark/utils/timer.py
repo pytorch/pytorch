@@ -64,7 +64,9 @@ class Timer(object):
 
     Arguments:
         stmt: Code snippet to be run in a loop and timed.
+
         setup: Optional setup code. Used to define variables used in `stmt`
+
         timer:
             Callable which returns the current time. If PyTorch was built
             without CUDA or there is no GPU present, this defaults to
@@ -291,6 +293,7 @@ class Timer(object):
         competing objectives:
             1) A small block size results in more replicates and generally
                better statistics.
+
             2) A large block size better amortizes the cost of `timer`
                invocation, and results in a less biased measurement. This is
                important because CUDA syncronization time is non-trivial
