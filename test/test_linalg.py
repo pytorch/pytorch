@@ -327,7 +327,7 @@ class TestLinalg(TestCase):
             (w.sum() + abs(v).sum()).backward()
             self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
 
-        for dims, uplo in itertools.product([(3, 3), (2, 3, 3),], ["L", "U"]):
+        for dims, uplo in itertools.product([(3, 3), (2, 3, 3)], ["L", "U"]):
             run_test(dims, uplo)
 
     # TODO: once batched matmul works for complex dtypes on GPU, they shall be added to above test
@@ -336,8 +336,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.complex128)
     def test_eigh_autograd_xfailed(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
         def func(x, uplo):
             x = 0.5 * (x + x.conj().transpose(-2, -1))
             return torch.linalg.eigh(x, UPLO=uplo)
