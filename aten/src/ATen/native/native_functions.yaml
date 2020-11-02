@@ -8887,6 +8887,8 @@
   python_module: linalg
   use_c10_dispatcher: full
   variants: function
+  dispatch:
+    DefaultBackend: linalg_eigh
 
 - func: linalg_eigh.eigvals(Tensor self, str UPLO="L", *, Tensor(a!) eigvals, Tensor(b!) eigvecs) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   python_module: linalg
@@ -8897,6 +8899,8 @@
   python_module: linalg
   use_c10_dispatcher: full
   variants: function
+  dispatch:
+    DefaultBackend: linalg_eigvalsh
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg

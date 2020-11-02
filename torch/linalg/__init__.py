@@ -207,6 +207,8 @@ each repeated according to its multiplicity.
 
 .. note:: The eigenvalues are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
 
+.. note:: This function doesn't support backpropagation, please use :func:`torch.linalg.eigh` instead.
+
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian
                     :math:`n \times n` matrices, where `*` is zero or more batch dimensions.

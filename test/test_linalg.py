@@ -11,7 +11,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
      onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
-from torch.autograd import gradcheck
+from torch.autograd import gradcheck, gradgradcheck
 
 if TEST_NUMPY:
     import numpy as np
@@ -287,6 +287,65 @@ class TestLinalg(TestCase):
         for shape, batch, uplo in itertools.product(shapes, batches, uplos):
             run_test_permuted(shape, batch, uplo)
             run_test_skipped_elements(shape, batch, uplo)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64, torch.complex128)
+    @dtypesIfCUDA(torch.float64)
+    def test_eigh_autograd(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def func(x, uplo):
+            x = 0.5 * (x + x.conj().transpose(-2, -1))
+            return torch.linalg.eigh(x, UPLO=uplo)
+
+        def func_grad_w(x, uplo):
+            return func(x, uplo)[0]
+
+        def func_grad_v(x, uplo):
+            # gauge invariant loss function
+            return abs(func(x, uplo)[1])
+
+        def run_test(dims, uplo):
+            x = torch.randn(*dims, dtype=dtype, device=device, requires_grad=True)
+
+            gradcheck(func_grad_w, [x, uplo])
+            gradgradcheck(func_grad_w, [x, uplo])
+
+            gradcheck(func_grad_v, [x, uplo])
+            gradgradcheck(func_grad_v, [x, uplo])
+
+            x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            w, v = torch.linalg.eigh(x)
+            (w.sum() + abs(v).sum()).backward()
+            self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
+
+        for dims, uplo in itertools.product([(3, 3), (2, 3, 3),], ["L", "U"]):
+            run_test(dims, uplo)
+
+    # TODO: once batched matmul works for complex dtypes on GPU, they shall be added to above test
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex128)
+    def test_eigh_autograd_xfailed(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def func(x, uplo):
+            x = 0.5 * (x + x.conj().transpose(-2, -1))
+            return torch.linalg.eigh(x, UPLO=uplo)
+
+        def func_grad_w(x, uplo):
+            return func(x, uplo)[0]
+
+        def run_test(dims, uplo):
+            x = torch.randn(*dims, dtype=dtype, device=device, requires_grad=True)
+
+            gradcheck(func_grad_w, [x, uplo])
+            gradgradcheck(func_grad_w, [x, uplo])
+
+        dims = (2, 3, 3)
+        run_test(dims, "L")
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
