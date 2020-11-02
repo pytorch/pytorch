@@ -377,7 +377,8 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
 SugaredValuePtr SimpleValue::getitem(
     const SourceRange& loc,
     Function& m,
-    Value* idx) {
+    Value* idx,
+    TypePtr type_hint) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
@@ -393,6 +394,17 @@ SugaredValuePtr SimpleValue::getitem(
     return std::make_shared<SimpleValue>(
         g.insert(aten::select, {val, 0, idx}, {}, loc));
   } else if (auto class_type = val_type->cast<ClassType>()) {
+    // Check if this is an indexing operation enabled by a type hint.
+    // The ModuleDict has already been checked during IR generation to make
+    // sure its contents implement the module interface referred to by
+    // type_hint.
+    if (class_type->is_module() && type_hint) {
+      auto res = g.insert(prim::ModuleDictIndex, {val, idx}, {}, loc);
+      res->setType(type_hint);
+      return std::make_shared<SimpleValue>(res);
+    }
+
+    // Defer to the __getitem__ attr on the class.
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
     throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
@@ -485,7 +497,8 @@ Value* RangeValue::len(const SourceRange& loc, Function& m) {
 SugaredValuePtr RangeValue::getitem(
     const SourceRange& loc,
     Function& m,
-    Value* idx) {
+    Value* idx,
+    TypePtr type_hint) {
   if (has_only_end_) {
     return std::make_shared<SimpleValue>(idx);
   } else {
@@ -535,7 +548,8 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
 SugaredValuePtr IterableTree::getitem(
     const SourceRange& loc,
     Function& m,
-    Value* idx) {
+    Value* idx,
+    TypePtr type_hint) {
   std::vector<SugaredValuePtr> child_items;
   for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));

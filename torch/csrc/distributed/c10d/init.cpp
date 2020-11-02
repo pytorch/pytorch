@@ -127,19 +127,25 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
-// This method is called from DDP's Python API. Its inputs are
-// a c10d reducer object, state, and callable comm_hook. State and
-// comm_hook inputs are Python objects and this function creates a
-// c10d PythonCommHook object using these inputs. It later calls
-// register_comm_hook function of the reducer input to register that
-// PythonCommHook object.
+// Called from DDP's Python API to create a c10d Python comm hook object.
+// The input state and callable comm_hook are Python objects. It later calls
+// register_comm_hook function of the reducer input to register the hook.
 void _register_comm_hook(
     ::c10d::Reducer& reducer,
     py::object state,
     py::object comm_hook) {
   reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
       std::move(state), std::move(comm_hook)));
-};
+}
+
+// Called from DDP's Python API to create a c10d C++ comm hook.
+// The input is an enum hook type. It later calls register_builtin_comm_hook
+// function of the reducer input to set the hook type.
+void _register_builtin_comm_hook(
+    ::c10d::Reducer& reducer,
+    ::c10d::BuiltinCommHookType comm_hook_type) {
+  reducer.register_builtin_comm_hook(comm_hook_type);
+}
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
@@ -150,12 +156,19 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
 
   auto module = py::handle(c10d_module).cast<py::module>();
 
-  module.def(
-      "_register_comm_hook",
-      &_register_comm_hook,
-      py::arg("reducer"),
-      py::arg("state"),
-      py::arg("comm_hook"));
+  module
+      .def(
+          "_register_comm_hook",
+          &_register_comm_hook,
+          py::arg("reducer"),
+          py::arg("state"),
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_register_builtin_comm_hook",
+          &_register_builtin_comm_hook,
+          py::arg("reducer"),
+          py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
@@ -170,6 +183,11 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
             the single process single device mode, this list would consist of only
             a single tensor.
            )");
+
+  py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
+An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
+      .value("ALLREDUCE", ::c10d::BuiltinCommHookType::ALLREDUCE)
+      .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS);
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -1176,32 +1194,54 @@ Arguments:
 
 #undef PROCESS_GROUP_DEPRECATION_WARNING
 
-// TorchBind bindings.
-// Note that these bindings will live together with those pybind
-// bindings above until we resolve all the TorchBind issues and
-// merge these two together
-static auto store_torchbind =
-  torch::class_<::c10d::Store>("dist_c10d", "Store");
-
-// static auto fileStore_torchbind =
-//   torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
-//     .def(torch::init<std::string, int64_t>());
+// NOTE: Below are TorchBind bindings for c10d, these bindings will
+// live together with those pybind11 bindings above until we resolve
+// all the TorchBind issues and merge these two together
+static auto StoreTorchBind = torch::class_<::c10d::Store>("dist_c10d", "Store");
 
 // Torchbind the ProcessGroup to make it available in TorchScript
-static auto processGroupWork_torchbind =
-  torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
-    .def(torch::init<>())
-    .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
-    .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
-    .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
-    .def("synchronize", &::c10d::ProcessGroup::Work::synchronize);
+static auto ProcessGroupNCCLOptionsTorchBind =
+    torch::class_<::c10d::ProcessGroupNCCL::Options>(
+        "dist_c10d",
+        "ProcessGroupNCCL.Options");
 
-static auto processGroup_torchbind =
-  torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+static auto ProcessGroupWorkTorchBind =
+    torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
+        .def(torch::init<>())
+        .def(
+            "wait",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroup::Work>& work)
+                -> bool {
+              // TODO: make std::chrono::millisecond works with TorchBind to
+              // provide the full API in python
+              return work->wait();
+            })
+        .def("result", &::c10d::ProcessGroup::Work::result);
 
-static auto processGroupNCCL_torchbind =
-    torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL");
-// .def(torch::init<std::shared_ptr<::c10d::Store>, )
+static auto ProcessGroupTorchBind =
+    torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+
+static auto ProcessGroupNCCLTorchBind =
+    torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
+        .def(torch::init<
+             const c10::intrusive_ptr<::c10d::Store>&,
+             int64_t,
+             int64_t,
+             const c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>&>())
+        .def(
+            "alltoalll_base",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+               at::Tensor output,
+               at::Tensor input,
+               std::vector<int64_t> outputSplitSizes,
+               std::vector<int64_t> inputSplitSizes) {
+              return pg->alltoall_base(
+                  output,
+                  input,
+                  outputSplitSizes,
+                  inputSplitSizes,
+                  ::c10d::AllToAllOptions());
+            });
 
 } // namespace
 
