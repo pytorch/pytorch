@@ -1587,81 +1587,181 @@ std::vector<VarHandle> squeezeIndices(
 
 } // namespace
 
+// Tensor* TensorExprKernel::computeGradSumToSize(const torch::jit::Value* v) {
+  
+//   auto output_shape = v->node()->is(attr::profiled_axes);
+//   auto output_shape_dims = dimsFromSizes(sizesForValue(v));
+//   std::vector<ExprHandle> squeezed_output_shape_exprs;
+      
+//   std::vector<int64_t> reduce_axes;
+//   std::vector<ExprHandle> reduce_exprs;
+//   auto sizes = *v->node()->input(0)->type()->cast<TensorType>()->sizes().concrete_sizes();
+//   const int64_t leading_dims = sizes.size() - output_shape.size();
+//     for (int64_t i = 0; i < leading_dims; ++i) {
+//       reduce_axes.push_back(i);
+//       reduce_exprs.push_back(IntImm::make(sizes[i]));
+//     }
+//     std::set<int64_t> skip_axes;
+//     for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
+//       GRAPH_DEBUG("Looking at output_shape[i - leading_dims]", output_shape[i - leading_dims], " and sizes[i]", sizes[i]);
+//       if (output_shape[i - leading_dims] == 1 && sizes[i] != 1) {
+//         GRAPH_DEBUG("Adding 1 to N broadcast ", i);
+        
+//         reduce_axes.push_back(i);
+//         GRAPH_DEBUG("Adding reduce axis ", skip_axes.size() + i);
+//         reduce_exprs.push_back(IntImm::make(sizes[i]));
+//         skip_axes.insert(squeezed_output_shape_exprs.size());
+//         squeezed_output_shape_exprs.push_back(IntImm::make(1));
+//       }
+//       else {
+//         squeezed_output_shape_exprs.push_back(IntImm::make(sizes[i]));
+//       }
+//     }
+
+    
+//     for (int64_t& axis : reduce_axes) {
+//       axis += skip_axes.size();
+//     }
+//     std::set<int64_t> reduce_axes_set(reduce_axes.begin(), reduce_axes.end());
+//     auto reduce_dims = dimsFromSizes(reduce_exprs);
+//     auto squeezed_output_dims = dimsFromSizes(squeezed_output_shape_exprs);
+//     GRAPH_DEBUG("squeezed_output_dims = ", c10::Join(",", squeezed_output_shape_exprs));
+
+//     auto sum = Reduce("grad_sum_to_size", 
+//       squeezed_output_dims, Sum(), [&](ParameterList& indices) {
+
+//         std::vector<ExprHandle> indices_exprs;
+
+//         //TORCH_INTERNAL_ASSERT(indices.size() == sizes.size());
+
+//         // NB, this is different from leading_dims
+//         // TODO: check off by one
+//         size_t reduction_axes_it = indices.size() - reduce_exprs.size();
+//         size_t output_axes_it = 0;
+//         size_t i = 0;
+//         for (size_t i = 0; i < indices.size(); i++) {
+//           GRAPH_DEBUG("Looking at ", i);
+//           if (skip_axes.count(i) != 0) {
+//             output_axes_it++;
+//             GRAPH_DEBUG("skipping ", i, " ", indices[i]);
+//             continue;
+//           }
+//           if (reduce_axes_set.count(i) != 0) {
+//             GRAPH_DEBUG("reducing on ", i, " ", indices[i]);
+//             indices_exprs.push_back(indices[reduction_axes_it++]);
+//           }
+//           else {
+//             GRAPH_DEBUG("reducing on ", i, " ", indices[i]);
+//             indices_exprs.push_back(indices[output_axes_it++]);
+//           }
+//         }
+
+//         auto ti = tensors_[v->node()->input(0)->unique()];
+//         GRAPH_DEBUG(" rank input = ", ti->dims().size());
+//         GRAPH_DEBUG("indices_exprs ")
+
+
+        
+//         return tensorOrConstant(v->node()->input(0), indices_exprs);        
+//       }, reduce_dims);
+
+
+//       GRAPH_DEBUG("sum = ", *sum);
+//       return sum;
+
+//     //this needs to be inlined to be efficient
+
+//     // auto grad_view = Compute("grad_sum_view", output_shape_dims, [&reduce_axes, leading_dims, &sum](const std::vector<VarHandle>& axes) -> ExprHandle {
+
+//     //      std::vector<ExprHandle> new_axes;
+//     //      for (size_t i = 0; i < axes.size(); i++) {
+//     //        if (reduce_axes.count(leading_dims + i) == 0) {
+//     //          new_axes.push_back(axes[i]);
+//     //        }
+//     //      }
+
+//     //      return sum->call(new_axes);
+//     //   }
+//     // );
+
+//     // return grad_view;     
+// }
+
+enum class AXIS_TYPE {
+  REDUCTION,
+  OUTPUT,
+  SKIP
+};
+
 Tensor* TensorExprKernel::computeGradSumToSize(const torch::jit::Value* v) {
   
   auto output_shape = v->node()->is(attr::profiled_axes);
   auto output_shape_dims = dimsFromSizes(sizesForValue(v));
   std::vector<ExprHandle> squeezed_output_shape_exprs;
       
-  std::set<int64_t> reduce_axes;
+  std::vector<AXIS_TYPE> axis_types;
   std::vector<ExprHandle> reduce_exprs;
   auto sizes = *v->node()->input(0)->type()->cast<TensorType>()->sizes().concrete_sizes();
   const int64_t leading_dims = sizes.size() - output_shape.size();
     for (int64_t i = 0; i < leading_dims; ++i) {
-      reduce_axes.insert(i);
+      axis_types.push_back(AXIS_TYPE::REDUCTION);
       reduce_exprs.push_back(IntImm::make(sizes[i]));
     }
     for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-      if (output_shape[i - leading_dims] == 1 && sizes[i] != 1) {
-        reduce_axes.insert(i);
+      if (output_shape[i - leading_dims] == 1 && sizes[i] != 1) {        
+        axis_types.push_back(AXIS_TYPE::SKIP);
+        axis_types.push_back(AXIS_TYPE::REDUCTION);
         reduce_exprs.push_back(IntImm::make(sizes[i]));
+        squeezed_output_shape_exprs.push_back(IntImm::make(1));
       }
       else {
+        axis_types.push_back(AXIS_TYPE::OUTPUT);
         squeezed_output_shape_exprs.push_back(IntImm::make(sizes[i]));
       }
     }
 
     auto reduce_dims = dimsFromSizes(reduce_exprs);
     auto squeezed_output_dims = dimsFromSizes(squeezed_output_shape_exprs);
-
     auto sum = Reduce("grad_sum_to_size", 
       squeezed_output_dims, Sum(), [&](ParameterList& indices) {
 
         std::vector<ExprHandle> indices_exprs;
-
-        TORCH_INTERNAL_ASSERT(indices.size() == sizes.size());
-
-        // NB, this is different from leading_dims
-        // TODO: check off by one
         size_t reduction_axes_it = indices.size() - reduce_exprs.size();
         size_t output_axes_it = 0;
         size_t i = 0;
         for (size_t i = 0; i < indices.size(); i++) {
-          if (reduce_axes.count(i) != 0) {
+          if (axis_types[i] == AXIS_TYPE::SKIP) {
+            output_axes_it++;
+            continue;
+          }
+          if (axis_types[i] == AXIS_TYPE::REDUCTION) {
             indices_exprs.push_back(indices[reduction_axes_it++]);
           }
           else {
             indices_exprs.push_back(indices[output_axes_it++]);
           }
         }
-
-        auto ti = tensors_[v->node()->input(0)->unique()];
-        GRAPH_DEBUG(" rank input = ", ti->dims().size());
-        GRAPH_DEBUG("indices_exprs ")
-
-
-        
         return tensorOrConstant(v->node()->input(0), indices_exprs);        
       }, reduce_dims);
 
+      return sum;
 
-      GRAPH_DEBUG("sum = ", *sum);
+    //this needs to be inlined to be efficient
 
-    // this needs to be inlined to be efficient
-    auto grad_view = Compute("grad_sum_view", output_shape_dims, [&reduce_axes, leading_dims, &sum](const std::vector<VarHandle>& axes) -> ExprHandle {
+    // auto grad_view = Compute("grad_sum_view", output_shape_dims, [&reduce_axes, leading_dims, &sum](const std::vector<VarHandle>& axes) -> ExprHandle {
 
-         std::vector<ExprHandle> new_axes;
-         for (size_t i = 0; i < axes.size(); i++) {
-           if (reduce_axes.count(leading_dims + i) == 0) {
-             new_axes.push_back(axes[i]);
-           }
-         }
+    //      std::vector<ExprHandle> new_axes;
+    //      for (size_t i = 0; i < axes.size(); i++) {
+    //        if (reduce_axes.count(leading_dims + i) == 0) {
+    //          new_axes.push_back(axes[i]);
+    //        }
+    //      }
 
-         return sum->call(new_axes);
-      }
-    );
+    //      return sum->call(new_axes);
+    //   }
+    // );
 
-    return grad_view;     
+    // return grad_view;     
 }
 
 Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
