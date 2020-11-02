@@ -87,9 +87,15 @@ DEFAULT_OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = 
     (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
 }
 
-# TODO: remove
-def get_fuser_method(op_list):
+def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     ''' Get fuser method for the given list of module types,
     return None if fuser method does not exist
     '''
-    return DEFAULT_OP_LIST_TO_FUSER_METHOD.get(op_list, None)
+    if additional_fuser_method_mapping is None:
+        additional_fuser_method_mapping = {}
+    all_mappings = DEFAULT_OP_LIST_TO_FUSER_METHOD.copy()
+    for k, v in additional_fuser_method_mapping:
+        all_mappings[k] = v
+    fuser_method = all_mappings.get(op_list, None)
+    assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
+    return fuser_method

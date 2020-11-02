@@ -392,10 +392,16 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
           LOG(INFO) << "[Rank " << rank_
                     << "] Wrote aborted communicator id to store: " << storeKey;
         }
-        LOG(INFO) << "[Rank " << rank_
-                  << "] Caught collective operation timeout for work: "
-                  << (*this);
-        throw std::runtime_error("Operation timed out!");
+        auto currentTimepoint = std::chrono::steady_clock::now();
+        auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            currentTimepoint - workStartTime_);
+        std::string exceptionMsg = c10::str("[Rank ", rank_, "] ",
+                                            "Caught collective operation timeout: ",
+                                            (*this),
+                                            " ran for ",
+                                            timeElapsed.count(),
+                                            " milliseconds before timing out.");
+        throw std::runtime_error(exceptionMsg);
       }
       // Check for errors and throw appropriate exception.
       checkAndThrowException();
@@ -504,12 +510,18 @@ void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>&
     // Check for Timeouts in the WorkNCCL Operations, and abort all
     // communicators accordingly.
     if (work.timedOut()) {
-      LOG(INFO)
-          << "[Rank " << rank_
-          << "] Watchdog caught collective operation timeout for work: "
-          << work;
+      auto currentTimepoint = std::chrono::steady_clock::now();
+      auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          currentTimepoint - work.workStartTime_);
+      std::string exceptionMsg = c10::str("[Rank ", rank_, "] ",
+                                          "Watchdog caught collective operation timeout: ",
+                                          work,
+                                          " ran for ",
+                                          timeElapsed.count(),
+                                          " milliseconds before timing out.");
+      LOG(INFO) << exceptionMsg;
       std::exception_ptr exception_ptr = std::make_exception_ptr(
-          std::runtime_error("NCCL Operation Timed Out"));
+          std::runtime_error(exceptionMsg));
       work.setException(exception_ptr);
       for (const auto& ncclComm : work.ncclComms_) {
         ncclComm->ncclCommAbort();
@@ -1435,6 +1447,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+        // See [Sync Streams].
+        c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
         torch::cuda::nccl::all2all(
               input,
               output,
@@ -1464,6 +1479,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               inputSplitSizes, input, &send_lengths, &send_offsets);
           c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
+          // See [Sync Streams].
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
           return ncclAlltoallv(
               input.data_ptr(),
               send_lengths.data(),

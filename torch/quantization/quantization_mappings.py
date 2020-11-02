@@ -10,6 +10,10 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 
 from .stubs import QuantStub, DeQuantStub
+from .fake_quantize import (
+    default_affine_fixed_qparams_fake_quant,
+    default_symmetric_fixed_qparams_fake_quant,
+)
 
 # Default map for swapping float module to quantized ones
 DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
@@ -91,19 +95,32 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
     F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
 }
 
+# mapping from module to output activation post process class
+DEFAULT_MODULE_TO_ACT_POST_PROCESS = {
+    nn.Hardsigmoid: default_affine_fixed_qparams_fake_quant,
+    nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
+    nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
+}
+
 def get_default_static_quant_module_mappings():
     ''' Get module mapping for post training static quantization
     '''
     return DEFAULT_STATIC_QUANT_MODULE_MAPPINGS
 
-def get_static_quant_module_class(float_module_class):
-    ''' Get the statically quantized module class corresponding to
+def get_static_quant_module_class(float_module_class, additional_static_quant_mapping=None):
+    r"""n Get the statically quantized module class corresponding to
     the floating point module class
-    '''
-    static_quant_module_class = DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.get(float_module_class, None)
+    """
+    if additional_static_quant_mapping is None:
+        additional_static_quant_mapping = {}
+    all_mappings = DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.copy()
+    for k, v in additional_static_quant_mapping.items():
+        all_mappings[k] = v
+
+    static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
-        'Floating point module class {}'.format(float_module_class) + \
-        ' does not have a corresponding quantized module class'
+        "Floating point module class {}".format(str(float_module_class)) + \
+        " does not have a corresponding quantized module class"
     return static_quant_module_class
 
 def get_default_qat_module_mappings():
@@ -150,5 +167,17 @@ def get_quantized_operator(float_op):
     '''
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, \
-        'Operator {} does not have corresponding quantized op'.format(float_op)
+        'Operator {} does not have corresponding quantized op'.format(str(float_op))
     return quantized_op
+
+def get_default_special_act_post_process(module_cls):
+    r""" Get the special activation post process for `module`, this has
+    higher priority than the activation post process in `qconfig`
+    e.g.
+    input: torch.nn.Sigmoid
+    output: default_affine_fixed_qparam_fake_quant
+    """
+    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(module_cls, None)
+
+def has_special_act_post_process(module_cls):
+    return module_cls in DEFAULT_MODULE_TO_ACT_POST_PROCESS

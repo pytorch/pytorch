@@ -12,16 +12,19 @@ from .pattern_utils import (
 
 from .fusion_patterns import *  # noqa: F401
 
-import copy
 class Fuser:
-    def fuse(self, model, inplace=False):
-        if not inplace:
-            model = copy.deepcopy(model)
+    def fuse(self, model, fuse_custom_config_dict=None):
+        if fuse_custom_config_dict is None:
+            fuse_custom_config_dict = {}
+
         input_root = model
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
-        fusion_patterns = get_default_fusion_patterns()
+        additional_fusion_patterns = fuse_custom_config_dict.get("additional_quant_pattern", {})
+        fusion_patterns = get_default_fusion_patterns().copy()
+        for k, v in additional_fusion_patterns.items():
+            fusion_patterns[k] = v
         # find fusion
         fusion_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
         self.fused_graph = Graph()
