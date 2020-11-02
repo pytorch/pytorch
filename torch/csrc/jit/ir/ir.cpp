@@ -1928,10 +1928,14 @@ std::vector<Value*> inlineCallTo(
       if (new_node_cs) {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
+<<<<<<< HEAD
                 *new_node_cs,
                 callee,
                 to_replace->sourceRange(),
                 module_instance_info);
+=======
+                *new_node_cs, callee, to_replace->sourceRange(), module_instance_info);
+>>>>>>> 84bec65c5b... [Pytorch][Annotation] Update inlined callstack with module instance info
       } else {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
