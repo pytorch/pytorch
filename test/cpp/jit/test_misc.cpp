@@ -71,6 +71,8 @@
 #include <utility>
 #include <vector>
 
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+
 using namespace torch::autograd::profiler;
 
 namespace torch {
@@ -363,6 +365,65 @@ void testATenNativeBatchNorm() {
   // Compare results
   assertAllClose(tensors_out, expected_tensors_out);
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
+}
+
+
+// void testGradSum() {
+
+//   auto graph_string = R"IR(
+//     graph(%0 : Tensor,
+//           %1 : Tensor,
+//           %2 : int[]?):
+//       %3 : Tensor = aten::mul(%0, %1)
+//       %4 : Tensor = aten::_grad_sum_to_size(%3, %2)
+//       return (%4))IR";
+//   auto g = std::make_shared<Graph>();
+//   torch::jit::parseIR(graph_string, g.get());
+
+//   auto a = at::ones({4, 5, 6, 7}, TensorOptions(kCUDA, 0));
+//   auto b = at::ones({4, 5, 6, 7}, TensorOptions(kCUDA, 0));
+//   auto c = at::ones({6, 7}, TensorOptions(kCUDA, 0));
+//   c10::IValue axes (std::vector<int64_t>{6, 7});
+//   Stack stack {a, b, c, axes};
+//   getProfilingMode() = true;
+//   setTensorExprFuserEnabled(true);
+//   setTexprReductionsEnabled(true);
+//   GraphExecutor ge(g, "fun");
+//   ge.run(stack);
+//   stack.pop_back();
+//   stack.push_back(a);
+//   stack.push_back(b);
+//   stack.push_back(c);
+//   stack.push_back(axes);
+//   ge.run(stack);
+// }
+
+void testGradSum() {
+
+  auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor,
+          %2 : Tensor):
+      %3 : Tensor = aten::mul(%0, %1)
+      %4 : Tensor = aten::div(%3, %2)
+      return (%4))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  auto a = at::ones({4, 5, 6, 7}, TensorOptions(kCUDA, 0));
+  auto b = at::ones({4, 5, 6, 7}, TensorOptions(kCUDA, 0));
+  auto c = at::ones({4, 5, 6, 7}, TensorOptions(kCUDA, 0));
+  Stack stack {a, b, c};
+  getProfilingMode() = true;
+  setTensorExprFuserEnabled(true);
+  setTexprReductionsEnabled(true);
+  GraphExecutor ge(g, "fun");
+  ge.run(stack);
+  stack.pop_back();
+  stack.push_back(a);
+  stack.push_back(b);
+  stack.push_back(c);
+  ge.run(stack);
 }
 
 void testCustomFusion() {

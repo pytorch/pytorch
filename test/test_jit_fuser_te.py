@@ -209,11 +209,11 @@ class TestTEFuser(JitTestCase):
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_keepdim_cast(self):
         def func(x):
-            return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
+            return x.sum((0, )) * 2
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
-            a = a.reshape(5, 3)
+            a = torch.tensor(list(x for x in range(0, 30)), dtype=torch.float, device='cpu')
+            a = a.reshape(2, 5, 3)
             scripted = self.checkScript(func, (a,))
             graph = scripted.graph_for(a)
             fusion_groups = self.findFusionGroups(graph)

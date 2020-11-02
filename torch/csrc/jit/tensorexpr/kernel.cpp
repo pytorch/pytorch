@@ -6,6 +6,10 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include "ATen/core/interned_strings.h"
+#include "c10/util/StringUtil.h"
+#include "jit/tensorexpr/expr.h"
+
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -1231,6 +1235,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::sum: {
       return computeSum(v);
     }
+    case aten::_grad_sum_to_size: {
+      return computeGradSumToSize(v);
+    }
 
     default: {
       throw std::runtime_error("Unhandled node kind");
@@ -1441,6 +1448,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   }
 
   Stmt* stmt = l.root_stmt();
+  GRAPH_DEBUG("stmt = ", *stmt);
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
   GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
@@ -1579,6 +1587,83 @@ std::vector<VarHandle> squeezeIndices(
 
 } // namespace
 
+Tensor* TensorExprKernel::computeGradSumToSize(const torch::jit::Value* v) {
+  
+  auto output_shape = v->node()->is(attr::profiled_axes);
+  auto output_shape_dims = dimsFromSizes(sizesForValue(v));
+  std::vector<ExprHandle> squeezed_output_shape_exprs;
+      
+  std::set<int64_t> reduce_axes;
+  std::vector<ExprHandle> reduce_exprs;
+  auto sizes = *v->node()->input(0)->type()->cast<TensorType>()->sizes().concrete_sizes();
+  const int64_t leading_dims = sizes.size() - output_shape.size();
+    for (int64_t i = 0; i < leading_dims; ++i) {
+      reduce_axes.insert(i);
+      reduce_exprs.push_back(IntImm::make(sizes[i]));
+    }
+    for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
+      if (output_shape[i - leading_dims] == 1 && sizes[i] != 1) {
+        reduce_axes.insert(i);
+        reduce_exprs.push_back(IntImm::make(sizes[i]));
+      }
+      else {
+        squeezed_output_shape_exprs.push_back(IntImm::make(sizes[i]));
+      }
+    }
+
+    auto reduce_dims = dimsFromSizes(reduce_exprs);
+    auto squeezed_output_dims = dimsFromSizes(squeezed_output_shape_exprs);
+
+    auto sum = Reduce("grad_sum_to_size", 
+      squeezed_output_dims, Sum(), [&](ParameterList& indices) {
+
+        std::vector<ExprHandle> indices_exprs;
+
+        TORCH_INTERNAL_ASSERT(indices.size() == sizes.size());
+
+        // NB, this is different from leading_dims
+        // TODO: check off by one
+        size_t reduction_axes_it = indices.size() - reduce_exprs.size();
+        size_t output_axes_it = 0;
+        size_t i = 0;
+        for (size_t i = 0; i < indices.size(); i++) {
+          if (reduce_axes.count(i) != 0) {
+            indices_exprs.push_back(indices[reduction_axes_it++]);
+          }
+          else {
+            indices_exprs.push_back(indices[output_axes_it++]);
+          }
+        }
+
+        auto ti = tensors_[v->node()->input(0)->unique()];
+        GRAPH_DEBUG(" rank input = ", ti->dims().size());
+        GRAPH_DEBUG("indices_exprs ")
+
+
+        
+        return tensorOrConstant(v->node()->input(0), indices_exprs);        
+      }, reduce_dims);
+
+
+      GRAPH_DEBUG("sum = ", *sum);
+
+    // this needs to be inlined to be efficient
+    auto grad_view = Compute("grad_sum_view", output_shape_dims, [&reduce_axes, leading_dims, &sum](const std::vector<VarHandle>& axes) -> ExprHandle {
+
+         std::vector<ExprHandle> new_axes;
+         for (size_t i = 0; i < axes.size(); i++) {
+           if (reduce_axes.count(leading_dims + i) == 0) {
+             new_axes.push_back(axes[i]);
+           }
+         }
+
+         return sum->call(new_axes);
+      }
+    );
+
+    return grad_view;     
+}
+
 Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
   auto reduction_info = getReductionInfo(v->node());
   return Reduce(
@@ -1588,6 +1673,7 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
       [&](ParameterList& indices) {
         const auto& axes = reduction_info.axes;
         // "Squeeze" out indices inserted when keepdim is set.
+        GRAPH_DEBUG("indices: ", c10::Join(",", indices));
         auto indices_squeezed =
             reduction_info.keepdim ? squeezeIndices(indices, axes) : indices;
         TORCH_INTERNAL_ASSERT(axes.size() <= indices_squeezed.size());
@@ -1606,6 +1692,8 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
           ++i;
         }
         auto indexed = tensorOrConstant(v->node()->input(0), indices_exprs);
+        //GRAPH_DEBUG("indices_exprs = ", indexed);
+        GRAPH_DEBUG("indexed = ", indexed);
         if (reduction_info.dtype) {
           return Cast::make(*reduction_info.dtype, indexed);
         } else {
@@ -1727,6 +1815,7 @@ void TensorExprKernel::compile() {
   std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
 
   // Generate code.
+  GRAPH_DEBUG("stmt : ", *stmt);
   codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
 }
 

@@ -121,6 +121,8 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeSum(const torch::jit::Value* v);
 
+  Tensor* computeGradSumToSize(const torch::jit::Value* v);
+
   Tensor* computeValue(const torch::jit::Value* v);
 
   void flattenTensors(BackendType backendType);

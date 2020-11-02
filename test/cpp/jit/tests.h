@@ -16,6 +16,7 @@ namespace jit {
   _(ControlFlow)                                  \
   _(IValueKWargs)                                 \
   _(CustomFusion)                                 \
+  _(GradSum)                                      \
   _(SchemaMatching)                               \
   _(FromQualString)                               \
   _(InternedStrings)                              \

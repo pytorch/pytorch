@@ -10580,19 +10580,6 @@ a")
                        .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
 
 
-    @torch.jit.script
-    def check_strides():
-        return torch.ones(128, 1, 64, 1).to(memory_format=torch.memory_format.)
-
-    # although the type should be int here, testing that the runtime dtype
-    # and shape analysis dtype is the same.
-    with enable_profiling_mode_for_profiling_tests():
-        with num_profiled_runs(1):
-            out = randint()
-            graph_str = torch.jit.last_executed_optimized_graph()
-            self.assertEqual(out.dtype, torch.double)
-            FileCheck().check("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu)").run(graph_str)
-
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():
