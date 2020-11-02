@@ -34,8 +34,10 @@ namespace c10 {
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
   _(prim, CudaFusionGroup)           \
+  _(prim, CudaFusionGuard)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
+  _(prim, TensorExprGroup)           \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \
@@ -54,10 +56,12 @@ namespace c10 {
   _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
-  _(prim, LocalVariableScope)        \
+  _(prim, ListComprehensionScope)    \
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
+  _(prim, AutogradAllNonZero)        \
+  _(prim, AutogradAllZero)           \
   _(prim, Starred)                   \
   _(prim, TupleConstruct)            \
   _(prim, TupleUnpack)               \
@@ -66,6 +70,7 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
+  _(prim, ModuleDictIndex)           \
   _(prim, EnumName)                  \
   _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
@@ -125,7 +130,7 @@ namespace c10 {
   _(prim, fork)                      \
   _(prim, forkClosure)               \
   _(prim, RaiseException)            \
-  _(prim, Function)                  \
+  _(prim, Closure)                   \
   _(prim, CreateObject)              \
   _(prim, SetAttr)                   \
   _(prim, GetAttr)                   \
@@ -142,6 +147,8 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, rpc_sync)                  \
+  _(prim, rpc_remote)                \
   _(prim, is_cuda)                   \
   _(aten, abs_)                      \
   _(aten, absolute)                  \
@@ -180,11 +187,18 @@ namespace c10 {
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
+  _(aten, percentFormat)             \
   _(aten, __not__)                   \
   _(aten, __is__)                    \
   _(aten, __isnot__)                 \
   _(aten, copy)                      \
   _(aten, copy_)                     \
+  _(aten, div)                       \
+  _(aten, div_)                      \
+  _(aten, divide)                    \
+  _(aten, divide_)                   \
+  _(aten, true_divide)               \
+  _(aten, true_divide_)              \
   _(aten, t_)                        \
   _(aten, addbmm_)                   \
   _(aten, addcdiv_)                  \
@@ -192,12 +206,31 @@ namespace c10 {
   _(aten, addmv_)                    \
   _(aten, addr_)                     \
   _(aten, baddbmm_)                  \
+  _(aten, ge)                        \
   _(aten, ge_)                       \
+  _(aten, greater_equal)             \
+  _(aten, greater_equal_)            \
+  _(aten, gt)                        \
   _(aten, gt_)                       \
+  _(aten, greater)                   \
+  _(aten, greater_)                  \
+  _(aten, le)                        \
   _(aten, le_)                       \
+  _(aten, less_equal)                \
+  _(aten, less_equal_)               \
   _(aten, lerp_)                     \
+  _(aten, lt)                        \
   _(aten, lt_)                       \
+  _(aten, less)                      \
+  _(aten, less_)                     \
+  _(aten, mul)                       \
+  _(aten, mul_)                      \
+  _(aten, multiply)                  \
+  _(aten, multiply_)                 \
+  _(aten, ne)                        \
   _(aten, ne_)                       \
+  _(aten, not_equal)                 \
+  _(aten, not_equal_)                \
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
@@ -214,6 +247,10 @@ namespace c10 {
   _(aten, list)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
+  _(aten, sub)                       \
+  _(aten, sub_)                      \
+  _(aten, subtract)                  \
+  _(aten, subtract_)                 \
   _(aten, keys)                      \
   _(aten, ord)                       \
   _(aten, chr)                       \
@@ -232,12 +269,15 @@ namespace c10 {
   _(aten, bin)                       \
   _(aten, pop)                       \
   _(aten, insert)                    \
+  _(aten, vstack)                    \
+  _(aten, row_stack)                 \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
   _(prim, grad)                      \
   _(aten, zero_)                     \
   _(aten, fill_)                     \
+  _(aten, masked_fill_)              \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -279,6 +319,7 @@ namespace c10 {
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
+  _(onnx, SequenceErase)             \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
   _(onnx, SoftmaxCrossEntropyLoss)   \
@@ -324,7 +365,8 @@ namespace c10 {
   _(attr, scope)                     \
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
-  _(attr, new_axis)
+  _(attr, new_axis)                  \
+  _(attr, warn_id)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

@@ -28,6 +28,10 @@
 #include <miopen/version.h>
 #endif
 
+#ifndef USE_ROCM
+#include <ATen/cuda/detail/LazyNVRTC.h>
+#endif
+
 #include <cuda.h>
 
 #include <sstream>
@@ -116,9 +120,13 @@ bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
-#ifdef USE_DIRECT_NVRTC
+#if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());
+}
+#elif !defined(USE_ROCM)
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+  return std::make_pair(nullptr, &at::cuda::detail::lazyNVRTC);
 }
 #else
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {

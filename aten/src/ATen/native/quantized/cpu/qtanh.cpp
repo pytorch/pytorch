@@ -50,9 +50,10 @@ Tensor qnnpack_tanh(Tensor input) {
                         "failed to create QNNPACK TanH operator");
   qy = at::_empty_affine_quantized(
     input_contig.sizes(),
-    input.options(),
+    at::device(kCPU).dtype(input_contig.dtype()),
     output_scale,
-    output_zero_point);
+    output_zero_point,
+    input_contig.suggest_memory_format());
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_tanh_nc_q8(
     tanh_op,

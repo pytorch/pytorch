@@ -378,14 +378,14 @@ Tensor quantized_batch_norm(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("batch_norm",        TORCH_FN(q_batch_norm_impl<false>));
-  m.impl("batch_norm_relu",   TORCH_FN(q_batch_norm_impl<true>));
-  m.impl("batch_norm1d",      TORCH_FN(q_batch_norm1d_impl<false>));
-  m.impl("batch_norm1d_relu", TORCH_FN(q_batch_norm1d_impl<true>));
-  m.impl("batch_norm2d",      TORCH_FN(q_batch_norm2d_impl<false>));
-  m.impl("batch_norm2d_relu", TORCH_FN(q_batch_norm2d_impl<true>));
-  m.impl("batch_norm3d",      TORCH_FN(q_batch_norm3d_impl<false>));
-  m.impl("batch_norm3d_relu", TORCH_FN(q_batch_norm3d_impl<true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm"),        TORCH_FN(q_batch_norm_impl<false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm_relu"),   TORCH_FN(q_batch_norm_impl<true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm1d"),      TORCH_FN(q_batch_norm1d_impl<false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm1d_relu"), TORCH_FN(q_batch_norm1d_impl<true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm2d"),      TORCH_FN(q_batch_norm2d_impl<false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm2d_relu"), TORCH_FN(q_batch_norm2d_impl<true>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d"),      TORCH_FN(q_batch_norm3d_impl<false>));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"), TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
 } // namespace native

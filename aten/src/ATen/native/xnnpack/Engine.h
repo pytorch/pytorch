@@ -67,6 +67,18 @@ Tensor max_pool2d(
     float output_min = -std::numeric_limits<float>::infinity(),
     float output_max = +std::numeric_limits<float>::infinity());
 
+//
+// Channel Shuffle
+//
+
+bool use_channel_shuffle(
+    const Tensor& input,
+    const int64_t groups);
+
+Tensor channel_shuffle(
+    const Tensor& input,
+    const int64_t groups);
+
 } // namespace xnnpack
 } // namespace native
 } // namespace at

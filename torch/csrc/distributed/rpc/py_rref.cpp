@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -120,6 +122,16 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
+PyRRef::~PyRRef() {
+  if (type_.has_value()) {
+    (*type_).dec_ref();
+    // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+    // decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    (*type_).ptr() = nullptr;
+  }
+}
+
 c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // Marking hasValue to false, as this Future is only used for signaling
   // profiler to update profiling result and the profiler does not retrieve
@@ -237,6 +249,19 @@ py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
   }
 }
 
+py::object PyRRef::getRRefType() {
+  // GIL is not released when calling this function.
+  if (!type_.has_value()) {
+    pybind11::gil_scoped_release release;
+    auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+    auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
+    pybind11::gil_scoped_acquire acquire;
+    type_ = isOwner() ? typeFuncs.onOwner_(*this) : typeFuncs.onUser_(*this);
+  }
+
+  return *type_;
+}
+
 py::tuple PyRRef::pickle() const {
   auto& ctx = RRefContext::getInstance();
   auto rrefForkData = ctx.prepareChildFork(rref_);
@@ -258,6 +283,25 @@ c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
+}
+
+void PyRRef::backward(int64_t dist_autograd_ctx_id, bool retain_graph) {
+  if (rref_->isOwner()) {
+    const auto& value =
+        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref_)->getValue();
+    TORCH_CHECK(
+        value.isTensor(), "RRef should contain a tensor for .backward()");
+    auto root = value.toTensor();
+
+    if (dist_autograd_ctx_id == -1) {
+      torch::autograd::backward({root});
+    } else {
+      torch::distributed::autograd::backward(
+          dist_autograd_ctx_id, {value.toTensor()}, retain_graph);
+    }
+  } else {
+    // TODO
+  }
 }
 
 } // namespace rpc

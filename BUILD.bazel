@@ -55,6 +55,7 @@ cc_library(
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
+        "c10/mobile/*.h",
         "c10/util/*.h",
         "c10/util/*.hpp",
     ]),
@@ -71,6 +72,7 @@ cc_library(
     srcs = glob([
         "c10/core/*.cpp",
         "c10/core/impl/*.cpp",
+        "c10/mobile/*.cpp",
         "c10/util/*.cpp",
     ]) + if_cuda(
         glob([
@@ -106,49 +108,43 @@ cc_test(
     ],
 )
 
+# TODO: refactor this into its own library (but how to make
+# a binary based off of a module in a library?)
 py_binary(
     name = "gen",
-    srcs = ["aten/src/ATen/gen.py"],
+    srcs = ["tools/setup_helpers/gen.py"],
+    deps = [
+        ":tools_codegen"
+    ],
 )
 
 genrule(
     name = "generated_cpp",
     srcs = [
-        "aten/src/ATen/Declarations.cwrap",
-        "aten/src/THCUNN/generic/THCUNN.h",
-        "aten/src/ATen/nn.yaml",
         "aten/src/ATen/native/native_functions.yaml",
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
         "aten/src/ATen/Declarations.yaml",
         "aten/src/ATen/BackendSelectRegister.cpp",
-        "aten/src/ATen/CPUType.h",
         "aten/src/ATen/CPUType.cpp",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
-        "aten/src/ATen/LegacyTHFunctionsCPU.h",
-        "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
         "aten/src/ATen/NativeFunctions.h",
-        "aten/src/ATen/MkldnnCPUType.h",
         "aten/src/ATen/MkldnnCPUType.cpp",
-        "aten/src/ATen/QuantizedCPUType.h",
         "aten/src/ATen/QuantizedCPUType.cpp",
-        "aten/src/ATen/SparseCPUType.h",
         "aten/src/ATen/SparseCPUType.cpp",
-        "aten/src/ATen/TypeDefault.h",
         "aten/src/ATen/TypeDefault.cpp",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
-    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
+    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
     tools = [":gen"],
 )
 
 py_library(
-    name = "code_template",
-    srcs = ["aten/src/ATen/code_template.py"],
-    imports = ["aten"],
+    name = "tools_codegen",
+    srcs = glob(["tools/codegen/**/*.py"]),
 )
 
 py_library(
@@ -158,7 +154,7 @@ py_library(
         "tools/autograd/*.yaml",
         "tools/autograd/templates/*",
     ]),
-    deps = [":code_template"],
+    deps = [":tools_codegen"],
 )
 
 py_library(
@@ -190,7 +186,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/TraceType_3.cpp",
         "torch/csrc/autograd/generated/TraceType_4.cpp",
         # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
-        "torch/csrc/autograd/generated/RegistrationDeclarations.h",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
@@ -213,9 +208,10 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/Declarations.yaml",
+        "aten/src/ATen/native/native_functions.yaml",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
 )
 
@@ -298,6 +294,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_base_metal",
+    srcs = glob(["aten/src/ATen/metal/*.cpp"]),
+)
+
+filegroup(
     name = "ATen_QUANTIZED_SRCS",
     srcs = glob(
         [
@@ -332,10 +333,12 @@ filegroup(
     name = "aten_cuda_srcs",
     srcs = [
         "aten/src/ATen/cuda/CUDABlas.cpp",
+        "aten/src/ATen/cuda/CUDASolver.cpp",
         "aten/src/ATen/cuda/CUDAContext.cpp",
         "aten/src/ATen/cuda/CUDAGenerator.cpp",
         "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
         "aten/src/ATen/cuda/CublasHandlePool.cpp",
+        "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
         "aten/src/ATen/cuda/PinnedMemoryAllocator.cpp",
         "aten/src/ATen/cuda/detail/CUDAHooks.cpp",
         "aten/src/ATen/cudnn/AutocastRNN.cpp",
@@ -460,6 +463,7 @@ filegroup(
         "aten/src/ATen/native/cuda/AveragePool2d.cu.cc",
         "aten/src/ATen/native/cuda/AveragePool3d.cu.cc",
         "aten/src/ATen/native/cuda/BatchLinearAlgebra.cu.cc",
+        "aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cu.cc",
         "aten/src/ATen/native/cuda/BinaryArithmeticKernel.cu.cc",
         "aten/src/ATen/native/cuda/BinaryCompareKernel.cu.cc",
         "aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu.cc",
@@ -591,7 +595,10 @@ cc_library(
         "aten/src/THC/generic/*.cu.cc",
         "aten/src/THCUNN/*.cuh",
         "aten/src/THCUNN/generic/*.cu.cc",
-    ]) + [
+    ],
+    exclude = [
+        "aten/src/ATen/Config.h",
+    ],) + [
         ":generated_cpp",
         ":aten_src_ATen_config",
     ],
@@ -646,6 +653,7 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_metal",
         ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
@@ -719,6 +727,7 @@ torch_cuda_half_options = [
     "-DCUDA_HAS_FP16=1",
     "-D__CUDA_NO_HALF_OPERATORS__",
     "-D__CUDA_NO_HALF_CONVERSIONS__",
+    "-D__CUDA_NO_BFLOAT16_CONVERSIONS__",
     "-D__CUDA_NO_HALF2_OPERATORS__",
 ]
 
@@ -1725,13 +1734,16 @@ cc_library(
         "@gloo",
         "@onnx",
         "@fmt",
-        "@tensorpipe",
     ] + if_cuda(
         [
             ":caffe2_cpp_cuda",
             ":aten_cuda",
+            "@tensorpipe//:tensorpipe_cuda",
         ],
-        [":aten"],
+        [
+            ":aten",
+            "@tensorpipe",
+        ],
     ),
     alwayslink = True,
 )
@@ -1762,7 +1774,7 @@ cu_library(
         "@cudnn",
         "@eigen",
         "@gloo",
-        "@tensorpipe",
+        "@tensorpipe//:tensorpipe_cuda",
     ],
     alwayslink = True,
 )
@@ -1868,6 +1880,10 @@ cc_library(
         exclude = [
             "torch/lib/c10d/ProcessGroupMPI.hpp",
             "torch/lib/c10d/ProcessGroupNCCL.hpp",
+            "torch/csrc/autograd/generated/VariableType.h",
+            "torch/csrc/autograd/generated/RegistrationDeclarations.h",
+            "torch/csrc/autograd/generated/variable_factories.h",
+            "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
     ) + [":cpp_generated_code"],
     includes = [

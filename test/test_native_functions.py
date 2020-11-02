@@ -58,7 +58,7 @@ class TestNativeFunctions(TestCase):
         self.do_test_optional_floatlist_with_module(fake_module)
 
     def test_optional_floatlist_invalid(self):
-        with self.assertRaisesRegex(TypeError, "must be .* but found"):
+        with self.assertRaisesRegex(TypeError, "must be tuple of floats, not list"):
             FloatListWrapperModule()(torch.zeros(1), ["hi"])
 
         with self.assertRaisesRegex(RuntimeError, "value of type .* instead found type"):
@@ -175,6 +175,22 @@ class TestNativeFunctions(TestCase):
             raise Exception("Invalid argument")
 
         self.do_test_optional_filled_intlist_with_module(fake_module)
+
+    def test_string_defaults(self):
+        dummy = torch.rand(1)
+        fn = torch._C._nn._test_string_default
+        fn(dummy)
+
+        with self.assertRaisesRegex(RuntimeError, "A"):
+            fn(dummy, a="")
+
+        with self.assertRaisesRegex(RuntimeError, "B"):
+            fn(dummy, b="")
+
+        def f(x):
+            torch._C._nn._test_string_default(x)
+        scripted_fn = torch.jit.script(f)
+        scripted_fn(dummy)
 
 
 if __name__ == '__main__':

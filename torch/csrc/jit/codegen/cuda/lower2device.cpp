@@ -1,9 +1,10 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
+#include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
@@ -13,67 +14,16 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
-namespace {
+namespace cuda {
 
 // TODO(kir): revisit this
 thread_local GpuLower* active_gpu_lower = nullptr;
 
-class GridReductionBuffers : OptOutDispatch {
- public:
-  static std::vector<kir::Allocate*> getGlobalAllocs(
-      const std::vector<Expr*>& exprs) {
-    GridReductionBuffers fgr;
-    for (auto expr : exprs) {
-      fgr.handle(expr);
-    }
-    return fgr.global_allocations_;
-  }
+void GpuLower::replaceSymbolicSizes() {
+  FUSER_PERF_SCOPE("replaceSymbolicSizes");
 
-  static std::vector<kir::Allocate*> getSyncAllocs(
-      const std::vector<Expr*>& exprs) {
-    GridReductionBuffers fgr;
-    for (auto expr : exprs) {
-      fgr.handle(expr);
-    }
-    return fgr.sync_allocations_;
-  }
+  kir::IrBuilder ir_builder(kernel());
 
- private:
-  std::vector<kir::Allocate*> global_allocations_;
-  std::vector<kir::Allocate*> sync_allocations_;
-
-  GridReductionBuffers() = default;
-
-  void handle(Expr* expr) final {
-    OptOutDispatch::handle(expr);
-  }
-
-  void handle(kir::ForLoop* fl) final {
-    for (auto expr : fl->body().exprs()) {
-      OptOutDispatch::handle(expr);
-    }
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->body().exprs()) {
-      OptOutDispatch::handle(expr);
-    }
-
-    for (auto expr : ite->elseBody().exprs()) {
-      OptOutDispatch::handle(expr);
-    }
-  }
-
-  void handle(kir::GridReduction* gr) final {
-    global_allocations_.push_back(gr->reduction_buffer());
-    sync_allocations_.push_back(gr->sync_buffer());
-  }
-};
-
-} // namespace
-
-void GpuLower::buildSizesMap() {
   // Grab inputs and outputs
   // TODO: Only run through inputs for the size map, outputs don't actually set
   // any sizes of the problem.
@@ -101,10 +51,9 @@ void GpuLower::buildSizesMap() {
 
     size_t dim = 0;
     for (auto id : root_td) {
+      const Val* orig_size = id->extent();
+
       // Output sizes could have reduction axes, which isn't what gets output.
-
-      Val* orig_size = id->extent();
-
       if (id->isReduction()) {
         continue;
       } else if (id->getIterType() == IterType::BroadcastWithoutStride) {
@@ -117,31 +66,21 @@ void GpuLower::buildSizesMap() {
         continue;
       }
 
+      // TODO(kir): consider a different implementation which doesn't
+      //  hijack the kir_map_
       if (kir_map_.find(orig_size) == kir_map_.end()) {
         std::stringstream ss;
         ss << "T" << tv->name() << ".size[" << dim++ << "]";
-        auto new_size =
-            new kir::NamedScalar(ss.str(), orig_size->getDataType().value());
-        kir_map_[orig_size] = new_size;
-      }
-    }
-  }
-}
-
-void GpuLower::adjustMemoryTypes() {
-  for (auto val : fusion_->deterministic_vals()) {
-    if (ir_utils::isTV(val)) {
-      auto tv = val->as<TensorView>();
-      if (fusion_->hasInput(tv) || fusion_->hasOutput(tv)) {
-        tv->setMemoryType(MemoryType::Global);
-      } else if (tv->getMemoryType() == MemoryType::Global) {
-        tv->setMemoryType(MemoryType::Local);
+        kir_map_[orig_size] = ir_builder.create<kir::NamedScalar>(
+            ss.str(), orig_size->getDataType().value());
       }
     }
   }
 }
 
 void GpuLower::lower() {
+  FUSER_PERF_SCOPE("lower");
+
   TORCH_INTERNAL_ASSERT(fusion_ != nullptr);
   TORCH_INTERNAL_ASSERT(
       active_gpu_lower == nullptr, "Nested lowering passes are not supported");
@@ -158,68 +97,60 @@ void GpuLower::lower() {
 
   FusionGuard fg(fusion_);
 
+  // Start with a fresh kernel
+  kernel_ = std::make_unique<Kernel>();
+
   // prepare for lowering
   validateIr(fusion_);
-  buildSizesMap();
-  adjustMemoryTypes();
+  replaceSymbolicSizes();
 
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
 
-  // Run our passes keeping the lowered expressions and forwarding
-  // them.
+  // Run our passes keeping the lowered expressions and forwarding them
   const auto lowered_exprs =
       LoopNestGenerator::loweredExprs(fusion_, preds, fusion_->exprs(true));
 
   const auto unrolled_loops =
       UnrollPass::runPass(fusion_, lowered_exprs, preds);
 
+  // Reuse memory locations if:
+  // TensorView is dynamic shared memory
+  // TensorViews have the same size
+  // Output TensorView is modified using Input TensorView
+  const auto reuse_mem_exprs = reuseMemoryAllocations(fusion_, unrolled_loops);
+
+  // Insert SyncThreads at end of for-loop to avoid WAR race condition
+  const auto sync_exprs = insertThreadSynchronization(fusion_, reuse_mem_exprs);
+
   const auto indexed_loops =
-      IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
+      IndexLowering::getIndexedExprs(fusion_, sync_exprs);
 
-  // Store the final lowered IR
-  lowered_exprs_ = indexed_loops;
+  // We now have the lowered expressions, finalize the kernel IR
+  kernel_->finalize(indexed_loops, preds);
 
-  // Get allocations
-  global_allocations_ = GridReductionBuffers::getGlobalAllocs(lowered_exprs_);
-  sync_allocations_ = GridReductionBuffers::getSyncAllocs(lowered_exprs_);
+  // Set the kernel inputs & outputs
+  for (auto input : fusion_->inputs()) {
+    kernel_->addInput(GpuLower::lowerValue(input));
+  }
+  for (auto output : fusion_->outputs()) {
+    kernel_->addOutput(GpuLower::lowerValue(output));
+  }
 }
 
-// Traverse through the fusion and print CUDA code associated with it
-std::ostream& GpuLower::printKernel(
-    std::ostream& os,
-    const std::string& kernel_name) {
-  FusionGuard fg(fusion_);
-
-  std::vector<kir::Allocate*> allocs;
-  allocs.insert(
-      allocs.end(), global_allocations_.begin(), global_allocations_.end());
-  allocs.insert(
-      allocs.end(), sync_allocations_.begin(), sync_allocations_.end());
-
-  std::vector<Val*> global_tensors(allocs.size(), nullptr);
-  std::transform(
-      allocs.begin(),
-      allocs.end(),
-      global_tensors.begin(),
-      [](kir::Allocate* alloc) { return alloc->buffer(); });
-
-  IRPrinter irp(os);
-  irp.printKernel(lowered_exprs_, kernel_name, global_tensors);
-  return os;
-}
-
-std::string GpuLower::getKernel(const std::string& kernel_name) {
-  std::stringstream ss;
-  printKernel(ss, kernel_name);
-  return ss.str();
+Kernel* GpuLower::kernel() const {
+  TORCH_CHECK(kernel_);
+  return kernel_.get();
 }
 
 // Maps Fusion IR nodes to the Kernel IR counterparts
-// (this is a interim solution for easing the Kernel IR splitting)
+//
+// TODO(kir): this is a interim solution for easing the Kernel IR splitting
+//
 class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
  public:
-  explicit KernelIrMapper(GpuLower* gpu_lower) : gpu_lower_(gpu_lower) {}
+  explicit KernelIrMapper(GpuLower* gpu_lower)
+      : gpu_lower_(gpu_lower), ir_builder_(gpu_lower->kernel()) {}
 
   Val* lower(const Val* value) {
     const auto it = gpu_lower_->kir_map_.find(value);
@@ -247,13 +178,14 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
   void lowerDefinition(Val* lowered_value, const Expr* def) {
     switch (def->type()) {
       case ExprType::UnaryOp: {
-        const auto op = def->as<fuser::UnaryOp>();
-        new kir::UnaryOp(op->getUnaryOpType(), lowered_value, lower(op->in()));
+        const auto op = def->as<UnaryOp>();
+        ir_builder_.create<kir::UnaryOp>(
+            op->getUnaryOpType(), lowered_value, lower(op->in()));
         break;
       }
       case ExprType::BinaryOp: {
-        const auto op = def->as<fuser::BinaryOp>();
-        new kir::BinaryOp(
+        const auto op = def->as<BinaryOp>();
+        ir_builder_.create<kir::BinaryOp>(
             op->getBinaryOpType(),
             lowered_value,
             lower(op->lhs()),
@@ -261,8 +193,8 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
         break;
       }
       case ExprType::TernaryOp: {
-        const auto op = def->as<fuser::TernaryOp>();
-        new kir::TernaryOp(
+        const auto op = def->as<TernaryOp>();
+        ir_builder_.create<kir::TernaryOp>(
             op->getTernaryOpType(),
             lowered_value,
             lower(op->in1()),
@@ -288,56 +220,69 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const TensorDomain* node) override {
-    const auto lowered_node = new kir::TensorDomain(node);
+    const auto lowered_node = ir_builder_.create<kir::TensorDomain>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const IterDomain* node) override {
-    const auto lowered_node = new kir::IterDomain(node);
+    const auto lowered_node = ir_builder_.create<kir::IterDomain>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const TensorView* node) override {
-    const auto lowered_node = new kir::TensorView(node);
+    const auto lowered_node = ir_builder_.create<kir::TensorView>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Bool* node) override {
-    const auto lowered_node = new kir::Bool(node);
+    const auto lowered_node = ir_builder_.create<kir::Bool>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Float* node) override {
-    const auto lowered_node = new kir::Float(node);
+    const auto lowered_node = ir_builder_.create<kir::Float>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Half* node) override {
-    const auto lowered_node = new kir::Half(node);
+    const auto lowered_node = ir_builder_.create<kir::Half>(node);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const Int* node) override {
-    const auto lowered_node = new kir::Int(node, false);
+    const auto lowered_node = ir_builder_.create<kir::Int>(node, false);
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
   void handle(const NamedScalar* node) override {
-    const auto lowered_node =
-        new kir::NamedScalar(node->name(), node->getDataType().value());
+    const auto lowered_node = ir_builder_.create<kir::NamedScalar>(
+        node->name(), node->getDataType().value());
     TORCH_CHECK(gpu_lower_->kir_map_.insert({node, lowered_node}).second);
   }
 
  private:
   GpuLower* gpu_lower_ = nullptr;
+  kir::IrBuilder ir_builder_;
 };
 
 Val* GpuLower::lowerValue(const Val* val) {
+  TORCH_INTERNAL_ASSERT(!kir::isLoweredVal(val));
   TORCH_INTERNAL_ASSERT(active_gpu_lower != nullptr);
   KernelIrMapper kir_mapper(active_gpu_lower);
   return kir_mapper.lower(val);
 }
 
+Val* GpuLower::getLowerValue(const Val* val) {
+  KernelIrMapper kir_mapper(this);
+  return kir_mapper.lower(val);
+}
+
+GpuLower* GpuLower::current() {
+  TORCH_INTERNAL_ASSERT(active_gpu_lower != nullptr);
+  return active_gpu_lower;
+}
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

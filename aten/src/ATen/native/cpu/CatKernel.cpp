@@ -36,7 +36,7 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
       int64_t local_inner = inputs[j].inner_size;
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
       if (local_inner < Vec::size()) {
-        #ifndef _MSC_VER
+        #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
         # pragma unroll
         #endif
         for (int64_t k = 0; k < local_inner; k++) {

@@ -489,7 +489,10 @@ def move_nightly_files(spdir, platform):
     if platform.startswith("win"):
         _copy_files(listing, source_dir, target_dir)
     else:
-        _link_files(listing, source_dir, target_dir)
+        try:
+            _link_files(listing, source_dir, target_dir)
+        except Exception:
+            _copy_files(listing, source_dir, target_dir)
 
 
 def _available_envs():

@@ -4,13 +4,6 @@
 namespace torch {
 namespace jit {
 
-TORCH_API Node* createFallbackGraph(
-    Block* b,
-    ArrayRef<Value*> inputs,
-    Graph* g);
-
-TORCH_API void replaceBlockWithFallbackGraph(Block* b);
-
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
@@ -29,6 +22,8 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
+  // this plan is used if getGraphExecutorOptimize is unset
+  c10::optional<ExecutionPlan> fallback_plan_;
   // fallback functions are inserted for tensorexpr fusion groups
   // and by specialize_autogradzero. Whenever, at runtime, input
   // tensor don't match profiled properties, fallback functions are called

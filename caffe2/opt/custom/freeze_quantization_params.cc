@@ -13,13 +13,13 @@ void freezeQuantizationParams(NetDef* net, Workspace* ws) {
       if (!b) {
         LOG(WARNING)
             << "ParamBlob " << paramName
-            << "does not exist in the workspace. Skip freezing current op.";
+            << " does not exist in the workspace. Skip freezing current op.";
         continue;
       }
       if (!b->template IsType<caffe2::unique_ptr<Int8QuantParamsBlob>>()) {
         LOG(WARNING)
             << "ParamBlob " << paramName
-            << "is not of caffe2::unique_ptr<Int8QuantParamsBlob> type. Skip freezing current op.";
+            << " is not of caffe2::unique_ptr<Int8QuantParamsBlob> type. Skip freezing current op.";
         continue;
       }
 

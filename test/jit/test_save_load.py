@@ -1,5 +1,6 @@
 import os
 import io
+import pathlib
 import sys
 import random
 import torch
@@ -128,8 +129,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 3)
+        self._verify_count("aten::div", v3_module, 3)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 3)
 
         current_module = self._save_load_module(MyModule)
@@ -172,8 +172,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 1)
+        self._verify_count("aten::div", v3_module, 1)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 1)
 
         current_module = self._save_load_module(MyModule)
@@ -218,8 +217,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 1)
+        self._verify_count("aten::div", v3_module, 1)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 1)
 
         current_module = self._save_load_module(MyModule)
@@ -278,8 +276,7 @@ class TestSaveLoad(JitTestCase):
             self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
-            self._verify_no("aten::div", m)
-            self._verify_count("aten::true_divide", m, 1)
+            self._verify_count("aten::div", m, 1)  # true_divide aliases to div
             self._verify_count("aten::floor_divide", m, 1)
 
         current_module_float = self._save_load_module(MyModuleFloat)
@@ -414,8 +411,7 @@ class TestSaveLoad(JitTestCase):
             self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
-            self._verify_no("aten::div", m)
-            self._verify_count("aten::true_divide", m, 1)
+            self._verify_count("aten::div", m, 1)  # true_divide aliases to div
             self._verify_count("aten::floor_divide", m, 1)
 
         current_module_float = self._save_load_module(MyModuleFloat)
@@ -925,3 +921,29 @@ class TestSaveLoad(JitTestCase):
         with self.assertRaises(RuntimeError):
             extra_files['bar'] = ''
             torch.jit.load(buffer, _extra_files=extra_files)
+
+    def test_save_load_using_pathlib(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return 2 * a
+
+        m = MyMod()
+
+        # Save then load.
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            m.save(path)
+            m2 = torch.jit.load(path)
+
+        x = torch.tensor([1., 2., 3., 4.])
+        self.assertTrue(torch.equal(m(x), m2(x)))
+
+    def test_save_nonexit_file(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return 2 * x
+
+        script_module = torch.jit.script(Foo())
+        with self.assertRaises(RuntimeError):
+            script_module.save("NonExist/path/test.pt")

@@ -22,6 +22,21 @@ static void BM_deep_wide_base(benchmark::State& state) {
   }
 }
 
+static void BM_deep_wide_fast(benchmark::State& state) {
+  std::shared_ptr<DeepAndWideFast> net =
+      std::make_shared<DeepAndWideFast>(num_features);
+
+  const int batch_size = state.range(0);
+  auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+  auto user_emb = torch::randn({batch_size, 1, embedding_size});
+  auto wide = torch::randn({batch_size, num_features});
+  // warmup
+  net->forward(ad_emb_packed, user_emb, wide);
+  for (auto _ : state) {
+    net->forward(ad_emb_packed, user_emb, wide);
+  }
+}
+
 static void BM_deep_wide_jit_graph_executor(benchmark::State& state) {
   auto mod = getDeepAndWideSciptModel();
 
@@ -60,7 +75,8 @@ static void BM_deep_wide_jit_profiling_executor(benchmark::State& state) {
 
 static void BM_deep_wide_static(benchmark::State& state) {
   auto mod = getDeepAndWideSciptModel();
-  torch::jit::StaticRuntime runtime(mod);
+  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(g);
 
   const int batch_size = state.range(0);
   auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
@@ -75,7 +91,30 @@ static void BM_deep_wide_static(benchmark::State& state) {
   }
 }
 
+const std::shared_ptr<torch::jit::InferenceModule>& getStaticGraph() {
+  static const std::shared_ptr<torch::jit::InferenceModule> g =
+      torch::jit::PrepareForStaticRuntime(getDeepAndWideSciptModel());
+  return g;
+}
+
+static void BM_deep_wide_static_threaded(benchmark::State& state) {
+  auto g = getStaticGraph();
+  torch::jit::StaticRuntime runtime(g);
+
+  const int batch_size = 1; // state.range(0);
+  auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+  auto user_emb = torch::randn({batch_size, 1, embedding_size});
+  auto wide = torch::randn({batch_size, num_features});
+
+  std::vector<at::Tensor> inputs({ad_emb_packed, user_emb, wide});
+
+  for (auto _ : state) {
+    runtime.run(inputs);
+  }
+}
+
 BENCHMARK(BM_deep_wide_base)->RangeMultiplier(8)->Ranges({{1, 20}});
+BENCHMARK(BM_deep_wide_fast)->RangeMultiplier(8)->Ranges({{1, 20}});
 
 BENCHMARK(BM_deep_wide_jit_graph_executor)
     ->RangeMultiplier(8)
@@ -86,5 +125,6 @@ BENCHMARK(BM_deep_wide_jit_profiling_executor)
     ->Ranges({{1, 20}});
 
 BENCHMARK(BM_deep_wide_static)->RangeMultiplier(8)->Ranges({{1, 20}});
+BENCHMARK(BM_deep_wide_static_threaded)->Threads(8);
 
 BENCHMARK_MAIN();

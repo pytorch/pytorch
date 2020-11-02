@@ -77,6 +77,18 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
+int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
+  int64_t new_size_bytes;
+  switch(t) {
+    case at::ScalarType::QUInt4x2:
+      new_size_bytes = std::ceil(size_bytes * 0.5);
+      break;
+    default:
+      new_size_bytes = size_bytes;
+  }
+  return new_size_bytes;
+}
+
 inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
@@ -99,7 +111,9 @@ inline Tensor new_qtensor(
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor.");
-  int64_t size_bytes = nelements * dtype.itemsize();
+  auto scalar_type = typeMetaToScalarType(dtype);
+  int64_t size_bytes = get_sub_byte_tensor_size(nelements * dtype.itemsize(), scalar_type);
+
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
       size_bytes,

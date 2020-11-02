@@ -85,6 +85,14 @@ Workspace* GetCurrentWorkspace() {
   return gWorkspace;
 }
 
+Workspace* GetWorkspaceByName(const std::string &name) {
+  if (gWorkspaces.count(name)) {
+    return gWorkspaces[name].get();
+  }
+  return nullptr;
+}
+
+
 class StringFetcher : public BlobFetcherBase {
  public:
   py::object Fetch(const Blob& blob) override {
@@ -110,7 +118,7 @@ static_assert(
     sizeof(int) == sizeof(int32_t),
     "We make an assumption that int is always int32 for numpy "
     "type mapping.");
-int CaffeToNumpyType(const TypeMeta& meta) {
+int CaffeToNumpyType(const TypeMeta meta) {
 #ifdef USE_NUMPY
   static std::map<TypeIdentifier, int> numpy_type_map{
       {TypeMeta::Id<bool>(), NPY_BOOL},
@@ -135,7 +143,7 @@ int CaffeToNumpyType(const TypeMeta& meta) {
 #endif // USE_NUMPY
 }
 
-const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
+const TypeMeta NumpyTypeToCaffe(int numpy_type) {
 #ifdef USE_NUMPY
   static std::map<int, TypeMeta> caffe_type_map{
       {NPY_BOOL, TypeMeta::Make<bool>()},
@@ -361,10 +369,18 @@ class BackgroundPlan {
 };
 
 void addObjectMethods(py::module& m) {
-  py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
-    py::gil_scoped_release g;
-    CAFFE_ENFORCE(net->Run());
-  });
+  py::class_<NetBase>(m, "Net")
+      .def(
+          "run",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            CAFFE_ENFORCE(net->Run());
+          })
+      .def("cancel",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            net->Cancel();
+      });
 
   py::class_<ObserverBase<NetBase>>(m, "Observer")
       .def(

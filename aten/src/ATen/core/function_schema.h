@@ -156,18 +156,29 @@ struct FunctionSchema {
     checkSchema();
   }
 
-  // check whether this schema is backward compatible with the old one.
-  // the following conditions are considered as this schema is backward
-  // compatible with old:
-  //   1) two schemas are equal
-  //   2) this schema has the same or more positional args than old,
-  //      and any positional arg in this schema is backward compatible
-  //      with the corresponding one in old schema, which could be an arg
-  //      or a kwarg, if it has, or it must provide a default value
-  //   3) this schema has the same or more kwargs than old, and all the kwargs
-  //      in old schema can find the corresponding kwarg in this schema which
-  //      is backward compatible with the old kwarg, and the extra kwargs in
-  //      this schema must provide default values.
+  // Checks whether this schema is backward compatible with the old one.
+  // The following conditions must be true:
+  // [Function structure] The new schema's name, overload-name, varargs, and
+  //      return arity are the same.
+  // [Output Narrowing] The new schema's output type must be the same class
+  //      or inherit from the old schema's output type.
+  // [Argument count] The new schema must have at least as many arguments as
+  //      the old schema (considering the list of positional and kwargs).
+  // [Arg Compatibility] Every argument in the old schema has a corresponding
+  //      argument in the new schema that:
+  //        * is at the same position.
+  //        * has the same name.
+  //        * is either positional, or kwarg and the old argument was kwarg.
+  //        * has the same type, or the old argument's type inherits from the
+  //          new argument's type.
+  // [Default Values] Every new argument must have a default value.
+  // E.g.
+  //   OK    f_new(a, b, c=1) => f_old(a, b)
+  //   NOK   f_new(a, c=1, *, b) => f_old(a, *, b)
+  //   OK    f_new(a, b, *, c) => f_old(a, *, b, c)
+  //   NOK   f_new(a, *, b, c) -> f_old(a, b, *, c)
+  //   NOK   f_new(a, *, c, b) => f_old(a, *, b, c)
+  //   OK    f_new(a, *, b, c, d=1) => f_old(a, *, b, c)
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
       std::ostream* why_not = nullptr) const;
