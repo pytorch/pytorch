@@ -76,11 +76,9 @@ Tensor& clamp_(
     const c10::optional<Scalar> min_value,
     const c10::optional<Scalar> max_value) {
   api::Context* const context = api::context();
-
   if (!min_value && !max_value) {
     TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
   }
-
   TORCH_CHECK(
       self_arg.is_vulkan(),
       "Vulkan: In-place clamp is only supported on Vulkan tensors.");
