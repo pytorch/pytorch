@@ -325,6 +325,9 @@ class profile(object):
 
         with_stack (bool, optional): record source information (file and line number) for the ops
 
+        use_kineto (bool, default False): experimental support for Kineto profiler
+            skip_cpu (default False) - whether to skip profiling of CPU events
+
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
         overhead
@@ -365,7 +368,8 @@ class profile(object):
             record_shapes=False,
             profile_memory=False,
             with_stack=False,
-            use_kineto=False):
+            use_kineto=False,
+            skip_cpu=False):
         self.enabled = enabled
         if not self.enabled:
             return
@@ -376,16 +380,22 @@ class profile(object):
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.use_kineto = use_kineto
+        self.skip_cpu = skip_cpu
+        if self.skip_cpu:
+            assert self.use_kineto, "skip_cpu is used with use_kineto=True"
 
         self.profiler_kind = None
         self.kineto_activities = []
         if self.use_kineto:
             self.profiler_kind = torch.autograd.ProfilerState.KINETO
-            self.kineto_activities = [torch.autograd.ProfilerActivity.CPU]
+            if not self.skip_cpu:
+                self.kineto_activities = [torch.autograd.ProfilerActivity.CPU]
+            else:
+                self.kineto_activities = []
             if self.use_cuda:
                 self.kineto_activities += [
                     # uses CUPTI
-                    torch.autograd.ProfilerActivity.CUDA_RUNTIME,
+                    # torch.autograd.ProfilerActivity.CUDA_RUNTIME,
                     torch.autograd.ProfilerActivity.CUDA]
         elif self.use_cuda:
             # legacy CUDA mode
@@ -412,7 +422,9 @@ class profile(object):
         if self.entered:
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
-        torch.autograd._prepare_profiler(self.config, self.kineto_activities)
+        if self.use_kineto:
+            torch.autograd._prepare_profiler(self.config, self.kineto_activities)
+
         torch.autograd._enable_profiler(self.config)
         return self
 

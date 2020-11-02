@@ -114,7 +114,7 @@ enum class C10_API_ENUM ProfilerState {
 
 enum class C10_API_ENUM ActivityType {
   CPU = 0,
-  CUDA_RUNTIME, // CUDA host events
+  // CUDA_RUNTIME, // CUDA host events
   CUDA, // CUDA kernels
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
@@ -158,10 +158,21 @@ struct TORCH_API Event {
     return kind_;
   }
 
+  std::string kindStr() const {
+    switch (kind_) {
+      case EventKind::Mark: return "mark";
+      case EventKind::PushRange: return "push";
+      case EventKind::PopRange: return "pop";
+      case EventKind::MemoryAlloc: return "memory_alloc";
+    }
+    throw std::runtime_error("unknown event kind");
+  }
+
  protected:
   EventKind kind_;
 }
 
+// To be deprecated, once we switch to Kineto profiling
 struct TORCH_API LegacyEvent : public Event {
   LegacyEvent(
       EventKind kind,
@@ -223,15 +234,6 @@ struct TORCH_API LegacyEvent : public Event {
   static LegacyEvent fromIValue(const at::IValue& eventIValue);
 
   void record(bool record_cuda);
-  std::string kindStr() const {
-    switch (kind_) {
-      case EventKind::Mark: return "mark";
-      case EventKind::PushRange: return "push";
-      case EventKind::PopRange: return "pop";
-      case EventKind::MemoryAlloc: return "memory_alloc";
-    }
-    throw std::runtime_error("unknown EventKind");
-  }
 
   const char* name() const {
     return name_.str();
@@ -373,10 +375,6 @@ struct TORCH_API LegacyEvent : public Event {
   uint64_t correlation_id_;
 };
 
-struct TORCH_API KinetoEvent : public Event {
-
-};
-
 // a linked-list of fixed sized vectors, to avoid
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
@@ -433,9 +431,12 @@ TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
+struct TORCH_API KinetoEvent : public Event {
+
+};
 
 struct TORCH_API ProfilerResult {
-  thread_event_lists legacy_events_; // mem alloc, start/stop
+  thread_event_lists legacy_events_; // tensor mem alloc, start/stop
 
   std::vector<std::vector<KinetoEvent>> events_;
 };

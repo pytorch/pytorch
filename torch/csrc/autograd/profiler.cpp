@@ -205,12 +205,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
           std::make_move_iterator(remoteProfiledEvents_->begin()),
           std::make_move_iterator(remoteProfiledEvents_->end()));
     }
-    if (kinetoEvents_) {
-      result.insert(
-          result.end(),
-          std::make_move_iterator(kinetoEvents_->begin()),
-          std::make_move_iterator(kinetoEvents_->end()));
-    }
     return result;
   }
 
@@ -227,6 +221,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
           at::RecordFunction::currentThreadId(),
           include_cuda && config_.state == ProfilerState::CUDA);
       evt.setNodeId(at::RecordFunction::getDefaultNodeId());
+      evt.setCorrelationId(peek_correlation_id());
       getEventList().record(std::move(evt));
     }
   }
@@ -240,11 +235,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
     } else {
       remoteProfiledEvents_ = {std::move(remoteProfiledEvents)};
     }
-  }
-
-  void setKinetoEvents(std::vector<std::vector<Event>>&& kinetoEvents) {
-    std::lock_guard<std::mutex> guard(state_mutex_);
-    kinetoEvents_ = std::move(kinetoEvents);
   }
 
   void pushRange(
@@ -270,7 +260,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       evt.setSequenceNr(fn.seqNr());
       evt.setFwdThreadId(fn.forwardThreadId());
       evt.setScope((uint8_t)fn.scope());
-      evt.setCorrelationId(peek_correlation_id());
 #ifndef C10_MOBILE
       // backward nodes source range corresponds to the forward node
       // TODO: consider using C++ stack trace
@@ -328,6 +317,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
           thread_id,
           config_.state == ProfilerState::CUDA);
       evt.updateMemoryStats(alloc_size, device);
+      evt.setCorrelationId(peek_correlation_id());
       getEventList(thread_id).record(std::move(evt));
     }
   }
@@ -433,7 +423,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
   at::CallbackHandle handle_ = 0;
   c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
-  c10::optional<std::vector<std::vector<Event>>> kinetoEvents_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -450,6 +439,12 @@ void pushProfilingCallbacks() {
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
+#ifdef USE_KINETO
+        if (state_ptr->config().state == ProfilerState::KINETO) {
+          libkineto::api().pushCorrelationId(next_correlation_id());
+          return;
+        }
+#endif
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
         if (record_cuda && disable_cuda_profiling.find(fn.name().str()) != disable_cuda_profiling.end()) {
@@ -476,28 +471,25 @@ void pushProfilingCallbacks() {
         } else {
           state_ptr->pushRange(fn, record_cuda, msg);
         }
-#ifdef USE_KINETO
-        if (state_ptr->config().state == ProfilerState::KINETO) {
-          libkineto::api().pushCorrelationId(next_correlation_id());
-        }
-#endif
       },
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
+#ifdef USE_KINETO
+        if (state_ptr->config().state == ProfilerState::KINETO) {
+                    // push new cpu trace event
+          libkineto::api().popCorrelationId();
+          return;
+        }
+#endif
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
         if (record_cuda && disable_cuda_profiling.find(fn.name().str()) != disable_cuda_profiling.end()) {
           record_cuda = false;
         }
         state_ptr->popRange(fn, record_cuda);
-#ifdef USE_KINETO
-        if (state_ptr->config().state == ProfilerState::KINETO) {
-          libkineto::api().popCorrelationId();
-        }
-#endif
       })
     .needsInputs(state_ptr->config().report_input_shapes)
     .needsIds(true));
@@ -563,17 +555,18 @@ bool kinetoAvailable() {
 }
 
 void prepareProfiler(
-    const ProfilerConfig& new_config,
+    const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {
 #ifdef USE_KINETO
-  if (new_config.state == ProfilerState::KINETO) {
+  if (config.state == ProfilerState::KINETO) {
     std::set<libkineto::ActivityType> k_activities;
     if (activities.count(ActivityType::CPU)) {
       k_activities.insert(libkineto::ActivityType::EXTERNAL_CORRELATION);
-    }
-    if (activities.count(ActivityType::CUDA_RUNTIME)) {
       k_activities.insert(libkineto::ActivityType::CUDA_RUNTIME);
     }
+    //if (activities.count(ActivityType::CUDA_RUNTIME)) {
+    //  k_activities.insert(libkineto::ActivityType::CUDA_RUNTIME);
+    //}
     if (activities.count(ActivityType::CUDA)) {
       k_activities.insert(libkineto::ActivityType::GPU_MEMCPY);
       k_activities.insert(libkineto::ActivityType::GPU_MEMSET);
@@ -586,15 +579,18 @@ void prepareProfiler(
     }
     libkineto::api().initProfilerIfRegistered();
     libkineto::api().prepareTrace(k_activities);
+
+    return;
   }
 #endif
+  TORCH_CHECK(false, "Supported only in Kineto profiler");
 }
 
-void enableProfiler(const ProfilerConfig& new_config) {
+void enableProfilerLegacy(const ProfilerConfig& new_config) {
   TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
 
-  TORCH_CHECK(new_config.state != ProfilerState::KINETO || kinetoAvailable());
+  TORCH_CHECK(new_config.state != ProfilerState::KINETO);
 
   auto state_ptr = getProfilerTLSState();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
@@ -602,12 +598,6 @@ void enableProfiler(const ProfilerConfig& new_config) {
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   pushProfilingCallbacks();
-
-#ifdef USE_KINETO
-  if (new_config.state == ProfilerState::KINETO) {
-    libkineto::api().startTrace();
-  }
-#endif
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -629,7 +619,7 @@ void enableProfiler(const ProfilerConfig& new_config) {
   state->mark("__start_profile", false);
 }
 
-thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profilerDisableOptions) {
+thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions) {
   auto cleanupTLSState = profilerDisableOptions ? profilerDisableOptions->cleanupTLSState : true;
   auto consolidate = profilerDisableOptions ? profilerDisableOptions->consolidate : true;
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
@@ -639,6 +629,46 @@ thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profile
   } else {
     state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
   }
+
+  auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
+  TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
+      "Can't disable profiler when it's not running");
+
+  if (cleanupTLSState) {
+    at::removeCallback(state_ptr->callbackHandle());
+  }
+
+  if (!consolidate || state_ptr->config().state == ProfilerState::NVTX) {
+    return thread_event_lists();
+  }
+
+  state_ptr->mark("__stop_profile");
+  // Note that this will erase the underlying events.
+  return state_ptr->consolidate();
+}
+
+void enableProfiler(const ProfilerConfig& new_config) {
+  TORCH_CHECK(new_config.state == ProfilerState::KINETO && kinetoAvailable());
+
+  auto state_ptr = getProfilerTLSState();
+  TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
+  auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
+  c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
+
+  pushProfilingCallbacks();
+
+#ifdef USE_KINETO
+  if (new_config.state == ProfilerState::KINETO) {
+    libkineto::api().startTrace();
+  }
+#endif
+
+  state->mark("__start_profile", false);
+}
+
+ProfilerResult disableProfiler() {
+  // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
+  auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
 
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
@@ -660,8 +690,8 @@ thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profile
           k_evt.threadId,
           false,
           k_evt.correlationId);
-      push_evt.setDevice(k_evt.deviceId);
-      push_evt.setCpuUS(k_evt.startUs);
+      push_evt.setDeviceId(k_evt.deviceId);
+      push_evt.setCpuUs(k_evt.startUs);
       push_evt.setCorrelationId(k_evt.correlationId);
       evt_list.emplace_back(std::move(push_evt));
 
@@ -671,8 +701,8 @@ thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profile
           k_evt.threadId,
           false,
           k_evt.correlationId);
-      pop_evt.setDevice(k_evt.deviceId);
-      pop_evt.setCpuUS(k_evt.endUs);
+      pop_evt.setDeviceId(k_evt.deviceId);
+      pop_evt.setCpuUs(k_evt.endUs);
       pop_evt.setCorrelationId(k_evt.correlationId);
       evt_list.emplace_back(std::move(pop_evt));
     }
@@ -682,13 +712,8 @@ thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profile
         events_list.emplace_back(it2.second);
       }
     }
-    state_ptr->setKinetoEvents(std::move(events_list));
   }
 #endif
-
-  if (!consolidate || state_ptr->config().state == ProfilerState::NVTX) {
-    return thread_event_lists();
-  }
 
   state_ptr->mark("__stop_profile");
   // Note that this will erase the underlying events.

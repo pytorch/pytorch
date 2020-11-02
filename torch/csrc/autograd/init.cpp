@@ -44,7 +44,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
-      .value("CUDA_RUNTIME", ActivityType::CUDA_RUNTIME)
+      //.value("CUDA_RUNTIME", ActivityType::CUDA_RUNTIME)
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
@@ -67,7 +67,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("is_remote", &LegacyEvent::isRemote)
       .def("sequence_nr", &LegacyEvent::sequenceNr)
       .def("stack", &LegacyEvent::stack)
-      .def("scope", &LegacyEvent::scope);
+      .def("scope", &LegacyEvent::scope)
+      .def("correlation_id", &LegacyEvent::correlationId);
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
       .def("kind", &LegacyEvent::kindStr)
