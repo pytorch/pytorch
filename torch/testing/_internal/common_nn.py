@@ -2467,17 +2467,6 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3)',
-        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
-        jacobian_input=False,
-        check_gradgrad=False,
-        desc='alert_nondeterministic',
-        test_cpu=False,
-        decorator=expectedAlertNondeterministic('_embedding_bag_dense_backward_cuda', fn_has_device_arg=False)
-    ),
-    dict(
-        module_name='EmbeddingBag',
         constructor_args=(4, 3, None, 2., False, 'sum'),
         cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
                                 .max_norm(c10::nullopt).norm_type(2.).scale_grad_by_freq(false).mode(torch::kSum)''',
