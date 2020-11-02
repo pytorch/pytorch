@@ -7,9 +7,14 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-Tensor mul_scalar(
+Tensor clamp(
     const Tensor& self_arg,
-    const Scalar other) {
+    const c10::optional<Scalar> min_value,
+    const c10::optional<Scalar> max_value) {
+  if (!min_value && !max_value) {
+    TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
+  }
+
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -27,12 +32,14 @@ Tensor mul_scalar(
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
         uint32_t width, height, channels;
-        float other;
+        float min_value;
+        float max_value;
       } block {
         v_output.extents().width,
         v_output.extents().height,
         v_output.extents().depth,
-        other.to<float>(),
+        min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
+        max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
       };
 
       context->dispatch(
@@ -42,7 +49,7 @@ Tensor mul_scalar(
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(mul_scalar),
+          VK_KERNEL(clamp),
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
@@ -64,14 +71,15 @@ Tensor mul_scalar(
   return convert(v_output);
 }
 
-Tensor& mul_scalar_(
+Tensor& clamp_(
     Tensor& self_arg,
-    const Scalar other) {
+    const c10::optional<Scalar> min_value,
+    const c10::optional<Scalar> max_value) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
       self_arg.is_vulkan(),
-      "Vulkan: In-place mul_scalar is only supported on Vulkan tensors.");
+      "Vulkan: In-place clamp is only supported on Vulkan tensors.");
 
   vTensor& v_self = convert(self_arg);
 
@@ -81,12 +89,14 @@ Tensor& mul_scalar_(
     if (v_self.has_image()) {
       const struct {
         uint32_t width, height, channels;
-        float other;
+        float min_value;
+        float max_value;
       } block {
         v_self.extents().width,
         v_self.extents().height,
         v_self.extents().depth,
-        other.to<float>(),
+        min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
+        max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
       };
 
       context->dispatch(
@@ -95,7 +105,7 @@ Tensor& mul_scalar_(
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(mul_scalar_),
+          VK_KERNEL(clamp_),
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
@@ -117,8 +127,8 @@ Tensor& mul_scalar_(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
-  m.impl("mul_.Scalar", TORCH_FN(mul_scalar_));
+  m.impl("clamp", TORCH_FN(clamp));
+  m.impl("clamp_", TORCH_FN(clamp_));
 }
 
 #endif /* USE_VULKAN_API */
