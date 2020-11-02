@@ -382,7 +382,8 @@ class profile(object):
         self.use_kineto = use_kineto
         self.skip_cpu = skip_cpu
         if self.skip_cpu:
-            assert self.use_kineto, "skip_cpu is used with use_kineto=True"
+            assert self.use_kineto, \
+                "skip_cpu is supported only with Kineto (use_kineto=True)"
 
         self.profiler_kind = None
         self.kineto_activities = []
@@ -397,6 +398,8 @@ class profile(object):
                     # uses CUPTI
                     # torch.autograd.ProfilerActivity.CUDA_RUNTIME,
                     torch.autograd.ProfilerActivity.CUDA]
+            assert len(self.kineto_activities) > 0, \
+                "No activities specified for Kineto profiler"
         elif self.use_cuda:
             # legacy CUDA mode
             self.profiler_kind = torch.autograd.ProfilerState.CUDA
@@ -425,7 +428,7 @@ class profile(object):
         if self.use_kineto:
             torch.autograd._prepare_profiler(self.config, self.kineto_activities)
 
-        torch.autograd._enable_profiler(self.config)
+        torch.autograd._enable_profiler(self.config, self.kineto_activities)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

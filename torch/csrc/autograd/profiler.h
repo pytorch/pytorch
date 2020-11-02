@@ -440,7 +440,9 @@ struct TORCH_API ProfilerResult {
 
   std::vector<std::vector<KinetoEvent>> events_;
 };
-TORCH_API void enableProfiler(const ProfilerConfig&);
+TORCH_API void enableProfiler(
+    const ProfilerConfig& config,
+    const std::set<ActivityType>& activities);
 TORCH_API ProfilerResult disableProfiler();
 
 TORCH_API bool kinetoAvailable();

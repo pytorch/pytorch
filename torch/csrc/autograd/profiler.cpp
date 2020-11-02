@@ -175,9 +175,9 @@ struct FileLineFunc {
 
 thread_local size_t corr_id_ = 0;
 size_t next_correlation_id() {
-  return corr_id_++;
+  return ++corr_id_;
 }
-size_t peek_correlation_id() {
+size_t cur_correlation_id() {
   return corr_id_;
 }
 
@@ -221,7 +221,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
           at::RecordFunction::currentThreadId(),
           include_cuda && config_.state == ProfilerState::CUDA);
       evt.setNodeId(at::RecordFunction::getDefaultNodeId());
-      evt.setCorrelationId(peek_correlation_id());
+      evt.setCorrelationId(cur_correlation_id());
       getEventList().record(std::move(evt));
     }
   }
@@ -317,7 +317,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
           thread_id,
           config_.state == ProfilerState::CUDA);
       evt.updateMemoryStats(alloc_size, device);
-      evt.setCorrelationId(peek_correlation_id());
+      evt.setCorrelationId(cur_correlation_id());
       getEventList(thread_id).record(std::move(evt));
     }
   }
@@ -647,20 +647,26 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
   return state_ptr->consolidate();
 }
 
-void enableProfiler(const ProfilerConfig& new_config) {
-  TORCH_CHECK(new_config.state == ProfilerState::KINETO && kinetoAvailable());
+void enableProfiler(
+    const ProfilerConfig& config,
+    const std::set<ActivityType>& activities) {
+  TORCH_CHECK(config.state == ProfilerState::KINETO && kinetoAvailable());
+  TORCH_CHECK(!activities.empty(), "No activities specified for Kineto profiler");
 
   auto state_ptr = getProfilerTLSState();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
-  auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
+  auto state = std::make_shared<ProfilerThreadLocalState>(config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-  pushProfilingCallbacks();
+  if (activities.count(ActivityType::CPU)) {
+    pushProfilingCallbacks();
+  }
 
 #ifdef USE_KINETO
-  if (new_config.state == ProfilerState::KINETO) {
+  while (!libkineto::api().traceActive()) { // sync?
     libkineto::api().startTrace();
   }
+  //TORCH_CHECK(libkineto::api().traceActive());
 #endif
 
   state->mark("__start_profile", false);
@@ -671,10 +677,10 @@ ProfilerResult disableProfiler() {
   auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
 
   auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
-  TORCH_CHECK(state_ptr && state_ptr->config().state != ProfilerState::Disabled,
-      "Can't disable profiler when it's not running");
+  TORCH_CHECK(state_ptr && state_ptr->config().state == ProfilerState::KINETO,
+      "Can't disable Kineto profiler when it's not running");
 
-  if (cleanupTLSState) {
+  if (state_ptr->callbackHandle() > 0) {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
