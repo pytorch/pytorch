@@ -161,8 +161,8 @@ and the imaginary part of the diagonal will always be treated as zero.
 .. note:: The eigenvalues/eigenvectors are computed using LAPACK routines ``_syevd``, ``_heevd``.
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
-                    batch dimensions consisting of Hermitian matrices.
+    input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian
+                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
     UPLO ('L', 'U', optional): controls whether to consider upper-triangular or lower-triangular part.
         Default: ``'L'``
 
@@ -203,8 +203,8 @@ or real symmetric matrix :attr:`input`.
 .. note:: The eigenvalues are computed using LAPACK routines ``_syevd``, ``_heevd``.
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
-                    batch dimensions consisting of Hermitian matrices.
+    input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian
+                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
     UPLO ('L', 'U', optional): controls whether to consider upper-triangular or lower-triangular part.
         Default: ``'L'``
 
