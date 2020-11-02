@@ -54,8 +54,9 @@ Tensor not_implemented(const char* name) {
       std::string("the derivative for '") + name + "' is not implemented");
 }
 
-Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
+Tensor maybe_multiply(const Tensor & t, const Scalar & s, optional<bool> is_conj) {
   bool is_one = false;
+  bool do_conj = is_conj.has_value() ? is_conj.value() : false;
   if (s.isFloatingPoint()) {
     is_one = s.toDouble() == 1;
   } else if(s.isIntegral(true)) {
@@ -64,6 +65,8 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
 
   if (is_one) {
     return t;
+  } else if (do_conj) {
+    return t * at::scalar_to_tensor(s).conj();
   } else {
     return t * s;
   }
