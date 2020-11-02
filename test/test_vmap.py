@@ -1824,6 +1824,18 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             return x.expand(5, 5, 2, 3)
         self._batched_grad_test(op, (x,), {})
 
+    @allowVmapFallbackUsage
+    def test_index(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        index = torch.tensor([[0, 0], [1, 1]], device=device)
+
+        def op(x):
+            y = x * x
+            return y[index]
+
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
+
     def test_lgamma(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
         self._batched_grad_test(Tensor.lgamma, (x,), {})
