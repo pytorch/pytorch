@@ -238,14 +238,6 @@ bool IsUninitializedNode(Node* n) {
   return false;
 }
 
-// Node* CreateCastToBoolNode(Value* val, Graph* graph) {
-//   Node* cast_node = graph->create(::c10::onnx::Cast);
-//   cast_node->addInput(val);
-//   cast_node->i_(attr::to, 9);
-//   cast_node->output()->setType(BoolType::get());
-//   return cast_node;
-// }
-
 // Infer shape and type of the uninitialized_output from the corresponding
 // output of the other subblock. prim::Uninitialized node is proven to be
 // unused. So replace this node with a constant of the inferred shape and type.
