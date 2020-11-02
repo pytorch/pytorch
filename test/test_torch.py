@@ -6206,7 +6206,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(out, m1)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @onlyOnCPUAndCUDA
     @dtypes(*list(product(torch.testing.get_all_dtypes(include_bool=False, include_complex=False),
                           torch.testing.get_all_dtypes(include_bool=False, include_complex=False))))
     def test_float_power(self, device, dtypes):
@@ -6256,7 +6255,6 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(expected_scalar_base, out)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
     def test_float_power_with_complex(self, device, dtype):
         def to_np(value):
@@ -6283,7 +6281,6 @@ class TestTorchDeviceType(TestCase):
                         op(base, exp, out=out)
                         self.assertEqual(expected, out)
 
-    @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
     def test_float_power_exceptions(self, device, dtype):
         values = [torch.tensor([-2.8, -2, -1, -0.5, 0, 0.5, 1, 2], device=device),
