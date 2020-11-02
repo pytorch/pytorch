@@ -326,7 +326,8 @@ class profile(object):
         with_stack (bool, optional): record source information (file and line number) for the ops
 
         use_kineto (bool, default False): experimental support for Kineto profiler
-            skip_cpu (default False) - whether to skip profiling of CPU events
+
+        use_cpu (default True) - whether to profile CPU events
 
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
@@ -369,7 +370,7 @@ class profile(object):
             profile_memory=False,
             with_stack=False,
             use_kineto=False,
-            skip_cpu=False):
+            use_cpu=True):
         self.enabled = enabled
         if not self.enabled:
             return
@@ -380,16 +381,16 @@ class profile(object):
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.use_kineto = use_kineto
-        self.skip_cpu = skip_cpu
-        if self.skip_cpu:
+        self.use_cpu = use_cpu
+        if not self.use_cpu:
             assert self.use_kineto, \
-                "skip_cpu is supported only with Kineto (use_kineto=True)"
+                "Device-only events supported only with Kineto (use_kineto=True)"
 
         self.profiler_kind = None
         self.kineto_activities = []
         if self.use_kineto:
             self.profiler_kind = torch.autograd.ProfilerState.KINETO
-            if not self.skip_cpu:
+            if self.use_cpu:
                 self.kineto_activities = [torch.autograd.ProfilerActivity.CPU]
             else:
                 self.kineto_activities = []
