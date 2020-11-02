@@ -1196,7 +1196,7 @@ void guardFusionGroup(Node* fusion) {
        */
       typecheck_result =
           fusion->owningGraph()
-              ->create(aten::__or__, {ivalue_check, typecheck_result}, 1)
+              ->create(aten::__and__, {ivalue_check, typecheck_result}, 1)
               ->insertBefore(versioning_if)->output();
       typecheck_result->setType(BoolType::get());
 
