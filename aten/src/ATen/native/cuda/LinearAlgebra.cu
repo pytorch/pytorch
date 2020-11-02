@@ -260,16 +260,11 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       " and ",
       other.scalar_type());
   TORCH_CHECK(
-      self.numel() == other.numel(),
-      "inconsistent tensor size, expected tensor [",
-      self.numel(),
-      "] and src [",
-      other.numel(),
-      "] to have the same number of elements, but got ",
+      self.numel() == other.numel() || self.numel() == 1 || other.numel() == 1,
+      "cannot broadcast tensors with sizes ",
       self.numel(),
       " and ",
-      other.numel(),
-      " elements respectively");
+      other.numel());
   TORCH_CHECK(
       self.device() == other.device(),
       "expected all tensors to be on the same device. Found: ",
@@ -287,8 +282,14 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 
 Tensor dot_cuda(const Tensor& self, const Tensor& other) {
   at::NoNamesGuard guard;
-
   dot_check(self, other);
+
+  // Handle broadcasting
+  if (self.numel() == 1) {
+    return self.mul(other.sum());
+  } else if (other.numel() == 1) {
+    return self.sum().mul(other);
+  }
 
   const int n = static_cast<int>(self.numel());
   int incx = static_cast<int>(self.stride(0));
@@ -298,31 +299,41 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, self.scalar_type(), "dot", [&] {
-    Tensor result = at::empty({}, self.options());
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      ScalarType::Half, self.scalar_type(), "dot", [&] {
+        Tensor result = at::empty({}, self.options());
 
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
-    at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
-    at::cuda::blas::dot<scalar_t>(
-        handle,
-        n,
-        self.data_ptr<scalar_t>(),
-        incx,
-        other.data_ptr<scalar_t>(),
-        incy,
-        result.data_ptr<scalar_t>());
+        auto handle = at::cuda::getCurrentCUDABlasHandle();
+        at::cuda::blas::PointerModeGuard pointerModeGuard(
+            handle, CUBLAS_POINTER_MODE_DEVICE);
+        at::cuda::blas::dot<scalar_t>(
+            handle,
+            n,
+            self.data_ptr<scalar_t>(),
+            incx,
+            other.data_ptr<scalar_t>(),
+            incy,
+            result.data_ptr<scalar_t>());
 
-    return result;
-  });
+        return result;
+      });
 }
 
 Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
+  // Dispatch to `dot` for real dtypes.
   if (!self.is_complex()) {
     return dot_cuda(self, other);
   }
 
   at::NoNamesGuard guard;
   dot_check(self, other);
+
+  // Handle broadcasting
+  if (self.numel() == 1) {
+    return self.conj().mul(other.sum());
+  } else if (other.numel() == 1) {
+    return self.sum().conj().mul(other);
+  }
 
   const int n = static_cast<int>(self.numel());
   int incx = static_cast<int>(self.stride(0));
@@ -350,4 +361,6 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     return result;
   });
 }
-} }
+
+} // namespace native
+} // namespace at

@@ -17021,6 +17021,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             compare_with_numpy_bin_op(torch_fn, np_fn, v4, v1)
             compare_out_variant(torch_fn, v4, v1)
 
+        # Test broadcasting
+        v1 = torch.randn(5, dtype=dtype, device=device)
+        v2 = torch.randn(1, dtype=dtype, device=device)
+        v2_np = v2.expand(5).cpu().numpy()
+        self.compare_with_numpy(lambda x: torch_fn(x, v2), lambda x: np_fn(x, v2_np), v1)
+        self.compare_with_numpy(lambda x: torch_fn(v2, x), lambda x: np_fn(v2_np, x), v1)
+
     @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_dot_vs_numpy(self, device, dtype):
@@ -17048,7 +17055,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch_fn(x.reshape(1, 1), y)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    'inconsistent tensor size'):
+                                    'cannot broadcast tensors'):
             torch_fn(x.expand(9), y.to(x.dtype))
 
         if self.device_type != 'cpu':

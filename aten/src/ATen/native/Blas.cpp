@@ -113,46 +113,64 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       other.scalar_type());
 
   TORCH_CHECK(
-      self.numel() == other.numel(),
-      "inconsistent tensor size, expected tensor [",
-      self.numel(),
-      "] and src [",
-      other.numel(),
-      "] to have the same number of elements, but got ",
+      self.numel() == other.numel() || self.numel() == 1 || other.numel() == 1,
+      "cannot broadcast tensors with sizes ",
       self.numel(),
       " and ",
-      other.numel(),
-      " elements respectively");
+      other.numel());
 }
 
-Tensor dot(const Tensor &self, const Tensor &other){
+Tensor dot(const Tensor& self, const Tensor& other) {
   at::NoNamesGuard guard;
-
   dot_check(self, other);
 
-  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
-    Tensor result = at::empty({}, self.options());
-    result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
-    return result;
-  });
-}
-
-Tensor vdot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
-
-  // Dispatch to `dot` for real dtypes.
-  if (!self.is_complex()){
-    return at::dot(self, other);
+  // Handle broadcasting
+  if (self.numel() == 1) {
+    return self.mul(other.sum());
+  } else if (other.numel() == 1) {
+    return self.sum().mul(other);
   }
 
-  // For complex dtypes.
-  dot_check(self, other);
-  return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
-    Tensor result = at::empty({}, self.options());
-    result.fill_(vdot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
-    return result;
-  });
-
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
+      at::ScalarType::Half, self.scalar_type(), "dot", [&] {
+        Tensor result = at::empty({}, self.options());
+        result.fill_(dot_impl<scalar_t>(
+            self.numel(),
+            self.data_ptr<scalar_t>(),
+            self.stride(0),
+            other.data_ptr<scalar_t>(),
+            other.stride(0)));
+        return result;
+      });
 }
 
-}}  // namespace at::native
+Tensor vdot(const Tensor& self, const Tensor& other) {
+  // Dispatch to `dot` for real dtypes.
+  if (!self.is_complex()) {
+    return at::dot(self, other);
+  }
+  
+  at::NoNamesGuard guard;
+  dot_check(self, other);
+
+  // Handle broadcasting
+  if (self.numel() == 1) {
+    return self.conj().mul(other.sum());
+  } else if (other.numel() == 1) {
+    return self.sum().conj().mul(other);
+  }
+
+  return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
+    Tensor result = at::empty({}, self.options());
+    result.fill_(vdot_impl<scalar_t>(
+        self.numel(),
+        self.data_ptr<scalar_t>(),
+        self.stride(0),
+        other.data_ptr<scalar_t>(),
+        other.stride(0)));
+    return result;
+  });
+}
+
+} // namespace native
+} // namespace at

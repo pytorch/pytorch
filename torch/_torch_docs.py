@@ -2563,31 +2563,40 @@ Alias for :func:`torch.div`.
 
 add_docstr(torch.dot,
            r"""
-dot(input, tensor) -> Tensor
+dot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors.
+Computes the dot product (inner product) of two 1D tensors.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note:: This function is similar to numpy.dot only for 1D tensors.
+
+Args:
+    input (Tensor): first tensor in the dot product, must be 1D.
+    other (Tensor): second tensor in the dot product, must be 1D.
+
+Keyword args:
+    {out}
 
 Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
+    >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2]))
+    tensor([10])
 """)
 
 add_docstr(torch.vdot,
            r"""
 vdot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors. The vdot(a, b) function
+Computes the dot product (inner product) of two 1D tensors. The vdot(a, b) function
 handles complex numbers differently than dot(a, b). If the first argument is complex,
 the complex conjugate of the first argument is used for the calculation of the dot product.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note:: This function is similar to numpy.vdot only for 1D tensors.
 
 Args:
-    input (Tensor): first tensor in the dot product. Its conjugate is used if it's complex.
-    other (Tensor): second tensor in the dot product.
+    input (Tensor): first tensor in the dot product, must be 1D. Its conjugate is used if it's complex.
+    other (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -2602,6 +2611,8 @@ Example::
     tensor([16.+1.j])
     >>> torch.vdot(b, a)
     tensor([16.-1.j])
+    >>> torch.vdot(a, c)
+    tensor([11.+10.j])
 """.format(**common_args))
 
 add_docstr(torch.eig,
