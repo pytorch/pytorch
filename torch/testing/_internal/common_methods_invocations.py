@@ -712,7 +712,8 @@ def method_tests():
         ('copysign', (S, 1, S), ((M, S),), 'broadcast_all', (False,)),
         ('copysign', (S, S), (3.14,), 'scalar', (False,)),
         ('copysign', (S, S), (0.0,), 'scalar_pos_zero', (False,)),
-        # TorchScript does not recognize -0.0
+        # TorchScript does not recognize -0.0: Issue #46848
+        # https://github.com/pytorch/pytorch/issues/46848
         # ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
         ('real', (S, S, S), NO_ARGS, 'complex'),
         ('imag', (S, S, S), NO_ARGS, 'complex'),
