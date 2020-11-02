@@ -2954,27 +2954,31 @@ class TestSparse(TestCase):
             warnings.simplefilter("always")
             self.assertEqual(t._indices(), i)
             self.assertEqual(len(w), 1)
-            self.assertEqual(str(w[0].message), "The usage of '_indices()' method is deprecated. Please use 'indices(False)' instead.")
+            self.assertEqual(str(w[0].message), "The usage of '_indices()' method is deprecated."
+                             " Please use 'indices(False)' instead.")
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             self.assertEqual(t._values(), v)
             self.assertEqual(len(w), 1)
-            self.assertEqual(str(w[0].message), "The usage of '_values()' method is deprecated. Please use 'values(False)' instead.")
+            self.assertEqual(str(w[0].message), "The usage of '_values()' method is deprecated."
+                             " Please use 'values(False)' instead.")
 
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             self.assertEqual(t._nse(), nse)
             self.assertEqual(len(w), 1)
-            self.assertEqual(str(w[0].message), "The usage of '_nse()' method is deprecated. Please use 'nse(False)' instead.")
+            self.assertEqual(str(w[0].message), "The usage of '_nse()' method is deprecated."
+                             " Please use 'nse(False)' instead.")
 
         # Private API
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             self.assertEqual(t._values_coalesce(), [3])
             self.assertEqual(len(w), 1)
-            self.assertEqual(str(w[0].message), "The usage of '_values_coalesce()' method is deprecated. Please use 'values(True)' instead.")
+            self.assertEqual(str(w[0].message), "The usage of '_values_coalesce()' method is deprecated."
+                             " Please use 'values(True)' instead.")
 
         # Deprecated API
         with warnings.catch_warnings(record=True) as w:
@@ -2984,7 +2988,10 @@ class TestSparse(TestCase):
                 # The warning from `_nnz` is triggered only once
                 wm = str(w[0].message)
                 wm = wm[:wm.index(' (Triggered internally at')]
-                self.assertEqual(wm, "The _nnz() method is deprecated and will be removed in a future PyTorch release. Please use nse(False) instead.")
+                self.assertEqual(
+                    wm,
+                    "The _nnz() method is deprecated and will be removed in a future PyTorch release."
+                    " Please use nse(False) instead.")
             else:
                 self.assertEqual(len(w), 0)
 
