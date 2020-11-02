@@ -114,15 +114,15 @@ Tensor avg_pool2d(
   {
     if (v_self.has_image()) {
       const struct {
-        uint32_t input_width, input_height, input_channels;
-        uint32_t output_width, output_height, output_channels;
+        uint32_t input_width, input_height, input_channels, input_size_stub;
+        uint32_t output_width, output_height, output_channels, output_size_stub;
         uint32_t kernel_width, kernel_height;
         uint32_t stride_x, stride_y;
         uint32_t padding_x, padding_y;
         uint32_t dilate_x, dilate_y;
       } block {
-        input_width, input_height, input_batch * input_channels,
-        output_width, output_height, input_batch * input_channels,
+        input_width, input_height, input_batch * input_channels, 0u,
+        output_width, output_height, input_batch * input_channels, 0u,
         kernel_width, kernel_height,
         dW, dH,
         padW, padH,

@@ -79,6 +79,30 @@ TEST(VulkanAPITest, add_scalar_) {
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
+TEST(VulkanAPITest, mul_scalar) {
+  const auto a_cpu = at::rand({17, 213, 213, 7}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const float b_scalar = 3.1415f;
+
+  const auto c_cpu = at::mul(a_cpu, b_scalar);
+  const auto c_vulkan = at::mul(a_vulkan, b_scalar);
+
+  ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
+}
+
+TEST(VulkanAPITest, mul_scalar_) {
+  auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const float b_scalar = 3.1415f;
+
+  a_cpu.mul_(b_scalar);
+  a_vulkan.mul_(b_scalar);
+
+  ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
+}
+
 TEST(VulkanTest, addmm) {
   auto t_m1 = at::rand({2, 2}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_m2 = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));

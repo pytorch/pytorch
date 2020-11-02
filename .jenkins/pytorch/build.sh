@@ -42,6 +42,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  # enable build option in CMake
+  export USE_CPP_CODE_COVERAGE=ON
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
