@@ -521,7 +521,7 @@ Tensor mean(
     const Tensor& self,
     const IntArrayRef dim,
     const bool keepdim,
-    const optional<ScalarType> dtype) {
+    const optional<ScalarType>& dtype) {
   TORCH_INTERNAL_ASSERT(self.is_vulkan(), "mean expects Vulkan tensor input");
 
   // Mean is implemented only for HW dimensions of 4-d tensor

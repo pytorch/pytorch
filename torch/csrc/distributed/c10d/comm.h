@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/utils/pybind.h>
 
 namespace c10d {
 
@@ -48,7 +48,7 @@ class TORCH_PYTHON_API CommHookInterface {
   // Passes the input grad bucket to the registered communication hook.
   // Once the tensors in the bucket are ready, kicks off the hook asynchronously
   // and returns a future that holds the communication results.
-  virtual c10::intrusive_ptr<torch::jit::Future> runHook(
+  virtual c10::intrusive_ptr<c10::ivalue::Future> runHook(
       GradBucket& bucket) = 0;
 
   // Returns the resulting tensors once the communication hook result is ready.
@@ -58,32 +58,11 @@ class TORCH_PYTHON_API CommHookInterface {
       const c10::IValue& result) = 0;
 };
 
-class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
- public:
-  // Takes a state and a callable hook. The inputs are Python objects.
-  // The state is passed to the hook in runHook method, and it can be used to
-  // maintain and update any state information during the execution of the hook.
-  // The hook performs user-specified processing and returns a future indicating
-  // asychronous communication of gradients.
-  PythonCommHook(py::object state, py::object hook)
-      : state_(std::move(state)), hook_(std::move(hook)) {}
-
-  ~PythonCommHook() override;
-
-  c10::intrusive_ptr<torch::jit::Future> runHook(GradBucket& bucket) override;
-
-  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override;
-
- private:
-  // Only needed for stateful communication.
-  py::object state_;
-  py::object hook_;
-};
-
 // This CppCommHook interface only requires implementing runHook method that
 // potentially uses a state.
+// Still need TORCH_PYTHON_API instead of TORCH_API to support Windows platform.
 template <typename T>
-class TORCH_API CppCommHookInterface : public CommHookInterface {
+class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T& state) : state_(state) {}
 

@@ -166,41 +166,8 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const c10::optional<ScalarType>& dtype_opt, const c10::optional<Layout>& layout_opt,
-                 const c10::optional<Device>& device_opt, const c10::optional<bool>& pin_memory_opt, c10::optional<MemoryFormat> memory_format_opt) {
-  Device device = device_or_default(device_opt);
-
-  TORCH_CHECK(device.type() == DeviceType::CPU);
-  check_size_nonnegative(size);
-
-  bool pin_memory = pinned_memory_or_default(pin_memory_opt);
-  c10::Allocator* allocator;
-  if (pin_memory) {
-    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
-  } else {
-    allocator = at::getCPUAllocator();
-  }
-
-  int64_t nelements = prod_intlist(size);
-  caffe2::TypeMeta dtype = scalarTypeToTypeMeta(dtype_or_default(dtype_opt));
-  int64_t size_bytes = nelements * dtype.itemsize();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      size_bytes,
-      allocator->allocate(size_bytes),
-      allocator,
-      /*resizeable=*/true);
-
-  auto tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage_impl), at::DispatchKey::CPU, dtype);
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
-
-  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-
-  return tensor;
+                 const c10::optional<Device>& device_opt, const c10::optional<bool>& pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
 Tensor empty(
@@ -275,7 +242,7 @@ Tensor empty_like(
   TensorOptions options =
       self.options()
           .merge_in(options_)
-          .merge_in(TensorOptions().memory_format(optional_memory_format));
+          .merge_memory_format(optional_memory_format);
 
   TORCH_CHECK(
       !(options.layout() != kStrided &&
