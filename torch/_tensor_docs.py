@@ -1542,6 +1542,20 @@ i0_() -> Tensor
 In-place version of :meth:`~Tensor.i0`
 """)
 
+add_docstr_all('igamma',
+               r"""
+igamma(other) -> Tensor
+
+See :func:`torch.igamma`
+""")
+
+add_docstr_all('igamma_',
+               r"""
+igamma_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.igamma`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
