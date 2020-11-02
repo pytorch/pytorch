@@ -38,6 +38,27 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   return broadcast_n->output();
 }
 
+Value* createConditionalConstant(Node* profile_ivalue) {
+  TORCH_INTERNAL_ASSERT(profile_ivalue->kind() == prim::profile_ivalue);
+  TORCH_INTERNAL_ASSERT(profile_ivalue->hasAttribute(attr::profiled_type) && profile_ivalue->hasAttribute(attr::a));
+
+  auto type = profile_ivalue->ty(attr::profiled_type);
+  auto graph = profile_ivalue->owningGraph();
+
+  IValue val; // default to None
+  if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(ListType::ofInts()))) {
+    // int[]
+    val = IValue(profile_ivalue->is(attr::a));
+  } else if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(BoolType::get()))) {
+    // bool
+    val = IValue(static_cast<bool>(profile_ivalue->i(attr::a)));
+  } else {
+    TORCH_INTERNAL_ASSERT(false, __func__, " gets unidentified type: ", profile_ivalue->ty(attr::profiled_type));
+  }
+
+  return graph->insertConstant(val);
+}
+
 struct CudaGraphFuser {
   using FusionCallback = std::function<bool(Node*)>;
 
@@ -1070,6 +1091,17 @@ void guardFusionGroup(Node* fusion) {
   auto true_block = versioning_if->addBlock();
   auto false_block = versioning_if->addBlock();
 
+  // insert typecheck_node;
+  Node* typecheck_node = fusion->owningGraph()
+                             ->create(prim::CudaFusionGuard, tensor_inputs_to_check, 1)
+                             ->insertBefore(fusion);
+  // fix output to BoolType
+  typecheck_node->output()->setType(BoolType::get());
+  Value* typecheck_result = typecheck_node->output();
+  typecheck_node->tys_(attr::types, guard_types);
+
+  versioning_if->insertAfter(typecheck_node);
+
 
   // Fill in the false block. It should contain the unoptimized
   // copy of the fused subgraph, unless we have conditional constants from
@@ -1107,19 +1139,77 @@ void guardFusionGroup(Node* fusion) {
     // removeTensorTypeSpecializations(false_block);
     replaceBlockWithFallbackGraph(false_block, fusion->inputs());
 
-    // 2. REMOVE conditional constant dependency in fusion group;
+    // 2. REMOVE conditional constant dependency in fusion group
     size_t compensation = 0;
-    for (const auto& offset : profiled_ivalue_indices) {
-      // do NOT remove inputs from fusion yet, as we needed the dependency to
-      // build logic for fallback
-      // fusion->removeInput(offset);
 
-      // let's remove the extra dependency inside fusion;
-      for (auto use : fusion_graph->inputs()[offset - compensation]->uses()) {
+    // get a constant false, which is used by `and` pattern later
+    auto const_true = fusion->owningGraph()->insertConstant(IValue(true));
+    const_true->node()->moveBefore(versioning_if);
+
+    for (const auto& original_offset : profiled_ivalue_indices) {
+      size_t offset = original_offset - compensation;
+
+      // step a. handle fusion
+      // remove inputs to fusion, and update check logic for fallback
+      auto profiled_ival = fusion->input(offset)->node()->input();
+      auto const_o = createConditionalConstant(fusion->input(offset)->node());
+      const_o->node()->moveBefore(versioning_if);
+      // TODO: :sigh :/ aten::eq doesn't support comparison between two boolean
+      // auto eq_node =
+      //     fusion->owningGraph()
+      //         ->create(aten::eq, {profiled_ival, const_o}, 1)
+      //         ->insertBefore(versioning_if);
+      // eq_node->output()->setType(BoolType::get());
+      Value* ivalue_check = nullptr;
+      if (fusion->input(offset)->node()->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(BoolType::get()))) {
+        auto xor_n =
+             fusion->owningGraph()
+                 ->create(aten::__xor__, {profiled_ival, const_o}, 1)
+                 ->insertBefore(versioning_if);
+        xor_n->output()->setType(BoolType::get());
+        ivalue_check =
+            fusion->owningGraph()
+                ->create(aten::__xor__, {xor_n->output(), const_true}, 1)
+                ->insertBefore(versioning_if)->output();
+      } else {
+        ivalue_check =
+            fusion->owningGraph()
+                ->create(aten::eq, {profiled_ival, const_o}, 1)
+                ->insertBefore(versioning_if)->output();
+      }
+      ivalue_check->setType(BoolType::get());
+
+      // TODO: this is a very complicated pattern for `and`.
+      /*
+      auto cascade_if =
+          fusion->owningGraph()
+              ->create(prim::If, {ivalue_check}, 1)
+              ->insertBefore(versioning_if);
+      cascade_if->output()->setType(BoolType::get());
+      auto true_block = cascade_if->addBlock();
+      true_block->registerOutput(typecheck_result);
+      auto false_block = cascade_if->addBlock();
+      false_block->registerOutput(const_false);
+
+      // update check result
+      typecheck_result = cascade_if->output();
+       */
+      typecheck_result =
+          fusion->owningGraph()
+              ->create(aten::__or__, {ivalue_check, typecheck_result}, 1)
+              ->insertBefore(versioning_if)->output();
+      typecheck_result->setType(BoolType::get());
+
+
+      // remove inputs to fusion;
+      fusion->removeInput(offset);
+
+      // step b. remove the extra dependency inside fusion;
+      for (auto use : fusion_graph->inputs()[offset]->uses()) {
         TORCH_INTERNAL_ASSERT(use.user->kind() == prim::Constant, "profile_ivalue at index: ", offset, " can only be used by conditional constant, instead got: ", use.user->kind().toDisplayString());
         use.user->removeAllInputs();
       }
-      fusion_graph->eraseInput(offset - compensation);
+      fusion_graph->eraseInput(offset);
       compensation++;
     }
     // update graph in fusion node
@@ -1139,23 +1229,10 @@ void guardFusionGroup(Node* fusion) {
     replaceBlockWithFallbackGraph(false_block, fusion->inputs());
   }
 
-  Node* typecheck_node = fusion->owningGraph()
-                             ->create(prim::CudaFusionGuard, tensor_inputs_to_check, 1)
-                             ->insertBefore(fusion);
-  // fix output to BoolType
-  typecheck_node->output()->setType(BoolType::get());
-  Value* typecheck_result = typecheck_node->output();
-  typecheck_node->tys_(attr::types, guard_types);
-
-  std::unordered_map<Value*, Value*> typechecked_inputs;
-
-  // Things gets messy here due to `prim::profile_ivalue`
-  // We need to add ivalue check here with combination to typecheck_result.
-  
-
   // wiring up if block
   versioning_if->addInput(typecheck_result);
-  versioning_if->insertAfter(typecheck_node);
+
+
   //auto versioning_if =
   //    fusion->owningGraph()
   //        ->create(prim::If, {typecheck_result}, fusion->outputs().size())
@@ -1187,6 +1264,10 @@ void guardFusionGroup(Node* fusion) {
   for (Value* output : fusion->outputs()) {
     true_block->registerOutput(output);
   }
+
+  // last step: remove all existing profile_ivalue and conditional constants and
+  // restore everything to dynamic inputs
+
 }
 
 void guardFusionGroups(Block* block) {
@@ -1210,21 +1291,7 @@ void guardFusionGroups(Block* block) {
 }
 
 void ExtractProfileIValue(Node* profile_ivalue) {
-  auto type = profile_ivalue->ty(attr::profiled_type);
-  auto graph = profile_ivalue->owningGraph();
-
-  IValue val; // default to None
-  if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(ListType::ofInts()))) {
-    // int[]
-    val = IValue(profile_ivalue->is(attr::a));
-  } else if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(BoolType::get()))) {
-    // bool
-    val = IValue(static_cast<bool>(profile_ivalue->i(attr::a)));
-  } else {
-    TORCH_INTERNAL_ASSERT(false, __func__, " gets unidentified type: ", profile_ivalue->ty(attr::profiled_type));
-  }
-
-  auto const_o = graph->insertConstant(val);
+  auto const_o = createConditionalConstant(profile_ivalue);
   auto const_n = const_o->node();
   const_n->moveAfter(profile_ivalue);
   profile_ivalue->output()->replaceAllUsesAfterNodeWith(const_n, const_o);
