@@ -8,7 +8,7 @@ from random import randrange
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, slowTest, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, dtypes,
      onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
@@ -1004,7 +1004,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(torch.float, torch.double)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorsolve(self, device, dtype):
         def run_test(a_shape, dims):
@@ -1028,7 +1027,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(torch.float, torch.double)
     def test_tensorsolve_empty(self, device, dtype):
         # Check for empty inputs. NumPy does not work for these cases.
         a = torch.empty(0, 0, 1, 2, 3, 0, dtype=dtype, device=device)
@@ -1036,23 +1034,9 @@ class TestLinalg(TestCase):
         x = torch.linalg.tensorsolve(a, b)
         self.assertEqual(torch.tensordot(a, x, dims=len(x.shape)), b)
 
-    # TODO: once "solve_cuda" supports complex dtypes, they shall be added to above tests
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_tensorsolve_xfailed(self, device, dtype):
-        a_shape = (2, 3, 6)
-        a = torch.randn(a_shape, dtype=dtype, device=device)
-        b = torch.randn(a_shape[:2], dtype=dtype, device=device)
-        result = torch.linalg.tensorsolve(a, b)
-        expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(result, expected)
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(torch.float, torch.double)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorsolve_non_contiguous(self, device, dtype):
         def run_test_permuted(a_shape, dims):
