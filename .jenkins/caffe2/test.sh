@@ -168,9 +168,6 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
-    # Fix the pip error: Couldn't find a version that satisfies the requirement
-    pip install --upgrade pip
     pip install -q --user onnxruntime==1.5.2
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
