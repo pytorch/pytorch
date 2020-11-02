@@ -731,7 +731,6 @@ if __name__ == '__main__':
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 8) + 1
     setup(
         name=package_name,
         version=version,
@@ -891,7 +890,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
+        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], 9)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )

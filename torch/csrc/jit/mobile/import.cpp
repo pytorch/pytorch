@@ -86,7 +86,8 @@ void print_unsupported_ops_and_throw(
   TORCH_CHECK(
       false,
       "Following ops cannot be found. ",
-      "Check fburl.com/missing_ops for the fix.",
+      "May need to add them explicitly to the selective build operator whitelist, ",
+      "or re-run the export_opnames to update the whitelist:",
       error_message);
 }
 

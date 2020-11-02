@@ -1,7 +1,12 @@
+
+
+
+
+
 import numpy
 
 from caffe2.python import core
-from hypothesis import given, settings
+from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -11,8 +16,7 @@ import numpy as np
 @st.composite
 def _data(draw):
     return draw(
-        hu.tensor(
-            dtype=np.int64,
+        hu.tensor(dtype=np.int64,
             elements=st.integers(
                 min_value=np.iinfo(np.int64).min, max_value=np.iinfo(np.int64).max
             )
@@ -21,7 +25,6 @@ def _data(draw):
 
 
 class TestMod(hu.HypothesisTestCase):
-    @settings(deadline=None)
     @given(
         data=_data(),
         divisor=st.integers(
@@ -29,7 +32,7 @@ class TestMod(hu.HypothesisTestCase):
         ),
         inplace=st.booleans(),
         sign_follow_divisor=st.booleans(),
-        **hu.gcs
+        **hu.gcs_cpu_only
     )
     def test_mod(
         self, data, divisor, inplace, sign_follow_divisor, gc, dc

@@ -151,11 +151,7 @@ StaticRuntime::StaticRuntime(
       for (Value* output : node->outputs()) {
         output_regs.push_back(value_to_reg[output]);
       }
-      nodes_.emplace_back(
-          node,
-          std::move(input_regs),
-          std::move(output_regs),
-          opts.enable_out_variant);
+      nodes_.emplace_back(node, std::move(input_regs), std::move(output_regs));
     }
   }
 }
@@ -336,8 +332,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<size_t>&& input_regs,
-    std::vector<size_t>&& output_regs,
-    bool enable_out_variants)
+    std::vector<size_t>&& output_regs)
     : node_(node),
       input_regs_(std::move(input_regs)),
       output_regs_(std::move(output_regs)) {
@@ -348,7 +343,7 @@ ProcessedNode::ProcessedNode(
     TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
   }
-  if (enable_out_variants && canRunOutOfPlace(node)) {
+  if (canRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
   }
 }

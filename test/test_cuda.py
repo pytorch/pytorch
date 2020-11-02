@@ -1,15 +1,15 @@
-from itertools import repeat, chain, product
-from typing import NamedTuple
 import collections
-import gc
 import io
-import os
-import pickle
-import queue
-import sys
 import tempfile
-import threading
+from typing import NamedTuple
 import unittest
+import sys
+from itertools import repeat, chain, product
+import os
+import gc
+import threading
+import queue
+import pickle
 
 import torch
 import torch.cuda
@@ -23,7 +23,7 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, IS_WINDOWS, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -287,10 +287,10 @@ class TestCuda(TestCase):
         self.assertFalse(t.is_pinned())
         cudart = torch.cuda.cudart()
         r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
-        self.assertEqual(r, 0)
+        self.assertEquals(r, 0)
         self.assertTrue(t.is_pinned())
         r = cudart.cudaHostUnregister(t.data_ptr())
-        self.assertEqual(r, 0)
+        self.assertEquals(r, 0)
         self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
@@ -492,6 +492,7 @@ class TestCuda(TestCase):
             event = torch.cuda.Event()
             a.copy_(b, non_blocking=True)
             event.record()
+            self.assertFalse(event.query())
             event.synchronize()
             self.assertEqual(a, b)
 
@@ -1544,6 +1545,7 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
+    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -2150,7 +2152,6 @@ t2.start()
 
         self._run_scaling_case(run, unskipped=3, skipped=1)
 
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):

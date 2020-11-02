@@ -439,7 +439,6 @@
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
-            echo "USE_PYTORCH_METAL": "${USE_METAL}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -448,9 +447,6 @@
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
-              export USE_PYTORCH_METAL=${USE_METAL}
-            fi
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
           name: Run Build Test

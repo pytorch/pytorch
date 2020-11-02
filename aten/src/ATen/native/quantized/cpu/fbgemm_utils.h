@@ -257,9 +257,7 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
     const std::vector<int>& kernels,
     const std::vector<int>& strides,
     const std::vector<int>& pads,
-    const std::vector<int>& dilations,
-    const std::vector<int>& output_padding = std::vector<int>(kSpatialDim, 0),
-    bool transposed = false);
+    const std::vector<int>& dilations);
 
 // TODO: Remove functions below when ChannelsLast3d is ready.
 Tensor MakeStridedQTensorCPU(
@@ -289,11 +287,6 @@ Tensor MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
     const Tensor& zero_points);
 
 Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
-
-template <int kSpatialDim = 2>
-Tensor TransposeConvTensorUnpackConversion(
-    const Tensor& src,
-    int groups);
 
 } // namespace fbgemm_utils
 } // namespace native

@@ -68,7 +68,8 @@ Keyword args:
         :attr:`dtype` before performing the operation, and the returned tensor's type
         will be :attr:`dtype`. If this argument is used in conjunction with the
         :attr:`out` argument, the output tensor's type must match this argument or a
-        RuntimeError will be raised. Default: ``None``
+        RuntimeError will be raised. This argument is not currently supported for
+        :attr:`ord='nuc'` or :attr:`ord='fro'`. Default: ``None``
 
 Examples::
 

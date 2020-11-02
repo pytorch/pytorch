@@ -922,15 +922,8 @@ def emit_single_dispatch(ps: PythonSignature, decl: Dict[str, Any], method: bool
         lambda_args = ', '.join(lambda_arg_exprs.exprs)
 
         # scatter fields
-        # TODO: Checking `ps.method and ('requires_grad' in parser_outputs)` is a hacky
-        #       solution for enabling the 'requires_grad' argument for tensor methods
-        #       new_full, new_empty, and new_zeros. A much better but more difficult to
-        #       implement solution involves refactoring according to Ed's description here:
-        #       https://github.com/pytorch/pytorch/issues/36455#issuecomment-614767589
-        need_set_requires_grad = ps.tensor_options_args and (not has_tensor_options(f) or (
-            ps.method and ('requires_grad' in parser_outputs)))
         set_requires_grad = f'.set_requires_grad({parser_outputs["requires_grad"].expr})' \
-            if need_set_requires_grad else ''
+            if ps.tensor_options_args and not has_tensor_options(f) else ''
 
         auto_no_gil = '' if decl['with_gil'] else 'pybind11::gil_scoped_release no_gil;'
 

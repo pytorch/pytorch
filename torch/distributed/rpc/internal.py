@@ -2,7 +2,6 @@ import collections
 import copyreg
 import io
 import pickle
-import sys
 import threading
 import traceback
 from enum import Enum
@@ -169,7 +168,6 @@ def _run_function(python_udf):
             f"On {_get_current_rpc_agent().get_worker_info()}:\n"
             f"{repr(e)}\n{traceback.format_exc()}"
         )
-        print(except_str, file=sys.stderr)
         result = RemoteException(except_str, type(e))
     return result
 
