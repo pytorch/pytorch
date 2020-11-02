@@ -4303,25 +4303,20 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histogram(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
                             bins=4, range=(5, 1))
+        # element in range cannot be represented by tensor's dtype - when this is fixed, the test should fail.
+        with self.assertWarnsRegex(UserWarning, 'range'):
+            actual = torch.histogram(
+                torch.tensor([0, 1, 2, 1], dtype=torch.int64, device=device),
+                range=(.25, 3))
+        self.assertEqual(actual[0], torch.tensor([1, 0, 0, 2, 0, 0, 1, 0, 0, 0], device=device, dtype=torch.int64))
+        self.assertEqual(actual[1], torch.linspace(0, 3, 11))
 
+    # This test fails with float32 weights because numpy uses sorting and partial pairwise summation
+    # instead of linear summation as bincount does, the NumPy implementation is more numerically stable.
+    @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False),
+                     torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False)))
+    def test_histogram_vs_np_custom_bins(self, device, dtypes):
         # test against numpy.histogram()
-        def test_against_np_uniformbins(tensor, bins=100, min=0, max=0, weights=None, density=False):
-            if min == 0 and max == 0:
-                min = tensor.min().item()
-                max = tensor.max().item()
-            nparr = tensor.cpu().numpy()
-            if weights is not None:
-                npweights = weights.cpu().numpy()
-            else:
-                npweights = None
-            actual = torch.histogram(tensor, bins=bins, weights=weights, range=(min, max), density=density)
-            expected = np.histogram(nparr, bins=bins, range=(min, max), weights=npweights, density=density)
-            self.assertEqual(actual[0], torch.from_numpy(expected[0]))
-            if torch.is_floating_point(tensor):
-                self.assertEqual(actual[1], torch.from_numpy(expected[1]))
-            else:
-                self.assertEqual(actual[1], torch.from_numpy(expected[1]).to(torch.get_default_dtype()))
-
         def test_against_np_custombins(tensor, bins, weights=None, density=False, rtol=None, atol=None):
             nparr = tensor.cpu().numpy()
             npbins = bins.cpu().numpy()
@@ -4334,81 +4329,151 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(actual[0], torch.from_numpy(expected[0]), rtol=rtol, atol=atol)
             self.assertEqual(actual[1], torch.from_numpy(expected[1]))
 
-        if TEST_NUMPY:
-            default_dtype = torch.get_default_dtype()
+        if dtypes[0].is_floating_point:
+            sample = torch.randn(5000, device=device, dtype=dtypes[0])
+            bins = torch.randn(101, device=device, dtype=dtypes[0]).sort()[0]
+        else:
+            sample = torch.randint(127, (5000, ), device=device, dtype=dtypes[0])
+            bins = torch.arange(10, 111, 3)
+        if dtypes[1].is_floating_point:
+            weights = torch.rand(5000, device=device, dtype=dtypes[1])
+        else:
+            weights = torch.randint(127, (5000, ), device=device, dtype=dtypes[1])
 
-            for test_default_dtype in [torch.float, torch.double]:
-                torch.set_default_dtype(test_default_dtype)
-                test_against_np_uniformbins(torch.tensor([1., 2, 1], device=device))
-                test_against_np_uniformbins(torch.randn(5000, device=device))
+        test_against_np_custombins(sample, bins)
 
-                # test integer input
-                test_against_np_uniformbins(torch.tensor([1, 2, 3, 4], device=device))
+        # test weights arg
+        if dtypes[1] == torch.float32:
+            test_against_np_custombins(sample, bins, weights, atol=2e-3, rtol=3e-5)
+        else:
+            test_against_np_custombins(sample, bins, weights)
 
-                # test weights arg
-                test_against_np_uniformbins(torch.randn(5000, device=device), weights=torch.rand(5000, device=device))
-                test_against_np_uniformbins(torch.randn(5000, device=device), weights=torch.randint(100, (5000, ), device=device))
+        # test density arg
+        test_against_np_custombins(sample, bins, density=True)
 
-                # test density arg
-                test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device), density=True)
+        # test weights and density arg - this will fail for int8 types
+        # because torch.bincount promotes integral types to double
+        # preventing the integer overflow which is the case in numpy from happening
+        if dtypes[1] == torch.float32:
+            test_against_np_custombins(sample, bins, weights, density=True, atol=2e-3, rtol=3e-5)
+        elif dtypes[1] not in (torch.int8, torch.uint8):
+            test_against_np_custombins(sample, bins, weights, density=True)
 
-                # test weights and density arg
-                test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device),
-                                            weights=torch.rand(5000, dtype=torch.double, device=device), density=True)
-                test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device),
-                                            weights=torch.randint(100, (5000, ), dtype=torch.double, device=device), density=True)
+        if dtypes[0].is_floating_point:
+            sample_noncontig = torch.randn(5000, 2, device=device, dtype=dtypes[0])[:, 1]
+            bins_noncontig = torch.randn(101, 2, device=device, dtype=dtypes[0]).sort(axis=0)[0][:, 1]
+        else:
+            sample_noncontig = torch.randint(127, (5000, 2), device=device, dtype=dtypes[0])[:, 1]
+            bins_noncontig = torch.arange(10, 111, 1)[::3]
+        if dtypes[1].is_floating_point:
+            weights_noncontig = torch.rand(5000, device=device, dtype=dtypes[1])
+        else:
+            weights_noncontig = torch.randint(127, (5000, ), device=device, dtype=dtypes[1])
 
-                # Test bins arg
-                test_against_np_uniformbins(torch.randn(301, device=device), bins=20)
+        if dtypes[1] == torch.float32:
+            test_against_np_custombins(sample_noncontig, bins_noncontig, weights_noncontig, density=True, atol=2e-3, rtol=3e-5)
+        elif dtypes[1] not in (torch.int8, torch.uint8):
+            test_against_np_custombins(sample_noncontig, bins_noncontig, weights_noncontig, density=True)
 
-                # Test truncated range
-                test_against_np_uniformbins(torch.randn(701, device=device), min=0.1, max=1)
+    @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False),
+                     torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False),
+                     (torch.float32, torch.float64)))
+    def test_histogram_vs_np_uniform_bins(self, device, dtypes):
+        # test against numpy.histogram()
+        def test_against_np_uniformbins(tensor, bins=None, range=None, weights=None, density=False, atol=None, rtol=None):
+            nparr = tensor.cpu().numpy()
+            if weights is not None:
+                npweights = weights.cpu().numpy()
+            else:
+                npweights = None
+            if bins is not None:
+                actual = torch.histogram(tensor, bins=bins, weights=weights, range=range, density=density)
+                expected = np.histogram(nparr, bins=bins, range=range, weights=npweights, density=density)
+            else:
+                actual = torch.histogram(tensor, weights=weights, range=range, density=density)
+                expected = np.histogram(nparr, range=range, weights=npweights, density=density)
+            self.assertEqual(actual[0], torch.from_numpy(expected[0]), atol=atol, rtol=rtol)
+            if torch.is_floating_point(tensor):
+                self.assertEqual(actual[1], torch.from_numpy(expected[1]))
+            else:
+                self.assertEqual(actual[1], torch.from_numpy(expected[1]).to(torch.get_default_dtype()))
 
-                noncontig = torch.randn(100, 3, device=device)[:, 2]
-                test_against_np_uniformbins(noncontig)
+        default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(dtypes[2])
 
-                multidim = torch.randn(3, 5, 7, 2, device=device)
-                test_against_np_uniformbins(multidim)
+        if(dtypes[0].is_floating_point):
+            sample = torch.randn(5000, device=device, dtype=dtypes[0])
+        else:
+            sample = torch.randint(127, (5000, ), device=device, dtype=dtypes[0])
+        if(dtypes[1].is_floating_point):
+            weights = torch.rand(5000, device=device, dtype=dtypes[1])
+        else:
+            weights = torch.randint(127, (5000, ), device=device, dtype=dtypes[1])
 
-                expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
-                test_against_np_uniformbins(expanded)
+        # Test only inputting sample
+        test_against_np_uniformbins(sample)
 
-                test_against_np_custombins(torch.tensor([1., 2, 1], device=device),
-                                           torch.tensor([0, 1, 2, 3], device=device))
-                test_against_np_custombins(torch.tensor([1., 2, 1], device=device), torch.tensor([0, 1, 2], device=device))
-                test_against_np_custombins(torch.randn(5000, device=device), torch.rand(101, device=device).sort()[0])
+        # test weights arg
+        test_against_np_uniformbins(sample, weights=weights)
 
-                test_against_np_custombins(torch.randn(5000, device=device), torch.rand(101, device=device).sort()[0])
-                # test weights arg
-                test_against_np_custombins(torch.randn(5000, device=device, dtype=torch.double),
-                                           torch.randn(101, device=device, dtype=torch.double).sort()[0],
-                                           weights=torch.rand(5000, device=device, dtype=torch.double))
-                test_against_np_custombins(torch.randn(5000, device=device), torch.randn(101, device=device).sort()[0],
-                                           weights=torch.rand(5000, device=device), rtol=1e-3, atol=1e-5)
-                test_against_np_custombins(torch.randn(5000, device=device, dtype=torch.double),
-                                           torch.randn(101, device=device, dtype=torch.double).sort()[0],
-                                           weights=torch.randint(100, (5000, ), device=device))
+        # test density arg
+        test_against_np_uniformbins(sample, density=True)
 
-                # test density arg
-                test_against_np_custombins(torch.randn(5000, device=device),
-                                           torch.rand(101, device=device).sort()[0], density=True)
+        # test weights and density arg
+        # if weights have a float32 type, the difference is around 2e-7, so increasing atol
+        if dtypes[1] == torch.float32:
+            test_against_np_uniformbins(sample, weights=weights, density=True, atol=3e-7, rtol=1e-7)
+        else:
+            test_against_np_uniformbins(sample, weights=weights, density=True)
 
-                # test weights and density arg
-                test_against_np_custombins(torch.randn(5000, device=device, dtype=torch.double),
-                                           torch.rand(101, device=device, dtype=torch.double).sort()[0],
-                                           weights=torch.rand(5000, device=device, dtype=torch.double), density=True)
-                test_against_np_custombins(torch.randn(5000, device=device), torch.randn(101, device=device).sort()[0],
-                                           weights=torch.rand(5000, device=device), density=True, rtol=1e-3, atol=1e-5)
-                noncontig = torch.randn(100, 3, device=device)[:, 2]
-                test_against_np_custombins(noncontig, torch.randn(101, device=device).sort()[0])
+        # Test bins arg
+        test_against_np_uniformbins(sample, bins=20)
 
-                multidim = torch.randn(3, 5, 7, 2, device=device)
-                test_against_np_custombins(multidim, torch.randn(101, device=device).sort()[0])
+        # Test truncated range
+        test_against_np_uniformbins(sample, range=(1, 2), bins=100)
+        if(dtypes[0].is_floating_point):
+            test_against_np_uniformbins(sample, range=(.25, 7.125), bins=100)
+        if(dtypes[0] == torch.float64):
+            test_against_np_uniformbins(sample, range=(.1, 2.04), bins=100)
 
-                expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
-                test_against_np_custombins(expanded, torch.randn(101, device=device).sort()[0])
-            # Restore default dtype
-            torch.set_default_dtype(default_dtype)
+        if(dtypes[0].is_floating_point):
+            noncontig_sample = torch.randn(5000, 2, device=device, dtype=dtypes[0])[:, 1]
+        else:
+            noncontig_sample = torch.randint(127, (5000, 2), device=device, dtype=dtypes[0])[:, 1]
+        if(dtypes[1].is_floating_point):
+            noncontig_weights = torch.rand(5000, 2, device=device, dtype=dtypes[1])[:, 1]
+        else:
+            noncontig_weights = torch.randint(127, (5000, 2), device=device, dtype=dtypes[1])[:, 1]
+        test_against_np_uniformbins(noncontig_sample)
+        test_against_np_uniformbins(noncontig_sample, weights=weights)
+        test_against_np_uniformbins(noncontig_sample, weights=noncontig_weights)
+        test_against_np_uniformbins(sample, weights=noncontig_weights)
+
+        if(dtypes[0].is_floating_point):
+            multidim_sample = torch.randn(10, 1, 2, 4, device=device, dtype=dtypes[0])
+        else:
+            multidim_sample = torch.randint(127, (10, 1, 2, 4), device=device, dtype=dtypes[0])
+        if(dtypes[1].is_floating_point):
+            multidim_weights = torch.rand(10, 1, 2, 4, device=device, dtype=dtypes[1])
+        else:
+            multidim_weights = torch.randint(127, (10, 1, 2, 4), device=device, dtype=dtypes[1])
+        test_against_np_uniformbins(multidim_sample)
+        test_against_np_uniformbins(multidim_sample, weights=multidim_weights)
+
+        if(dtypes[0].is_floating_point):
+            expanded_sample = torch.randn(1, 1, 2, 1, device=device, dtype=dtypes[0]).expand(10, 1, 2, 4)
+        else:
+            expanded_sample = torch.randint(127, (1, 1, 2, 1), device=device, dtype=dtypes[0]).expand(10, 1, 2, 4)
+        if(dtypes[1].is_floating_point):
+            expanded_weights = torch.rand(1, 1, 2, 1, device=device, dtype=dtypes[1]).expand(10, 1, 2, 4) + .5
+        else:
+            expanded_weights = torch.randint(127, (1, 1, 2, 1), device=device, dtype=dtypes[1]).expand(10, 1, 2, 4)
+        test_against_np_uniformbins(expanded_sample)
+        test_against_np_uniformbins(expanded_sample, weights=multidim_weights)
+        test_against_np_uniformbins(expanded_sample, weights=expanded_weights)
+        test_against_np_uniformbins(multidim_sample, weights=expanded_weights)
+
+        torch.set_default_dtype(default_dtype)
 
     def test_bool_tensor_value_change(self, device):
         x = torch.tensor([True, False], dtype=torch.bool, device=device)
