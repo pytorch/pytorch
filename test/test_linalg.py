@@ -208,6 +208,15 @@ class TestLinalg(TestCase):
                 actual_v = sign * actual_v
                 self.assertEqual(actual_v, expected_v)
 
+            # check the out= variant
+            out_w = torch.empty_like(actual_w)
+            out_v = torch.empty_like(actual_v)
+            ans_w, ans_v = torch.linalg.eigh(matrix, UPLO=uplo, out=(out_w, out_v))
+            self.assertEqual(ans_w, out_w)
+            self.assertEqual(ans_v, out_v)
+            self.assertEqual(ans_w, actual_w)
+            self.assertEqual(abs(ans_v), abs(actual_v))
+
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
         uplos = ["U", "L"]
@@ -217,7 +226,9 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_eigh_errors(self, device, dtype):
+    def test_eigh_errors_and_warnings(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
         # eigh requires a square matrix
         t = torch.randn(2, 3, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
@@ -230,6 +241,18 @@ class TestLinalg(TestCase):
                 torch.linalg.eigh(t, UPLO=uplo)
             with self.assertRaisesRegex(ValueError, "be \'L\' or \'U\'"):
                 np.linalg.eigh(t.cpu().numpy(), UPLO=uplo)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = random_hermitian_matrix(3, dtype=dtype, device=device)
+        out_w = torch.empty(7, 7, dtype=dtype, device=device)
+        out_v = torch.empty(7, 7, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.eigh(a, out=(out_w, out_v))
+            # Check warning occurs
+            self.assertEqual(len(w), 2)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -278,6 +301,12 @@ class TestLinalg(TestCase):
             actual_w = torch.linalg.eigvalsh(matrix, UPLO=uplo)
             self.assertEqual(actual_w, expected_w)
 
+            # check the out= variant
+            out = torch.empty_like(actual_w)
+            ans = torch.linalg.eigvalsh(matrix, UPLO=uplo, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, actual_w)
+
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
         uplos = ["U", "L"]
@@ -287,7 +316,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_eigvalsh_errors(self, device, dtype):
+    def test_eigvalsh_errors_and_warnings(self, device, dtype):
         # eigvalsh requires a square matrix
         t = torch.randn(2, 3, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
@@ -300,6 +329,15 @@ class TestLinalg(TestCase):
                 torch.linalg.eigvalsh(t, UPLO=uplo)
             with self.assertRaisesRegex(ValueError, "be \'L\' or \'U\'"):
                 np.linalg.eigvalsh(t.cpu().numpy(), UPLO=uplo)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        out = torch.empty_like(t)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.eigvalsh(t, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

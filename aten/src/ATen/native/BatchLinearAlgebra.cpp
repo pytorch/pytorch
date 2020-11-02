@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
@@ -981,12 +982,39 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
   return at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
 }
 
+std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+  squareCheckInputs(self);
+  checkUplo(uplo);
+
+  Tensor eigvals_tmp, eigvecs_tmp;
+  std::tie(eigvals_tmp, eigvecs_tmp) = at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
+
+  at::native::resize_output(eigvals, eigvals_tmp.sizes());
+  eigvals.copy_(eigvals_tmp);
+  at::native::resize_output(eigvecs, eigvecs_tmp.sizes());
+  eigvecs.copy_(eigvecs_tmp);
+
+  return std::tuple<Tensor&, Tensor&>(eigvals, eigvecs);
+}
+
 Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
   squareCheckInputs(self);
   checkUplo(uplo);
   Tensor eigvals, eigvecs;
   std::tie(eigvals, eigvecs) = at::_syevd_helper(self, /*compute_eigenvectors=*/false, uplo);
   return eigvals;
+}
+
+Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+  squareCheckInputs(self);
+  checkUplo(uplo);
+
+  Tensor result_tmp = std::get<0>(at::_syevd_helper(self, /*compute_eigenvectors=*/false, uplo));
+
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
