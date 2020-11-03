@@ -495,7 +495,7 @@ class CAFFE2_API Tensor {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false) const;
+  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -522,13 +522,13 @@ class CAFFE2_API Tensor {
   /// \param create_graph If ``true``, graph of the derivative will
   ///     be constructed, allowing to compute higher order derivative
   ///     products. Defaults to ``false``.
-
+  /// \param inputs Inputs w.r.t. which the gradient will be accumulated into
+  ///     ``at::Tensor::grad``. All other Tensors will be ignored. If not provided, the gradient
+  ///     is accumulated into all the leaf Tensors that were used to compute the attr::tensors.
+  ///     All the provided inputs must be leaf Tensors.
   void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
-    if (inputs.has_value()) {
-      this->_backward(inputs.value(), gradient, retain_graph, create_graph);
-    } else {
-      this->_backward({}, gradient, retain_graph, create_graph);
-    }
+    variable_list input_vars = inputs.has_value() ? inputs.value() : {};
+    this->_backward(input_vars, gradient, retain_graph, create_graph);
   }
 
   /// \fn Tensor detach() const;

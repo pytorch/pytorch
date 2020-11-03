@@ -781,9 +781,14 @@ TEST(CustomAutogradTest, BackwardWithEmptyInputs) {
   Variable z = x * x + x * y + y * y;
   Variable x_grad_expected = 2 * x + y;
   Variable y_grad_expected = x + 2 * y;
+
   z.backward(torch::ones({5, 5}), false, false, {});
-  // Does not throw an error when inputs is empty because the argument default is an empty list
-  // ASSERT_THROWS_WITH(z.backward(torch::ones({5, 5}), false, false, {}), "TBD");
+
+  // Calling backward with empty 'inputs' argument does not raise
+  // an error currently though it might be desirable in the future
+  // this is since codegen does not currently support optional TensorList,
+  // so an empty list becomes the only sensible default for the internal api
+  // might be better just to keep the behavior as-is for consistency/simplicity
   ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
   ASSERT_VARIABLE_EQ(y.grad(), y_grad_expected);
 }

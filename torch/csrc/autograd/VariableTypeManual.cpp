@@ -83,18 +83,6 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
 
 namespace {
 
-// void _backward(
-//     const Tensor& self,
-//     const TensorList& inputs,
-//     const c10::optional<Tensor>& gradient,
-//     c10::optional<bool> keep_graph,
-//     bool create_graph) {
-//   // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
-//   // instead of us having to unwrap it to Tensor _gradient here.
-//   Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
-//   torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph);
-// }
-
 void _backward(
     const Tensor& self,
     TensorList inputs,
