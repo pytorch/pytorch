@@ -260,14 +260,6 @@ void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool
   }
 }
 
-void ProfilerThreadLocalState::setCallbackHandle(at::CallbackHandle handle) {
-  handle_ = handle;
-}
-
-at::CallbackHandle ProfilerThreadLocalState::callbackHandle() const {
-  return handle_;
-}
-
 void ProfilerThreadLocalState::reportMemoryUsage(
     void* /* unused */,
     int64_t alloc_size,

@@ -223,7 +223,7 @@ ProfilerResult disableProfiler() {
   TORCH_CHECK(state_ptr && state_ptr->config().state == ProfilerState::KINETO,
       "Can't disable Kineto profiler when it's not running");
 
-  if (state_ptr->callbackHandle() > 0) {
+  if (state_ptr->hasCallbackHandle()) {
     at::removeCallback(state_ptr->callbackHandle());
   }
 

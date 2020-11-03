@@ -502,9 +502,17 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
 
-  void setCallbackHandle(at::CallbackHandle handle);
+  void setCallbackHandle(at::CallbackHandle handle) {
+    handle_ = handle;
+  }
 
-  at::CallbackHandle callbackHandle() const;
+  at::CallbackHandle callbackHandle() const {
+    return handle_;
+  }
+
+  bool hasCallbackHandle() {
+    return handle_ > 0;
+  }
 
   void reportMemoryUsage(
       void* /* unused */,
