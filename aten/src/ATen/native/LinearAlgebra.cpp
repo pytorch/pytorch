@@ -337,7 +337,7 @@ static void addbmm_impl_cpu_(
 
   result.resize_as_(self);
 
-  if (beta.to<double>() != 0.0 && !self.is_same(result)) {
+  if (beta.to<c10::complex<double>>() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
   }
 

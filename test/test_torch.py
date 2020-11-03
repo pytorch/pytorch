@@ -17955,22 +17955,24 @@ else:
                         f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
                         + e.output.decode("utf-8")))
 
-    def _test_addbmm_baddbmm(self, func, b1, b2, res, res2, res3):
+    def _test_addbmm_baddbmm(self, func, b1, b2, ref, res2):
+        res3 = res2.clone()
+
         getattr(res2, func + "_")(b1, b2)
-        self.assertEqual(res2, res)
+        self.assertEqual(res2, ref)
         res3.copy_(res2)
 
         with self.maybeWarnsRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(res2, func + "_")(1, b1, b2)
-        self.assertEqual(res2, res * 2),
+        self.assertEqual(res2, ref * 2),
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(res2, res3)
 
         with self.maybeWarnsRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(res2, func + "_")(1., .5, b1, b2)
-        self.assertEqual(res2, res * 2.5)
+        self.assertEqual(res2, ref * 2.5)
         getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
         self.assertEqual(res2, res3)
 
@@ -17979,35 +17981,51 @@ else:
             self.assertEqual(res2, getattr(torch, func)(1, res2, 0, b1, b2))
 
         res4 = getattr(torch, func)(res2, b1, b2, beta=1, alpha=.5)
-        self.assertEqual(res4, res * 3),
+        self.assertEqual(res4, ref * 3),
 
         nan = torch.full_like(res2, math.nan)
         res5 = getattr(torch, func)(nan, b1, b2, beta=0, alpha=1)
-        self.assertEqual(res5, res)
+        self.assertEqual(res5, ref)
 
-        res6 = getattr(torch, func)(res2, b1, b2, beta=.1, alpha=.5)
-        self.assertEqual(res6, res2 * .1 + .5 * res),
+        if b1.is_complex():
+            res6 = getattr(torch, func)(res2, b1, b2, beta=.1j, alpha=.5j)
+            self.assertEqual(res6, res2 * .1j + .5j * ref)
+        else:
+            res6 = getattr(torch, func)(res2, b1, b2, beta=.1, alpha=.5)
+            self.assertEqual(res6, res2 * .1 + .5 * ref)
 
         res7 = torch.full_like(res2, math.nan)
         getattr(torch, func)(nan, b1, b2, beta=0, out=res7)
-        self.assertEqual(res7, res)
+        self.assertEqual(res7, ref)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
-    @dtypes(*torch.testing.floating_and_complex_types())
+    @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
-        # num_batches = 10
-        # M, N, O = 12, 8, 5
         num_batches = 2
         M, N, O = 2, 3, 4
+
+        if self.device_type == 'cpu':
+            is_supported = True
+            if dtype == torch.bfloat16:
+                self.precision = 1  # 43 vs 43.75
+        else:
+            is_supported = dtype != torch.bfloat16 or AMPERE_OR_ROCM
+
+        if not is_supported:
+            b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
+            b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
+            t = torch.randn(M, O, device=device).to(dtype)
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.addbmm(t, b1, b2))
+            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
             return (d[0], d[1], d[2])
 
         def generate_tensor():
+            numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
             # transposed tensors
             for perm1, perm2 in product(permutations((0, 1, 2)), repeat=2):
                 for perm3 in permutations((0, 1)):
@@ -18015,32 +18033,45 @@ else:
                     b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
                     b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                     b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
-                    res = torch.bmm(b1, b2).sum(0, False)
+                    res = torch.from_numpy(
+                        b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
+                    ).to(device=device, dtype=dtype).sum(0)
                     res2 = torch.zeros_like(res).permute(perm3).contiguous().permute(perm3)
-                    res3 = torch.zeros_like(res).permute(perm3).contiguous().permute(perm3)
-                    yield b1, b2, res, res2, res3
+                    yield b1, b2, res, res2
             # broadcasting tensors
             for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
                 b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
                 b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
-                res = torch.bmm(b1, b2).sum(0, False)
+                res = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
+                ).to(device=device, dtype=dtype).sum(0)
                 res2 = torch.zeros_like(res)
-                res3 = torch.zeros_like(res)
-                yield b1, b2, res, res2, res3
+                yield b1, b2, res, res2
 
-        for b1, b2, res, res2, res3 in generate_tensor():
-            self._test_addbmm_baddbmm("addbmm", b1, b2, res, res2, res3)
+        for b1, b2, res, res2 in generate_tensor():
+            self._test_addbmm_baddbmm("addbmm", b1, b2, res, res2)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.5})
     @onlyOnCPUAndCUDA
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
-    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
+    @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_baddbmm(self, device, dtype):
         num_batches = 10
         M, N, O = 12, 8, 5
+
+        cpu_supported_dtypes = torch.testing.floating_and_complex_types()
+        cuda_supported_dtypes = torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)
+        is_supported = (self.device_type == 'cpu' and dtype in cpu_supported_dtypes) or \
+            (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
+
+        if not is_supported:
+            b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
+            b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
+            t = torch.randn(num_batches, M, O, device=device).to(dtype)
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.baddbmm(t, b1, b2))
+            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
@@ -18059,8 +18090,7 @@ else:
                 res2 = torch.zeros_like(res)
                 res3 = torch.zeros_like(res)
                 res2 = res2.permute(perm3).contiguous().permute(invert_perm(perm3))
-                res3 = res3.permute(perm3).contiguous().permute(invert_perm(perm3))
-                yield b1, b2, res, res2, res3 
+                yield b1, b2, res, res2 
             # broadcasting tensors
             for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
@@ -18070,11 +18100,10 @@ else:
                 res = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 res2 = torch.zeros_like(res)
-                res3 = torch.zeros_like(res)
-                yield b1, b2, res, res2, res3
+                yield b1, b2, res, res2
 
-        for b1, b2, res, res2, res3 in generate_tensor():
-            self._test_addbmm_baddbmm("baddbmm", b1, b2, res, res2, res3)
+        for b1, b2, res, res2 in generate_tensor():
+            self._test_addbmm_baddbmm("baddbmm", b1, b2, res, res2)
 
     def _test_cop(self, torchfn, mathfn, dtype, device):
         def reference_implementation(res2):
