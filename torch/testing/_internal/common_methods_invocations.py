@@ -419,7 +419,35 @@ op_db = [
                    ref=np.nan_to_num,
                    dtypes=all_types_and(torch.half, torch.bool),
                    dtypesIfCPU=None,
-                   dtypesIfCUDA=None)
+                   dtypesIfCUDA=None),
+    UnaryUfuncInfo('sqrt',
+                   ref=np.sqrt,
+                   domain=(0, float('inf')),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 7e-2}),),
+                   skips=(
+                       # Investigate flaky behaviour
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.bfloat16, torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.bfloat16]),
+                       # RuntimeError: sqrt does not support automatic differentiation for outputs with complex dtype.
+                       SkipInfo('TestGradients', 'test_fn_grad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_fn_gradgrad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_method_grad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_method_gradgrad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_inplace_grad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_inplace_gradgrad',
+                                dtypes=[torch.cdouble]),),
+                   promotes_integers_to_float=True,
+                   handles_complex_extremals=False),
 ]
 
 # Common operator groupings
