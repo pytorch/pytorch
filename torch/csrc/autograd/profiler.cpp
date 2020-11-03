@@ -21,6 +21,10 @@
 
 #include <iostream>
 
+#ifdef USE_KINETO
+#include "libkineto.h"
+#endif
+
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
@@ -787,6 +791,16 @@ ProfilerResult disableProfiler() {
   auto legacy_events = state_ptr->consolidate();
   return ProfilerResult(kineto_events, legacy_events);
 }
+
+KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
+  name_ = activity.name();
+  device_index_ = activity.deviceId();
+  start_us_ = activity.timestamp();
+  duration_us_ = activity.duration();
+  correlation_id_ = activity.correlationId();
+  return *this;
+}
+
 #endif
 
 void addEventList(std::vector<LegacyEvent>&& profiledEvents) {

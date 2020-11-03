@@ -73,16 +73,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "KinetoEvent")
       .def("name", &KinetoEvent::name)
-      .def("thread_id", &KinetoEvent::threadId)
+      .def("start_thread_id", [](const KinetoEvent& e) { return e.startThreadId(); })
+      .def("end_thread_id", [](const KinetoEvent& e) { return e.endThreadId(); })
       .def("device_index", &KinetoEvent::deviceIndex)
       .def("start_us", &KinetoEvent::startUs)
-      .def("duration", &KinetoEvent::duration)
-      .def("correlation_id", &KinetoEvent::correlationId)
-      .def("fwd_thread_id", &KinetoEvent::fwdThreadId)
-      .def("shapes", &KinetoEvent::shapes)
-      .def("sequence_nr", &KinetoEvent::sequenceNr)
-      .def("stack", &KinetoEvent::stack)
-      .def("scope", &KinetoEvent::scope);
+      .def("duration_us", &KinetoEvent::durationUs)
+      .def("correlation_id", [](const KinetoEvent& e) { return e.correlationId(); })
+      .def("fwd_thread_id", [](const KinetoEvent& e) { return e.fwdThreadId(); })
+      .def("shapes", [](const KinetoEvent& e) { return e.shapes(); })
+      .def("sequence_nr", [](const KinetoEvent& e) { return e.sequenceNr(); })
+      .def("stack", [](const KinetoEvent& e) { return e.stack(); })
+      .def("scope", [](const KinetoEvent& e) { return e.scope(); });
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
       .def("events", &ProfilerResult::events)

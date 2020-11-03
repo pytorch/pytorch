@@ -21,12 +21,14 @@
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 
-#ifdef USE_KINETO
-#include "libkineto.h"
-#endif
-
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
+
+#ifdef USE_KINETO
+namespace libkineto {
+class TraceActivity;
+}
+#endif
 
 namespace torch { namespace autograd {
 
@@ -507,14 +509,7 @@ struct TORCH_API KinetoEvent {
 
   // Kineto fields
 
-  KinetoEvent& activity(const libkineto::TraceActivity& activity) {
-    name_ = activity.name();
-    device_index_ = activity.deviceId();
-    start_us_ = activity.timestamp();
-    duration_us_ = activity.duration();
-    correlation_id_ = activity.correlationId();
-    return *this;
-  }
+  KinetoEvent& activity(const libkineto::TraceActivity& activity);
 
   std::string name() const {
     return name_;
