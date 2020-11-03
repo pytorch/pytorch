@@ -59,7 +59,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .fwdThreadId(ctx->fwdThreadId)
           .scope(ctx->recFunScope)
           .deviceType(c10::DeviceType::CPU)
-          .shapes(*ctx->shapes);
+      if (ctx->shapes && !ctx->shapes.empty()) {
+          kineto_events_.back().shapes(*ctx->shapes);
+      }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
       }
