@@ -9,7 +9,8 @@ import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
-    skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
+    skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -166,9 +167,6 @@ except ImportError:
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
 
-# set type to List[Any] due to mypy list-of-union issue:
-# https://github.com/python/mypy/issues/3351
-device_type_test_bases: List[Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -361,9 +359,25 @@ class CUDATestBase(DeviceTypeTestBase):
 
 
 # Adds available device-type-specific test base classes
-device_type_test_bases.append(CPUTestBase)
-if torch.cuda.is_available():
-    device_type_test_bases.append(CUDATestBase)
+def get_device_type_test_bases():
+    # set type to List[Any] due to mypy list-of-union issue:
+    # https://github.com/python/mypy/issues/3351
+    test_bases: List[Any] = list()
+
+    if IS_SANDCASTLE or IS_FBCODE:
+        if IS_REMOTE_GPU:
+            test_bases.append(CUDATestBase)
+        else:
+            test_bases.append(CPUTestBase)
+    else:
+        test_bases.append(CPUTestBase)
+        if torch.cuda.is_available():
+            test_bases.append(CUDATestBase)
+
+    return test_bases
+
+
+device_type_test_bases = get_device_type_test_bases()
 
 
 # Note [How to extend DeviceTypeTestBase to add new test device]

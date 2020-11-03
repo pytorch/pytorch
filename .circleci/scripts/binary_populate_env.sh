@@ -167,6 +167,7 @@ export CIRCLE_TAG="${CIRCLE_TAG:-}"
 export CIRCLE_SHA1="$CIRCLE_SHA1"
 export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
 export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 

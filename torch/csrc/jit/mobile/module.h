@@ -67,6 +67,16 @@ class TORCH_API Module {
     return metadata_;
   }
 
+  c10::IValue attr(const std::string& name, c10::IValue or_else) const {
+    if (auto r = object_->type()->findAttributeSlot(name)) {
+      return object_->getSlot(*r);
+    }
+    if (auto r = object_->type()->findConstantSlot(name)) {
+      return object_->type()->getConstant(*r);
+    }
+    return or_else;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;

@@ -99,8 +99,8 @@ class Embedding(Module):
 
     num_embeddings: int
     embedding_dim: int
-    padding_idx: int
-    max_norm: float
+    padding_idx: Optional[int]
+    max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
@@ -284,7 +284,7 @@ class EmbeddingBag(Module):
 
     num_embeddings: int
     embedding_dim: int
-    max_norm: float
+    max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor

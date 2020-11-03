@@ -814,6 +814,11 @@ class TestFX(JitTestCase):
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
 
+    def test_sequential(self):
+        m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
+        gm = torch.fx.symbolic_trace(m)
+        gm_copy = copy.deepcopy(gm)
+
     def test_ctx_mgr(self):
         @contextlib.contextmanager
         def do_nothing():
@@ -837,6 +842,25 @@ class TestFX(JitTestCase):
                                               type_expr=List[float])
         output : torch.fx.Node = graph.output(b)
         self.assertTrue('typing.List[float]' in str(graph))
+
+    def test_inf_nan(self):
+        class FooMod(torch.nn.Module):
+            def forward(self, x):
+                return x + float('inf'), x + float('-inf'), x + float('nan')
+
+        fm = FooMod()
+        self.checkGraphModule(fm, (torch.rand(3, 4),))
+
+    def test_inf_nan_kwds(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', operator.add, (x, float('inf')), {}, name='inf')
+        c : torch.fx.Node = graph.create_node('call_function', operator.add, (x, float('nan')), {}, name='nan')
+        graph.output((b, c))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        x = torch.rand(3, 4)
+        self.assertEqual(gm(x), (x + float('inf'), x + float('nan')))
 
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
@@ -1054,6 +1078,26 @@ class TestFX(JitTestCase):
 
         x, y = torch.randn(3, 4), torch.randn(3, 4)
         self.checkGraphModule(foo, (x, y))
+
+    def test_direct_param_use(self):
+        class TransposeTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.nn.Parameter(torch.rand(4, 3))
+
+            def forward(self, x):
+                return self.b
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = TransposeTest()
+
+            def forward(self, x):
+                return self.a.b, self.a.b.t(), self.a.b.view(12)
+
+        traced = torch.fx.symbolic_trace(Foo())
+        assert(all('constant' not in node.target for node in traced.graph.nodes))
 
 
 if __name__ == '__main__':
