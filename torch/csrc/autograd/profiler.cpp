@@ -181,13 +181,41 @@ struct KinetoObserverContext : public at::ObserverContext {
   uint64_t correlationId;
   uint64_t startThreadId;
   uint64_t endThreadId;
-  std::vector<std::vector<int64_t>> shapes;
+  c10::optional<std::vector<std::vector<int64_t>>> shapes;
   int64_t sequenceNr;
   uint64_t fwdThreadId;
   uint8_t recFunScope;
-  std::vector<std::string> stack;
+  c10::optional<std::vector<std::string>> stack;
 };
 #endif
+
+std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs) {
+  std::vector<FileLineFunc> entries;
+  entries.reserve(cs.size());
+  for (const auto& entry : cs) {
+    auto& range = entry.range;
+    if (range.source()) {
+      auto& src = range.source();
+      if (src && src->filename()) {
+        auto line = src->starting_line_no() +
+            src->lineno_for_offset(range.start());
+        entries.emplace_back(FileLineFunc{*(src->filename()), line, entry.filename});
+      }
+    }
+  }
+  return entries;
+}
+
+std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
+  std::vector<std::string> cs_str;
+  cs_str.reserve(cs.size());
+  for (const auto& entry : cs) {
+    std::stringstream loc;
+    loc << entry.filename << "(" << entry.line << "): " << entry.funcname;
+    cs_str.push_back(loc.str());
+  }
+  return cs_str;
+}
 
 // Profiler state
 struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
@@ -332,7 +360,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
     return config_.profile_memory;
   }
 
-  KinetoEvent& reportKinetoClientActivity(
+  void reportKinetoClientActivity(
       const at::RecordFunction& fn,
       const KinetoObserverContext& ctx) {
 #ifdef USE_KINETO
@@ -340,26 +368,26 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       libkineto::ClientTraceActivity op;
       op.startTime = ctx.startUs;
       op.endTime = (getTime() / 1000);
-      op.opType = std::string(fn.name());
+      op.opType = std::string(fn.name().str());
       op.device = 0; // CPU
       op.correlation = ctx.correlationId;
-      //op.inputDims = toStr(ctx.shapes); //
-      /*
-      op.threadId = pthread_self();
-      */
+      if (ctx.shapes && !ctx.shapes->empty()) {
+        //op.inputDims = toStr(*ctx.shapes); //
+      }
+      //op.threadId = pthread_self();
 
       {
         std::lock_guard<std::mutex> guard(state_mutex_);
-        kineto_client_activities_.emplace_back(op);
+        kineto_client_activities_.emplace_back(std::move(op));
         kineto_events_.emplace_back();
         kineto_events_.back()
             .startThreadId(ctx.startThreadId)
             .endThreadId(ctx.endThreadId)
             .sequenceNr(ctx.sequenceNr)
             .fwdThreadId(ctx.fwdThreadId)
-            .scope(ctx.recFunScope)
-        if (!stack.empty()) {
-          kineto_events_.back().stack(stack);
+            .scope(ctx.recFunScope);
+        if (ctx.stack && !ctx.stack->empty()) {
+          kineto_events_.back().stack(*ctx.stack);
         }
       }
       return;
@@ -369,34 +397,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   }
 
  private:
-  std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs) {
-    std::vector<FileLineFunc> entries;
-    entries.reserve(cs.size());
-    for (const auto& entry : cs) {
-      auto& range = entry.range;
-      if (range.source()) {
-        auto& src = range.source();
-        if (src && src->filename()) {
-          auto line = src->starting_line_no() +
-              src->lineno_for_offset(range.start());
-          entries.emplace_back(FileLineFunc{*(src->filename()), line, entry.filename});
-        }
-      }
-    }
-    return entries;
-  }
-
-  std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
-    std::vector<std::string> cs_str;
-    cs_str.reserve(cs.size());
-    for (const auto& entry : cs) {
-      std::stringstream loc;
-      loc << entry.filename << "(" << entry.line << "): " << entry.funcname;
-      cs_str.push_back(loc.str());
-    }
-    return cs_str;
-  }
-
   std::string getNvtxStr(
       const at::StringView& name,
       const char* msg,
@@ -468,7 +468,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
 
 #ifdef USE_KINETO
   std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
-  std::vector<KinetoEventImpl> kineto_events_;
+  std::vector<KinetoEvent> kineto_events_;
 #endif
 };
 
@@ -513,7 +513,7 @@ void pushProfilingCallbacksLegacy() {
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (state_ptr->config().report_input_shapes) {
           auto sizes = inputSizes(fn);
-          state_ptr->pushRange(fn, record_cuda, msg, std::move(inputSizes));
+          state_ptr->pushRange(fn, record_cuda, msg, std::move(sizes));
         } else {
           state_ptr->pushRange(fn, record_cuda, msg);
         }
@@ -543,7 +543,7 @@ void pushProfilingCallbacks() {
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
-          return;
+          return std::make_unique<KinetoObserverContext>();
         }
 
         auto corr_id = next_correlation_id();
@@ -576,7 +576,7 @@ void pushProfilingCallbacks() {
 #endif
         return ctx_ptr;
       },
-      [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {) {
+      [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
           return;
@@ -736,11 +736,12 @@ void prepareProfiler(
     k_activities.insert(libkineto::ActivityType::CONCURRENT_KERNEL);
   }
 
-  if (!libkineto::api().hasProfilerRegistered()) {
-    libkineto::api().registerProfiler(
-      std::make_unique<libkineto::ActivityProfilerInterface>(false));
-  }
-  libkineto::api().initProfilerIfRegistered();
+  //if (!libkineto::api().hasProfilerRegistered()) {
+  //  libkineto::api().registerProfiler(
+  //    std::make_unique<libkineto::ActivityProfilerInterface>(false));
+  //}
+
+  //libkineto::api().initProfilerIfRegistered();
   libkineto::api().prepareTrace(k_activities);
 }
 
@@ -780,8 +781,9 @@ ProfilerResult disableProfiler() {
 
   state_ptr->mark("__stop_profile");
 
-  auto trace = libkineto::api().stopTrace();
-  auto kineto_events = filterTrace(trace);
+  //auto trace = std::move(libkineto::api().stopTrace());
+  libkineto::api().stopTrace();
+  std::vector<std::vector<KinetoEvent>> kineto_events; // = filterTrace(trace);
   auto legacy_events = state_ptr->consolidate();
   return ProfilerResult(kineto_events, legacy_events);
 }
@@ -904,7 +906,6 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
 
 CUDAStubs::~CUDAStubs() = default;
 
-
 static jit::CodeTemplate event_template(R"(
 {
   "name": "${name}",
@@ -937,9 +938,9 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEven
   out << "[\n";
   bool first = true;
   for (LegacyEvent* evt : events) {
-    if (evt->kind() == "push") {
+    if (evt->kindStr() == "push") {
       events_map[std::make_pair(evt->handle(), evt->nodeId())] = evt;
-    } else if (evt->kind() == "pop") {
+    } else if (evt->kindStr() == "pop") {
       if (!first) {
         out << ",\n";
       }
@@ -960,7 +961,6 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEven
   out << "]\n";
 }
 
-
 RecordProfile::RecordProfile(std::ostream& out)
 : out_(out) {
   init();
@@ -972,11 +972,11 @@ RecordProfile::RecordProfile(const std::string& filename)
 }
 
 void RecordProfile::init() {
-  enableProfiler(ProfilerConfig(ProfilerState::CPU));
+  enableProfilerLegacy(ProfilerConfig(ProfilerState::CPU));
 }
 
 RecordProfile::~RecordProfile() {
-  thread_event_lists event_lists = disableProfiler();
+  thread_event_lists event_lists = disableProfilerLegacy();
   std::vector<LegacyEvent*> events;
   for (auto& l : event_lists) {
     for (auto& e : l) {

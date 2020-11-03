@@ -500,8 +500,8 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
-  KinetoEvent& scope(uint8_t scope_id) {
-    scope_id_ = scope_id;
+  KinetoEvent& scope(uint8_t scope) {
+    scope_ = scope;
     return *this;
   }
 
@@ -548,7 +548,7 @@ struct TORCH_API KinetoEvent {
   int64_t sequence_nr_ = 0;
   uint8_t scope_ = 0;
 
-  c10::DeviceType device_type_ = c10::DeviceType::CPU,
+  c10::DeviceType device_type_ = c10::DeviceType::CPU;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
 
@@ -625,10 +625,10 @@ struct TORCH_API TLSProfilerGuard {
           c10::nullopt)
       : cb_(std::move(resultCallback)),
         profilerDisableOptions_(std::move(profilerDisableOptions)) {
-    enableProfiler(cfg);
+    enableProfilerLegacy(cfg);
   }
   ~TLSProfilerGuard() {
-    thread_event_lists event_lists = disableProfiler(profilerDisableOptions_);
+    thread_event_lists event_lists = disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
       try {
         (*cb_)(event_lists);

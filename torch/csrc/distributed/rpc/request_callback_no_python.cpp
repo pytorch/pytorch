@@ -92,7 +92,7 @@ std::shared_ptr<FutureMessage> RequestCallbackNoPython::processMessage(
           if (serverProcessGlobalProfilerStateStackEntryPtr) {
             // Restore thread-local profiler state.
             ::torch::autograd::profiler::thread_event_lists event_lists =
-                ::torch::autograd::profiler::disableProfiler();
+                ::torch::autograd::profiler::disableProfilerLegacy();
             // Put thread_local event_lists into the process-global profiler
             // state.
             profiler::processglobal::pushResultRecursive(
@@ -543,7 +543,7 @@ void RequestCallbackNoPython::processRpc(
               torch::autograd::profiler::ProfilerDisableOptions opts(
                   false, true);
               auto event_lists =
-                  torch::autograd::profiler::disableProfiler(opts);
+                  torch::autograd::profiler::disableProfilerLegacy(opts);
               if (wrappedRpcResponseFuture->hasError()) {
                 // Propagate error
                 // No need to propagate remote events in the case of an error.
