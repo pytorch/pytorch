@@ -5650,7 +5650,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_trace
+    CPU: trace_cpu
     CUDA: trace_cuda
 
 - func: trace_backward(Tensor grad, int[] sizes) -> Tensor
