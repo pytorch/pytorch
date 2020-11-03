@@ -350,47 +350,51 @@ struct constexpr_optional_base {
   }
 };
 
-// HACK: Optimization for small scalars. The mainline implementation
-// fails to have trivial copy/move operations in these cases, and we
-// care about them, so just implement that directly.
+// HACK: Optimization for trivially copyable types. The mainline
+// implementation fails to have trivial copy/move operations in these
+// cases, and we care about them, so just implement that directly.
 template <class T>
-struct small_scalar_optimization_optional_base {
+struct trivially_copyable_optimization_optional_base {
   bool init_;
   constexpr_storage_t<T> storage_;
 
-  constexpr small_scalar_optimization_optional_base() noexcept
+  constexpr trivially_copyable_optimization_optional_base() noexcept
   : init_(false), storage_(trivial_init) {}
 
-  explicit constexpr small_scalar_optimization_optional_base(const T& v)
+  explicit constexpr trivially_copyable_optimization_optional_base(const T& v)
       : init_(true), storage_(v) {}
 
-  explicit constexpr small_scalar_optimization_optional_base(T&& v)
+  explicit constexpr trivially_copyable_optimization_optional_base(T&& v)
       : init_(true), storage_(constexpr_move(v)) {}
 
   template <class... Args>
-  explicit constexpr small_scalar_optimization_optional_base(in_place_t, Args&&... args)
+  explicit constexpr trivially_copyable_optimization_optional_base(in_place_t, Args&&... args)
       : init_(true), storage_(constexpr_forward<Args>(args)...) {}
 
   template <
       class U,
       class... Args,
       TR2_OPTIONAL_REQUIRES(std::is_constructible<T, std::initializer_list<U>>)>
-  constexpr explicit small_scalar_optimization_optional_base(
+  constexpr explicit trivially_copyable_optimization_optional_base(
       in_place_t,
       std::initializer_list<U> il,
       Args&&... args)
       : init_(true), storage_(il, std::forward<Args>(args)...) {}
 
-  ~small_scalar_optimization_optional_base() = default;
+  ~trivially_copyable_optimization_optional_base() = default;
 };
 
 template <class T>
 using OptionalBase = typename std::conditional<
-    // Apparently, VS 2019 says std::pair with non-trivial copy
-    // assignment is_trivially_copyable anyway, hence the other two
-    // checks. Think it may be related to CWG 1734?
-    C10_IS_TRIVIALLY_COPYABLE(T) && std::is_copy_constructible<T>::value && std::is_copy_assignable<T>::value,
-    small_scalar_optimization_optional_base<T>,
+    std::is_trivially_destructible<T>::value &&
+    C10_IS_TRIVIALLY_COPYABLE(T) &&
+    // Avoid using is_trivially_copy_{constructible,assignable}
+    // because old GCC versions don't support them. Also,
+    // is_trivially_copyable seems not to do what I expect, so check
+    // trivially_copyable_optimization_optional_base directly.
+    std::is_copy_constructible<trivially_copyable_optimization_optional_base<T>>::value &&
+    std::is_copy_assignable<trivially_copyable_optimization_optional_base<T>>::value,
+    trivially_copyable_optimization_optional_base<T>,
     typename std::conditional<
         std::is_trivially_destructible<T>::value, // if possible
         constexpr_optional_base<typename std::remove_const<
@@ -401,8 +405,11 @@ template <class T>
 class optional : private OptionalBase<T> {
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = typename std::conditional<
-      C10_IS_TRIVIALLY_COPYABLE(U) && std::is_copy_constructible<U>::value && std::is_copy_assignable<U>::value,
-      small_scalar_optimization_optional_base<U>,
+      std::is_trivially_destructible<U>::value &&
+      C10_IS_TRIVIALLY_COPYABLE(U) &&
+      std::is_copy_constructible<trivially_copyable_optimization_optional_base<U>>::value &&
+      std::is_copy_assignable<trivially_copyable_optimization_optional_base<U>>::value,
+      trivially_copyable_optimization_optional_base<U>,
       typename std::conditional<
           std::is_trivially_destructible<U>::value, // if possible
           constexpr_optional_base<typename std::remove_const<
