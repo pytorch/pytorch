@@ -141,7 +141,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 cond = _add_docstr(_linalg.linalg_cond, r"""
-linalg.norm(input, p=None) -> Tensor
+linalg.norm(input, p=None, *, out=None) -> Tensor
 
 Returns the condition number of a matrix.
 The condition number of :attr:`input` is defined as the norm of
@@ -172,6 +172,9 @@ Args:
         =====  ============================
 
         Default: ``None``
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
 Examples::
 

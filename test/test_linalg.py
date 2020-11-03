@@ -317,8 +317,13 @@ class TestLinalg(TestCase):
         def run_test_case(input, ord):
             result = torch.linalg.cond(input, ord)
             result_numpy = np.linalg.cond(input.cpu().numpy(), ord)
-
             self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
+
+            # test out= variant
+            out = torch.empty_like(result)
+            ans = torch.linalg.cond(input, ord, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
 
         norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
         input_sizes = [(3, 3), (2, 3, 3, 3)]
@@ -337,7 +342,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64)
     @precisionOverride({torch.float32: 1e-3})
-    def test_cond_errors(self, device, dtype):
+    def test_cond_errors_and_warnings(self, device, dtype):
         norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
 
         # cond expects the input to be non-empty
@@ -358,6 +363,23 @@ class TestLinalg(TestCase):
         for ord in norm_types:
             with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
                 torch.linalg.cond(a, ord)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.ones((2, 2), dtype=dtype, device=device)
+        for ord in ['fro', 2]:
+            out = torch.empty_like(a)
+            with warnings.catch_warnings(record=True) as w:
+                # Trigger warning
+                torch.linalg.cond(a, ord, out=out)
+                # Check warning occurs
+                self.assertEqual(len(w), 1)
+                self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        for ord in ['fro', 2]:
+            with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match"):
+                torch.linalg.cond(a, ord, out=out)
 
     # Test autograd and jit functionality for linalg functions.
     # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,

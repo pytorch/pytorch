@@ -1647,6 +1647,17 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   return result;
 }
 
+Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(result.scalar_type() == real_dtype,
+    "result dtype ", result.scalar_type(), " does not match self.real dtype ", real_dtype);
+
+  Tensor result_tmp = at::linalg_cond(self, opt_ord);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, std::string ord) {
   TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
@@ -1669,6 +1680,17 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
   // this will get replaced by inf
   result = result + result - result;
   result = at::nan_to_num(result, INFINITY);
+  return result;
+}
+
+Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(result.scalar_type() == real_dtype,
+    "result dtype ", result.scalar_type(), " does not match self.real dtype ", real_dtype);
+
+  Tensor result_tmp = at::linalg_cond(self, ord);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
