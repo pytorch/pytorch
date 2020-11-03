@@ -601,7 +601,7 @@ inline c10::complex<double> PythonArgs::toComplex(int i) {
 
 inline c10::complex<double> PythonArgs::toComplexWithDefault(int i, c10::complex<double> default_value) {
   if (!args[i]) return default_value;
-  return toDouble(i);
+  return toComplex(i);
 }
 
 inline bool PythonArgs::toBool(int i) {

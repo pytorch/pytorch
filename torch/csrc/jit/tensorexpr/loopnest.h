@@ -51,8 +51,8 @@ class TORCH_API LoopNest {
 
   void vectorize(Stmt*);
 
-  void computeInline(Stmt* s);
-  void computeInline(const Buf* b);
+  bool computeInline(Stmt* s);
+  bool computeInline(const Buf* b);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
