@@ -391,7 +391,7 @@ def emit_namedtuple_typedefs(declarations):
         fn_key = '_'.join(fieldnames)
         fieldsname = flddefnames.get(fn_key)
         if fieldsname is None:
-            fieldsname = 'NamedTuple_fields{}'.format('' if flddefs == [] else len(fielddefs))
+            fieldsname = 'NamedTuple_fields{}'.format('' if flddefs == [] else len(flddefs))
             fields = ['{{"{}", ""}}'.format(fn) for fn in fieldnames]
             fieldsdef = PY_NAMEDTUPLE_FIELDSDEF.substitute(
                 fieldsname=fieldsname,
