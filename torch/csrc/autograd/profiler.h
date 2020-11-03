@@ -481,7 +481,7 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
       : config_(config), remoteProfiledEvents_{c10::nullopt} {}
   ~ProfilerThreadLocalState() override = default;
 
-  inline const ProfilerConfig& config() const;
+  const ProfilerConfig& config() const;
 
   thread_event_lists consolidate();
 

@@ -151,7 +151,7 @@ static CUDAStubs* cuda_stubs = default_stubs_addr;
 }
 
 // Profiler state
-inline const ProfilerConfig& ProfilerThreadLocalState::config() const {
+const ProfilerConfig& ProfilerThreadLocalState::config() const {
   return config_;
 }
 
@@ -349,6 +349,24 @@ RangeEventList& ProfilerThreadLocalState::getEventList(int64_t thread_id) {
   return *list_ptr;
 }
 
+std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
+  std::vector<std::vector<int64_t>> sizes;
+  sizes.reserve(fn.inputs().size());
+  for (const c10::IValue& input : fn.inputs()) {
+    if (!input.isTensor()) {
+      sizes.emplace_back();
+      continue;
+    }
+    const at::Tensor& tensor = input.toTensor();
+    if (tensor.defined()) {
+      sizes.push_back(input.toTensor().sizes().vec());
+    } else {
+      sizes.emplace_back();
+    }
+  }
+  return sizes;
+}
+
 namespace {
 
 enum EventIValueIdx {
@@ -395,24 +413,6 @@ const std::unordered_set<std::string> disable_cuda_profiling = {
 ProfilerThreadLocalState* getProfilerTLSState() {
   const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
   return dynamic_cast<ProfilerThreadLocalState*>(state.get());
-}
-
-std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
-  std::vector<std::vector<int64_t>> sizes;
-  sizes.reserve(fn.inputs().size());
-  for (const c10::IValue& input : fn.inputs()) {
-    if (!input.isTensor()) {
-      sizes.emplace_back();
-      continue;
-    }
-    const at::Tensor& tensor = input.toTensor();
-    if (tensor.defined()) {
-      sizes.push_back(input.toTensor().sizes().vec());
-    } else {
-      sizes.emplace_back();
-    }
-  }
-  return sizes;
 }
 
 void pushProfilingCallbacksLegacy() {
