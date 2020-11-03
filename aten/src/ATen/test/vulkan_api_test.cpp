@@ -211,6 +211,79 @@ TEST(VulkanAPITest, clamp_) {
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
+TEST(VulkanAPITest, conv2d_depthwise) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::vector<int64_t> size() const {
+      return { batches, channels, width, height, };
+    }
+  } input {
+    1u,
+    3u,
+    16u,
+    16u,
+  };
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::vector<int64_t> size() const {
+      return { output_channels, input_channels, width, height, };
+    }
+  } weights {
+    4u,
+    input.channels,
+    3u,
+    3u,
+  };
+
+  const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::zeros({4}, at::device(at::kCPU).dtype(at::kFloat));
+
+  int64_t groups = 1;
+  std::vector<int64_t> stride{1, 1};
+  std::vector<int64_t> padding{0, 0};
+  std::vector<int64_t> dilation{1, 1};
+
+  const auto output_cpu = at::conv2d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const auto output_vulkan = at::conv2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const bool check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << output_cpu << std::endl;
+    std::cout << "got:\n" << output_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, copy) {
   if (!at::is_vulkan_available()) {
     return;

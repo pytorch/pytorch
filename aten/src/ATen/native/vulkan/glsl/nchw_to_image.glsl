@@ -22,7 +22,6 @@ void main() {
   const ivec4 offset = plane * ivec4(0, 1, 2, 3);
 
   if (all(lessThan(pos.xy, size))) {
-
     const int base = pos.x + size.x * pos.y + block * pos.z;
     const ivec4 index = base + offset;
 
