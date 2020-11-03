@@ -182,37 +182,44 @@ size_t cur_correlation_id() {
 }
 
 #ifdef USE_KINETO
-struct KinetoEventImpl : public KinetoEvent {
-  static void fromClientActivity(const libkineto::ClientTraceActivity* activity) {
+std::string Kineto::name() const override  {
+  return activity_->name();
+}
 
-  }
+uint64_t Kineto::deviceIndex() const override {
+  return activity_->deviceId();
+}
 
-  static void fromDeviceActivity(const libkineto::TraceActivity* activity) {
+uint64_t Kineto::startUs() const override {
+  return activity_->timestamp();
+}
 
-  }
+uint64_t Kineto::durationUs() const override {
+  return activity_->duration();
+}
 
-  std::string name() const override  {
-    return activity_ptr_->name();
-  }
+uint64_t Kineto::correlationId() const override {
+  return activity_->correlationId();
+}
+#else
+std::string Kineto::name() const override  {
+  TORCH_CHECK(false, "Supported only with Kineto");
+}
 
-  uint64_t deviceIndex() const override {
-    return activity_ptr_->deviceId();
-  }
+uint64_t Kineto::deviceIndex() const override {
+  TORCH_CHECK(false, "Supported only with Kineto");
+}
 
-  uint64_t startUs() const override {
-    return activity_ptr_->timestamp();
-  }
+uint64_t Kineto::startUs() const override {
+  TORCH_CHECK(false, "Supported only with Kineto");
+}
 
-  uint64_t durationUs() const override {
-    return activity_ptr_->duration();
-  }
+uint64_t Kineto::durationUs() const override {
+  TORCH_CHECK(false, "Supported only with Kineto");
+}
 
-  uint64_t correlationId() const override {
-    return activity_ptr_->correlationId();
-  }
-
- private:
-  libkineto::TraceActivity* activity_ptr_ = nullptr;
+uint64_t Kineto::correlationId() const override {
+  TORCH_CHECK(false, "Supported only with Kineto");
 }
 #endif
 

@@ -423,11 +423,15 @@ TORCH_API ProfilerConfig getProfilerConfig();
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
 struct TORCH_API KinetoEvent {
-  virtual std::string name() const = 0;
-  virtual uint64_t deviceIndex() const = 0;
-  virtual uint64_t startUs() const = 0;
-  virtual uint64_t durationUs() const = 0;
-  virtual uint64_t correlationId() const = 0;
+  KinetoEvent(std::unique_ptr<TraceActivity>&& activity) : activity_(activity) {
+    TORCH_CHECK(activity_);
+  }
+
+  std::string name() const;
+  uint64_t deviceIndex() const;
+  uint64_t startUs() const;
+  uint64_t durationUs() const;
+  uint64_t correlationId() const;
 
   int64_t threadId() const {
     return thread_id_;
@@ -500,6 +504,8 @@ struct TORCH_API KinetoEvent {
   int64_t sequence_nr_ = -1;
   std::vector<std::string> stack_;
   uint8_t scope_ = 0;
+
+  std::unique_ptr<libkineto::TraceActivity> activity_;
 };
 
 struct TORCH_API ProfilerResult {
