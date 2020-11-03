@@ -289,6 +289,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         #  static       quint8                      qint8
         #  dynamic      float32 (quint8)            qint8
         #  weight_only  float32                    float16
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
         supported_dtypes = [
             (torch.quint8, torch.qint8, None),
             (torch.float32, torch.qint8, torch.quint8),
@@ -437,11 +438,22 @@ class Embedding(QuantizeHandler):
         super().__init__(quantizer, node)
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        # Supported combinations are:
+        # quant_type  | activation (compute_type) | weight
+        # weight_only |  float32 (torch.uint8)    | quint8
+        # weight_only |  float32 (torch.uint8)    | quint4x2
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.float32, torch.quint8, torch.quint8),
+            (torch.float32, torch.quint4x2, torch.quint8),
+        ]
         assert node.op == 'call_module'
         emb_node = node
         emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
-        assert not activation_is_statically_quantized(qconfig)
+        dtypes = get_qconfig_dtypes(qconfig)
+        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
+            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
