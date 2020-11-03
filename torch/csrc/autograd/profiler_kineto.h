@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/profiler_legacy.h>
 
 #include <c10/core/DeviceType.h>
 
