@@ -1,7 +1,6 @@
 from enum import Enum
 from functools import partial
 
-import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks as quantization
 from torch.nn.parallel import DistributedDataParallel
@@ -39,7 +38,6 @@ def register_ddp_comm_hook(
         to the DDP model. User can specify the type of hook as an enum
         ``DDPCommHookType`` type using ``comm_hook_type`` input. State input will
         be passed to the model.
-        Uses Python comm hook implementations.
 
         Example::
             >>> register_ddp_comm_hook(DDPCommHookType.FP16_COMPRESS, model, state)

@@ -67,7 +67,7 @@ void upsample_nearest2d(
 
   WorkGroupSize workGroupSize{8, 8, 1};
   auto& computeUnit = context().computeUnitFactory().get(
-      GLSL_SPV(upsampleNearest2d), descriptorSetLayout, workGroupSize);
+      GLSL_SPV(upsample_nearest2d), descriptorSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descriptorSet);
   input.image()->addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
   computeUnit.dispatchCommandBuffer(OW, OH, C, workGroupSize);
@@ -1243,7 +1243,6 @@ void addmm(
     int32_t OW;
     int32_t OH;
     int32_t C_4;
-    int32_t C;
     float beta;
     float alpha;
     int32_t K;
@@ -1251,7 +1250,6 @@ void addmm(
   ConstBlock cb{safe_downcast<int32_t>(OW),
                 safe_downcast<int32_t>(OH),
                 safe_downcast<int32_t>(C_4),
-                safe_downcast<int32_t>(C),
                 beta,
                 alpha,
                 safe_downcast<int32_t>(K)};
