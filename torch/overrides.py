@@ -927,6 +927,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
+        torch.linalg.norm: lambda self: -1
     }
 
     ret2 = {}
@@ -1107,7 +1108,9 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
         (torch.functional, torch.functional.__all__),
         (torch.nn.functional, dir(torch.nn.functional)),
-        (torch.Tensor, dir(torch.Tensor))
+        (torch.Tensor, dir(torch.Tensor)),
+        (torch.linalg, dir(torch.linalg)),
+        (torch.fft, dir(torch.fft)),
     ]
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
