@@ -205,8 +205,8 @@ LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
     at::Device device,
-    Dtype dtype,
-    const std::string& kernel_func_name)
+    const std::string& kernel_func_name,
+    Dtype dtype)
     : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
@@ -302,10 +302,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   }
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
-      fntype,
-      llvm::Function::PrivateLinkage,
-      kernel_func_name(),
-      module_.get());
+      fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
   fn_->addAttribute(
       llvm::AttributeList::AttrIndex::FunctionIndex,
       llvm::Attribute::AlwaysInline);
