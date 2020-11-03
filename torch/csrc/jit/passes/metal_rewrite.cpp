@@ -190,6 +190,8 @@ script::Module metalOptimizeForMobile(
   metalFoldPrePackingOps(cloned_module);
   metalInsertCopyOps(cloned_module);
   removeDropout(cloned_module);
+  cloned_module.register_attribute(
+      "optimized_for_metal", BoolType::get(), true);
   return cloned_module;
 }
 
