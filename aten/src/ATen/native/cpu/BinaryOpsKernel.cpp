@@ -657,32 +657,6 @@ void fmod_kernel(TensorIterator& iter) {
   }
 }
 
-void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
-  if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
-      const auto div = divisor.to<scalar_t>();
-      TORCH_CHECK(div != 0, "ZeroDivisionError");
-      cpu_kernel(iter, [=](scalar_t x) -> scalar_t {
-        return x % div;
-      });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "fmod_scalar_cpu", [&]() {
-      const auto div = divisor.to<scalar_t>();
-      const auto div_vec = Vec256<scalar_t>(div);
-      cpu_kernel_vec(
-        iter,
-        [=](scalar_t x) -> scalar_t {
-          return std::fmod(x, div);
-        },
-        [=](Vec256<scalar_t> x) {
-          return x.fmod(div_vec);
-        });
-      });
-  }
-
-}
-
 void logaddexp_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
     cpu_kernel_vec(
@@ -831,7 +805,6 @@ REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
-REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel);
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel);

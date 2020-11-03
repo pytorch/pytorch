@@ -40,7 +40,6 @@ DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(minimum_stub);
 DEFINE_DISPATCH(fmod_stub);
-DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
@@ -876,9 +875,7 @@ Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
-  auto iter = TensorIterator::unary_op(result, self);
-  TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
-  fmod_scalar_stub(iter.device_type(), iter, other);
+  at::fmod_out(result, self, wrapped_scalar_tensor(other));
   return result;
 }
 
