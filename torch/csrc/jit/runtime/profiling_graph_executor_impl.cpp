@@ -40,8 +40,7 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-// TODO: keep the else clause for trial runs
-#if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
+#if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
