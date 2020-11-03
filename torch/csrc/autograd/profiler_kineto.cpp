@@ -11,35 +11,19 @@
 
 #ifdef USE_KINETO
 #include "libkineto.h"
+#endif
 
 namespace torch { namespace autograd { namespace profiler {
 
+#ifdef USE_KINETO
 namespace {
 // TODO: consider TLS
-std::atomic<uint64_t> corr_id_ {1};
 uint64_t next_correlation_id() {
+  static std::atomic<uint64_t> corr_id_ {1};
   return corr_id_++;
 }
 
-std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
-  std::ostringstream oss;
-  oss << "[";
-  for (auto t_idx = 0; t_idx < shapes.size(); ++t_idx) {
-    if (t_idx > 0) {
-      oss << ", ";
-    }
-    oss << "[";
-    for (auto s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
-      if (s_idx > 0) {
-        oss << ", ";
-      }
-      oss << shapes[t_idx][s_idx];
-    }
-    oss << "]";
-  }
-  oss << "]";
-  return oss.str();
-}
+std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
@@ -146,6 +130,26 @@ void pushProfilingCallbacks() {
     .needsInputs(state_ptr->config().report_input_shapes)
     .needsIds(true));
   state_ptr->setCallbackHandle(handle);
+}
+
+std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
+  std::ostringstream oss;
+  oss << "[";
+  for (auto t_idx = 0; t_idx < shapes.size(); ++t_idx) {
+    if (t_idx > 0) {
+      oss << ", ";
+    }
+    oss << "[";
+    for (auto s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+      if (s_idx > 0) {
+        oss << ", ";
+      }
+      oss << shapes[t_idx][s_idx];
+    }
+    oss << "]";
+  }
+  oss << "]";
+  return oss.str();
 }
 
 } // namespace
