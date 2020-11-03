@@ -3,16 +3,42 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <sstream>
+
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
 #ifdef USE_KINETO
 #include "libkineto.h"
 
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
-// TODO: TLS
+// TODO: consider TLS
 std::atomic<uint64_t> corr_id_ {1};
 uint64_t next_correlation_id() {
   return corr_id_++;
+}
+
+std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
+  std::ostringstream oss;
+  oss << "[";
+  for (auto t_idx = 0; t_idx < shapes.size(); ++t_idx) {
+    if (t_idx > 0) {
+      oss << ", ";
+    }
+    oss << "[";
+    for (auto s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+      if (s_idx > 0) {
+        oss << ", ";
+      }
+      oss << shapes[t_idx][s_idx];
+    }
+    oss << "]";
+  }
+  oss << "]";
+  return oss.str();
 }
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
@@ -28,15 +54,16 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
         "Supported only in Kineto profiler");
     libkineto::ClientTraceActivity op;
     op.startTime = ctx->startUs;
-    op.endTime = (getTime() / 1000);
+    op.endTime = getTimeUs();
     op.opType = std::string(fn.name().str());
     op.device = 0; // CPU
     op.correlation = ctx->correlationId;
     if (ctx->shapes && !ctx->shapes->empty()) {
-      //op.inputDims = toStr(*ctx->shapes); //
+      op.inputDims = shapesToStr(*ctx->shapes);
     }
-    //op.threadId = pthread_self();
-
+#ifndef _WIN32
+    op.threadId = pthread_self();
+#endif
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
       cpu_trace->ops.emplace_back(std::move(op));

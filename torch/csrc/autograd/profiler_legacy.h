@@ -90,6 +90,10 @@ inline int64_t getTime() {
 #endif
 }
 
+inline int64_t getTimeUs() {
+  return getTime() / 1000;
+}
+
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
   PushRange,
