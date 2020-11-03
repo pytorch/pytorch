@@ -208,8 +208,7 @@ Reducer::Reducer(
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
 // registered from Python API using `register_comm_hook`. `PythonCommHook`
 // enables registering a Python hook and is a subclass of `CommHookInterface`.
-// Additionally, there are also some built-in C++ hook implementations that can
-// be specified by calling `register_builtin_comm_hook` from Python API.
+// `CommHookInterface` can be used to implement CPP hooks in the future.
 
 Reducer::~Reducer() noexcept(false) {
   // Remove all hooks on variables registered by this Reducer. This is necessary
@@ -1370,8 +1369,7 @@ bool Reducer::rebuild_buckets() {
 // See Note [DDP Communication Hook]
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
-      comm_hook_ == nullptr,
-      "register_comm_hook or register_builtin_comm_hook can only be called once.");
+      comm_hook_ == nullptr, "register_comm_hook can only be called once.");
   // TODO(@sinannasir): Single-process multiple-device mode support for DDP
   // communication hook. Related to GH Issue #42542.
   TORCH_CHECK(
@@ -1379,33 +1377,6 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
       "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
-}
-
-// See Note [DDP Communication Hook]
-void Reducer::register_builtin_comm_hook(
-    c10d::BuiltinCommHookType comm_hook_type) {
-  TORCH_CHECK(
-      comm_hook_ == nullptr,
-      "register_builtin_comm_hook or register_comm_hook can only be called once.");
-  TORCH_CHECK(
-      replicas_.size() == 1,
-      "Communication hook does not support single-process multiple-device mode.");
-
-  switch (comm_hook_type) {
-    case c10d::BuiltinCommHookType::ALLREDUCE:
-      comm_hook_ =
-          std::make_unique<c10d::AllReduceCommHook>(process_group_.get());
-      LOG(INFO) << "Built-in communication hook ALLREDUCE is registered.";
-      break;
-    case c10d::BuiltinCommHookType::FP16_COMPRESS:
-      comm_hook_ =
-          std::make_unique<c10d::FP16CompressCommHook>(process_group_.get());
-      LOG(INFO) << "Built-in communication hook FP16_COMPRESS is registered.";
-      break;
-    default:
-      TORCH_WARN_ONCE(
-          "Unknown built-in DDP comm hook type is provided. No comm hook will be used.");
-  }
 }
 
 void Reducer::ensure_prior_reduction_finished() {
