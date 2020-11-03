@@ -534,6 +534,7 @@ void pushProfilingCallbacks() {
     .needsIds(true));
   state_ptr->setCallbackHandle(handle);
 }
+#endif
 
 const int kCUDAWarmupStart = 5;
 
@@ -690,7 +691,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
 void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {
-  TORCH_CHECK(config.state == ProfilerState::KINETO && kinetoAvailable());
+  TORCH_CHECK(config.state == ProfilerState::KINETO);
   TORCH_CHECK(!activities.empty(), "No activities specified for Kineto profiler");
 
   auto state_ptr = getProfilerTLSState();
@@ -702,10 +703,9 @@ void enableProfiler(
     pushProfilingCallbacks();
   }
 
-  while (!libkineto::api().traceActive()) { // sync?
+  if (!libkineto::api().traceActive()) {
     libkineto::api().startTrace();
   }
-  //TORCH_CHECK(libkineto::api().traceActive());
 
   state->mark("__start_profile", false);
 }

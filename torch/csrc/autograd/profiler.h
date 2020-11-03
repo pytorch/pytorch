@@ -428,30 +428,6 @@ TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<
 
 #ifdef USE_KINETO
 struct TORCH_API KinetoEvent {
-  KinetoEvent(std::unique_ptr<TraceActivity>&& activity) : activity_(activity) {
-    TORCH_CHECK(activity_);
-  }
-
-  std::string name() const override  {
-    return activity_->name();
-  }
-
-  uint64_t deviceIndex() const override {
-    return activity_->deviceId();
-  }
-
-  uint64_t startUs() const override {
-    return activity_->timestamp();
-  }
-
-  uint64_t durationUs() const override {
-    return activity_->duration();
-  }
-
-  uint64_t correlationId() const override {
-    return activity_->correlationId();
-  }
-
   int64_t threadId() const {
     return thread_id_;
   }
@@ -515,16 +491,57 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  // Kineto fields
+
+  KinetoEvent& activity(const libkineto::TraceActivity& activity) {
+    name_ = activity.name();
+    deviceIndex_ = activity.deviceId();
+    startUs_ = activity.timestamp();
+    durationUs_ = activity.duration();
+    correlationId_ = activity.correlationId();
+    return *this;
+  }
+
+  std::string name() const {
+    return name_;
+  }
+
+  uint64_t deviceIndex() const {
+    return deviceIndex_;
+  }
+
+  uint64_t startUs() const {
+    return startUs_;
+  }
+
+  uint64_t durationUs() const {
+    return durationUs_;
+  }
+
+  uint64_t correlationId() const {
+    return correlationId_;
+  }
+
+  KinetoEvent& correlationId(uint64_t correlationId)  {
+    correlationId_ = correlationId;
+    return *this;
+  }
+
  private:
-  int64_t thread_id_ = -1;
+  int64_t thread_id_ = 0;
   c10::DeviceType device_type_ = c10::DeviceType::CPU,
-  int64_t fwd_thread_id_ = -1;
+  int64_t fwd_thread_id_ = 0;
   std::vector<std::vector<int64_t>> shapes_;
-  int64_t sequence_nr_ = -1;
+  int64_t sequence_nr_ = 0;
   std::vector<std::string> stack_;
   uint8_t scope_ = 0;
 
-  std::unique_ptr<libkineto::TraceActivity> activity_;
+  std::string name_;
+  uint64_t deviceIndex_ = 0;
+  uint64_t startUs_ = 0;
+  uint64_t durationUs_ = 0;
+  uint64_t correlationId_ = 0;
+
 };
 
 struct TORCH_API ProfilerResult {
@@ -549,11 +566,12 @@ TORCH_API void enableProfiler(
     const std::set<ActivityType>& activities);
 TORCH_API ProfilerResult disableProfiler();
 
-TORCH_API bool kinetoAvailable();
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 #endif // USE_KINETO
+
+TORCH_API bool kinetoAvailable();
 
 // Usage:
 //   {
