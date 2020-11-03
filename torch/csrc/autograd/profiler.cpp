@@ -778,14 +778,15 @@ ProfilerResult disableProfiler() {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
+  state_ptr->mark("__stop_profile");
+
   if (state_ptr->config().state == ProfilerState::KINETO) {
     auto trace = libkineto::api().stopTrace();
     //
   }
 
-  state_ptr->mark("__stop_profile");
-  // Note that this will erase the underlying events.
-  return state_ptr->consolidate();
+  auto legacy_events = state_ptr->consolidate();
+  //
 }
 #endif
 
