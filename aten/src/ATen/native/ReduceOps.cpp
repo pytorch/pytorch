@@ -1,6 +1,7 @@
 #include <ATen/native/ReduceOps.h>
 
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
@@ -470,6 +471,38 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
   } else {
     prod_stub(iter.device_type(), iter);
   }
+  return result;
+}
+
+Tensor trace_cpu(const Tensor& self) {
+  Tensor result;
+  ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
+  result = at::empty({}, self.options().dtype(dtype));
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    accscalar_t sum = 0;
+    const auto* t_data = self.data_ptr<scalar_t>();
+
+    int64_t t_stride_0, t_stride_1, t_diag_size;
+
+    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
+
+    t_stride_0 = self.stride(0);
+    t_stride_1 = self.stride(1);
+
+    t_diag_size = std::min(self.size(0), self.size(1));
+    for (int64_t i = 0; i < t_diag_size; i++) {
+      sum += t_data[i * (t_stride_0 + t_stride_1)];
+    }
+
+    // all integer types get promoted to kLong
+    if (result.scalar_type() == at::kLong) {
+      *result.data_ptr<int64_t>() = sum;
+    } else {
+      *result.data_ptr<scalar_t>() = sum;
+    }
+  });
+
   return result;
 }
 
@@ -1008,8 +1041,8 @@ Tensor var(const Tensor& self, bool unbiased) {
     return trivial_return.value();
   }
 
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
-  //   so this dispatches differently based on device type. 
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
+  //   so this dispatches differently based on device type.
   //   See https://github.com/pytorch/pytorch/pull/43858.
   if (self.device().type() == kCPU) {
     return at::_var(self, unbiased);
@@ -1040,8 +1073,8 @@ Tensor std(const Tensor& self, bool unbiased) {
     return trivial_return.value();
   }
 
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
-  //   so this dispatches differently based on device type. 
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
+  //   so this dispatches differently based on device type.
   //   See https://github.com/pytorch/pytorch/pull/43858.
   if (self.device().type() == kCPU) {
     return at::_std(self, unbiased);
