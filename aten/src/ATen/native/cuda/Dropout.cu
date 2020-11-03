@@ -252,7 +252,7 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
               TORCH_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
-   });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
@@ -288,8 +288,7 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
               TORCH_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
-    }
-   });
+    });
   }
   return std::tuple<Tensor,Tensor>(ret, mask);
 }
