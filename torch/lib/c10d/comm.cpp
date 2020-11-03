@@ -4,13 +4,12 @@
 
 #include <ATen/core/functional.h>
 #include <c10d/reducer.hpp>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
 namespace {
 
-class BroadcastWork {
+class TORCH_API BroadcastWork {
  public:
   BroadcastWork(
       const std::shared_ptr<c10d::ProcessGroup>& process_group,

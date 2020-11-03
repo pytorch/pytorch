@@ -19,7 +19,7 @@ namespace c10d {
 // WorkEntry is the state associated with a single MPI run instance.
 // It include the source Tensor list and destination Tensor list, as well as
 // The actual run function that will operate either on src or dst or both.
-struct WorkEntry {
+struct TORCH_API WorkEntry {
   explicit WorkEntry(
       std::vector<at::Tensor>* srcPtr,
       std::vector<at::Tensor>* dstPtr,
@@ -70,7 +70,7 @@ struct WorkEntry {
 //
 // CUDA tensor can be supported if the MPI used is CUDA-aware MPI, and
 // ProcessGroupMPI will automatically detect this support.
-class ProcessGroupMPI : public ProcessGroup {
+class TORCH_API ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
    protected:

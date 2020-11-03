@@ -43,10 +43,10 @@ enum class OpType : std::uint8_t {
 };
 
 // Converts OpType to human readable string.
-std::string opTypeToString(OpType opType);
+TORCH_API std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-bool isP2POp(OpType opType);
+TORCH_API bool isP2POp(OpType opType);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -68,14 +68,14 @@ bool isP2POp(OpType opType);
 // process group to find each other (referred to as rendezvous from
 // hereon)
 //
-class ProcessGroup {
+class TORCH_API ProcessGroup {
  public:
 
   // Please do not use ProcessGroup::Work API, it is going away, to be
   // replaced by ivalue::Future.
   // Python binding for this class might change, please do not assume
   // this will be bound using pybind.
-  class Work {
+  class TORCH_API Work {
    public:
     Work();
 

@@ -16,7 +16,7 @@ namespace c10d {
 // across all processes in the process group. This is the only way that we
 // can guarantee to match up the same calls among all processes.
 //
-class ProcessGroupRoundRobin final : public ProcessGroup {
+class TORCH_API ProcessGroupRoundRobin final : public ProcessGroup {
  public:
   explicit ProcessGroupRoundRobin(
       int rank,

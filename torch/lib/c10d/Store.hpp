@@ -5,10 +5,11 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace c10d {
 
-class Store {
+class TORCH_API Store {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(300);

@@ -45,7 +45,7 @@ class TCPStoreDaemon {
   std::vector<int> controlPipeFd_{-1, -1};
 };
 
-class TCPStore : public Store {
+class TORCH_API TCPStore : public Store {
  public:
   explicit TCPStore(
       const std::string& masterAddr,

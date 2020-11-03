@@ -10,7 +10,7 @@ enum class BuiltinCommHookType {
   FP16_COMPRESS = 2,
 };
 
-class AllReduceCommHook : public CppCommHookInterface<ProcessGroup*> {
+class TORCH_API AllReduceCommHook : public CppCommHookInterface<ProcessGroup*> {
  public:
   explicit AllReduceCommHook(ProcessGroup* state)
       : CppCommHookInterface<ProcessGroup*>(state) {}
@@ -20,7 +20,7 @@ class AllReduceCommHook : public CppCommHookInterface<ProcessGroup*> {
   c10::intrusive_ptr<c10::ivalue::Future> runHook(GradBucket& bucket) override;
 };
 
-class FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
+class TORCH_API FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
  public:
   explicit FP16CompressCommHook(ProcessGroup* state)
       : CppCommHookInterface<ProcessGroup*>(state) {}

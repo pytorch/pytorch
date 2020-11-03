@@ -21,7 +21,7 @@ typedef void* ncclComm_t;
 
 /** redefine nccl unique ID in torch scope. this should be identical to native nccl impp. */
 #define NCCL_UNIQUE_ID_BYTES 128
-typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; } ncclUniqueId;
+typedef struct TORCH_API { char internal[NCCL_UNIQUE_ID_BYTES]; } ncclUniqueId;
 
 /* Error type */
 enum class ncclResult {

@@ -94,6 +94,7 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
 endif()
 
+
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
@@ -287,10 +288,17 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-
+message(WARNING "Caffe2_CPU_INCLUDE before: ${Caffe2_CPU_INCLUDE}")
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(USE_DISTRIBUTED)
+    add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
+    list(APPEND Caffe2_CPU_SRCS ${C10D_CPU_SRCS})
+    list(APPEND Caffe2_GPU_SRCS ${C10D_CUDA_SRCS})
+    list(APPEND Caffe2_CPU_INCLUDE ${C10D_INCLUDE})
+    list(APPEND Caffe2_GPU_INCLUDE ${C10D_INCLUDE})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${C10D_CPU_LIBS})
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${C10D_CUDA_LIBS})
 
     # Define this target even if we're building without TensorPipe, to make life
     # easier to other targets that depend on this. However, in that case, by not
@@ -298,8 +306,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # up being empty. Downstream targets should also add a #ifdef guard.
     if(NOT WIN32)
       add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
-      target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
-      add_dependencies(process_group_agent torch c10d)
+      target_link_libraries(process_group_agent PRIVATE torch fmt::fmt-header-only)
+      add_dependencies(process_group_agent torch)
 
       add_library(tensorpipe_agent
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
@@ -307,8 +315,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
         )
-      target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
-      add_dependencies(tensorpipe_agent torch c10d)
+      target_link_libraries(tensorpipe_agent PRIVATE torch tensorpipe fmt::fmt-header-only)
+      add_dependencies(tensorpipe_agent torch)
       if(USE_TENSORPIPE)
         target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
         target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
@@ -897,10 +905,6 @@ endif()
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     DESTINATION share/cmake/Torch)
 
-  if(USE_DISTRIBUTED)
-    add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
-  endif()
-
 
   # ---[ Torch python bindings build
   add_subdirectory(../torch torch)
@@ -967,12 +971,26 @@ if(USE_ROCM)
     )
 endif()
 
-# Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
-# jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
 if(USE_DISTRIBUTED)
+  # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
+  # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
+
+  if(NOT WIN32)
+    if(USE_GLOO)
+      target_compile_definitions(torch_cpu INTERFACE USE_C10D_GLOO)
+    endif()
+    if(USE_NCCL)
+      target_compile_definitions(torch_cpu INTERFACE USE_C10D_NCCL)
+    endif()
+    if(USE_MPI)
+      target_compile_definitions(torch_cpu INTERFACE USE_C10D_MPI)
+    endif()
+    target_include_directories(torch_cpu PUBLIC ${C10D_INCLUDE})
+  endif()
+ 
   # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
   # need to be removed when RPC is supported
@@ -988,6 +1006,14 @@ if(USE_DISTRIBUTED)
       USE_TENSORPIPE
     )
   endif()
+
+#  if(C10D_CPU_LIBS AND NOT USE_CUDA)
+#    add_dependencies(torch_cpu ${C10D_CPU_LIBS})
+#  endif()
+#  if(USE_CUDA AND C10D_CUDA_LIBS)
+#    add_dependencies(torch_cuda ${C10D_CUDA_LIBS})
+#  endif()
+
 endif()
 
 if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)

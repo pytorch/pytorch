@@ -14,7 +14,7 @@ namespace autograd {
 //
 // During the backward pass, this function is queued for execution in the
 // autograd engine which eventually runs the rest of the autograd graph.
-struct TORCH_API SendRpcBackward : public torch::autograd::Node {
+struct SendRpcBackward : public torch::autograd::Node {
  public:
   torch::autograd::variable_list apply(
       torch::autograd::variable_list&& inputs) override;

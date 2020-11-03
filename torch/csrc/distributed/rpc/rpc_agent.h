@@ -101,7 +101,7 @@ struct TORCH_API RpcRetryOptions {
 };
 
 // Struct that stores all the metadata needed to retry a given RPC.
-struct TORCH_API RpcRetryInfo {
+struct RpcRetryInfo {
   RpcRetryInfo(
       const WorkerInfo& to,
       Message&& message,
