@@ -1144,13 +1144,15 @@ std::ostream& operator<<(
 // we need to introduce a new type to allow overload resolution distinguish
 // between the two.
 
-struct Layout final {
-  VkImageLayout value;
+struct Image final {
+  struct Layout final {
+    VkImageLayout value;
+  };
 };
 
 std::ostream& operator<<(
     std::ostream& stream,
-    const Layout& layout) {
+    const Image::Layout& layout) {
   stream << "Layout: ";
 
   switch (layout.value) {
@@ -1238,7 +1240,7 @@ std::ostream& operator<<(
       Access{
         bundle.image.access,
       } <<  "\n " <<
-      Layout{
+      Image::Layout{
         bundle.image.layout,
       } << std::endl;
 
