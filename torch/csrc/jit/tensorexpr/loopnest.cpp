@@ -647,17 +647,18 @@ class FunctionInliner : public IRMutator {
   std::unordered_map<Let*, std::unordered_set<const Var*>> random_bindings_;
 };
 
-void LoopNest::computeInline(Stmt* s) {
+bool LoopNest::computeInline(Stmt* s) {
   auto* s_store = dynamic_cast<Store*>(s);
   if (s_store == nullptr) {
     throw std::logic_error("Could not find buffer producer to inline");
   }
-  computeInline(s_store->buf());
+  return computeInline(s_store->buf());
 }
 
-void LoopNest::computeInline(const Buf* b) {
+bool LoopNest::computeInline(const Buf* b) {
   if (output_bufs_.count(b)) {
-    throw std::logic_error("Can't inline producers of output Tensors");
+    // Cannot inline producers of output Tensors
+    return false;
   }
 
   // Find producers.
@@ -667,20 +668,24 @@ void LoopNest::computeInline(const Buf* b) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
-        throw std::logic_error("cannot inline a reduction computation");
+        // Cannot inline a reduction computation
+        return false;
       }
       if (relevant_store != nullptr) {
-        throw std::logic_error("cannot inline Buf with multiple Tensors");
+        // Cannot inline Buf with multiple Tensors
+        return false;
       }
       relevant_store = s;
     }
   }
+  TORCH_INTERNAL_ASSERT(relevant_store);
 
   FunctionInliner inliner(relevant_store);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
   // No longer computing this intermediate tensor, so don't alloc it.
   intermediate_bufs_.erase(b);
+  return true;
 }
 
 // TODO: Unify with DepTracker

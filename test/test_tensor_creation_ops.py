@@ -1199,7 +1199,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
 
-    @dtypes(torch.half, torch.float, torch.double,
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         SIZE = 100

@@ -83,13 +83,15 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   // that would also invalidate the old TypedOperatorHandles.
   if (cpp_signature.has_value()) {
     if (cpp_signature_.has_value()) {
-      TORCH_INTERNAL_ASSERT(*cpp_signature == *cpp_signature_,
-        "Tried to register a kernel (", debug, ") for operator ", name_," for dispatch key ", toString(dispatch_key),
-        ", but the C++ function signature ", cpp_signature->name(), " mismatched with a previous kernel that had the signature ",
-        cpp_signature_->name()
+      TORCH_INTERNAL_ASSERT(*cpp_signature == cpp_signature_->signature,
+        "Tried to register a kernel (", debug, ") for operator ", name_," (",
+        (this->schema_.has_value() ? this->schema_->debug : "no debug info"),
+        ") for dispatch key ", toString(dispatch_key), ", but the C++ function signature ",
+        cpp_signature->name(), " mismatched with a previous kernel (", cpp_signature_->debug,
+        ") that had the signature ", cpp_signature_->signature.name()
       );
     } else {
-      cpp_signature_ = *cpp_signature;
+      cpp_signature_ = CppSignatureWithDebug { *cpp_signature, debug };
     }
   }
 
@@ -103,7 +105,12 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::Math];
 
   if (k.size() > 0) {
-    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " (",
+              (this->schema_.has_value() ? this->schema_->debug : "no debug info"),
+              ") for dispatch key ", toString(dispatch_key),
+              " that overwrote a previously registered kernel (",
+              (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"),
+              ") with the same dispatch key for the same operator.");
   }
 
   if (manuallyBoxedKernel_.has_value()) {
@@ -377,7 +384,11 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   }
 
   TORCH_CHECK(false, "Could not run '", name_, "' with arguments",
-          " from the '", toString(dispatchKey), "' backend. '",
+          " from the '", toString(dispatchKey), "' backend. This could be because "
+          "the operator doesn't exist for this backend, or was omitted during ",
+          "the selective/custom build process (if using custom build). If you are a ",
+          "Facebook employee using PyTorch on mobile, please visit ",
+          "https://fburl.com/ptmfixes for possible resolutions. '",
           name_, "' is only available for these backends: ",
           listAllDispatchKeys(), ".\n\n", dumpComputedTable());
 }
