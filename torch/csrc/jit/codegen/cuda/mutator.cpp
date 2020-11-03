@@ -64,15 +64,18 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
   TensorDomain* td = mutateAsVal(tv->domain())->as<TensorDomain>();
 
   TensorView* computeAtView = nullptr;
-  if (tv->hasComputeAt())
+  if (tv->hasComputeAt()) {
     computeAtView = mutateAsVal(tv->getComputeAtView())->as<TensorView>();
+  }
 
   if (!tv->domain()->sameAs(td) ||
       (tv->hasComputeAt() && !tv->getComputeAtView()->sameAs(computeAtView))) {
     TensorView* mutated_tv = new TensorView(td, tv->getDataType().value());
     if (tv->hasComputeAt()) {
       mutated_tv->setComputeAt(
-          computeAtView, (int)(tv->getRelativeComputeAtAxis()));
+          computeAtView,
+          (int)tv->getThisComputeAtAxis(),
+          (int)(tv->getRelativeComputeAtAxis()));
     }
     registerMutation(tv, mutated_tv);
     return mutated_tv;

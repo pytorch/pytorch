@@ -232,7 +232,8 @@ unsigned int ComputeAt::backwardComputeAt_impl(
   producer_entry.setPassPosition(replay.second);
 
   if (producer_entry.shouldSetComputeAt(replay.second)) {
-    producer->setComputeAt(consumer, (int)consumer_compute_at_axis);
+    producer->setComputeAt(
+        consumer, (int)replay.second, (int)consumer_compute_at_axis);
     producer_entry.setComputeAtDomain(producer->domain());
   }
 
@@ -258,7 +259,14 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   root_map_.setAlias(current_domain, new_domain);
 
   if (producer_entry.shouldSetComputeAt(producer_compute_at_axis)) {
-    producer->setComputeAt(consumer, replay.second);
+    int producer_rel_pos = replay.second;
+    int producer_this_pos = (int)producer_compute_at_axis;
+    // When the producer CA axes have reductions, they are not used to
+    // replay the consumer.
+    if (producer_this_pos > producer_rel_pos) {
+      producer_this_pos = producer_rel_pos;
+    }
+    producer->setComputeAt(consumer, producer_this_pos, producer_rel_pos);
   }
 
   consumer_entry.setPassPosition(replay.second);

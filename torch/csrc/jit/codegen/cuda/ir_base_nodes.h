@@ -209,6 +209,12 @@ class TORCH_CUDA_API Val : public Statement {
   // was found
   Expr* getOrigin() const;
 
+  //! Returns true when other is a producer of this
+  bool isProducerOf(const Val* other) const;
+
+  //! Returns true when other is a consumer of this
+  bool isConsumerOf(const Val* other) const;
+
   virtual bool sameType(const Statement* other) {
     return Statement::sameType(other) &&
         getDataType() == other->as<Val>()->getDataType();

@@ -8905,6 +8905,25 @@ TEST(NVFuserTest, FusionIssue468_CUDA) {
       aten_output.sub(outputs[0]).abs().max());
 }
 
+TEST(NVFuserTest, FusionIssue477_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = broadcast(tv0, {true, true, false});
+  auto tv2 = broadcast(tv1, {true, false, false, false});
+  auto tv3 = makeSymbolicTensor(4);
+  fusion.addInput(tv3);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv0->computeAt(tv4, -3);
+
+  TORCH_CHECK(tv1->getThisComputeAtAxis() == 1);
+  TORCH_CHECK(tv1->getRelativeComputeAtAxis() == 2);
+}
+
 } // namespace jit
 } // namespace torch
 

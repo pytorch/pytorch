@@ -33,13 +33,8 @@ PairwiseRootDomainMap::PairwiseRootDomainMap(
   TORCH_INTERNAL_ASSERT(consumer != nullptr);
   TORCH_INTERNAL_ASSERT(producer->fusion() == consumer->fusion());
   // Make sure they are really a producer and its consumer
-  Expr* origin = consumer->getOrigin();
-  TORCH_INTERNAL_ASSERT(origin != nullptr);
   TORCH_INTERNAL_ASSERT(
-      std::any_of(
-          origin->inputs().begin(),
-          origin->inputs().end(),
-          [producer](const Val* input) { return input == producer; }),
+      producer->isConsumerOf(consumer),
       "Not a producer-consumer pair: ",
       producer,
       ", ",

@@ -144,6 +144,23 @@ Expr* Val::getOrigin() const {
   return fusion_->origin(this);
 }
 
+bool Val::isProducerOf(const Val* other) const {
+  TORCH_INTERNAL_ASSERT(other != nullptr);
+  TORCH_INTERNAL_ASSERT(fusion() == other->fusion());
+  Expr* origin = getOrigin();
+  if (origin == nullptr) {
+    return false;
+  }
+  return std::any_of(
+      origin->inputs().begin(),
+      origin->inputs().end(),
+      [other](const Val* input) { return input == other; });
+}
+
+bool Val::isConsumerOf(const Val* other) const {
+  return other->isProducerOf(this);
+}
+
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
 Expr::Expr(ExprType type) : type_{type} {

@@ -322,8 +322,6 @@ class TORCH_CUDA_API TensorView : public Val {
     domain_ = td;
   }
 
-  void setComputeAt(TensorView* computeAtView, int axis);
-
   // Set all computeAt members without checking any correctness. Useful for
   // computeAt with outputs relative to eachother
   void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
@@ -350,8 +348,6 @@ class TORCH_CUDA_API TensorView : public Val {
       Expr* expr,
       TensorView* current,
       TensorView* producer);
-
-  void setThisComputeAtAxis();
 
  private:
   TensorDomain* domain_ = nullptr;
