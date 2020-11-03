@@ -928,7 +928,7 @@ void CudaCodeGen::Initialize() {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
 
-  std::string func_name = GetUniqueFuncName("func");
+  std::string func_name = GetUniqueFuncName(kernel_func_name());
   os() << "extern \"C\" __global__" << std::endl;
 #ifdef USE_ROCM
   // CUDA has a default limit of threads per block (=flat work group size)
