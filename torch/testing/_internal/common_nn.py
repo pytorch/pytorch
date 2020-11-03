@@ -4956,11 +4956,11 @@ class ModuleTest(TestBase):
             # are unreachable (which can happen if you differentiate
             # only on the gradient.
             cpu_gg = torch.autograd.grad(
-                cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
+                cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs),
                 cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
                 retain_graph=True)
             gpu_gg = torch.autograd.grad(
-                gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
+                gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
                 gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
