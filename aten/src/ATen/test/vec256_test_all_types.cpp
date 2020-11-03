@@ -984,6 +984,346 @@ namespace {
                     },
                     test_case);
     }
+
+
+    // ********************************* vec256_test.cpp ***************************************************
+    //
+    // TODO:
+    // We are working on merging all the vec256 test files into above framework. The following tests originally
+    // come from vec256_test.cpp, these tests are not consistent with the generic framework and can not be migrated
+    // at the moment. We temporarily put these tests here and will migrate them into the generic framework in the
+    // next phase.
+    using namespace at::vec256;
+    bool check_equal(const at::Tensor& a, const at::Tensor& b) {
+      return (a.equal(b));
+    }
+
+    bool check_almost_equal(const at::Tensor& a, const at::Tensor& b, const float tolerance) {
+      double max_val = a.abs().max().item<float>();
+      max_val = std::max(max_val, b.abs().max().item<float>());
+      if ((a - b).abs().max().item<float>() > tolerance * max_val) {
+        std::cout << "Max difference:" << (a - b).abs().max().item<float>() << std::endl;
+        return false;
+      }
+      return true;
+    }
+
+    TEST(Vec256TestFloat, arangeTest) {
+      at::Tensor arange_output_ref = at::zeros({8});
+      at::Tensor arange_output_vectorized = at::zeros({8});
+      float base = 7.f;
+      float step = 5.f;
+      float* ref_output_ptr = arange_output_ref.data_ptr<float>();
+      for (int64_t i = 0; i < 8; ++i) {
+        ref_output_ptr[i] = base + i * step;
+      }
+      float* vec_output_ptr = arange_output_vectorized.data_ptr<float>();
+      auto arange_output = Vec256<float>::arange(base, step);
+      arange_output.store(vec_output_ptr);
+      ASSERT_TRUE(check_equal(arange_output_ref, arange_output_vectorized));
+    }
+
+    // TODO:
+    // CopyTest and Set are basically tests loadu and store, probably can be either merged into one, or just
+    // delete them since the generic framework test loadu and store implicitly everywhere.
+
+    // Checks both loads and stores.
+    TEST(Vec256TestFloat, CopyTest) {
+      at::Tensor a = at::rand({23, 23});
+      at::Tensor b = at::zeros({23, 23});
+      // Copy goes through vec256 via tensoriterator
+      b.copy_(a);
+      ASSERT_TRUE(check_equal(a, b));
+    }
+
+    template<typename T>
+    void BlendTestHelperScalar(
+        const T* a_ptr,
+        const T* b_ptr,
+        T* res_ptr,
+        const int64_t num_els,
+        const int64_t count) {
+      for(auto i = 0; i < num_els; ++i) {
+        for (auto j = 0; j < Vec256<float>::size(); ++j) {
+          auto index = i * Vec256<float>::size() + j;
+          if (j < count) {
+            res_ptr[index] = b_ptr[index];
+          } else {
+            res_ptr[index] = a_ptr[index];
+          }
+        }
+      }
+    }
+
+    template<typename T>
+    void BlendTestHelperVector(
+        const T* a_ptr,
+        const T* b_ptr,
+        T* res_ptr,
+        const int64_t num_els,
+        const int64_t count) {
+      for(auto i = 0; i < num_els; ++i) {
+        auto a_elements = Vec256<float>::loadu(a_ptr);
+        auto b_elements = Vec256<float>::loadu(b_ptr);
+        a_ptr += Vec256<float>::size();
+        b_ptr += Vec256<float>::size();
+        auto res_elements = Vec256<float>::set(a_elements, b_elements, count);
+        res_elements.store(res_ptr);
+        res_ptr += Vec256<float>::size();
+      }
+    }
+
+    // Checks Set
+    TEST(Vec256TestFloat, Set) {
+      at::Tensor a = at::rand({23, 23});
+      at::Tensor b = at::rand({23, 23});
+      at::Tensor ref_res = at::zeros({23, 23});
+      at::Tensor vec_res = at::zeros({23, 23});
+
+      const float* a_ptr = a.data_ptr<float>();
+      const float* b_ptr = b.data_ptr<float>();
+      float* ref_res_ptr = ref_res.data_ptr<float>();
+      float* vec_res_ptr = vec_res.data_ptr<float>();
+
+      // Only check over multiple of Vec::size elements
+      const size_t num_els = (a.numel() / Vec256<float>::size());
+      BlendTestHelperScalar(a_ptr, b_ptr, ref_res_ptr, num_els, 0);
+      BlendTestHelperVector(a_ptr, b_ptr, vec_res_ptr, num_els, 0);
+      ASSERT_TRUE(check_equal(ref_res, vec_res));
+      BlendTestHelperScalar(a_ptr, b_ptr, ref_res_ptr, num_els, 1);
+      BlendTestHelperVector(a_ptr, b_ptr, vec_res_ptr, num_els, 1);
+      ASSERT_TRUE(check_equal(ref_res, vec_res));
+      BlendTestHelperScalar(a_ptr, b_ptr, ref_res_ptr, num_els, 4);
+      BlendTestHelperVector(a_ptr, b_ptr, vec_res_ptr, num_els, 4);
+      ASSERT_TRUE(check_equal(ref_res, vec_res));
+      BlendTestHelperScalar(a_ptr, b_ptr, ref_res_ptr, num_els, 6);
+      BlendTestHelperVector(a_ptr, b_ptr, vec_res_ptr, num_els, 6);
+      ASSERT_TRUE(check_equal(ref_res, vec_res));
+      BlendTestHelperScalar(a_ptr, b_ptr, ref_res_ptr, num_els, 8);
+      BlendTestHelperVector(a_ptr, b_ptr, vec_res_ptr, num_els, 8);
+      ASSERT_TRUE(check_equal(ref_res, vec_res));
+    }
+
+    // TODO:
+    // We have blend covered in the generic framework, but not blandv, they are basically the same except
+    // the input format of the mask (integer vs vector), probably no need to add blendv. Will add if
+    // necessary in next phase.
+
+    // Checks blend and blendv.
+    TEST(Vec256TestFloat, Blend) {
+      at::Tensor a = at::rand({23, 23});
+      at::Tensor b = at::rand({23, 23});
+      at::Tensor ref_res = at::zeros({23, 23});
+      at::Tensor vec_res = at::zeros({23, 23});
+
+      // Check templatized blend.
+      // Reference result:
+      const int64_t mask = 0xC5;
+      // Only check over multiple of Vec::size elements
+      size_t num_els =
+        (a.numel() / Vec256<float>::size()) * Vec256<float>::size();
+      // Vector components
+      float* a_ptr = a.data_ptr<float>();
+      float* b_ptr = b.data_ptr<float>();
+      float* ref_res_ptr = ref_res.data_ptr<float>();
+      int64_t tmp_mask = mask;
+      for (size_t i = 0; i < num_els; ++i) {
+        if (i % Vec256<float>::size() == 0) {
+          tmp_mask = mask;
+        }
+        if (tmp_mask & 0x1) {
+          ref_res_ptr[i] = b_ptr[i];
+        } else {
+          ref_res_ptr[i] = a_ptr[i];
+        }
+        tmp_mask = tmp_mask >> 1;
+      }
+
+      // Vectorized impl
+      float* vec_res_ptr = vec_res.data_ptr<float>();
+      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {
+        auto a_elements = Vec256<float>::loadu(a_ptr);
+        auto b_elements = Vec256<float>::loadu(b_ptr);
+        a_ptr += Vec256<float>::size();
+        b_ptr += Vec256<float>::size();
+        auto res_elements = Vec256<float>::blend<mask>(a_elements, b_elements);
+        res_elements.store(vec_res_ptr);
+        vec_res_ptr += Vec256<float>::size();
+      }
+      ASSERT_TRUE(check_equal(ref_res, vec_res));
+
+      // Vector components
+      a_ptr = a.data_ptr<float>();
+      b_ptr = b.data_ptr<float>();
+      int32_t full_int_mask = 0xFFFFFFFF;
+      float* full_ptr = reinterpret_cast<float*>(&full_int_mask);
+      float full_float_mask = *full_ptr;
+      Vec256<float> float_mask(full_float_mask, 0.f, full_float_mask, 0.f,
+          0.f, full_float_mask, 0.f, 0.f);
+      float float_mask_array[Vec256<float>::size()];
+      float_mask.store(float_mask_array);
+      ref_res_ptr = ref_res.data_ptr<float>();
+      for (size_t i = 0; i < num_els; ++i) {
+        if (float_mask_array[i % Vec256<float>::size()] != 0) {
+          ref_res_ptr[i] = b_ptr[i];
+        } else {
+          ref_res_ptr[i] = a_ptr[i];
+        }
+        tmp_mask = tmp_mask >> 1;
+      }
+
+      // Vectorized impl
+      vec_res_ptr = vec_res.data_ptr<float>();
+      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {
+        auto a_elements = Vec256<float>::loadu(a_ptr);
+        auto b_elements = Vec256<float>::loadu(b_ptr);
+        a_ptr += Vec256<float>::size();
+        b_ptr += Vec256<float>::size();
+        auto res_elements = Vec256<float>::blendv(a_elements, b_elements, float_mask);
+        res_elements.store(vec_res_ptr);
+        vec_res_ptr += Vec256<float>::size();
+      }
+      ASSERT_TRUE(check_equal(ref_res, vec_res));
+    }
+
+    TEST(Vec256TestFloat, check_convert) {
+      at::Tensor a = at::rand({23, 23});
+      a = a * -10;
+      a = a + 10;
+      at::Tensor ref_res =
+        at::empty({23, 23}, at::device(at::kCPU).dtype(at::kInt));
+      at::Tensor vec_res =
+        at::empty({23, 23}, at::device(at::kCPU).dtype(at::kInt));
+      float* a_float_ptr = a.data_ptr<float>();
+      int32_t* ref_res_int_ptr = ref_res.data_ptr<int32_t>();
+      int32_t* vec_res_int_ptr = vec_res.data_ptr<int32_t>();
+      for(auto i = 0; i < a.numel(); ++i) {
+        ref_res_int_ptr[i] = static_cast<int32_t>(a_float_ptr[i]);
+      }
+      at::vec256::convert(a_float_ptr, vec_res_int_ptr, a.numel());
+      ASSERT_TRUE(check_almost_equal(ref_res, vec_res, 1e-6));
+
+      a = at::randint(-100, 100, {23, 23});
+      a = a.to(at::kInt);
+      ref_res = at::empty({23, 23});
+      vec_res = at::empty({23, 23});
+      int32_t* a_int_ptr = a.data_ptr<int32_t>();
+      float* ref_res_float_ptr = ref_res.data_ptr<float>();
+      float* vec_res_float_ptr = vec_res.data_ptr<float>();
+      for(auto i = 0; i < a.numel(); ++i) {
+        ref_res_float_ptr[i] = static_cast<float>(a_int_ptr[i]);
+      }
+      at::vec256::convert(a_int_ptr, vec_res_float_ptr, a.numel());
+      ASSERT_TRUE(check_almost_equal(ref_res, vec_res, 1e-6));
+    }
+
+    TEST(Vec256TestFloat, check_fmadd) {
+      at::Tensor a = at::rand({23, 23});
+      a = a * -10;
+      a = a + 10;
+      at::Tensor b = at::rand({23, 23});
+      b = b * -5;
+      b = b + 5;
+      at::Tensor c = at::rand({23, 23});
+      c = c * 20;
+      at::Tensor ref_res = at::zeros({23, 23});
+      at::Tensor vec_res = at::zeros({23, 23});
+      float* a_ptr = a.data_ptr<float>();
+      float* b_ptr = a.data_ptr<float>();
+      float* c_ptr = a.data_ptr<float>();
+      float* ref_res_ptr = ref_res.data_ptr<float>();
+      float* vec_res_ptr = vec_res.data_ptr<float>();
+      size_t num_els =
+        (a.numel() / Vec256<float>::size()) * Vec256<float>::size();
+      for(auto i = 0; i < num_els; ++i) {
+        ref_res_ptr[i] = a_ptr[i] * b_ptr[i] + c_ptr[i];
+      }
+      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {
+        auto a_elements = Vec256<float>::loadu(a_ptr);
+        auto b_elements = Vec256<float>::loadu(b_ptr);
+        auto c_elements = Vec256<float>::loadu(c_ptr);
+        a_ptr += Vec256<float>::size();
+        b_ptr += Vec256<float>::size();
+        c_ptr += Vec256<float>::size();
+        auto res_elements = at::vec256::fmadd(a_elements, b_elements, c_elements);
+        res_elements.store(vec_res_ptr);
+        vec_res_ptr += Vec256<float>::size();
+      }
+      ASSERT_TRUE(check_almost_equal(ref_res, vec_res, 1e-6));
+    }
+
+    #define TranscedentalTester(opnamespace, name)                    \
+    void TranscedentalHelper_##name(const float tolerance = 1e-6) {   \
+      at::Tensor a = at::rand({23, 23});                              \
+      a = a * -10;                                                    \
+      a = a + 10;                                                     \
+      at::Tensor ref_res = at::zeros({23, 23});                       \
+      at::Tensor vec_res = at::zeros({23, 23});                       \
+      float* a_ptr = a.data_ptr<float>();                             \
+      float* ref_res_ptr = ref_res.data_ptr<float>();                 \
+      float* vec_res_ptr = vec_res.data_ptr<float>();                 \
+      size_t num_els =                                                \
+      (a.numel() / Vec256<float>::size()) * Vec256<float>::size();  \
+      for(auto i = 0; i < num_els; ++i) {                             \
+        ref_res_ptr[i] = opnamespace::name(a_ptr[i]);                 \
+      }                                                               \
+      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {   \
+        auto a_elements = Vec256<float>::loadu(a_ptr);                \
+        a_ptr += Vec256<float>::size();                               \
+        auto res = a_elements.name();                                 \
+        res.store(vec_res_ptr);                                       \
+        vec_res_ptr += Vec256<float>::size();                         \
+      }                                                               \
+      ASSERT_TRUE(check_almost_equal(ref_res, vec_res, tolerance));   \
+    }
+
+    #define TranscedentalTester2(name)                                \
+    void TranscedentalHelper_##name(const float tolerance = 1e-6) {   \
+      at::Tensor a = at::rand({23, 23});                              \
+      at::Tensor b = at::rand({23, 23});                              \
+      a = a * -10;                                                    \
+      a = a + 10;                                                     \
+      at::Tensor ref_res = at::zeros({23, 23});                       \
+      at::Tensor vec_res = at::zeros({23, 23});                       \
+      float* a_ptr = a.data_ptr<float>();                             \
+      float* b_ptr = a.data_ptr<float>();                             \
+      float* ref_res_ptr = ref_res.data_ptr<float>();                 \
+      float* vec_res_ptr = vec_res.data_ptr<float>();                 \
+      size_t num_els =                                                \
+      (a.numel() / Vec256<float>::size()) * Vec256<float>::size();  \
+      for(auto i = 0; i < num_els; ++i) {                             \
+        ref_res_ptr[i] = std::name(a_ptr[i], b_ptr[i]);               \
+      }                                                               \
+      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {   \
+        auto a_elements = Vec256<float>::loadu(a_ptr);                \
+        auto b_elements = Vec256<float>::loadu(b_ptr);                \
+        a_ptr += Vec256<float>::size();                               \
+        b_ptr += Vec256<float>::size();                               \
+        auto res = a_elements.name(b_elements);                       \
+        res.store(vec_res_ptr);                                       \
+        vec_res_ptr += Vec256<float>::size();                         \
+      }                                                               \
+      ASSERT_TRUE(check_almost_equal(ref_res, vec_res, tolerance));   \
+    }
+
+    namespace Impl {
+      float frac(const float a) {
+          return a - (static_cast<int32_t>(a));
+      }
+    }
+    TranscedentalTester(Impl, frac)
+    TranscedentalTester2(fmod)
+
+    TEST(Vec256TestFloat, frac) {
+      TranscedentalHelper_frac();
+    }
+
+    TEST(Vec256TestFloat, fmod) {
+      TranscedentalHelper_fmod();
+    }
+
+    // ********************************* vec256_test.cpp end*****************************************************
+
 #else
 #error GTEST does not have TYPED_TEST
 #endif
