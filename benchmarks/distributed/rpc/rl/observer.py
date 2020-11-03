@@ -1,5 +1,4 @@
-import gym
-
+import torch
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import rpc_async, rpc_sync, remote
 
@@ -11,12 +10,15 @@ class ObserverBase:
     def __init__(self):
         self.id = rpc.get_worker_info().id
 
+    def set_state(self, state_size):
+        self.state_size = state_size
+
     def reset(self):
-        state, reward = np.random.uniform(low=-1, high=1, size=(10,)), 0
+        state, reward = torch.rand(self.state_size), 0
         return state, reward
 
     def step(self, action):
-        state = np.random.uniform(low=-1, high=1, size=(10,))
+        state = torch.rand(self.state_size)
         reward = random.randint(0, 1)
         done = False
 

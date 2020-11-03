@@ -5,8 +5,8 @@ from torch.distributed.rpc import rpc_async, rpc_sync, remote
 from Agent import AgentBase
 from Observer import ObserverBase
 
-import copy
 import time
+import numpy as np
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"
@@ -14,7 +14,7 @@ OBSERVER_NAME = "observer{}"
 
 
 class CoordinatorBase:
-    def __init__(self, world_size, batch):
+    def __init__(self, world_size, batch, state_size, nlayers, out_features):
         self.world_size = world_size
         self.batch = batch
 
@@ -26,9 +26,13 @@ class CoordinatorBase:
 
         for rank in range(2, world_size):
             ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank))
-            self.ob_rrefs.append(remote(ob_info, ObserverBase))
+            ob_ref = remote(ob_info, ObserverBase)
+            self.ob_rrefs.append(ob_ref)
 
-        self.agent_rref.rpc_sync().set_world(world_size)
+            ob_ref.rpc_sync().set_state(state_size)
+
+        self.agent_rref.rpc_sync().set_world(
+            world_size, state_size, nlayers, out_features)
 
     def run_coordinator(self, episodes, episode_steps):
         benchmarks = []
@@ -53,3 +57,9 @@ class CoordinatorBase:
 
             benchmarks.append(episode_time)
             print(episode_time)
+
+        print("\nThroughput - ")
+        benchmarks = sorted(benchmarks)
+        for p in [50, 75, 90, 95]:
+            v = np.percentile(benchmarks, p)
+            print("p" + str(p) + ":", round(v, 3))
