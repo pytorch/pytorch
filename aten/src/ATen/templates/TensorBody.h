@@ -723,6 +723,35 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
   return _register_hook(hook);
 }
 
+enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
+                                       NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
+struct C10_API ViewMeta: public c10::ViewMetaInterface {
+  bool is_view_;
+  at::Tensor base_;
+  uint32_t attr_version;
+  CreationMeta creation_meta;
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn_;
+
+
+  bool is_view() const override {
+      return is_view_;
+  }
+  const at::Tensor& _base() const override {
+    return base_;
+  }
+  bool has_view_fn() const override {
+    return view_fn_.has_value();
+  }
+
+  std::function<at::Tensor(const at::Tensor&)> view_fn() const override {
+    TORCH_CHECK(has_view_fn(), "view_fn is not set.");
+    return view_fn_.value();
+  }
+
+  ViewMeta(at::TensorImpl* self_impl, at::Tensor base, CreationMeta creation_meta=CreationMeta::DEFAULT);
+  ~ViewMeta();
+};
+
 namespace detail {
 // Helper creator for Tensor class which doesn't requires the users to pass
 // in an intrusive_ptr instead it just converts the argument passed to

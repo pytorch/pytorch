@@ -56,11 +56,12 @@ Tensor Tensor::tensor_data() const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool Tensor::is_view() const {
-  return impl::GetVariableHooks()->is_view(*this);
+  return impl_->view_meta() ? impl_->view_meta()->is_view() : false;
 }
 
 const Tensor& Tensor::_base() const {
-  return impl::GetVariableHooks()->base(*this);
+  TORCH_CHECK(impl_->view_meta());
+  return impl_->view_meta()->_base();
 }
 
 const std::string& Tensor::name() const {
@@ -77,6 +78,22 @@ void Tensor::remove_hook(unsigned pos) const {
 
 unsigned Tensor::_register_hook(std::function<Tensor(const Tensor&)> hook) const {
   return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
+}
+
+ViewMeta::ViewMeta(at::TensorImpl* self_impl, at::Tensor base, CreationMeta creation_meta)
+    : creation_meta(creation_meta) {
+  base_ = std::move(base);
+  TORCH_CHECK(base_.defined(), "base is undefined");
+  if (base_.is_view()) {
+    base_ = base_._base();
+  }
+  is_view_ = true;
+  self_impl->set_version_counter(base_.unsafeGetTensorImpl()->version_counter());
+  attr_version = self_impl->version_counter().current_version();
+}
+
+ViewMeta::~ViewMeta() {
+  base_.reset();
 }
 
 } // namespace at

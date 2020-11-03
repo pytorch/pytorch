@@ -44,9 +44,10 @@ inline void check_inplace(const Tensor& tensor) {
   if (var.requires_grad() && GradMode::is_enabled()) {
     if (var.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      auto diff_view_meta = static_cast<at::ViewMeta*>(impl::get_view_meta(var));
+      auto autograd_meta =static_cast<AutogradMeta*>(impl::get_autograd_meta(var));
       // This can throw or warn
-      handle_view_on_rebase(diff_view_meta);
+      handle_view_on_rebase(diff_view_meta, autograd_meta);
       if (tensor._base().is_leaf()) {
           AT_ERROR(
             "a view of a leaf Variable that requires grad is being used in an in-place operation.");
@@ -128,9 +129,12 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
+// TODO: remove
 inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
         c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
         CreationMeta creation_meta=CreationMeta::DEFAULT) {
+  return tensor;
+  /*
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     // Set `view_func` using the root base as input.
@@ -194,11 +198,15 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
                 "Non-differentiable views must have creation_meta=CreationMeta::DEFAULT");
     return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
   }
+  */
 }
 
 // See NOTE [ Autograd View Variables ] for details.
+// TODO: remove
 inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_differentiable,
                                    CreationMeta creation_meta=CreationMeta::DEFAULT) {
+  return tensors;
+/*
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var._base();
@@ -213,6 +221,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
     }
   }
   return tensors;
+  */
 }
 
 inline void check_no_requires_grad(const Tensor& tensor, const char* name) {

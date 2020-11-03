@@ -139,6 +139,14 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
+struct C10_API ViewMetaInterface {
+  virtual bool is_view() const = 0;
+  virtual const at::Tensor& _base() const = 0;
+  virtual bool has_view_fn() const = 0;
+  virtual std::function<at::Tensor(const at::Tensor&)> view_fn() const = 0;
+  virtual ~ViewMetaInterface();
+};
+
 namespace impl {
 
 // Unfortunately, the definition of AutogradMeta lives in a separate
@@ -836,11 +844,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
 
+  void set_view_meta(std::unique_ptr<c10::ViewMetaInterface> view_meta);
+
   /**
    * Return the pointer to autograd metadata.  May return nullptr if the
    * tensor does not track gradients.
    */
   c10::AutogradMetaInterface* autograd_meta() const;
+
+  c10::ViewMetaInterface* view_meta() const;
 
   /**
    * Set the pointer to named tensor metadata.
@@ -1616,6 +1628,7 @@ private:
   //    3. autograd_meta_ has nontrivial information content
   //
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
+  std::unique_ptr<c10::ViewMetaInterface> view_meta_ = nullptr;
 
 protected:
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
@@ -1797,7 +1810,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 29,
+              sizeof(TensorImpl) == sizeof(int64_t) * 30,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

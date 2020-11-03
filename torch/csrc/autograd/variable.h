@@ -98,7 +98,7 @@ struct Node;
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct AutogradMeta;
-struct DifferentiableViewMeta;
+//struct DifferentiableViewMeta;
 
 // Private-ish functions for manipulating variables; we don't want to put them
 // on Tensor proper
@@ -107,6 +107,8 @@ namespace impl {
   // WARNING: This may return a nullptr.  If you require AutogradMeta to return
   // a materialized structure, use materialize_autograd_meta instead.
   TORCH_API AutogradMeta* get_autograd_meta(const Variable&);
+
+  TORCH_API at::ViewMeta* get_view_meta(const Variable&);
 
   // Returns the current autograd meta, materializing it if it was previously
   // none.  This counts as a *mutating* operation, so do not call it on
@@ -383,14 +385,15 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///   logic! The graph won't be rewritten when an inplace is done, only a
 ///   warning will be thrown.
 /// - DEFAULT is for all other cases
-enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
+//enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
+                                   //NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
 
 /// Unified function to handle error checking when rebase happens
 /// indirect=true means that the caller is not doing the inplace, but the inplace happened
 /// somewhere else.
-TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect=false);
+TORCH_API void handle_view_on_rebase(at::ViewMeta* diff_view_meta, AutogradMeta* autograd_meta, bool indirect=false);
 
+/*
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// The base `Variable` (never a view).
   Variable base_;
@@ -424,6 +427,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
                          CreationMeta creation_meta=CreationMeta::DEFAULT);
   ~DifferentiableViewMeta();
 };
+*/
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                        Variable Implementation
@@ -447,22 +451,22 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 
 // See NOTE [ Autograd View Variables ] for details.
 // Differentiable view. Track history with DifferentiableViewMeta.
-inline Variable make_variable_differentiable_view(
-    Variable base,
-    at::Tensor data,
-    CreationMeta creation_meta,
-    c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_func = c10::nullopt) {
-  if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-      /*version_counter=*/0,
-      /*allow_tensor_metadata_change=*/true);
-    data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-      data_impl_copy.get(), std::move(base), std::move(view_func),
-      creation_meta));
-    return Variable(data_impl_copy);
-  }
-  return Variable();
-}
+//inline Variable make_variable_differentiable_view(
+//    Variable base,
+//    at::Tensor data,
+//    CreationMeta creation_meta,
+//    c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_func = c10::nullopt) {
+//  if (data.defined()) {
+//    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+//      /*version_counter=*/0,
+//      /*allow_tensor_metadata_change=*/true);
+//    data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+//      data_impl_copy.get(), std::move(base), std::move(view_func),
+//      creation_meta));
+//    return Variable(data_impl_copy);
+//  }
+//  return Variable();
+//}
 
 // See NOTE [ Autograd View Variables ] for details.
 // Non-differentiable view. Just share version counter.

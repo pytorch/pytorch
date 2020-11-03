@@ -260,7 +260,7 @@ Tensor & detach_(Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
   if (self.is_view()) {
     // NB: is_view() ==> get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+    auto diff_view_meta = static_cast<at::ViewMeta*>(torch::autograd::impl::get_view_meta(self));
     // See NOTE [ View + Inplace detection ]
     if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
         TORCH_WARN("This view is an output of a function that "

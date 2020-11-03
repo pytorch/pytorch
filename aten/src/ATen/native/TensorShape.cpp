@@ -692,11 +692,28 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
   return result;
 }
 
+void as_view(const Tensor& base, Tensor& tensor, bool is_differentiable) {
+  auto base_var = base;
+  if (base.is_view()) {
+    base_var = base_var._base();
+  }
+  if (is_differentiable) {
+    if (tensor.defined()) {
+    auto tensor_impl_copy = tensor.getIntrusivePtr()->shallow_copy_and_detach(0, true);
+      //tensor.unsafeGetTensorImpl()->set_autograd_meta(std::make_unique<ViewMeta>(base_var));
+        tensor.unsafeGetTensorImpl()->set_view_meta(std::make_unique<ViewMeta>(tensor_impl_copy.get(), base_var));
+    }
+  } else {
+    TORCH_CHECK(false, "NOT IMPLEMENTED");
+  }
+}
+
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = detail::make_tensor<TensorImpl>(
       Storage(self.storage()), self.key_set(), self.dtype());
   setStrided(result, size, stride, storage_offset);
+  as_view(self, result, true);
   return result;
 }
 
@@ -861,6 +878,7 @@ Tensor alias_with_sizes_and_strides(
     self_ = Tensor(std::move(impl));
   }
   namedinference::propagate_names(self_, self);
+  as_view(self, self_, true);
   return self_;
 }
 
@@ -1542,7 +1560,15 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
 Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
-  return self.view(size);
+  auto inferred_size = at::infer_size(size, self.numel());
+  auto stride = at::detail::computeStride(self.sizes(),
+                                          self.strides(),
+                                          inferred_size);
+  TORCH_CHECK(stride.has_value(), "view size is "
+    "not compatible with input tensor's size and stride (at least one dimension"
+    " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  auto stride_value = *stride;
+  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
 static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already be wrapped */) {

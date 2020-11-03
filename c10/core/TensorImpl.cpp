@@ -257,6 +257,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 }
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
+ViewMetaInterface::~ViewMetaInterface() {}
 
 void TensorImpl::set_requires_grad(bool requires_grad) {
   if (!requires_grad && !autograd_meta_) return;
@@ -284,9 +285,19 @@ void TensorImpl::set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> a
   autograd_meta_ = std::move(autograd_meta);
 }
 
+void TensorImpl::set_view_meta(std::unique_ptr<c10::ViewMetaInterface> view_meta) {
+  // NB: view_meta may be null!  That just means it's the default
+  // constructor
+  view_meta_ = std::move(view_meta);
+}
+
 c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   // NB: Might return null!
   return autograd_meta_.get();
+}
+
+c10::ViewMetaInterface* TensorImpl::view_meta() const {
+ return view_meta_.get();
 }
 
 void TensorImpl::copy_tensor_metadata(

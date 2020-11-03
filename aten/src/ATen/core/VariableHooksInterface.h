@@ -16,7 +16,7 @@
 // merge the libraries inside Facebook".  Well, the problem is that there
 // are some downstream applications which are at binary size limit, and
 // incorporating all of the extra code from libtorch would push them
-// over (admarket/adreview/service:adreviewservice, see also 
+// over (admarket/adreview/service:adreviewservice, see also
 // https://github.com/pytorch/pytorch/pull/29299)  So if you want to do that,
 // we have to fix all of the services like this.
 //
@@ -45,8 +45,8 @@ struct CAFFE2_API VariableHooksInterface {
   virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const = 0;
   virtual unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const = 0;
   virtual void remove_hook(const Tensor&, unsigned pos) const = 0;
-  virtual bool is_view(const Tensor&) const = 0;
-  virtual const Tensor& base(const Tensor&) const = 0;
+  //virtual bool is_view(const Tensor&) const = 0;
+  //virtual const Tensor& base(const Tensor&) const = 0;
   virtual const std::string& name(const Tensor&) const = 0;
 };
 
