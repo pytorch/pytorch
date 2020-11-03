@@ -3,10 +3,12 @@
 #include <torch/csrc/autograd/profiler_legacy.h>
 
 #include <c10/core/DeviceType.h>
+//#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #ifdef USE_KINETO
 namespace libkineto {
 class TraceActivity;
+class ActivityTraceInterface;
 }
 #endif
 
@@ -118,14 +120,7 @@ struct TORCH_API KinetoEvent {
 
   // Kineto fields
 
-  KinetoEvent& activity(const libkineto::TraceActivity& activity) {
-    name_ = activity.name();
-    device_index_ = activity.deviceId();
-    start_us_ = activity.timestamp();
-    duration_us_ = activity.duration();
-    correlation_id_ = activity.correlationId();
-    return *this;
-  }
+  KinetoEvent& activity(const libkineto::TraceActivity& activity);
 
   std::string name() const {
     return name_;
@@ -171,11 +166,11 @@ struct TORCH_API KinetoEvent {
 
 struct TORCH_API ProfilerResult {
   ProfilerResult(
-      const std::vector<std::vector<KinetoEvent>>& events,
-      const thread_event_lists& legacy_events)
-    : events_(events), legacy_events_(legacy_events) {}
+      std::vector<std::vector<KinetoEvent>> events,
+      thread_event_lists legacy_events,
+      std::unique_ptr<libkineto::ActivityTraceInterface> trace);
 
-  const std::vector<std::vector<KinetoEvent>> events() const {
+  const std::vector<std::vector<KinetoEvent>>& events() const {
     return events_;
   }
 
@@ -186,13 +181,21 @@ struct TORCH_API ProfilerResult {
  private:
   std::vector<std::vector<KinetoEvent>> events_;
   thread_event_lists legacy_events_; // tensor mem alloc, start/stop
+  std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
+};
+
+// avoid unique_ptr cophy issues when using pybind
+struct TORCH_API ProfilerResultWrapper {
+  ProfilerResultWrapper(const std::shared_ptr<ProfilerResult>& result)
+    : result_(result) {}
+ std::shared_ptr<ProfilerResult> result_;
 };
 
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 
-TORCH_API ProfilerResult disableProfiler();
+TORCH_API ProfilerResultWrapper disableProfiler();
 
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,

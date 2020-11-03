@@ -73,21 +73,41 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "KinetoEvent")
       .def("name", &KinetoEvent::name)
-      .def("start_thread_id", [](const KinetoEvent& e) { return e.startThreadId(); })
-      .def("end_thread_id", [](const KinetoEvent& e) { return e.endThreadId(); })
+      .def("start_thread_id", [](const KinetoEvent& e) {
+        return e.startThreadId();
+      })
+      .def("end_thread_id", [](const KinetoEvent& e) {
+        return e.endThreadId();
+      })
       .def("device_index", &KinetoEvent::deviceIndex)
       .def("start_us", &KinetoEvent::startUs)
       .def("duration_us", &KinetoEvent::durationUs)
-      .def("correlation_id", [](const KinetoEvent& e) { return e.correlationId(); })
-      .def("fwd_thread_id", [](const KinetoEvent& e) { return e.fwdThreadId(); })
-      .def("shapes", [](const KinetoEvent& e) { return e.shapes(); })
-      .def("sequence_nr", [](const KinetoEvent& e) { return e.sequenceNr(); })
-      .def("stack", [](const KinetoEvent& e) { return e.stack(); })
-      .def("scope", [](const KinetoEvent& e) { return e.scope(); });
+      .def("correlation_id", [](const KinetoEvent& e) {
+        return e.correlationId();
+      })
+      .def("fwd_thread_id", [](const KinetoEvent& e) {
+        return e.fwdThreadId();
+      })
+      .def("shapes", [](const KinetoEvent& e) {
+        return e.shapes();
+      })
+      .def("sequence_nr", [](const KinetoEvent& e) {
+        return e.sequenceNr();
+      })
+      .def("stack", [](const KinetoEvent& e) {
+        return e.stack();
+      })
+      .def("scope", [](const KinetoEvent& e) {
+        return e.scope();
+      });
 
-  py::class_<ProfilerResult>(m, "ProfilerResult")
-      .def("events", &ProfilerResult::events)
-      .def("legacy_events", &ProfilerResult::legacy_events);
+  py::class_<ProfilerResultWrapper>(m, "ProfilerResult")
+      .def("events",  [](const ProfilerResultWrapper& r) {
+        return r.result_->events();
+      })
+      .def("legacy_events",  [](const ProfilerResultWrapper& r) {
+        return r.result_->legacy_events();
+      });
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
