@@ -288,14 +288,6 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
               TORCH_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
-    } else {
-      switch (self_info.dims) {
-        case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-            break;
-        default:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-      }
     }
    });
   }
