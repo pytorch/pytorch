@@ -2964,7 +2964,6 @@ class TestSparse(TestCase):
             self.assertEqual(str(w[0].message), "The usage of '_values()' method is deprecated."
                              " Please use 'values(False)' instead.")
 
-
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             self.assertEqual(t._nse(), nse)
@@ -2991,7 +2990,7 @@ class TestSparse(TestCase):
                 self.assertEqual(
                     wm,
                     "The _nnz() method is deprecated and will be removed in a future PyTorch release."
-                    " Please use nse(False) instead.")
+                    " Please use _nse() instead.")
             else:
                 self.assertEqual(len(w), 0)
 
