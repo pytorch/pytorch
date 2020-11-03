@@ -367,6 +367,8 @@ namespace jit {
   _(KernelSoftmax2D)                                \
   _(KernelSoftmax3D)                                \
   _(KernelSoftmax4D)                                \
+  _(KernelInlineProducerIntoReduction)              \
+  _(KernelInlineReductionIntoConsumer)              \
   _(FuserPass_1)                                    \
   _(FuserPass_2)                                    \
   _(FuserPass_3)                                    \
