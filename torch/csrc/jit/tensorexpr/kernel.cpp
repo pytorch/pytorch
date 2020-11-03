@@ -1123,8 +1123,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::tanh: {
-      return computeOneOperand(
-          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
+      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
+        return tanh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sqrt: {

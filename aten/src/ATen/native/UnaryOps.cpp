@@ -369,8 +369,8 @@ Tensor& arcsinh_out(Tensor& result, const Tensor& self) { return at::asinh_out(r
 Tensor arcsinh(const Tensor& self) { return self.asinh(); }
 Tensor& arcsinh_(Tensor& self) { return self.asinh_(); }
 
-Tensor& atanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atanh_stub); }
-Tensor atanh(const Tensor& self) { return unary_op_impl(self, at::atanh_out); }
+Tensor& atanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, atanh_stub); }
+Tensor atanh(const Tensor& self) { return unary_op_impl_float(self, atanh_stub); }
 Tensor& atanh_(Tensor& self) { return unary_op_impl_(self, at::atanh_out); }
 
 // arctanh, alias for atanh
@@ -448,8 +448,8 @@ Tensor& nan_to_num_(
   return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
 }
 
-Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tanh_stub); }
-Tensor tanh(const Tensor& self) { return unary_op_impl(self, at::tanh_out); }
+Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, tanh_stub); }
+Tensor tanh(const Tensor& self) { return unary_op_impl_float(self, tanh_stub); }
 Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
 
 Tensor& tan_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, tan_stub);  }
