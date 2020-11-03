@@ -1364,13 +1364,8 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // Compute non-output tensors_ inline
-  for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second)) {
-      continue;
-    }
-    l.computeInline(p.second->buf());
-  }
+  l.inlineIntermediateBufs();
+
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
