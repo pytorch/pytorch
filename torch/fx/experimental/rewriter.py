@@ -50,9 +50,10 @@ class AST_Rewriter(ast.NodeTransformer):
         symbolically-traceable torch.Assert function
         """
         # Create the Call node
-        # `cast` is used to silence spurious type checker warnings
-        n = cast(ast.Expression, ast.parse('torch.Assert()', mode='eval'))
-        call_node = cast(ast.Call, n.body)
+        n = ast.parse('torch.Assert()', mode='eval')
+        assert isinstance(n, ast.Expression)
+        call_node = n.body
+        assert isinstance(call_node, ast.Call)
         msg = node.msg if node.msg else ast.Constant(value="", kind=None)
         call_node.args = [node.test, msg]
 
@@ -81,7 +82,7 @@ def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Ca
             RewrittenModule.forward = AST_Rewriter().rewrite(cast(FunctionType, m.forward))
             new_m = RewrittenModule(m)
             for name, child in new_m.named_children():
-                new_m[name] = rewrite_module(child)
+                new_m[name] = rewrite_module(child)    # type: ignore
             return new_m
         return rewrite_module(fn)
     else:
