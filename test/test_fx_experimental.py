@@ -4,7 +4,6 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental.Partitioner import Partitioner, Device, PartitionerConfig
 from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.graph_module import GraphModule
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.fx.experimental.partitioner_utils import get_latency_of_one_partition, \
@@ -217,6 +216,7 @@ class TestFXExperimental(JitTestCase):
         assert (128., 80., 160.) == partition_latency_0
         partition_latency_1 = get_latency_of_one_partition(partitions[1], node_to_latency_mapping)
         assert (16., 32., 32) == partition_latency_1
+
     def test_call_to_assert_no_msg(self):
 
         class M(torch.nn.Module):
