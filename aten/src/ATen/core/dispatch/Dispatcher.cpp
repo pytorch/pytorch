@@ -134,13 +134,11 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   OperatorName op_name = schema.operator_name();
   auto op = findOrRegisterName_(op_name);
 
-  if (op.operatorIterator_->def_count == 0) {
-    // NB: registerSchema is not idempotent! Only do it once!
-    op.operatorIterator_->op.registerSchema(std::move(schema), std::move(debug));
-    listeners_->callOnOperatorRegistered(op);
-  } else {
-    checkSchemaCompatibility(op, schema, debug);
-  }
+  TORCH_CHECK(op.operatorIterator_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
+                                                    " Each overload's schema should only be registered with a single call to def().",
+                                                    " Duplicate registration: ", debug, ". Original registration: ", op.operatorIterator_->op.debug());
+  op.operatorIterator_->op.registerSchema(std::move(schema), std::move(debug));
+  listeners_->callOnOperatorRegistered(op);
 
   // NB: do not increment the counts until AFTER error checking
   ++op.operatorIterator_->def_count;
@@ -149,25 +147,6 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   return RegistrationHandleRAII([this, op, op_name] {
     deregisterDef_(op, op_name);
   });
-}
-
-void Dispatcher::checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug) {
-  TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " (", debug, ") vs ", op.schema(), " (", op.debug(), ")");
-  if (schema.isDefaultAliasAnalysisKind()) {
-    // [BACKWARDS COMPAT] If the *new* schema is the default alias analysis
-    // kind, for BC, we will accept it.  If we don't accept it, most extensions
-    // that override existing operators will stop working (as they generally did
-    // not specify alias information).
-  } else if (op.schema().isDefaultAliasAnalysisKind()) {
-    // [BACKWARDS COMPAT] If you POST-FACTO specify a non-default alias analysis
-    // kind after we already have a schema for a function, bong it in for BC
-    // reasons.
-    op.operatorIterator_->op.updateSchemaAliasAnalysis(schema.aliasAnalysis());
-  } else {
-    TORCH_CHECK(op.schema().aliasAnalysis() == schema.aliasAnalysis(),
-      "Tried to define the schema for ", toString(op.operator_name()), " with different alias analysis kinds: ",
-      toString(op.schema().aliasAnalysis()), " (", op.debug(), ") vs ", toString(schema.aliasAnalysis()), " (", debug, ")");
-  }
 }
 
 void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op_name) {
