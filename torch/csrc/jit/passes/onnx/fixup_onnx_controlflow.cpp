@@ -286,7 +286,7 @@ void InferShapeTypeForUninitializedOutput(
 //       -> (%1, %y.1, %7)
 //   ...
 
-void ONNXIfShapeTypeInference(Node* node) {
+void ONNXFixupUninitializedOutput(Node* node) {
   if (node->kind() != ::c10::onnx::If) {
     return;
   }
@@ -350,7 +350,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
       }
     }
   }
-  ONNXIfShapeTypeInference(if_node);
+  ONNXFixupUninitializedOutput(if_node);
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
 }
