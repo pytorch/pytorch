@@ -413,7 +413,6 @@ class intrusive_ptr final {
     result.target_->weakcount_.store(1, std::memory_order_relaxed);
 
     return result;
->>>>>>> source: e5a229b82f69 - swolchok: [PyTorch] Avoid atomic refcounting i...
   }
 
   /**
