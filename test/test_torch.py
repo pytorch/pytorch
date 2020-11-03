@@ -18998,7 +18998,6 @@ else:
     def test_nansum_out_dtype(self, device):
         dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
         for inp_dtype, out_dtype in combinations(dtypes, 2):
-            print(inp_dtype, out_dtype)
             shape = self._rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = self._generate_input(shape, inp_dtype, device, with_extremal=False)
             torch_fn = partial(torch.nansum, dtype=out_dtype)
