@@ -118,7 +118,14 @@ struct TORCH_API KinetoEvent {
 
   // Kineto fields
 
-  KinetoEvent& activity(const libkineto::TraceActivity& activity);
+  KinetoEvent& activity(const libkineto::TraceActivity& activity) {
+    name_ = activity.name();
+    device_index_ = activity.deviceId();
+    start_us_ = activity.timestamp();
+    duration_us_ = activity.duration();
+    correlation_id_ = activity.correlationId();
+    return *this;
+  }
 
   std::string name() const {
     return name_;

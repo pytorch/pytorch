@@ -50,27 +50,30 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
 #endif
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
-      cpu_trace->ops.emplace_back(std::move(op));
       kineto_events_.emplace_back();
       kineto_events_.back()
+          .activity(op)
           .startThreadId(ctx->startThreadId)
           .endThreadId(ctx->endThreadId)
           .sequenceNr(ctx->sequenceNr)
           .fwdThreadId(ctx->fwdThreadId)
-          .scope(ctx->recFunScope);
+          .scope(ctx->recFunScope)
+          .deviceType(c10::DeviceType::CPU)
+          .shapes(*ctx->shapes);
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
       }
+      cpu_trace->ops.emplace_back(std::move(op));
     }
   }
 
   std::vector<KinetoEvent> kineto_events_;
-
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
 };
 
 KinetoThreadLocalState* getProfilerTLSState() {
-  const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
+  const auto& state = c10::ThreadLocalDebugInfo::get(
+      c10::DebugInfoKind::PROFILER_STATE);
   return dynamic_cast<KinetoThreadLocalState*>(state.get());
 }
 
@@ -172,6 +175,7 @@ void prepareProfiler(
     k_activities.insert(libkineto::ActivityType::GPU_MEMCPY);
     k_activities.insert(libkineto::ActivityType::GPU_MEMSET);
     k_activities.insert(libkineto::ActivityType::CONCURRENT_KERNEL);
+    k_activities.insert(libkineto::ActivityType::CUDA_RUNTIME);
   }
 
   //if (!libkineto::api().hasProfilerRegistered()) {
@@ -239,14 +243,6 @@ ProfilerResult disableProfiler() {
   return ProfilerResult(kineto_events, legacy_events);
 }
 
-KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
-  name_ = activity.name();
-  device_index_ = activity.deviceId();
-  start_us_ = activity.timestamp();
-  duration_us_ = activity.duration();
-  correlation_id_ = activity.correlationId();
-  return *this;
-}
 #endif
 
 bool kinetoAvailable() {
