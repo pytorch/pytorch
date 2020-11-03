@@ -1940,7 +1940,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                              " fixed length sequences. However, found "
                              "offsets of type {}".format(type_str))
         offsets = torch.arange(0, input.numel(), input.size(1),
-                               dtype=torch.long, device=input.device)
+                               dtype=input.dtype, device=input.device)
 
         input = input.reshape(-1)
         if per_sample_weights is not None:
