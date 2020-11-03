@@ -20,6 +20,8 @@
 
 #include <ATen/record_function.h>
 
+#include <c10/core/DeviceType.h>
+
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
@@ -420,12 +422,6 @@ TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
-enum class C10_API_ENUM KinetoDeviceType : uint16_t {
-  CPU = 0,
-  CUDA,
-  NUM_KINETO_DEVICE_TYPES, // must be the last one
-};
-
 struct TORCH_API KinetoEvent {
   virtual std::string name() const = 0;
   virtual uint64_t deviceIndex() const = 0;
@@ -437,7 +433,7 @@ struct TORCH_API KinetoEvent {
     return thread_id_;
   }
 
-  KinetoDeviceType deviceType() const {
+  c10::DeviceType deviceType() const {
     return device_type_;
   }
 
@@ -466,7 +462,7 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
-  KinetoEvent& deviceType(KinetoDeviceType device_type) {
+  KinetoEvent& deviceType(c10::DeviceType device_type) {
     device_type_ = device_type;
     return *this;
   }
@@ -497,15 +493,8 @@ struct TORCH_API KinetoEvent {
   }
 
  private:
-  //std::string name_;
-  //uint64_t device_index_;
-  //uint64_t start_us_;
-  //uint64_t duration_;
-  //uint64_t correlation_id_;
-
-  TraceActivity* activity_ = nullptr;
   int64_t thread_id_ = -1;
-  KinetoDeviceType device_type_ = KinetoDeviceType::CPU,
+  c10::DeviceType device_type_ = c10::DeviceType::CPU,
   int64_t fwd_thread_id_ = -1;
   std::vector<std::vector<int64_t>> shapes_;
   int64_t sequence_nr_ = -1;
