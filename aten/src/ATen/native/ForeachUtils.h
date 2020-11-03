@@ -84,7 +84,7 @@ bool has_same_attributes(Device expected_device, TensorList tensors) {
   return true;
 }
 
-bool tensor_and_scalar_are_same_type(Tensor tensor, Scalar scalar) {
+bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
   // complex scalar + integral or boolean tensor will result in complex tensor
   if (scalar.isComplex() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
     return false;
@@ -128,7 +128,7 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
       return false;
     }
 
-    if (!tensor_and_scalar_are_same_type(t, scalar)) {
+    if (!will_promote_tensor(t, scalar)) {
       return false;
     }
   }
@@ -166,7 +166,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar)
       return false;
     }
 
-    if (!tensor_and_scalar_are_same_type(tensors1[i], scalar)) {
+    if (!will_promote_tensor(tensors1[i], scalar)) {
       return false;
     }
   }
@@ -200,7 +200,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
       return false;
     }
 
-    if (!tensor_and_scalar_are_same_type(tensors1[i], scalar)) {
+    if (!will_promote_tensor(tensors1[i], scalar)) {
       return false;
     }
   }
