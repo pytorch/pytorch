@@ -2,9 +2,8 @@
 #define PRECISION $precision
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
-layout(set = 0, binding = 2)          uniform           restrict           Block {
+layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict image3D uOutput;
+layout(set = 0, binding = 1)          uniform           restrict         Block {
   ivec3 WHC;
   float minValue;
   float maxValue;
@@ -18,6 +17,6 @@ void main() {
     imageStore(
         uOutput,
         pos,
-        clamp(texelFetch(uInput, pos, 0), uBlock.minValue, uBlock.maxValue));
+        clamp(imageLoad(uOutput, pos), uBlock.minValue, uBlock.maxValue));
   }
 }
