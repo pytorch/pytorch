@@ -398,14 +398,21 @@ std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   if (s.size() <= maxlen) {
     return s;
   }
+  std::string hash_str = std::to_string(std::hash<std::string>{}(s));
+  // If hash-string plus '_' can fit into maxlen, then truncate the original
+  // string correspondingly so that the final string with the hash included fits
+  // into maxlen. If that's not possible, at least truncate the original string
+  // to maxlen (and appen the hash to it).
+  size_t trunc_len =
+      (maxlen > hash_str.size() + 1) ? (maxlen - hash_str.size() - 1) : maxlen;
   std::stringstream truncated;
-  truncated << s.substr(0, maxlen);
-  truncated << "_" << std::hash<std::string>{}(s) << "_";
+  truncated << s.substr(0, trunc_len);
+  truncated << "_" << hash_str;
   return truncated.str();
 }
 
 std::string generateNameForGraph(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     size_t maxlen,
     const std::string& prefix) {
   std::stringstream graph_name;
