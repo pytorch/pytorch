@@ -24,7 +24,7 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda
+# Install conda and other packages (e.g., numpy, coverage, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -39,12 +39,6 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 ARG CLANG_VERSION
 ADD ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
-
-# Install non-standard Python versions (via Travis binaries)
-ARG TRAVIS_PYTHON_VERSION
-ENV PATH /opt/python/$TRAVIS_PYTHON_VERSION/bin:$PATH
-ADD ./common/install_travis_python.sh install_travis_python.sh
-RUN bash ./install_travis_python.sh && rm install_travis_python.sh
 
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
