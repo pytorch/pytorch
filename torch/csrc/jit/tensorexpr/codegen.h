@@ -55,6 +55,7 @@ class TORCH_API CodeGen {
   at::Device device() {
     return device_;
   }
+
   // This function returns the generated code as
   // a string. Currently only implemented for Block.
   // TODO. Rename this, as we can return other than string
