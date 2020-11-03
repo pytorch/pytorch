@@ -211,9 +211,13 @@ op_db = [
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
+                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -257,7 +261,11 @@ op_db = [
                    test_inplace_grad=False),
     UnaryUfuncInfo('atan',
                    ref=np.arctan,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -268,8 +276,10 @@ op_db = [
     UnaryUfuncInfo('atanh',
                    ref=np.arctanh,
                    domain=(-1, 1),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('cos',
@@ -402,7 +412,10 @@ op_db = [
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -1462,6 +1475,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
+        ('kron', (S, S), ((M, L),))
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
