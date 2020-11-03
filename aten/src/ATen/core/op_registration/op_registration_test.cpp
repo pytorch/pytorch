@@ -310,7 +310,8 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegis
   std::string output = testing::internal::GetCapturedStderr();
   EXPECT_THAT(output, testing::HasSubstr("_test::dummy"));
   EXPECT_THAT(output, testing::HasSubstr("CPU"));
-  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel with the same dispatch key for the same operator"));
+  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel "));
+  EXPECT_THAT(output, testing::HasSubstr(" with the same dispatch key for the same operator"));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegisteringInSameOpCall_thenFails) {
@@ -348,7 +349,8 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegistering_then
   std::string output = testing::internal::GetCapturedStderr();
   EXPECT_THAT(output, testing::HasSubstr("_test::dummy"));
   EXPECT_THAT(output, testing::HasSubstr("catch all"));
-  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel with the same dispatch key for the same operator"));
+  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel "));
+  EXPECT_THAT(output, testing::HasSubstr(" with the same dispatch key for the same operator"));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegisteringInSameOpCall_thenFails) {
@@ -701,7 +703,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<DummyKernelWithIntParam>(c10::DispatchKey::CPU)
       .kernel<MockKernel>(c10::DispatchKey::CUDA, &called_kernel));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
@@ -944,7 +946,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingC
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBackendWithMismatchingCppSignatures_thenFails) {
@@ -953,7 +955,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBacke
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchAllWithMismatchingCppSignatures_thenFails) {
@@ -962,7 +964,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchA
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .catchAllKernel([] (const int64_t&) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCppSignatures_thenFails) {
@@ -989,7 +991,7 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingC
   m.impl("dummy", DispatchKey::CPU, [] (int64_t) {});
   expectThrows<c10::Error>([&] {
     m.impl("dummy", DispatchKey::CUDA, [] (const int64_t&) {});
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCppSignatures_thenFails) {
@@ -2249,6 +2251,22 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
     EXPECT_EQ(initial_num_registers + 1, listener_ptr->num_registers_);
   }
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
+}
+
+TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
+  auto danglingImpls = Dispatcher::singleton().findDanglingImpls();
+  std::string error_str = "Discovered operators that have been registered through the dispatcher"
+                          " without explicitly specifying their schemas. Please do so using"
+                          " the TORCH_LIBRARY macro. Suspect operators:\n";
+  for (auto& op : danglingImpls) {
+      auto& op_name = op.operator_name();
+      error_str += "\t" + op_name.name;
+      if (op_name.overload_name != "") {
+          error_str += "." + op_name.overload_name;
+      }
+      error_str += "\n";
+  }
+  ASSERT_EQ(danglingImpls.size(), 0) << error_str;
 }
 
 }

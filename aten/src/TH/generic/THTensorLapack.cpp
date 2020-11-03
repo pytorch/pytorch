@@ -410,7 +410,8 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
 {
   if (a == NULL) a = ra_;
   THArgCheck(THTensor_nDimension(a) == 2, 1, "'input' should be 2 dimensional");
-  THArgCheck(!a->is_empty(), 1, "'input' should not be empty");
+  THArgCheck(!a->is_empty(), 2, "'input' should not be empty");
+  THArgCheck(!tau->is_empty(), 3, "'tau' should not be empty");
 
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
