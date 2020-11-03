@@ -1623,34 +1623,44 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
     else {
       result = s_max / s_min;
     }
+    // a trick to convert FLT_MAX or DBL_MAX to INFINITY
+    // result might also contains infs already then inf + inf - inf = nan
+    // this will get replaced by inf
+    result = result + result - result;
+    result = at::nan_to_num(result, INFINITY);
+    return result;
   }
   // ord == ±1 ord == ±inf
   else {
     squareCheckInputs(self);
-    // Ignore errors if not invertible, self_inverse should contain NaNs in this case
+    IntArrayRef dim{-2, -1};
+    // Ignore errors if not invertible, result is INFINITY in this case
     try {
       self_inverse = at::inverse(self);
-    } catch (...) {
-      self_inverse = at::empty_like(self);
-      at::fill_(self_inverse, NAN);
+    } catch (const std::exception& e) {
+      if (strstr(e.what(), "singular")) {
+      result = at::empty_like(at::linalg_norm(self, ord, dim));
+      at::fill_(result, INFINITY);
+      return result;
+      }
+      else {
+        TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
+      }
     }
-    IntArrayRef dim{-2, -1};
     Tensor norm_self = at::linalg_norm(self, ord, dim);
     Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
     result = norm_self * norm_inverse;
   }
-  // a trick to convert FLT_MAX or DBL_MAX to INFINITY
-  // result might also contains infs already then inf + inf - inf = nan
-  // this will get replaced by inf
-  result = result + result - result;
-  result = at::nan_to_num(result, INFINITY);
   return result;
 }
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
   ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(result.scalar_type() == real_dtype,
-    "result dtype ", result.scalar_type(), " does not match self.real dtype ", real_dtype);
+  Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
+  auto expected_dtype = std::abs(ord.toDouble()) == 2.0 ? real_dtype : self.scalar_type();
+
+  TORCH_CHECK(result.scalar_type() == expected_dtype,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", expected_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -1662,31 +1672,31 @@ Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt
 Tensor linalg_cond(const Tensor& self, std::string ord) {
   TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
   squareCheckInputs(self);
-  // Ignore errors if not invertible, self_inverse should contain NaNs in this case
-  Tensor self_inverse;
+
+  Tensor self_inverse, result;
+  IntArrayRef dim{-2, -1};
+  // Ignore errors if not invertible, result is INFINITY in this case
   try {
     self_inverse = at::inverse(self);
-  } catch (...) {
-    self_inverse = at::empty_like(self);
-    at::fill_(self_inverse, NAN);
+  } catch (const std::exception& e) {
+    if (strstr(e.what(), "singular")) {
+    result = at::empty_like(at::linalg_norm(self, ord, dim));
+    at::fill_(result, INFINITY);
+    return result;
+    }
+    else {
+      TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
+    }
   }
-  IntArrayRef dim{-2, -1};
   Tensor norm_self = at::linalg_norm(self, ord, dim);
   Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
-  Tensor result = norm_self * norm_inverse;
-  result = at::nan_to_num(result, INFINITY);
-  // a trick to convert FLT_MAX or DBL_MAX to INFINITY
-  // result might also contains infs already then inf + inf - inf = nan
-  // this will get replaced by inf
-  result = result + result - result;
-  result = at::nan_to_num(result, INFINITY);
+  result = norm_self * norm_inverse;
   return result;
 }
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(result.scalar_type() == real_dtype,
-    "result dtype ", result.scalar_type(), " does not match self.real dtype ", real_dtype);
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", self.scalar_type());
 
   Tensor result_tmp = at::linalg_cond(self, ord);
   at::native::resize_output(result, result_tmp.sizes());

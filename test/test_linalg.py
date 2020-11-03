@@ -311,7 +311,8 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     @precisionOverride({torch.float32: 1e-3})
     def test_cond(self, device, dtype):
         def run_test_case(input, ord):
@@ -330,17 +331,37 @@ class TestLinalg(TestCase):
         for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
             for ord in norm_types:
+                # frobenius norm not supported for complex tensors
+                if dtype.is_complex and ord == 'fro':
+                    continue
                 run_test_case(input, ord)
 
         # test for singular input
         a = torch.eye(3, dtype=dtype, device=device)
         a[-1, -1] = 0  # make 'a' singular
         for ord in norm_types:
+            # frobenius norm not supported for complex tensors
+            if dtype.is_complex and ord == 'fro':
+                continue
             run_test_case(a, ord)
+
+    # TODO: once "inverse_cuda" supports complex dtypes, they shall be added to above tests
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3})
+    def test_cond(self, device, dtype):
+        input_size = (3, 3)
+        ord = 1
+        torch.randn(*input_size, dtype=dtype, device=device)
+        result = torch.linalg.cond(input, ord)
+        result_numpy = np.linalg.cond(input.cpu().numpy(), ord)
+        self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3})
     def test_cond_errors_and_warnings(self, device, dtype):
         norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
@@ -367,7 +388,11 @@ class TestLinalg(TestCase):
         # if non-empty out tensor with wrong shape is passed a warning is given
         a = torch.ones((2, 2), dtype=dtype, device=device)
         for ord in ['fro', 2]:
-            out = torch.empty_like(a)
+            # frobenius norm not supported for complex tensors
+            if dtype.is_complex and ord == 'fro':
+                continue
+            real_dtype = a.real.dtype if dtype.is_complex else dtype
+            out = torch.empty(a.shape, dtype=real_dtype, device=device)
             with warnings.catch_warnings(record=True) as w:
                 # Trigger warning
                 torch.linalg.cond(a, ord, out=out)

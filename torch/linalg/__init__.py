@@ -147,7 +147,7 @@ Returns the condition number of a matrix.
 The condition number of :attr:`input` is defined as the norm of
 :attr:`input` times the norm of the inverse of :attr:`input`.
 
-This function supports only real-valued input.
+This function supports real-valued, and only on CPU, complex-valued input.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
