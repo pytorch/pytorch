@@ -262,31 +262,31 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
-    Computes multilinear expressions (i.e. sums of products) specified using the Einstein summation convention.
+    Computes a sum of products over dimensions specified using a notation based on Einstein summation convention.
 
-    The Einstein summation convention provides a succint way of specifying many linear algebra operations by
-    labeling each dimension of the input operands and specifying which dimensions are to be summed over.
-    Einsum provides two modes: implicit mode computes the classical Einstein summation while explicit mode
-    provides more flexibility by manually enabling/disabling summation. The following section describes the
-    formatting and rules for the equation.
+    Einsum allows computing many common multi-dimensional, linear algebraic array operations by representing them
+    in a short-hand format based on the Eintein summation, given by :attr:`equation`. The details of this format are
+    described in the section below, but the general idea is to label every dimension of the input :attr:`operands`
+    with some subscript and define which subscripts are part of the output. The output is computed as a sum of products
+    over the dimensions whose subscripts are not part of the output. For example, matrix multiplication can be computed
+    using einsum as `torch.einsum("ij,jk", A, B)`. Here, j is the summation subscript (see section below for more details).
 
     Equation:
 
-        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for the Eintein summation.
+        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for each dimension of
+        the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
+        comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
+        must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
+        repeated for the same input operand, in which case the dimensions labeled with this subscript for this operand
+        must match in size and the operand will be replaced by its diagonal along these dimensions. The subscripts that
+        appear exactly once in the :attr:`equation` will be part of the output, sorted in increasing alphabetical order.
+        The output is computed by multiplying the input :attr:`operands` element-wise, with their dimensions aligned based
+        on the subscripts, and then summing out the dimensions whose subscripts are not part of the output.
 
-        In implicit mode, :attr:`equation` specifies the subscripts for each dimension of the input :attr:`operands` in
-        order, separating subcripts for each operand by a comma (','), e.g. `'ij,jk'` specify subscripts for two 2D
-        operands. The dimensions labeled with the same subscript must be broadcastable, that is, their size must either
-        match or be `1`. The exception is if a subscript is repeated for the same input operand, in which case the
-        dimensions under the subscript for the operand must match in size and the diagonal of the corresponding dimensions
-        will be taken. The dimensions that appear exactly once in the :attr:`equation` will be part of the output Tensor,
-        sorted in increasing alphabetical order. The dimensions that are not part of the output (appear more than once)
-        will be summed over.
-
-        In explicit mode, the same rules for the input operands in implicit mode apply but the output dimensions can be
-        specified by adding an arrow ('->') at the end of the equation followed by the subscripts for the output. For
-        instance, the following equation computes the transpose of a matrix multiplication: 'ij,jk->ki'. The output
-        subscripts must appear at least once for some input operand and at most once for the output.
+        Optionally, the output subscripts can be explictly defined by adding an arrow ('->') at the end of the equation
+        followed by the subscripts for the output. For instance, the following equation computes the transpose of a
+        matrix multiplication: 'ij,jk->ki'. The output subscripts must appear at least once for some input operand and
+        at most once for the output.
 
         Ellipsis ('...') can be used in place of subscripts to broadcast the dimensions covered by the ellipsis.
         Each input operand may contain at most one ellipsis which will cover the dimensions not covered by subscripts,
@@ -348,7 +348,7 @@ def einsum(equation, *operands):
         >>> torch.einsum('...ij->...ji', A).shape 
         torch.Size([2, 3, 5, 4])
 
-        # compare torch.nn.functional.bilinear
+        # equivalent to torch.nn.functional.bilinear
         >>> A = torch.randn(3,5,4)
         >>> l = torch.randn(2,5)
         >>> r = torch.randn(2,4)
