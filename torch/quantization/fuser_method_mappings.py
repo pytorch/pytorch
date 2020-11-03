@@ -51,25 +51,25 @@ def fuse_conv_bn_relu(conv, bn, relu):
     fused_module : Optional[Type[nn.Sequential]] = None
     if conv.training:
         map_to_fused_module_train = {
-            (nn.Conv1d, nn.BatchNorm1d): nni.ConvBnReLU1d,
-            (nn.Conv2d, nn.BatchNorm2d): nni.ConvBnReLU2d,
-            (nn.Conv3d, nn.BatchNorm3d): nni.ConvBnReLU3d,
+            nn.Conv1d: nni.ConvBnReLU1d,
+            nn.Conv2d: nni.ConvBnReLU2d,
+            nn.Conv3d: nni.ConvBnReLU3d,
         }
         assert bn.num_features == conv.out_channels, 'Output channel of Conv must match num_features of BatchNorm'
         assert bn.affine, 'Only support fusing BatchNorm with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm with tracking_running_stats set to True'
-        fused_module = map_to_fused_module_train.get((type(conv), type(bn)), None)
+        fused_module = map_to_fused_module_train.get(type(conv), None)
         if fused_module is not None:
             return fused_module(conv, bn, relu)
         else:
             raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, relu)))
     else:
         map_to_fused_module_eval = {
-            (nn.Conv1d, nn.BatchNorm1d): nni.ConvReLU1d,
-            (nn.Conv2d, nn.BatchNorm2d): nni.ConvReLU2d,
-            (nn.Conv3d, nn.BatchNorm3d): nni.ConvReLU3d,
+            nn.Conv1d: nni.ConvReLU1d,
+            nn.Conv2d: nni.ConvReLU2d,
+            nn.Conv3d: nni.ConvReLU3d,
         }
-        fused_module = map_to_fused_module_eval.get((type(conv), type(bn)), None)
+        fused_module = map_to_fused_module_eval.get(type(conv), None)
         if fused_module is not None:
             fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
             return fused_module(fused_conv, relu)
