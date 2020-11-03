@@ -1005,7 +1005,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self._test_unary(lambda x: x.clone(memory_format=torch.preserve_format), TensorFactory.randn, 'cpu')
 
         B0 = 3
-        msg = "NYI: Tensor.clone\(memory_format\) with memory_format not equal to"
+        msg = r'NYI: Tensor.clone\(memory_format\) with memory_format not equal to'
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(lambda x: x.clone(memory_format=torch.contiguous_format))(torch.randn(B0))
         with self.assertRaisesRegex(RuntimeError, msg):
