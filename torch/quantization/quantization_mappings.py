@@ -48,7 +48,9 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
+    nniqat.ConvBn1d: nnq.Conv1d,
     nniqat.ConvBn2d: nnq.Conv2d,
+    nniqat.ConvBnReLU1d: nniq.ConvReLU1d,
     nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.LinearReLU: nniq.LinearReLU,
@@ -62,7 +64,9 @@ DEFAULT_QAT_MODULE_MAPPINGS = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Linear: nnqat.Linear,
     # Intrinsic modules:
+    nni.ConvBn1d: nniqat.ConvBn1d,
     nni.ConvBn2d: nniqat.ConvBn2d,
+    nni.ConvBnReLU1d: nniqat.ConvBnReLU1d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
     nni.ConvReLU2d: nniqat.ConvReLU2d,
     nni.LinearReLU: nniqat.LinearReLU

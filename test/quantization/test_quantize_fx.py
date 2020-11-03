@@ -103,14 +103,15 @@ class TestFuseFx(QuantizationTestCase):
         # train mode fuse_fx is called in prepare_qat_fx
         m = prepare_qat_fx(m, {})
         expected_nodes = [
+            ns.call_module(nni.ConvBn1d),
             ns.call_module(nni.ConvBn2d),
             ns.call_module(nni.ConvBn3d),
+            ns.call_module(nni.ConvBnReLU1d),
             ns.call_module(nni.ConvBnReLU2d),
             ns.call_module(nni.ConvBnReLU3d),
         ]
-        # ConvBnRelu1d is not fused
         expected_occurrence = {
-            ns.call_module(nn.ReLU): 1
+            ns.call_module(nn.ReLU): 0
         }
         self.checkGraphModuleNodes(
             m,
@@ -123,14 +124,16 @@ class TestFuseFx(QuantizationTestCase):
         # fuse_fx is a top level api and only supports eval mode
         m = fuse_fx(m)
         expected_nodes = [
+            ns.call_module(nn.Conv1d),
             ns.call_module(nn.Conv2d),
             ns.call_module(nn.Conv3d),
+            ns.call_module(nni.ConvReLU1d),
             ns.call_module(nni.ConvReLU2d),
             ns.call_module(nni.ConvReLU3d),
         ]
         # ConvBnRelu1d is not fused
         expected_occurrence = {
-            ns.call_module(nn.ReLU): 1
+            ns.call_module(nn.ReLU): 0
         }
         self.checkGraphModuleNodes(
             m,
@@ -300,6 +303,60 @@ class TestQuantizeFx(QuantizationTestCase):
         weight_obs(quantized.weight)
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
+
+    def test_conv_bn_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1d = nn.Conv1d(1, 1, 1)
+                self.conv2d = nn.Conv2d(1, 1, 1)
+                self.conv3d = nn.Conv3d(1, 1, 1)
+                self.bn1d = nn.BatchNorm1d(1)
+                self.bn2d = nn.BatchNorm2d(1)
+                self.bn3d = nn.BatchNorm3d(1)
+                self.conv1d2 = nn.Conv1d(1, 1, 1)
+                self.conv2d2 = nn.Conv2d(1, 1, 1)
+                self.conv3d2 = nn.Conv3d(1, 1, 1)
+                self.bn1d2 = nn.BatchNorm1d(1)
+                self.bn2d2 = nn.BatchNorm2d(1)
+                self.bn3d2 = nn.BatchNorm3d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv1d(x)
+                x = self.bn1d(x)
+                x = self.conv2d(x)
+                x = self.bn2d(x)
+                x = self.conv3d(x)
+                x = self.bn3d(x)
+                x = self.conv1d2(x)
+                x = self.bn1d2(x)
+                x = self.relu(x)
+                x = self.conv2d2(x)
+                x = self.bn2d2(x)
+                x = self.relu(x)
+                x = self.conv3d2(x)
+                x = self.bn3d2(x)
+                x = self.relu(x)
+                return x
+
+        # test train mode
+        m = M().train()
+        m = prepare_qat_fx(m, {"": default_qat_qconfig})
+        m = convert_fx(m)
+        expected_nodes = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv1d),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method("dequantize"),
+            ns.call_module(nni.ConvBn3d),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.ConvReLU1d),
+            ns.call_module(nniq.ConvReLU2d),
+            ns.call_method("dequantize"),
+            ns.call_module(nni.ConvBnReLU3d),
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=expected_nodes)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):

@@ -749,7 +749,7 @@ class Quantizer:
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:
                 # copy quantized or non-quantized node
-                env[node.name] = self.quantized_graph.node_copy(node, load_x)
+                env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
 
         # remove activation post process
         act_post_process_removed_graph = Graph()
