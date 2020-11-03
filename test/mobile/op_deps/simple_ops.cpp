@@ -89,7 +89,7 @@ TORCH_LIBRARY(_test, m) {
   m.def("DD", TORCH_FN(DD_op));
 }
 
-TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(_test, m) {
+TORCH_LIBRARY_FRAGMENT(_test, m) {
   m.def("EE(Tensor self) -> Tensor");
   m.def("FF(Tensor self) -> Tensor");
   m.def("GG(Tensor self) -> Tensor");
