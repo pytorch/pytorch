@@ -19005,7 +19005,7 @@ else:
             np_fn = partial(np.nansum, dtype=np_out_dtype)
             if (inp_dtype, out_dtype) == (torch.uint8, torch.float16):
                 # 25504.0 vs 25536.0
-                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=50, rtol=0)
+                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=0, rtol=0.002)
             else:
                 self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
