@@ -57,9 +57,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   std::vector<KinetoEvent> kineto_events_;
 };
 
-ProfilerThreadLocalState* getProfilerTLSState() {
+KinetoThreadLocalState* getProfilerTLSState() {
   const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
-  return dynamic_cast<ProfilerThreadLocalState*>(state.get());
+  return dynamic_cast<KinetoThreadLocalState*>(state.get());
 }
 
 void pushProfilingCallbacks() {
@@ -158,7 +158,7 @@ void enableProfiler(
 
   auto state_ptr = getProfilerTLSState();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
-  auto state = std::make_shared<ProfilerThreadLocalState>(config);
+  auto state = std::make_shared<KinetoThreadLocalState>(config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   if (activities.count(ActivityType::CPU)) {
@@ -176,7 +176,7 @@ ProfilerResult disableProfiler() {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
 
-  auto state_ptr = static_cast<ProfilerThreadLocalState*>(state.get());
+  auto state_ptr = static_cast<KinetoThreadLocalState*>(state.get());
   TORCH_CHECK(state_ptr && state_ptr->config().state == ProfilerState::KINETO,
       "Can't disable Kineto profiler when it's not running");
 
