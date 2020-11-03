@@ -88,7 +88,7 @@ void pushProfilingCallbacks() {
         libkineto::api().pushCorrelationId(corr_id);
 
         auto ctx_ptr = std::make_unique<KinetoObserverContext>();
-        ctx_ptr->startUs = getTime() / 1000;
+        ctx_ptr->startUs = getTimeUs();
         ctx_ptr->correlationId = corr_id;
         ctx_ptr->startThreadId = at::RecordFunction::currentThreadId();
 
@@ -194,7 +194,7 @@ void enableProfiler(
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   state->cpu_trace = std::make_unique<libkineto::CpuTraceBuffer>();
-  state->cpu_trace->span.startTime = getTime() / 1000;
+  state->cpu_trace->span.startTime = getTimeUs();
   state->cpu_trace->gpuOpCount = -1;
   state->cpu_trace->span.name = "PyTorch Profiler";
 
@@ -229,7 +229,7 @@ ProfilerResult disableProfiler() {
 
   state_ptr->mark("__stop_profile");
 
-  state_ptr->cpu_trace->span.endTime = getTime() / 1000;
+  state_ptr->cpu_trace->span.endTime = getTimeUs();
 
   libkineto::api().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
