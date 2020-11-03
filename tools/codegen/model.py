@@ -368,7 +368,8 @@ class FunctionSchema:
         mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
         for ret in mutable_returns:
             assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
-                "All mutable returns must be aliased either to a keyword argument, or to \"self\""
+                "All mutable returns must be aliased either to a keyword argument, or to \"self\". " \
+                "Did you forget to mark an out argument as keyword-only?"
         if self.out_arguments:
             assert len(self.out_arguments) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"
