@@ -80,7 +80,7 @@ Select from: {', '.join(all_categories)}
         print(view)
         choice = None
         while choice is None:
-            value = input('category> ')
+            value = input('category> ').strip()
             if len(value) == 0:
                 choice = commit.category
                 continue

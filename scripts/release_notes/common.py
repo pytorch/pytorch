@@ -24,6 +24,11 @@ categories = [
     'opbench',
     'profiler',
     'dispatcher',
+    'releng',
+    'fx',
+    'code_coverage',
+    'package',
+    'vulkan',
     'skip',
 ]
 
@@ -39,6 +44,9 @@ subcategories = [
     'memory_format_frontend',
     'complex_frontend',
     'th_aten_frontend',
+    'typing_frontend',
+    'vmap_frontend',
+    'foreach_frontend',
     'misc',
 ]
 
