@@ -344,10 +344,10 @@ Tensor new_empty(
 Tensor new_empty_strided(
     const Tensor& self,
     IntArrayRef size,
-    IntArrayRef strides,
+    IntArrayRef stride,
     const TensorOptions& options
     ) {
-  return at::empty_strided(size, strides, self.options().merge_in(options));
+  return at::empty_strided(size, stride, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

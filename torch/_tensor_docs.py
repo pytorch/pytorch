@@ -114,9 +114,9 @@ Example::
 
 add_docstr_all('new_empty_strided',
                r"""
-new_empty_strided(size, strides, dtype=None, device=None, requires_grad=False) -> Tensor
+new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False) -> Tensor
 
-Returns a Tensor of size :attr:`size` and strides :attr:`strides` filled with
+Returns a Tensor of size :attr:`size` and strides :attr:`stride` filled with
 uninitialized data. By default, the returned Tensor has the same
 :class:`torch.dtype` and :class:`torch.device` as this tensor.
 
