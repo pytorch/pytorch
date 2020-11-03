@@ -377,8 +377,8 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
     // If the values in range cannot be represented by input dtype, we avoid
     // promoting the tensor
     // and instead output a warning.
-    if (static_cast<double>(min) != range.value()[0] ||
-        static_cast<double>(max) != range.value()[1]) {
+    if (static_cast<double>(minvalue) != range.value()[0] ||
+        static_cast<double>(maxvalue) != range.value()[1]) {
       TORCH_WARN_ONCE(
           "Value in range cannot be represented by tensor's scalar type, casting to ",
           self.scalar_type());
@@ -433,7 +433,7 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
 
   if (density) { // Compute the density
     hist = hist.to(ScalarType::Double);
-    double bin_volume = (static_cast<double>(max) - static_cast<double>(min)) /
+    double bin_volume = (static_cast<double>(maxvalue) - static_cast<double>(minvalue)) /
         static_cast<double>(nbins);
     hist /= bin_volume * hist.sum();
   }
