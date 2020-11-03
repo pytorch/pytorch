@@ -14,33 +14,6 @@ from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.nn.utils import fuse_conv_bn_weights
 
-
-def from_float_helper(cls, mod):
-    if hasattr(mod, "weight_fake_quant"):
-        # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
-        # ".from_float only works for " + cls.__QAT_MODULE.__name__
-        if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
-            mod.weight, mod.bias = fuse_conv_bn_weights(
-                mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
-                mod.bn.eps, mod.bn.weight, mod.bn.bias)
-            assert hasattr(mod, "activation_post_process"), \
-                "Input QAT module must have observer attached"
-        weight_post_process = mod.weight_fake_quant
-        activation_post_process = mod.activation_post_process
-    else:
-        assert type(mod) == cls._FLOAT_MODULE, \
-            " nnq." + cls.__name__ + ".from_float only works for " + \
-            cls._FLOAT_MODULE.__name__
-        assert hasattr(mod, "qconfig"), \
-            "Input float module must have qconfig defined."
-        if type(mod) == _NNI_CONV_RELU_MODULE:
-            activation_post_process = mod[1].activation_post_process
-            mod = mod[0]
-        else:
-            activation_post_process = mod.activation_post_process
-        weight_post_process = mod.qconfig.weight()
-    return cls.get_qconv(mod, activation_post_process, weight_post_process)
-
 class _ConvNd(nn.Module):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
@@ -190,6 +163,33 @@ class _ConvNd(nn.Module):
         qconv.zero_point = int(act_zp)
         return qconv
 
+    @staticmethod
+    def from_float(cls, mod):
+        if hasattr(mod, "weight_fake_quant"):
+            # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
+            # ".from_float only works for " + cls.__QAT_MODULE.__name__
+            if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
+                mod.weight, mod.bias = fuse_conv_bn_weights(
+                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
+            assert hasattr(mod, "activation_post_process"), \
+                "Input QAT module must have observer attached"
+            weight_post_process = mod.weight_fake_quant
+            activation_post_process = mod.activation_post_process
+        else:
+            assert type(mod) == cls._FLOAT_MODULE, \
+                " nnq." + cls.__name__ + ".from_float only works for " + \
+                cls._FLOAT_MODULE.__name__
+            assert hasattr(mod, "qconfig"), \
+                "Input float module must have qconfig defined."
+            if type(mod) == cls._NNI_CONV_RELU_MODULE:
+                activation_post_process = mod[1].activation_post_process
+                mod = mod[0]
+            else:
+                activation_post_process = mod.activation_post_process
+            weight_post_process = mod.qconfig.weight()
+        return cls.get_qconv(mod, activation_post_process, weight_post_process)
+
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over a quantized input signal composed of
     several quantized input planes.
@@ -272,7 +272,7 @@ class Conv1d(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
-        return from_float_helper(cls, mod)
+        return _ConvNd.from_float(cls, mod)
 
 
 class Conv2d(_ConvNd):
@@ -359,7 +359,7 @@ class Conv2d(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
-        return from_float_helper(cls, mod)
+        return _ConvNd.from_float(cls, mod)
 
 
 class Conv3d(_ConvNd):

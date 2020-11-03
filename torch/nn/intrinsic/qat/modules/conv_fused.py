@@ -405,9 +405,9 @@ class ConvReLU2d(nnqat.Conv2d):
         return super(ConvReLU2d, cls).from_float(mod)
 
 def update_bn_stats(mod):
-    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+    if type(mod) in set([ConvbnReLU1d, ConvBnReLU2d, ConvBn1d, ConvBn2d]):
         mod.update_bn_stats()
 
 def freeze_bn_stats(mod):
-    if type(mod) in set([ConvBnReLU2d, ConvBn2d]):
+    if type(mod) in set([ConvbnReLU1d, ConvBnReLU2d, ConvBn1d, ConvBn2d]):
         mod.freeze_bn_stats()

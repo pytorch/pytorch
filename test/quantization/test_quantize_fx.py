@@ -305,58 +305,54 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(qparams, ref_qparams)
 
     def test_conv_bn_relu(self):
+        convs = {
+            1: nn.Conv1d,
+            2: nn.Conv2d,
+            3: nn.Conv3d,
+        }
+        bns = {
+            1: nn.BatchNorm1d,
+            2: nn.BatchNorm1d,
+            3: nn.BatchNorm1d,
+        }
+        quantized_convs = {
+            1: nnq.Conv1d,
+            2: nnq.Conv2d,
+            3: nnq.Conv3d,
+        }
+        quantized_conv_relus = {
+            1: nniq.ConvReLU1d,
+            2: nniq.ConvReLU2d,
+            3: nniq.ConvReLU3d,
+        }
+
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim, has_relu):
                 super().__init__()
-                self.conv1d = nn.Conv1d(1, 1, 1)
-                self.conv2d = nn.Conv2d(1, 1, 1)
-                self.conv3d = nn.Conv3d(1, 1, 1)
-                self.bn1d = nn.BatchNorm1d(1)
-                self.bn2d = nn.BatchNorm2d(1)
-                self.bn3d = nn.BatchNorm3d(1)
-                self.conv1d2 = nn.Conv1d(1, 1, 1)
-                self.conv2d2 = nn.Conv2d(1, 1, 1)
-                self.conv3d2 = nn.Conv3d(1, 1, 1)
-                self.bn1d2 = nn.BatchNorm1d(1)
-                self.bn2d2 = nn.BatchNorm2d(1)
-                self.bn3d2 = nn.BatchNorm3d(1)
+                self.conv = convs[dim](3, 3, 3)
+                self.bn = bns[dim](3)
                 self.relu = nn.ReLU()
+                self.has_relu = has_relu
 
             def forward(self, x):
-                x = self.conv1d(x)
-                x = self.bn1d(x)
-                x = self.conv2d(x)
-                x = self.bn2d(x)
-                x = self.conv3d(x)
-                x = self.bn3d(x)
-                x = self.conv1d2(x)
-                x = self.bn1d2(x)
-                x = self.relu(x)
-                x = self.conv2d2(x)
-                x = self.bn2d2(x)
-                x = self.relu(x)
-                x = self.conv3d2(x)
-                x = self.bn3d2(x)
-                x = self.relu(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                if self.has_relu:
+                    x = self.relu(x)
                 return x
 
+        options = itertools.product([1, 2], [True, False], self.static_quant_types)
         # test train mode
-        m = M().train()
-        m = prepare_qat_fx(m, {"": default_qat_qconfig})
-        m = convert_fx(m)
-        expected_nodes = [
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nnq.Conv1d),
-            ns.call_module(nnq.Conv2d),
-            ns.call_method("dequantize"),
-            ns.call_module(nni.ConvBn3d),
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nniq.ConvReLU1d),
-            ns.call_module(nniq.ConvReLU2d),
-            ns.call_method("dequantize"),
-            ns.call_module(nni.ConvBnReLU3d),
-        ]
-        self.checkGraphModuleNodes(m, expected_node_list=expected_nodes)
+        for dim, has_relu, quant_type in options:
+            expected_node = ns.call_module(
+                quantized_conv_relus[dim] if has_relu
+                else quantized_convs[dim])
+            self.checkGraphModeFxOp(
+                M(dim, has_relu),
+                self.img_data_dict[dim],
+                quant_type,
+                expected_node=expected_node,
+            )
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):
