@@ -22,6 +22,10 @@
 
 #include <c10/core/DeviceType.h>
 
+#ifdef USE_KINETO
+#include "libkineto.h"
+#endif
+
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
@@ -422,16 +426,31 @@ TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
+#ifdef USE_KINETO
 struct TORCH_API KinetoEvent {
   KinetoEvent(std::unique_ptr<TraceActivity>&& activity) : activity_(activity) {
     TORCH_CHECK(activity_);
   }
 
-  std::string name() const;
-  uint64_t deviceIndex() const;
-  uint64_t startUs() const;
-  uint64_t durationUs() const;
-  uint64_t correlationId() const;
+  std::string name() const override  {
+    return activity_->name();
+  }
+
+  uint64_t deviceIndex() const override {
+    return activity_->deviceId();
+  }
+
+  uint64_t startUs() const override {
+    return activity_->timestamp();
+  }
+
+  uint64_t durationUs() const override {
+    return activity_->duration();
+  }
+
+  uint64_t correlationId() const override {
+    return activity_->correlationId();
+  }
 
   int64_t threadId() const {
     return thread_id_;
@@ -534,6 +553,7 @@ TORCH_API bool kinetoAvailable();
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
+#endif // USE_KINETO
 
 // Usage:
 //   {

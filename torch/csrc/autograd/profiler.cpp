@@ -21,10 +21,6 @@
 
 #include <iostream>
 
-#ifdef USE_KINETO
-#include "libkineto.h"
-#endif
-
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
@@ -180,48 +176,6 @@ size_t next_correlation_id() {
 size_t cur_correlation_id() {
   return corr_id_;
 }
-
-#ifdef USE_KINETO
-std::string Kineto::name() const override  {
-  return activity_->name();
-}
-
-uint64_t Kineto::deviceIndex() const override {
-  return activity_->deviceId();
-}
-
-uint64_t Kineto::startUs() const override {
-  return activity_->timestamp();
-}
-
-uint64_t Kineto::durationUs() const override {
-  return activity_->duration();
-}
-
-uint64_t Kineto::correlationId() const override {
-  return activity_->correlationId();
-}
-#else
-std::string Kineto::name() const override  {
-  TORCH_CHECK(false, "Supported only with Kineto");
-}
-
-uint64_t Kineto::deviceIndex() const override {
-  TORCH_CHECK(false, "Supported only with Kineto");
-}
-
-uint64_t Kineto::startUs() const override {
-  TORCH_CHECK(false, "Supported only with Kineto");
-}
-
-uint64_t Kineto::durationUs() const override {
-  TORCH_CHECK(false, "Supported only with Kineto");
-}
-
-uint64_t Kineto::correlationId() const override {
-  TORCH_CHECK(false, "Supported only with Kineto");
-}
-#endif
 
 // Profiler state
 struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
@@ -502,7 +456,7 @@ ProfilerThreadLocalState* getProfilerTLSState() {
   return dynamic_cast<ProfilerThreadLocalState*>(state.get());
 }
 
-void pushProfilingCallbacks() {
+void pushProfilingCallbacksLegacy() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
@@ -511,12 +465,6 @@ void pushProfilingCallbacks() {
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
-#ifdef USE_KINETO
-        if (state_ptr->config().state == ProfilerState::KINETO) {
-          libkineto::api().pushCorrelationId(next_correlation_id());
-          return;
-        }
-#endif
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
         if (record_cuda && disable_cuda_profiling.find(fn.name().str()) != disable_cuda_profiling.end()) {
@@ -549,19 +497,38 @@ void pushProfilingCallbacks() {
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
-#ifdef USE_KINETO
-        if (state_ptr->config().state == ProfilerState::KINETO) {
-          state_ptr->reportKinetoClientActivity(fn);
-          libkineto::api().popCorrelationId();
-          return;
-        }
-#endif
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
         if (record_cuda && disable_cuda_profiling.find(fn.name().str()) != disable_cuda_profiling.end()) {
           record_cuda = false;
         }
         state_ptr->popRange(fn, record_cuda);
+      })
+    .needsInputs(state_ptr->config().report_input_shapes)
+    .needsIds(true));
+  state_ptr->setCallbackHandle(handle);
+}
+
+#ifdef USE_KINETO
+void pushProfilingCallbacks() {
+  auto state_ptr = getProfilerTLSState();
+  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
+  auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
+      [](const at::RecordFunction& fn) {
+        auto state_ptr = getProfilerTLSState();
+        if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
+          return;
+        }
+
+        libkineto::api().pushCorrelationId(next_correlation_id());
+      },
+      [](const at::RecordFunction& fn) {
+        auto state_ptr = getProfilerTLSState();
+        if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
+          return;
+        }
+        state_ptr->reportKinetoClientActivity(fn);
+        libkineto::api().popCorrelationId();
       })
     .needsInputs(state_ptr->config().report_input_shapes)
     .needsIds(true));
@@ -669,7 +636,7 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
   auto state = std::make_shared<ProfilerThreadLocalState>(new_config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-  pushProfilingCallbacks();
+  pushProfilingCallbacksLegacy();
 
   if (new_config.state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -719,6 +686,7 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
   return state_ptr->consolidate();
 }
 
+#ifdef USE_KINETO
 void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {
@@ -734,12 +702,10 @@ void enableProfiler(
     pushProfilingCallbacks();
   }
 
-#ifdef USE_KINETO
   while (!libkineto::api().traceActive()) { // sync?
     libkineto::api().startTrace();
   }
   //TORCH_CHECK(libkineto::api().traceActive());
-#endif
 
   state->mark("__start_profile", false);
 }
@@ -756,47 +722,16 @@ ProfilerResult disableProfiler() {
     at::removeCallback(state_ptr->callbackHandle());
   }
 
-#ifdef USE_KINETO
   if (state_ptr->config().state == ProfilerState::KINETO) {
-    auto k_events = libkineto::api().stopTrace();
-    std::unordered_map<uint32_t, std::unordered_map<uint32_t, std::vector<Event>>> events;
-    for (auto& k_evt : k_events) {
-      auto& evt_list = events[k_evt.deviceId][k_evt.threadId];
-      Event push_evt(
-          EventKind::PushRange,
-          at::StringView(k_evt.name),
-          k_evt.threadId,
-          false,
-          k_evt.correlationId);
-      push_evt.setDeviceId(k_evt.deviceId);
-      push_evt.setCpuUs(k_evt.startUs);
-      push_evt.setCorrelationId(k_evt.correlationId);
-      evt_list.emplace_back(std::move(push_evt));
-
-      Event pop_evt(
-          EventKind::PopRange,
-          at::StringView(k_evt.name),
-          k_evt.threadId,
-          false,
-          k_evt.correlationId);
-      pop_evt.setDeviceId(k_evt.deviceId);
-      pop_evt.setCpuUs(k_evt.endUs);
-      pop_evt.setCorrelationId(k_evt.correlationId);
-      evt_list.emplace_back(std::move(pop_evt));
-    }
-    std::vector<std::vector<Event>> events_list;
-    for (const auto&  it : events) {
-      for (const auto& it2 : it.second) {
-        events_list.emplace_back(it2.second);
-      }
-    }
+    auto trace = libkineto::api().stopTrace();
+    //
   }
-#endif
 
   state_ptr->mark("__stop_profile");
   // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }
+#endif
 
 void addEventList(std::vector<Event>&& profiledEvents) {
   auto state_ptr = getProfilerTLSState();
