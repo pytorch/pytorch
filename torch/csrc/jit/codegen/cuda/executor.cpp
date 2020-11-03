@@ -511,7 +511,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     kernel_arguments.appendPhiloxRNGSeed(rand_offset);
   }
 
-  {
+  if (execute_kernel_) {
     FUSER_PERF_SCOPE("cuLaunchKernel");
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
         compiled_kernel_.function,

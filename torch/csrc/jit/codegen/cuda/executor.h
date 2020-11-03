@@ -57,10 +57,12 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
     executor_entry_lookup_.erase(cache_id);
   }
 
-  // TODO: strides would also be important when we handle permutations in
-  //       codegen.
   // struct used to hold necessary information to launch compiled kernel on a
   // given input set.
+  //
+  // TODO: strides would also be important when we handle permutations in
+  //       codegen.
+  //
   struct ExecutorEntry {
     bool init = false;
     LaunchParams launch_params;
@@ -75,6 +77,11 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
 
   kir::Kernel* kernel() const {
     return lowered_.kernel();
+  }
+
+  //! Internal knob used for debugging/profiling only
+  void setExecuteKernelFlag(bool execute_kernel) {
+    execute_kernel_ = execute_kernel;
   }
 
  private:
@@ -142,6 +149,10 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   // lookup table to take short cut to retrieve recorded information in order to
   // launch kernels without re-inference parameters.
   std::unordered_map<size_t, ExecutorEntry> executor_entry_lookup_;
+
+  // Profiling support: knob to control wheter we actually execute the
+  // kernel on the GPU or not
+  bool execute_kernel_ = true;
 };
 
 } // namespace cuda
