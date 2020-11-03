@@ -367,7 +367,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
         if not IS_DARWIN:
             return
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
-        otool_cmds = subprocess.check_output(['otool', '-l', os.path.join(lib_dir, 'libtorch_cpu.dylib')]).decode("utf-8").split("\n")
+        libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
+        libtorch_path = os.path.join(lib_dir, 'libtorch.dylib')
+        libtorch_python_path = os.path.join(lib_dir, 'libtorch_python.dylib')
+        otool_cmds = subprocess.check_output(['otool', '-l', libtorch_cpu_path]).decode("utf-8").split("\n")
         rpaths, libs = [], []
         for idx, line in enumerate(otool_cmds):
           if line.strip() == 'cmd LC_LOAD_DYLIB':
@@ -389,6 +392,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
             self.copy_file(source_lib, target_lib)
+        # Delete rpath from those libs
+        for rpath in rpaths:
+            for lib in [libtorch_cpu_path, libtorch_path, libtorch_python_path]:
+                subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, lib])
 
 
     def run(self):
