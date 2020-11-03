@@ -48,6 +48,7 @@ using at::Scalar;
 using at::ScalarType;
 using at::Tensor;
 using c10::Stream;
+using at::ArrayRef;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
