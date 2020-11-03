@@ -1,5 +1,6 @@
 import sys
 import io
+import gc
 import inspect
 import math
 import random
@@ -9564,6 +9565,7 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
+    @onlyCUDA
     @largeCUDATensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -9572,8 +9574,11 @@ class TestTorchDeviceType(TestCase):
         result = input_.sum(dim=0)
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
-        a = torch.zeros(8, 1, 128, 1024, 1024, device=device)
-        self.assertEqual(a.sum(1, keepdim=True), a)
+        gc.collect(); torch.cuda.empty_cache()
+        a = torch.randn(8, 1, 128, 1024, 1024, device=device, dtype=torch.half)
+        self.assertEqual((a.sum(1) - a.squeeze()).abs().max(), 0)
+        gc.collect(); torch.cuda.empty_cache()
+        self.assertEqual((a.sum(1, keepdim=True) - a).abs().max(), 0)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
