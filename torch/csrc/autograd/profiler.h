@@ -19,7 +19,6 @@
 #endif
 
 #include <ATen/record_function.h>
-
 #include <c10/core/DeviceType.h>
 
 #ifdef USE_KINETO
@@ -175,7 +174,7 @@ struct TORCH_API LegacyEvent {
     record(record_cuda);
   }
 
-  // Constructor to be used in conjunction with v::fromIValue.
+  // Constructor to be used in conjunction with LegacyEvent::fromIValue.
   LegacyEvent(
       EventKind kind,
       at::StringView name,
@@ -219,6 +218,16 @@ struct TORCH_API LegacyEvent {
 
   void record(bool record_cuda);
 
+  std::string kindStr() const {
+    switch (kind_) {
+      case EventKind::Mark: return "mark";
+      case EventKind::PushRange: return "push";
+      case EventKind::PopRange: return "pop";
+      case EventKind::MemoryAlloc: return "memory_alloc";
+    }
+    throw std::runtime_error("unknown event kind");
+  }
+
   const char* name() const {
     return name_.str();
   }
@@ -239,14 +248,14 @@ struct TORCH_API LegacyEvent {
     return cpu_ns_ / (1000.0);
   }
 
-  void setCpuUs(double cpu_us) {
-    cpu_ns_ = (int64_t)(cpu_us * 1000);
-  }
-
   double cudaElapsedUs(const LegacyEvent& e) const;
 
   bool hasCuda() const {
     return cuda_event != nullptr || (isRemote() && device_ != -1);
+  }
+
+  int device() const {
+    return device_;
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
@@ -336,21 +345,11 @@ struct TORCH_API LegacyEvent {
     scope_ = scope;
   }
 
-  std::string kindStr() const {
-    switch (kind_) {
-      case EventKind::Mark: return "mark";
-      case EventKind::PushRange: return "push";
-      case EventKind::PopRange: return "pop";
-      case EventKind::MemoryAlloc: return "memory_alloc";
-    }
-    throw std::runtime_error("unknown event kind");
-  }
-
  private:
-  EventKind kind_;
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
+  EventKind kind_;
   uint64_t thread_id_;
   uint64_t fwd_thread_id_;
   at::RecordFunctionHandle handle_ {0};
@@ -366,7 +365,6 @@ struct TORCH_API LegacyEvent {
 
   std::vector<std::string> stack_;
   uint8_t scope_;
-
   uint64_t correlation_id_;
 };
 
@@ -412,7 +410,6 @@ struct RangeEventList {
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfilerLegacy(const ProfilerConfig&);
-
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
 TORCH_API thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> profilerDisableOptions = c10::nullopt);
 
@@ -541,7 +538,6 @@ struct TORCH_API KinetoEvent {
   uint64_t startUs_ = 0;
   uint64_t durationUs_ = 0;
   uint64_t correlationId_ = 0;
-
 };
 
 struct TORCH_API ProfilerResult {
@@ -557,6 +553,7 @@ struct TORCH_API ProfilerResult {
   const thread_event_lists& legacy_events() const {
     return legacy_events_;
   }
+
  private:
   std::vector<std::vector<KinetoEvent>> events_;
   thread_event_lists legacy_events_; // tensor mem alloc, start/stop
