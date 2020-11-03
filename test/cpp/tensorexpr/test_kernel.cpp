@@ -335,6 +335,110 @@ void testKernel_4() {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
+  {
+    // Test that we throw an error when input list for aten::cat is empty
+    KernelScope kernel_scope;
+
+    const auto graph_string = R"IR(
+      graph():
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct()
+        %r : Tensor = aten::cat(%inputs, %dim)
+        return (%r))IR";
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+    auto compile = [&]() {
+      TensorExprKernel k(graph);
+      k.getCodeGenStmt();
+    };
+    ASSERT_THROWS_WITH(compile(), "Empty input list is passed to aten::cat");
+  }
+  {
+    // Test that we throw an error when 'dim' passed to aten::cat is invalid
+    KernelScope kernel_scope;
+
+    const auto ir_dim_99 = R"IR(
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 3, 2, strides=[6, 2, 1], device=cpu)):
+        %dim : int = prim::Constant[value=99]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b)
+        %r : Float(5, 3, 2, strides=[6, 2, 1], device=cpu) = aten::cat(%inputs, %dim)
+        return (%r))IR";
+    const auto ir_dim_minus_6 = R"IR(
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 3, 2, strides=[6, 2, 1], device=cpu)):
+        %dim : int = prim::Constant[value=-6]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b)
+        %r : Float(5, 3, 2, strides=[6, 2, 1], device=cpu) = aten::cat(%inputs, %dim)
+        return (%r))IR";
+
+    auto compile = [](const std::string& graph_string) {
+      auto graph = std::make_shared<Graph>();
+      parseIR(graph_string, &*graph);
+      TensorExprKernel k(graph);
+      k.getCodeGenStmt();
+    };
+    ASSERT_THROWS_WITH(compile(ir_dim_99), "invalid 'dim' value in aten::cat");
+    ASSERT_THROWS_WITH(
+        compile(ir_dim_minus_6), "invalid 'dim' value in aten::cat");
+  }
+}
+
+void testKernelCatInputTypesPromotion() {
+  {
+    // Test that we properly promote input types for aten::cat
+    KernelScope kernel_scope;
+
+    const auto graph_string = R"IR(
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 7, 2, strides=[14, 2, 1], device=cpu),
+            %c : Double(5, 9, 2, strides=[18, 2, 1], device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Tensor = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        return (%r))IR";
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kDouble));
+    auto ref = at::cat({a, b, c}, 1);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a, b, c};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_cat)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+
+    // Check sizes
+    CHECK_EQ(o.sizes().size(), ref.sizes().size());
+    CHECK_EQ(o.dtype(), ref.dtype());
+    size_t num_el = 1;
+    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+      CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+      num_el *= ref.sizes()[idx];
+    }
+
+    // Check the contents
+    for (size_t i = 0; i < num_el; i++) {
+      CHECK_EQ(((double*)o.data_ptr())[i], ((double*)ref.data_ptr())[i]);
+    }
+  }
 }
 
 namespace {
@@ -447,9 +551,10 @@ void testKernelSumOneAxis() {
         // Check the IR we produced
         const std::string& verification_pattern =
             R"IR(
-# CHECK: int v = 0
-# CHECK: int v_1 = 0
-# CHECK: input1)IR";
+# CHECK: for (int v = 0; v <
+# CHECK-NEXT: sum
+# CHECK-NEXT: for (int v_1 = 0; v_1 <
+# CHECK-NEXT:   sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
         std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -508,7 +613,7 @@ void testKernelSumMultipleAxes() {
 # CHECK: int v_1 = 0
 # CHECK: int v_2 = 0
 # CHECK: int v_3 = 0
-# CHECK: input1)IR";
+# CHECK: sum)IR";
         torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
         std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -537,20 +642,17 @@ void testKernelSoftmax2D() {
 
   const std::string& verification_template =
       R"IR(
-        # CHECK: for (int i0 = 0; i0 < 5
-        # CHECK-NEXT: for (int i1 = 0; i1 < 3
-        # CHECK-NEXT: input1
-        # CHECK: for (int i${other_dim}_1 = 0; i${other_dim}_1 < ${other_dim_size}
-        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
+        # CHECK: for (int i${other_dim} = 0; i${other_dim} < ${other_dim_size}
+        # CHECK: for (int i${softmax_dim} = 0; i${softmax_dim} < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_max
-        # CHECK: for (int i0_2 = 0; i0_2 < 5
-        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 3
+        # CHECK: for (int i0_1 = 0; i0_1 < 5
+        # CHECK-NEXT: for (int i1_1 = 0; i1_1 < 3
         # CHECK-NEXT: aten_softmax_exp
-        # CHECK: for (int i${other_dim}_3 = 0; i${other_dim}_3 < ${other_dim_size}
-        # CHECK: for (int i${softmax_dim}_3 = 0; i${softmax_dim}_3 < ${softmax_dim_size}
+        # CHECK: for (int i${other_dim}_2 = 0; i${other_dim}_2 < ${other_dim_size}
+        # CHECK: for (int i${softmax_dim}_2 = 0; i${softmax_dim}_2 < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_sum
-        # CHECK: for (int i0_4 = 0; i0_4 < 5
-        # CHECK-NEXT: for (int i1_4 = 0; i1_4 < 3
+        # CHECK: for (int i0_3 = 0; i0_3 < 5
+        # CHECK-NEXT: for (int i1_3 = 0; i1_3 < 3
         # CHECK-NEXT: aten_softmax)IR";
 
   for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
@@ -601,25 +703,21 @@ void testKernelSoftmax3D() {
 
   const std::string& verification_template =
       R"IR(
-        # CHECK: for (int i0 = 0; i0 < 3
-        # CHECK-NEXT: for (int i1 = 0; i1 < 4
-        # CHECK-NEXT: for (int i2 = 0; i2 < 5
-        # CHECK-NEXT: input1
-        # CHECK: for (int i${dim1}_1 = 0; i${dim1}_1 < ${dim1_size}
-        # CHECK-NEXT: for (int i${dim2}_1 = 0; i${dim2}_1 < ${dim2_size}
-        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
+        # CHECK: for (int i${dim1} = 0; i${dim1} < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2} = 0; i${dim2} < ${dim2_size}
+        # CHECK: for (int i${softmax_dim} = 0; i${softmax_dim} < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_max
-        # CHECK: for (int i0_2 = 0; i0_2 < 3
-        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 4
-        # CHECK-NEXT: for (int i2_2 = 0; i2_2 < 5
+        # CHECK: for (int i0_1 = 0; i0_1 < 3
+        # CHECK-NEXT: for (int i1_1 = 0; i1_1 < 4
+        # CHECK-NEXT: for (int i2_1 = 0; i2_1 < 5
         # CHECK-NEXT: aten_softmax_exp
-        # CHECK: for (int i${dim1}_3 = 0; i${dim1}_3 < ${dim1_size}
-        # CHECK-NEXT: for (int i${dim2}_3 = 0; i${dim2}_3 < ${dim2_size}
-        # CHECK: for (int i${softmax_dim}_3 = 0; i${softmax_dim}_3 < ${softmax_dim_size}
+        # CHECK: for (int i${dim1}_2 = 0; i${dim1}_2 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_2 = 0; i${dim2}_2 < ${dim2_size}
+        # CHECK: for (int i${softmax_dim}_2 = 0; i${softmax_dim}_2 < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_sum
-        # CHECK: for (int i0_4 = 0; i0_4 < 3
-        # CHECK-NEXT: for (int i1_4 = 0; i1_4 < 4
-        # CHECK-NEXT: for (int i2_4 = 0; i2_4 < 5
+        # CHECK: for (int i0_3 = 0; i0_3 < 3
+        # CHECK-NEXT: for (int i1_3 = 0; i1_3 < 4
+        # CHECK-NEXT: for (int i2_3 = 0; i2_3 < 5
         # CHECK-NEXT: aten_softmax)IR";
 
   for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
@@ -678,30 +776,25 @@ void testKernelSoftmax4D() {
 
   const std::string& verification_template =
       R"IR(
-        # CHECK: for (int i0 = 0; i0 < 2
-        # CHECK-NEXT: for (int i1 = 0; i1 < 3
-        # CHECK-NEXT: for (int i2 = 0; i2 < 2
-        # CHECK-NEXT: for (int i3 = 0; i3 < 3
-        # CHECK-NEXT: input1
-        # CHECK: for (int i${dim1}_1 = 0; i${dim1}_1 < ${dim1_size}
-        # CHECK-NEXT: for (int i${dim2}_1 = 0; i${dim2}_1 < ${dim2_size}
-        # CHECK-NEXT: for (int i${dim3}_1 = 0; i${dim3}_1 < ${dim3_size}
-        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
+        # CHECK: for (int i${dim1} = 0; i${dim1} < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2} = 0; i${dim2} < ${dim2_size}
+        # CHECK-NEXT: for (int i${dim3} = 0; i${dim3} < ${dim3_size}
+        # CHECK: for (int i${softmax_dim} = 0; i${softmax_dim} < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_max
-        # CHECK: for (int i0_2 = 0; i0_2 < 2
-        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 3
-        # CHECK-NEXT: for (int i2_2 = 0; i2_2 < 2
-        # CHECK-NEXT: for (int i3_2 = 0; i3_2 < 3
+        # CHECK: for (int i0_1 = 0; i0_1 < 2
+        # CHECK-NEXT: for (int i1_1 = 0; i1_1 < 3
+        # CHECK-NEXT: for (int i2_1 = 0; i2_1 < 2
+        # CHECK-NEXT: for (int i3_1 = 0; i3_1 < 3
         # CHECK-NEXT: aten_softmax_exp
-        # CHECK: for (int i${dim1}_3 = 0; i${dim1}_3 < ${dim1_size}
-        # CHECK-NEXT: for (int i${dim2}_3 = 0; i${dim2}_3 < ${dim2_size}
-        # CHECK-NEXT: for (int i${dim3}_3 = 0; i${dim3}_3 < ${dim3_size}
-        # CHECK: for (int i${softmax_dim}_3 = 0; i${softmax_dim}_3 < ${softmax_dim_size}
+        # CHECK: for (int i${dim1}_2 = 0; i${dim1}_2 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_2 = 0; i${dim2}_2 < ${dim2_size}
+        # CHECK-NEXT: for (int i${dim3}_2 = 0; i${dim3}_2 < ${dim3_size}
+        # CHECK: for (int i${softmax_dim}_2 = 0; i${softmax_dim}_2 < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_sum
-        # CHECK: for (int i0_4 = 0; i0_4 < 2
-        # CHECK-NEXT: for (int i1_4 = 0; i1_4 < 3
-        # CHECK-NEXT: for (int i2_4 = 0; i2_4 < 2
-        # CHECK-NEXT: for (int i3_4 = 0; i3_4 < 3
+        # CHECK: for (int i0_3 = 0; i0_3 < 2
+        # CHECK-NEXT: for (int i1_3 = 0; i1_3 < 3
+        # CHECK-NEXT: for (int i2_3 = 0; i2_3 < 2
+        # CHECK-NEXT: for (int i3_3 = 0; i3_3 < 3
         # CHECK-NEXT: aten_softmax)IR";
 
   for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
@@ -747,6 +840,89 @@ void testKernelSoftmax4D() {
     ASSERT_EQ(output.sizes(), ref.sizes());
     ASSERT_TRUE(at::allclose(output, ref));
   }
+}
+
+void testKernelInlineProducerIntoReduction() {
+  KernelScope kernel_scope;
+
+  // Inline producer (mul) into reduction (sum).
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[3, 1], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : int = prim::Constant[value=7]()
+        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
+        return (%4))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  TensorExprKernel k(graph);
+  Stmt* s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced.
+  // We should have only one loop in the end.
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: for (int v = 0; v < 5;
+        # CHECK-NEXT: for (int v_1 = 0; v_1 < 3;
+        # CHECK-NEXT:   sum
+        # CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  auto ref = (a * b).sum(at::kDouble);
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
+void testKernelInlineReductionIntoConsumer() {
+  KernelScope kernel_scope;
+
+  // Inline producer (mul %2) into reduction (sum %4) but DO NOT
+  // inline the reduction into consumer (mul %4).
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[3, 1], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : int = prim::Constant[value=6]()
+        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
+        %5 : Float(5, 3, strides=[3, 1]) = aten::mul(%2, %4)
+        return (%5))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  TensorExprKernel k(graph);
+  Stmt* s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  // Check the IR we produced.
+  // We should have two loops in the end.
+  const std::string& verification_pattern =
+      R"IR(
+        # CHECK: for (int v = 0; v < 5;
+        # CHECK-NEXT: for (int v_1 = 0; v_1 < 3;
+        # CHECK-NEXT:   sum
+        # CHECK: for (int v_2 = 0; v_2 < 5;
+        # CHECK-NEXT: for (int v_3 = 0; v_3 < 3;
+        # CHECK-NEXT:   aten_mul
+        # CHECK-NOT: for)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+  auto ref = (a * b).sum(at::kFloat) * (a * b);
+  ASSERT_TRUE(at::allclose(o, ref));
 }
 
 } // namespace jit

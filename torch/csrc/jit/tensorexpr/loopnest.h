@@ -51,8 +51,8 @@ class TORCH_API LoopNest {
 
   void vectorize(Stmt*);
 
-  void computeInline(Stmt* s);
-  void computeInline(const Buf* b);
+  bool computeInline(Stmt* s);
+  bool computeInline(const Buf* b);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
@@ -69,6 +69,10 @@ class TORCH_API LoopNest {
 
   static void unroll(For* f, Stmt** unrolled);
   static void normalize(For* f, For** normalized);
+  static bool flatten(const std::vector<For*>& f, For** flattened);
+
+  // Get 'num' loops from the loopnest starting at 'f'.
+  static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
 
   // LoopOptions are propagated to tail.
   void sliceHead(For* f, int factor, For** head, For** tail);

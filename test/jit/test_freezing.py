@@ -7,6 +7,7 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 from torch.jit._recursive import wrap_cpp_module
+from typing import Any
 
 import io
 
@@ -1068,7 +1069,8 @@ class TestFreezing(JitTestCase):
         inp = torch.ones(1, 8, 32, 32)
         out1 = fmod.forward(inp)
         # FIXME: frozen module mutated from outside (original module).
-        smod.weight[0, 0, 0, 0] += 100.0
+        with torch.no_grad():
+            smod.weight[0, 0, 0, 0] += 100.0
         out2 = fmod.forward(inp)
         out3 = smod(inp)
         self.assertNotEqual(out1, out2)
@@ -1195,3 +1197,61 @@ class TestFreezing(JitTestCase):
             # It used to segfault while running frozen module.
             m_frozen_res = m_frozen(data)
             self.assertEqual(m_res, m_frozen_res)
+
+    def test_module_getattr_indirection(self):
+        @torch.jit.script
+        class ValHolder(object):
+            def __init__(self, val: int):
+                self.val: int = val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    mod = self.mod1
+                else:
+                    mod = self.mod2
+                return mod.val
+
+        mod = Mod()
+        mod.eval()
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod))
+        mod_eager = Mod()
+        self.assertEqual(mod_eager(True), frozen_mod(True))
+        self.assertEqual(mod_eager(False), frozen_mod(False))
+
+    def test_freeze_module_with_non_static_module_dict_index(self):
+        """
+        Test that a Module contained a non-static ModuleDict index
+        cannot be frozen.
+        """
+        @torch.jit.interface
+        class ModuleInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                pass
+
+        class ImplementsInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                if isinstance(inp, torch.Tensor):
+                    return torch.max(inp, dim=0)
+
+                return inp
+
+        # Test annotation of submodule.
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                value: ModuleInterface = self.d[key]
+                return value.forward(x)
+
+        m = torch.jit.script(Mod())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
+            mf = torch._C._freeze_module(m._c)

@@ -165,7 +165,8 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-
+# This future is needed to print Python2 EOL message
+from __future__ import print_function
 import sys
 if sys.version_info < (3,):
     print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -175,7 +176,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 6, 1)
+python_min_version = (3, 6, 2)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -193,6 +194,7 @@ import distutils.command.clean
 import distutils.sysconfig
 import filecmp
 import shutil
+import subprocess
 import os
 import json
 import glob
@@ -341,7 +343,6 @@ def build_deps():
 
 # the list of runtime dependencies required by this built package
 install_requires = [
-    'future',
     'typing_extensions',
     'dataclasses; python_version < "3.7"'
 ]
@@ -360,6 +361,47 @@ def check_pydep(importname, module):
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+
+    # Copy libiomp5.dylib inside the wheel package on OS X
+    def _embed_libiomp(self):
+        if not IS_DARWIN:
+            return
+        lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
+        libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
+        libtorch_path = os.path.join(lib_dir, 'libtorch.dylib')
+        libtorch_python_path = os.path.join(lib_dir, 'libtorch_python.dylib')
+        # Parse libtorch_cpu load commands
+        otool_cmds = subprocess.check_output(['otool', '-l', libtorch_cpu_path]).decode('utf-8').split('\n')
+        rpaths, libs = [], []
+        for idx, line in enumerate(otool_cmds):
+            if line.strip() == 'cmd LC_LOAD_DYLIB':
+                lib_name = otool_cmds[idx + 2].strip()
+                assert lib_name.startswith('name ')
+                libs.append(lib_name.split(' ', 1)[1].rsplit('(', 1)[0][:-1])
+
+            if line.strip() == 'cmd LC_RPATH':
+                rpath = otool_cmds[idx + 2].strip()
+                assert rpath.startswith('path ')
+                rpaths.append(rpath.split(' ', 1)[1].rsplit('(', 1)[0][:-1])
+
+        omp_lib_name = 'libiomp5.dylib'
+        if os.path.join('@rpath', omp_lib_name) not in libs:
+            return
+
+        # Copy libiomp5 from rpath locations
+        for rpath in rpaths:
+            source_lib = os.path.join(rpath, omp_lib_name)
+            if not os.path.exists(source_lib):
+                continue
+            target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
+            self.copy_file(source_lib, target_lib)
+            break
+
+        # Delete rpath from those libs
+        for rpath in rpaths:
+            for lib in [libtorch_cpu_path, libtorch_path, libtorch_python_path]:
+                subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, lib])
+
     def run(self):
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
         # accurate report on what is used and what is not.
@@ -408,6 +450,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
+
+        self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
@@ -731,6 +775,7 @@ if __name__ == '__main__':
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
+    version_range_max = max(sys.version_info[1], 8) + 1
     setup(
         name=package_name,
         version=version,
@@ -890,7 +935,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], 9)],
+        ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )
