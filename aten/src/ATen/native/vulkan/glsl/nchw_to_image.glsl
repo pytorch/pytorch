@@ -15,12 +15,16 @@ layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
+
   const ivec2 size = imageSize(uImage).xy;
+  const int plane = size.x * size.y;
+  const int block = 4 * plane;
+  const ivec4 offset = plane * ivec4(0, 1, 2, 3);
 
   if (all(lessThan(pos.xy, size))) {
-    const int plane = size.x * size.y;
-    const int base = pos.x + size.x * pos.y + 4 * plane * pos.z;
-    const ivec4 index = base + plane * ivec4(0, 1, 2, 3);
+
+    const int base = pos.x + size.x * pos.y + block * pos.z;
+    const ivec4 index = base + offset;
 
     imageStore(
         uImage,
