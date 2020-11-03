@@ -192,9 +192,9 @@ class GraphModule(torch.nn.Module):
             traceback.print_exception(exctype, value, tb)
         src_forward = _forward_from_src(self.code)
 
-        def wrapped_forward(self, *args, **kwargs):
+        def wrapped_forward(self, *args):
             sys.excepthook = print_full_traceback
-            out = src_forward(self, *args, **kwargs)
+            out = src_forward(self, *args)
             sys.excepthook = sys.__excepthook__
             return out
         cls.forward = wrapped_forward
