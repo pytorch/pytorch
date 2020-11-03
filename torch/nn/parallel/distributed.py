@@ -13,7 +13,6 @@ import torch.distributed as dist
 
 if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group
-    from torch.distributed.distributed_c10d import BuiltinCommHookType
     from torch.distributed.distributed_c10d import ReduceOp
 from ..modules import Module
 from .replicate import replicate
@@ -1062,7 +1061,7 @@ class DistributedDataParallel(Module):
         dist._register_comm_hook(self.reducer, state, hook)
 
     def _register_builtin_comm_hook(
-        self, comm_hook_type: BuiltinCommHookType
+        self, comm_hook_type
     ):
         r"""
         Registers a built-in communication hook that specifies how DDP
@@ -1071,7 +1070,7 @@ class DistributedDataParallel(Module):
         which might not be as efficient if implemented in Python using a Python communication hook.
 
         Arguments:
-            comm_hook_type (BuiltinCommHookType): type of communication hook, such as
+            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
             ALLREDUCE, FP16_COMPRESS, etc.
 
         .. warning ::
@@ -1090,7 +1089,7 @@ class DistributedDataParallel(Module):
             compressed into 16-bit floating-point numbers before allreduce, and
             then decompressed after allreduce.
 
-            >>> ddp._register_builtin_comm_hook(BuiltinCommHookType.FP16_COMPRESS)
+            >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
 
         """
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)

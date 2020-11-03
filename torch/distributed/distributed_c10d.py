@@ -20,7 +20,6 @@ from . import (
     ReduceScatterOptions,
     ScatterOptions,
 )
-from . import BuiltinCommHookType  # noqa: F401
 from . import ReduceOp
 from . import PrefixStore
 
