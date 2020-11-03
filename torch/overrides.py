@@ -844,7 +844,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.apply_: lambda self, callable: -1,
         Tensor.as_strided: lambda self, size, stride: -1,
         Tensor.as_strided_: lambda self, size, stride: -1,
-        Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False: -1,
+        Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False, inputs=None: -1,
         Tensor.bfloat16: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.bool: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.byte: lambda self, memory_format=torch.preserve_format: -1,
