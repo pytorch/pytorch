@@ -215,13 +215,13 @@ TEST(TypeSubtyping, DictSubtypeTensors) {
       at::device(kCPU).dtype(at::ScalarType::Int)));
 
   c10::DictTypePtr dictStrTensorPlain = DictType::create(
-                                          StringType::get(), TensorType::get());
+      StringType::get(), TensorType::get());
   c10::DictTypePtr dictIntTensorPlain = DictType::create(
-                                          IntType::get(), TensorType::get());
+      IntType::get(), TensorType::get());
   c10::DictTypePtr dictStrTensorFloat = DictType::create(
-                                          StringType::get(), tensorFloatPointer);
+      StringType::get(), tensorFloatPointer);
   c10::DictTypePtr dictStrTensorInt = DictType::create(
-                                        StringType::get(), tensorIntPointer);
+      StringType::get(), tensorIntPointer);
 
   EXPECT_TRUE(dictStrTensorFloat->isSubtypeOfExt(dictStrTensorPlain, nullptr));
   EXPECT_TRUE(dictStrTensorInt->isSubtypeOfExt(dictStrTensorPlain, nullptr));
@@ -245,7 +245,6 @@ TEST(TypeSubtyping, DictSubtypeTensors) {
   os.str("");
   dictStrTensorInt->isSubtypeOfExt(dictIntTensorPlain, &os);
   EXPECT_TRUE(std::regex_match(os.str().c_str(), key_regex));
-
 }
 
 } // namespace c10
