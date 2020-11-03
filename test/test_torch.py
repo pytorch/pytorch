@@ -9574,10 +9574,12 @@ class TestTorchDeviceType(TestCase):
         result = input_.sum(dim=0)
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
         a = torch.randn(8, 1, 128, 1024, 1024, device=device, dtype=torch.half)
         self.assertEqual((a.sum(1) - a.squeeze()).abs().max(), 0)
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
         self.assertEqual((a.sum(1, keepdim=True) - a).abs().max(), 0)
 
     @onlyCUDA
