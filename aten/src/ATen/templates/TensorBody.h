@@ -527,8 +527,11 @@ class CAFFE2_API Tensor {
   ///     is accumulated into all the leaf Tensors that were used to compute the attr::tensors.
   ///     All the provided inputs must be leaf Tensors.
   void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
-    variable_list input_vars = inputs.has_value() ? inputs.value() : {};
-    this->_backward(input_vars, gradient, retain_graph, create_graph);
+    if (inputs.has_value()) {
+      this->_backward(inputs.value(), gradient, retain_graph, create_graph);
+    } else {
+      this->_backward({}, gradient, retain_graph, create_graph);
+    }
   }
 
   /// \fn Tensor detach() const;
