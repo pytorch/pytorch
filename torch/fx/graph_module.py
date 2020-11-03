@@ -188,16 +188,19 @@ class GraphModule(torch.nn.Module):
         self.code = self._graph.python_code(root_module='self')
         cls = type(self)
 
+        cls.forward = _forward_from_src(self.code)
+
+        cls_call = cls.__call__
+
         def print_full_traceback(exctype, value, tb):
             traceback.print_exception(exctype, value, tb)
-        src_forward = _forward_from_src(self.code)
 
-        def wrapped_forward(self, *args):
+        def wrapped_call(self, *args, **kwargs):
             sys.excepthook = print_full_traceback
-            out = src_forward(self, *args)
+            out = cls_call(self, *args, **kwargs)
             sys.excepthook = sys.__excepthook__
             return out
-        cls.forward = wrapped_forward
+        cls.__call__ = wrapped_call
 
     def __reduce__(self):
         dict_without_graph = self.__dict__.copy()
