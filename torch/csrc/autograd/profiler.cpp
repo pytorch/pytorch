@@ -192,27 +192,27 @@ struct KinetoEventImpl : public KinetoEvent {
   }
 
   std::string name() const override  {
-
+    return activity_ptr_->name();
   }
 
   uint64_t deviceIndex() const override {
-
+    return activity_ptr_->deviceId();
   }
 
   uint64_t startUs() const override {
-
+    return activity_ptr_->timestamp();
   }
 
   uint64_t durationUs() const override {
-
+    return activity_ptr_->duration();
   }
 
   uint64_t correlationId() const override {
-
+    return activity_ptr_->correlationId();
   }
 
  private:
-  libkineto::TraceActivity* activity_ptr_;
+  libkineto::TraceActivity* activity_ptr_ = nullptr;
 }
 #endif
 
