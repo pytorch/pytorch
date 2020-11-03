@@ -60,9 +60,8 @@ class TORCH_PYTHON_API CommHookInterface {
 
 // This CppCommHook interface only requires implementing runHook method that
 // potentially uses a state.
-// Still need TORCH_PYTHON_API instead of TORCH_API to support Windows platform.
 template <typename T>
-class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
+class TORCH_API CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T& state) : state_(state) {}
 
