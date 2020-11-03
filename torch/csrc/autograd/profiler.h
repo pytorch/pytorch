@@ -19,16 +19,11 @@
 #endif
 
 #include <ATen/record_function.h>
-#include <c10/core/DeviceType.h>
+
+#include <torch/csrc/jit/frontend/source_range.h>
 
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
-
-#ifdef USE_KINETO
-namespace libkineto {
-class TraceActivity;
-}
-#endif
 
 namespace torch { namespace autograd {
 
@@ -94,61 +89,6 @@ inline int64_t getTime() {
   return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
 #endif
 }
-
-// A struct to control settings of disableProfiler options.
-struct TORCH_API ProfilerDisableOptions {
-  ProfilerDisableOptions() = default;
-  ProfilerDisableOptions(bool shouldCleanupTLSState, bool shouldConsolidate)
-      : cleanupTLSState(shouldCleanupTLSState),
-        consolidate(shouldConsolidate) {}
-  // Whether we should clean up profiler states that are thread local, such as
-  // ThreadLocalDebugInfo and thread local RecordFunction callbacks.
-  bool cleanupTLSState = true;
-  // Whether we should consolidate all currently recorded profiled events. If
-  // false, will not consolidate and other threads can continue to write to the
-  // event lists.
-  bool consolidate = true;
-};
-
-enum class C10_API_ENUM ProfilerState {
-  Disabled = 0,
-  CPU, // CPU-only profiling
-  CUDA, // CPU + CUDA events
-  NVTX,  // only emit NVTX markers
-  KINETO, // use libkineto
-  NUM_PROFILER_STATES, // must be the last one
-};
-
-enum class C10_API_ENUM ActivityType {
-  CPU = 0,
-  // CUDA_RUNTIME, // CUDA host events
-  CUDA, // CUDA kernels
-  NUM_KINETO_ACTIVITIES, // must be the last one
-};
-
-struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
-      ProfilerState state,
-      bool report_input_shapes = false,
-      bool profile_memory = false,
-      bool with_stack = false)
-      : state(state),
-        report_input_shapes(report_input_shapes),
-        profile_memory(profile_memory),
-        with_stack(with_stack) {}
-  ~ProfilerConfig();
-  ProfilerState state;
-  bool report_input_shapes;
-  bool profile_memory;
-  bool with_stack;
-
-  // Returns IValues corresponding to ProfilerConfig struct, to be used for
-  // serialization.
-  at::IValue toIValue() const;
-
-  // Reconstructs a ProfilerConfig from IValues given by toIValue.
-  static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
-};
 
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
@@ -409,6 +349,54 @@ struct RangeEventList {
   static const size_t kReservedCapacity = 1024;
 };
 
+enum class C10_API_ENUM ProfilerState {
+  Disabled = 0,
+  CPU, // CPU-only profiling
+  CUDA, // CPU + CUDA events
+  NVTX,  // only emit NVTX markers
+  KINETO, // use libkineto
+  NUM_PROFILER_STATES, // must be the last one
+};
+
+struct TORCH_API ProfilerConfig {
+  ProfilerConfig(
+      ProfilerState state,
+      bool report_input_shapes = false,
+      bool profile_memory = false,
+      bool with_stack = false)
+      : state(state),
+        report_input_shapes(report_input_shapes),
+        profile_memory(profile_memory),
+        with_stack(with_stack) {}
+  ~ProfilerConfig();
+  ProfilerState state;
+  bool report_input_shapes;
+  bool profile_memory;
+  bool with_stack;
+
+  // Returns IValues corresponding to ProfilerConfig struct, to be used for
+  // serialization.
+  at::IValue toIValue() const;
+
+  // Reconstructs a ProfilerConfig from IValues given by toIValue.
+  static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
+};
+
+// A struct to control settings of disableProfiler options.
+struct TORCH_API ProfilerDisableOptions {
+  ProfilerDisableOptions() = default;
+  ProfilerDisableOptions(bool shouldCleanupTLSState, bool shouldConsolidate)
+      : cleanupTLSState(shouldCleanupTLSState),
+        consolidate(shouldConsolidate) {}
+  // Whether we should clean up profiler states that are thread local, such as
+  // ThreadLocalDebugInfo and thread local RecordFunction callbacks.
+  bool cleanupTLSState = true;
+  // Whether we should consolidate all currently recorded profiled events. If
+  // false, will not consolidate and other threads can continue to write to the
+  // event lists.
+  bool consolidate = true;
+};
+
 // NOTE: profiler mode is thread local, with automatic propagation
 // across thread boundary (e.g. at::launch tasks)
 TORCH_API void enableProfilerLegacy(const ProfilerConfig&);
@@ -424,165 +412,6 @@ TORCH_API bool profilerEnabled();
 TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
-
-#ifdef USE_KINETO
-struct TORCH_API KinetoEvent {
-  uint64_t startThreadId() const {
-    return start_thread_id_;
-  }
-
-  uint64_t endThreadId() const {
-    return end_thread_id_;
-  }
-
-  c10::DeviceType deviceType() const {
-    return device_type_;
-  }
-
-  uint64_t fwdThreadId() const {
-    return fwd_thread_id_;
-  }
-
-  bool hasShapes() const {
-    return shapes_ != c10::nullopt;
-  }
-
-  const std::vector<std::vector<int64_t>>& shapes() const {
-    return *shapes_;
-  }
-
-  int64_t sequenceNr() const {
-    return sequence_nr_;
-  }
-
-  bool hasStack() const {
-    return stack_ != c10::nullopt;
-  }
-
-  const std::vector<std::string>& stack() const {
-    return *stack_;
-  }
-
-  uint8_t scope() const {
-    return scope_;
-  }
-
-  KinetoEvent& startThreadId(uint64_t start_thread_id) {
-    start_thread_id_ = start_thread_id;
-    return *this;
-  }
-
-  KinetoEvent& endThreadId(uint64_t end_thread_id) {
-    end_thread_id_ = end_thread_id;
-    return *this;
-  }
-
-  KinetoEvent& deviceType(c10::DeviceType device_type) {
-    device_type_ = device_type;
-    return *this;
-  }
-
-  KinetoEvent& fwdThreadId(uint64_t fwd_thread_id) {
-    fwd_thread_id_ = fwd_thread_id;
-    return *this;
-  }
-
-  KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
-    *shapes_ = shapes;
-    return *this;
-  }
-
-  KinetoEvent& sequenceNr(int64_t sequence_nr) {
-    sequence_nr_ = sequence_nr_;
-    return *this;
-  }
-
-  KinetoEvent& stack(const std::vector<std::string>& st) {
-    *stack_ = st;
-    return *this;
-  }
-
-  KinetoEvent& scope(uint8_t scope) {
-    scope_ = scope;
-    return *this;
-  }
-
-  // Kineto fields
-
-  KinetoEvent& activity(const libkineto::TraceActivity& activity);
-
-  std::string name() const {
-    return name_;
-  }
-
-  uint64_t deviceIndex() const {
-    return device_index_;
-  }
-
-  uint64_t startUs() const {
-    return start_us_;
-  }
-
-  uint64_t durationUs() const {
-    return duration_us_;
-  }
-
-  uint64_t correlationId() const {
-    return correlation_id_;
-  }
-
-  KinetoEvent& correlationId(uint64_t correlation_id)  {
-    correlation_id_ = correlation_id;
-    return *this;
-  }
-
- private:
-  uint64_t start_thread_id_ = 0;
-  uint64_t end_thread_id_ = 0;
-  uint64_t fwd_thread_id_ = 0;
-  int64_t sequence_nr_ = 0;
-  uint8_t scope_ = 0;
-
-  c10::DeviceType device_type_ = c10::DeviceType::CPU;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes_;
-  c10::optional<std::vector<std::string>> stack_;
-
-  std::string name_;
-  uint64_t device_index_ = 0;
-  uint64_t start_us_ = 0;
-  uint64_t duration_us_ = 0;
-  uint64_t correlation_id_ = 0;
-};
-
-struct TORCH_API ProfilerResult {
-  ProfilerResult(
-      const std::vector<std::vector<KinetoEvent>>& events,
-      const thread_event_lists& legacy_events)
-    : events_(events), legacy_events_(legacy_events) {}
-
-  const std::vector<std::vector<KinetoEvent>> events() const {
-    return events_;
-  }
-
-  const thread_event_lists& legacy_events() const {
-    return legacy_events_;
-  }
-
- private:
-  std::vector<std::vector<KinetoEvent>> events_;
-  thread_event_lists legacy_events_; // tensor mem alloc, start/stop
-};
-TORCH_API void enableProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities);
-TORCH_API ProfilerResult disableProfiler();
-
-TORCH_API void prepareProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities);
-#endif // USE_KINETO
-
-TORCH_API bool kinetoAvailable();
 
 // Usage:
 //   {
@@ -637,6 +466,66 @@ struct TORCH_API TLSProfilerGuard {
   c10::optional<std::function<void(const thread_event_lists&)>> cb_;
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
+
+struct FileLineFunc {
+  std::string filename;
+  size_t line;
+  std::string funcname;
+};
+std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
+std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs);
+std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
+
+struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
+  explicit ProfilerThreadLocalState(const ProfilerConfig& config)
+      : config_(config), remoteProfiledEvents_{c10::nullopt} {}
+  ~ProfilerThreadLocalState() override = default;
+
+  inline const ProfilerConfig& config() const;
+
+  thread_event_lists consolidate();
+
+  void mark(std::string name, bool include_cuda = true);
+
+  void setOrAddRemoteProfiledEvents(
+      std::vector<LegacyEvent>&& remoteProfiledEvents);
+
+  void pushRange(
+      const at::RecordFunction& fn,
+      const bool record_cuda,
+      const char* msg = "",
+      std::vector<std::vector<int64_t>>&& shapes = {});
+
+  void popRange(const at::RecordFunction& fn, const bool record_cuda);
+
+  void setCallbackHandle(at::CallbackHandle handle);
+
+  at::CallbackHandle callbackHandle() const;
+
+  void reportMemoryUsage(
+      void* /* unused */,
+      int64_t alloc_size,
+      c10::Device device) override;
+
+  bool memoryProfilingEnabled() const override;
+ private:
+  std::string getNvtxStr(
+      const at::StringView& name,
+      const char* msg,
+      int64_t sequence_nr,
+      const std::vector<std::vector<int64_t>>& shapes) const;
+
+  RangeEventList& getEventList(int64_t thread_id = -1);
+
+  std::mutex state_mutex_;
+  std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
+      event_lists_map_;
+
+  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
+  at::CallbackHandle handle_ = 0;
+  c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
+};
+
 
 } // namespace profiler
 }} // namespace torch::autograd
