@@ -104,7 +104,6 @@ class Adamax(Optimizer):
 
         return loss
 
-
     # TODO: refactor to a base class once foreach ops are in a good shape.
     def zero_grad(self, set_to_none: bool = False):
         per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
@@ -127,4 +126,3 @@ class Adamax(Optimizer):
             for _, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
                     torch._foreach_zero_(grads)
-
