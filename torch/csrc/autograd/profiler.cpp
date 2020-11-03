@@ -169,8 +169,9 @@ struct FileLineFunc {
   std::string funcname;
 };
 
-thread_local size_t corr_id_ = 1;
-size_t next_correlation_id() {
+// TODO: figure if we can use TLS
+std::atomic<uint64_t> corr_id_ {1};
+uint64_t next_correlation_id() {
   return corr_id_++;
 }
 
@@ -178,6 +179,13 @@ size_t next_correlation_id() {
 struct KinetoObserverContext : public at::ObserverContext {
   int64_t startUs;
   uint64_t correlationId;
+  uint64_t startThreadId;
+  uint64_t endThreadId;
+  std::vector<std::vector<int64_t>> shapes;
+  int64_t sequenceNr;
+  uint64_t fwdThreadId;
+  uint8_t recFunScope;
+  std::vector<std::string> stack;
 };
 #endif
 
@@ -324,7 +332,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
     return config_.profile_memory;
   }
 
-  void reportKinetoClientActivity(
+  KinetoEvent& reportKinetoClientActivity(
       const at::RecordFunction& fn,
       const KinetoObserverContext& ctx) {
 #ifdef USE_KINETO
@@ -335,15 +343,22 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       op.opType = std::string(fn.name());
       op.device = 0; // CPU
       op.correlation = ctx.correlationId;
+      //op.inputDims = toStr(ctx.shapes); //
       /*
       op.threadId = pthread_self();
-      op.inputDims = folly::toJson(fc.input_shapes);
-      op.inputTypes = folly::toJson(fc.input_types);
       */
+
       {
         std::lock_guard<std::mutex> guard(state_mutex_);
         kineto_client_activities_.emplace_back(op);
-        //kineto_events_.emplace_back();
+        kineto_events_.emplace_back();
+        kineto_events_.back()
+            .startThreadId(ctx.startThreadId)
+            .endThreadId(ctx.endThreadId)
+            .sequenceNr(ctx.sequenceNr)
+            .fwdThreadId(ctx.fwdThreadId)
+            .scope(ctx.recFunScope)
+            .stack(stack); //
       }
       return;
     }
@@ -530,6 +545,43 @@ void pushProfilingCallbacks() {
         auto ctx_ptr = std::make_unique<KinetoObserverContext>();
         ctx_ptr->startUs = getTime() / 1000;
         ctx_ptr->correlationId = corr_id;
+        ctx_ptr->startThreadId = at::RecordFunction::currentThreadId();
+
+        if (state_ptr->config().report_input_shapes) {
+          std::vector<std::vector<int64_t>> inputSizes;
+          inputSizes.reserve(fn.inputs().size());
+          for (const c10::IValue& input : fn.inputs()) {
+            if (!input.isTensor()) {
+              inputSizes.emplace_back();
+              continue;
+            }
+            const at::Tensor& tensor = input.toTensor();
+            if (tensor.defined()) {
+              inputSizes.push_back(input.toTensor().sizes().vec());
+            } else {
+              inputSizes.emplace_back();
+            }
+          }
+          ctx_ptr->shapes = inputSizes;
+        }
+
+        ctx_ptr->sequenceNr = fn.seqNr();
+        ctx_ptr->fwdThreadId = fn.forwardThreadId();
+        ctx_ptr->recFunScope = (uint8_t)fn.scope();
+
+#ifndef C10_MOBILE
+        // backward nodes source range corresponds to the forward node
+        // TODO: consider using C++ stack trace
+        if (state_ptr->config().with_stack &&
+            fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+          auto cs = prepareCallstack(jit::currentCallstack());
+          if (cs.empty()) {
+            cs = prepareCallstack(jit::tracer::pythonCallstack());
+          }
+          ctx_ptr->stack = callstackStr(cs);
+        }
+#endif
+
         return ctx_ptr;
       },
       [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {) {
@@ -539,6 +591,9 @@ void pushProfilingCallbacks() {
         }
         auto kineto_ctx_ptr = dynamic_cast<KinetoObserverContext*>(ctx_ptr);
         TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
+
+        kineto_ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
+
         state_ptr->reportKinetoClientActivity(fn, *kineto_ctx_ptr);
         libkineto::api().popCorrelationId();
       })

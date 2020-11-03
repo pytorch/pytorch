@@ -425,36 +425,53 @@ TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<
 
 #ifdef USE_KINETO
 struct TORCH_API KinetoEvent {
-  int64_t threadId() const {
-    return thread_id_;
+  uint64_t startThreadId() const {
+    return start_thread_id_;
+  }
+
+  uint64_t endThreadId() const {
+    return end_thread_id_;
   }
 
   c10::DeviceType deviceType() const {
     return device_type_;
   }
 
-  int64_t fwdThreadId() const {
+  uint64_t fwdThreadId() const {
     return fwd_thread_id_;
   }
 
+  bool hasShapes() const {
+    return shapes_ != c10::nullopt;
+  }
+
   const std::vector<std::vector<int64_t>>& shapes() const {
-    return shapes_;
+    return *shapes_;
   }
 
   int64_t sequenceNr() const {
     return sequence_nr_;
   }
 
+  bool hasStack() const {
+    return stack_ != c10::nullopt;
+  }
+
   const std::vector<std::string>& stack() const {
-    return stack_;
+    return *stack_;
   }
 
   uint8_t scope() const {
     return scope_;
   }
 
-  KinetoEvent& threadId(int64_t thread_id) {
-    thread_id_ = thread_id;
+  KinetoEvent& startThreadId(uint64_t start_thread_id) {
+    start_thread_id_ = start_thread_id;
+    return *this;
+  }
+
+  KinetoEvent& endThreadId(uint64_t end_thread_id) {
+    end_thread_id_ = end_thread_id;
     return *this;
   }
 
@@ -463,13 +480,13 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
-  KinetoEvent& fwdThreadId(int64_t fwd_thread_id) {
+  KinetoEvent& fwdThreadId(uint64_t fwd_thread_id) {
     fwd_thread_id_ = fwd_thread_id;
     return *this;
   }
 
   KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
-    shapes_ = shapes;
+    *shapes_ = shapes;
     return *this;
   }
 
@@ -479,7 +496,7 @@ struct TORCH_API KinetoEvent {
   }
 
   KinetoEvent& stack(const std::vector<std::string>& st) {
-    stack_ = st;
+    *stack_ = st;
     return *this;
   }
 
@@ -492,10 +509,10 @@ struct TORCH_API KinetoEvent {
 
   KinetoEvent& activity(const libkineto::TraceActivity& activity) {
     name_ = activity.name();
-    deviceIndex_ = activity.deviceId();
-    startUs_ = activity.timestamp();
-    durationUs_ = activity.duration();
-    correlationId_ = activity.correlationId();
+    device_index_ = activity.deviceId();
+    start_us_ = activity.timestamp();
+    duration_us_ = activity.duration();
+    correlation_id_ = activity.correlationId();
     return *this;
   }
 
@@ -504,40 +521,42 @@ struct TORCH_API KinetoEvent {
   }
 
   uint64_t deviceIndex() const {
-    return deviceIndex_;
+    return device_index_;
   }
 
   uint64_t startUs() const {
-    return startUs_;
+    return start_us_;
   }
 
   uint64_t durationUs() const {
-    return durationUs_;
+    return duration_us_;
   }
 
   uint64_t correlationId() const {
-    return correlationId_;
+    return correlation_id_;
   }
 
-  KinetoEvent& correlationId(uint64_t correlationId)  {
-    correlationId_ = correlationId;
+  KinetoEvent& correlationId(uint64_t correlation_id)  {
+    correlation_id_ = correlation_id;
     return *this;
   }
 
  private:
-  int64_t thread_id_ = 0;
-  c10::DeviceType device_type_ = c10::DeviceType::CPU,
-  int64_t fwd_thread_id_ = 0;
-  std::vector<std::vector<int64_t>> shapes_;
+  uint64_t start_thread_id_ = 0;
+  uint64_t end_thread_id_ = 0;
+  uint64_t fwd_thread_id_ = 0;
   int64_t sequence_nr_ = 0;
-  std::vector<std::string> stack_;
   uint8_t scope_ = 0;
 
+  c10::DeviceType device_type_ = c10::DeviceType::CPU,
+  c10::optional<std::vector<std::vector<int64_t>>> shapes_;
+  c10::optional<std::vector<std::string>> stack_;
+
   std::string name_;
-  uint64_t deviceIndex_ = 0;
-  uint64_t startUs_ = 0;
-  uint64_t durationUs_ = 0;
-  uint64_t correlationId_ = 0;
+  uint64_t device_index_ = 0;
+  uint64_t start_us_ = 0;
+  uint64_t duration_us_ = 0;
+  uint64_t correlation_id_ = 0;
 };
 
 struct TORCH_API ProfilerResult {
