@@ -9780,7 +9780,7 @@ class TestTorchDeviceType(TestCase):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
         is_tf32 = (dtype == torch.float32 and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32)
-        recon_tol = 5e-3 if is_tf32 else 1e-8
+        reconstruct_tol = 5e-3 if is_tf32 else 1e-8
 
         def run_test(dims, eigenvectors, upper):
             x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
@@ -9794,7 +9794,7 @@ class TestTorchDeviceType(TestCase):
 
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
-                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=reconstruct_tol, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, oute, msg='Eigenvalues mismatch')
@@ -9813,7 +9813,7 @@ class TestTorchDeviceType(TestCase):
             rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese.to(dtype))), resv.transpose(-2, -1).conj())
-                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=reconstruct_tol, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, rese, msg='Eigenvalues mismatch')
@@ -10449,11 +10449,18 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(R.size(-1), n)
             self.assertEqual(Q.size(-1), n_columns)
 
+            # TODO: bmm is not supported on CUDA yet. Fix this when
+            # bmm is supported
+            if A.is_complex() and self.device_type == 'cuda' and A.dim() > 2:
+                self.assertRaisesRegex(
+                    RuntimeError, '_th_bmm_out not supported on CUDAType for Complex', lambda: torch.matmul(Q, R))
+                return
+
             # Check1: A = QR
             self.assertEqual(A, torch.matmul(Q, R))
 
             # Check2: A = QR (with out)
-            Q_out, R_out = torch.Tensor().to(device), torch.Tensor().to(device)
+            Q_out, R_out = torch.full_like(Q, math.nan), torch.full_like(R, math.nan)
             torch.qr(A, some=some, out=(Q_out, R_out))
             self.assertEqual(A, torch.matmul(Q_out, R_out))
 
@@ -10462,8 +10469,8 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(R, R_out)
 
             # Check4: Q^{T}Q = I, triu(R) = R
-            self.assertEqual(torch.matmul(Q.transpose(-2, -1), Q),
-                             torch.eye(n_columns, device=device).expand(Q.shape[:-2] + (n_columns, n_columns)))
+            self.assertEqual(torch.matmul(Q.transpose(-2, -1).conj(), Q),
+                             torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)))
             self.assertEqual(R.triu(), R)
 
         tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
