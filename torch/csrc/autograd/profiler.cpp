@@ -169,13 +169,17 @@ struct FileLineFunc {
   std::string funcname;
 };
 
-thread_local size_t corr_id_ = 0;
+thread_local size_t corr_id_ = 1;
 size_t next_correlation_id() {
-  return ++corr_id_;
+  return corr_id_++;
 }
-size_t cur_correlation_id() {
-  return corr_id_;
-}
+
+#ifdef USE_KINETO
+struct KinetoObserverContext : public at::ObserverContext {
+  int64_t startUs;
+  uint64_t correlationId;
+};
+#endif
 
 // Profiler state
 struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
@@ -217,7 +221,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
           at::RecordFunction::currentThreadId(),
           include_cuda && config_.state == ProfilerState::CUDA);
       evt.setNodeId(at::RecordFunction::getDefaultNodeId());
-      evt.setCorrelationId(cur_correlation_id());
       getEventList().record(std::move(evt));
     }
   }
@@ -313,7 +316,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
           thread_id,
           config_.state == ProfilerState::CUDA);
       evt.updateMemoryStats(alloc_size, device);
-      evt.setCorrelationId(cur_correlation_id());
       getEventList(thread_id).record(std::move(evt));
     }
   }
@@ -322,24 +324,26 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
     return config_.profile_memory;
   }
 
-  void reportKinetoClientActivity(const at::RecordFunction& fn) {
+  void reportKinetoClientActivity(
+      const at::RecordFunction& fn,
+      const KinetoObserverContext& ctx) {
 #ifdef USE_KINETO
     if (config_.state == ProfilerState::KINETO) {
       libkineto::ClientTraceActivity op;
-      /*op.startTime = libkineto::timeSinceEpoch(fc.startTime);
-      op.endTime = libkineto::timeSinceEpoch(now);
+      op.startTime = ctx.startUs;
+      op.endTime = (getTime() / 1000);
       op.opType = std::string(fn.name());
-      op.device = fc.deviceType;
-      op.correlation = fc.correlationId;
+      op.device = 0; // CPU
+      op.correlation = ctx.correlationId;
+      /*
       op.threadId = pthread_self();
       op.inputDims = folly::toJson(fc.input_shapes);
-      op.inputTypes = folly::toJson(fc.input_types);*/
+      op.inputTypes = folly::toJson(fc.input_types);
+      */
       {
         std::lock_guard<std::mutex> guard(state_mutex_);
         kineto_client_activities_.emplace_back(op);
-        kineto_events_.emplace_back(
-            KinetoEventImpl::fromClientActivity(
-                &(kineto_client_activities_.back())));
+        //kineto_events_.emplace_back();
       }
       return;
     }
@@ -520,14 +524,22 @@ void pushProfilingCallbacks() {
           return;
         }
 
-        libkineto::api().pushCorrelationId(next_correlation_id());
+        auto corr_id = next_correlation_id();
+        libkineto::api().pushCorrelationId(corr_id);
+
+        auto ctx_ptr = std::make_unique<KinetoObserverContext>();
+        ctx_ptr->startUs = getTime() / 1000;
+        ctx_ptr->correlationId = corr_id;
+        return ctx_ptr;
       },
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
           return;
         }
-        state_ptr->reportKinetoClientActivity(fn);
+        auto kineto_ctx_ptr = dynamic_cast<KinetoObserverContext*>(ctx_ptr);
+        TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
+        state_ptr->reportKinetoClientActivity(fn, *kineto_ctx_ptr);
         libkineto::api().popCorrelationId();
       })
     .needsInputs(state_ptr->config().report_input_shapes)
