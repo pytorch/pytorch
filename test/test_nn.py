@@ -10091,7 +10091,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
     def test_Dropout(self, device):
-        input = torch.Tensor(1000)
+        input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
 
         if self.device_type == 'cuda':
@@ -10103,7 +10103,7 @@ class TestNNDeviceType(NNTestCase):
         w = random.randint(1, 5)
         h = random.randint(1, 5)
         num_features = 1000
-        input = torch.Tensor(num_features, b, w, h)
+        input = torch.empty(num_features, b, w, h)
         self._test_dropout(nn.Dropout2d, device, input)
         self._test_dropout(nn.Dropout2d, device, input, memory_format=torch.channels_last)
 
@@ -10113,7 +10113,7 @@ class TestNNDeviceType(NNTestCase):
         h = random.randint(1, 5)
         d = random.randint(1, 2)
         num_features = 1000
-        input = torch.Tensor(num_features, b, d, w, h)
+        input = torch.empty(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, device, input)
 
     def test_InstanceNorm1d_general(self, device):
