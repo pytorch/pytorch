@@ -505,7 +505,7 @@ void ONNXAssignOutputShape(
           TORCH_INTERNAL_ASSERT(THPVariable_Check(tuple_elem));
           auto& var = reinterpret_cast<THPVariable*>(tuple_elem)->cdata;
           ONNXUpdateTypeFromTensor(
-            graph->outputs()[i+j], var, onnx_shape_inference);
+              graph->outputs()[i + j], var, onnx_shape_inference);
         }
         outputs_index += tuple_len;
       }
