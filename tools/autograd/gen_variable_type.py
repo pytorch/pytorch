@@ -165,9 +165,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
-    'bmm', 'diagonal', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
+    'bmm', 'diagonal', 'cholesky', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'inverse',
+    'exp', 'nonzero', 'inverse'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
