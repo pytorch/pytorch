@@ -131,6 +131,30 @@ decltype(auto) filter_map(const Mapper& mapper, Args&&... args) {
 
 
 /**
+ * make_offset_index_sequence<Start, N>
+ * Like make_index_sequence<N>, but starting from Start instead of 0.
+ *
+ * Example:
+ *  make_offset_index_sequence<10, 3> == std::index_sequence<10, 11, 12>
+ */
+template<size_t Start, size_t N, size_t... Is>
+struct make_offset_index_sequence_impl
+  : make_offset_index_sequence_impl<Start, N - 1, Start + N - 1, Is...>
+{
+  static_assert(static_cast<int>(Start) >= 0, "make_offset_index_sequence: Start < 0");
+  static_assert(static_cast<int>(N) >= 0, "make_offset_index_sequence: N < 0");
+};
+
+template<size_t Start, size_t... Is>
+struct make_offset_index_sequence_impl <Start, 0, Is...> {
+  typedef std::index_sequence<Is...> type;
+};
+
+template<size_t Start, size_t N>
+using make_offset_index_sequence = typename make_offset_index_sequence_impl<Start, N>::type;
+
+
+/**
  * Use tuple_elements to extract a position-indexed subset of elements
  * from the argument tuple into a result tuple.
  *
@@ -138,22 +162,76 @@ decltype(auto) filter_map(const Mapper& mapper, Args&&... args) {
  *  std::tuple<int, const char*, double> t = std::make_tuple(0, "HEY", 2.0);
  *  std::tuple<int, double> result = tuple_elements(t, std::index_sequence<0, 2>());
  */
-template <class Tuple, size_t... ns>
-constexpr auto tuple_elements(Tuple t, std::index_sequence<ns...>) {
-  return std::tuple<std::tuple_element_t<ns, Tuple>...>(std::get<ns>(t)...);
+template <class Tuple, size_t... Is>
+constexpr auto tuple_elements(Tuple t, std::index_sequence<Is...>) {
+  return std::tuple<std::tuple_element_t<Is, Tuple>...>(std::get<Is>(t)...);
 }
 
 /**
- * Use tuple_take to extract the first n elements from the argument tuple
- * into a result tuple.
+ * Use tuple_take to extract the first or last n elements from the argument
+ * tuple into a result tuple.
  *
  * Example:
  *  std::tuple<int, const char*, double> t = std::make_tuple(0, "HEY", 2.0);
- *  std::tuple<int, const char*> result = tuple_take<decltype(t), 2>(t);
+ *  std::tuple<int, const char*> first_two = tuple_take<decltype(t), 2>(t);
+ *  std::tuple<const char*, double> last_two = tuple_take<decltype(t), -2>(t);
  */
-template <class Tuple, size_t n>
-constexpr auto tuple_take(Tuple t) {
-  return tuple_elements(t, std::make_index_sequence<n>{});
+template <class Tuple, int N, class Enable = void>
+struct TupleTake {};
+
+template <class Tuple, int N>
+struct TupleTake<Tuple, N, std::enable_if_t<N >= 0, void>> {
+  static auto call(Tuple t) {
+    constexpr size_t size = std::tuple_size<Tuple>();
+    static_assert(N <= size, "tuple_take: N >= size");
+    return tuple_elements(t, std::make_index_sequence<N>{});
+  }
+};
+
+template <class Tuple, int N>
+struct TupleTake<Tuple, N, std::enable_if_t<N < 0, void>> {
+  static auto call(Tuple t) {
+    static_assert(N < 0, "tuple_take: N < 0");
+    constexpr size_t size = std::tuple_size<Tuple>();
+    static_assert(-N <= size, "tuple_take: -N >= size");
+    return tuple_elements(t, make_offset_index_sequence<size + N, -N>{});
+  }
+};
+
+template <class Tuple, int N>
+auto tuple_take(Tuple t) {
+  return TupleTake<Tuple, N>::call(t);
+}
+
+// template <class Tuple, int N>
+// constexpr auto tuple_take(Tuple t) {
+//   return guts::if_constexpr<N >= 0>(
+//     [&] {
+//       constexpr size_t size = std::tuple_size<Tuple>();
+//       static_assert(N <= size, "tuple_take: N >= size");
+//       return tuple_elements(t, std::make_index_sequence<N>{});
+//     },
+//     [&] {
+//       static_assert(N < 0, "tuple_take: N < 0");
+//       constexpr size_t size = std::tuple_size<Tuple>();
+//       static_assert(-N <= size, "tuple_take: -N >= size");
+//       return tuple_elements(t, make_offset_index_sequence<size + N, -N>{});
+//     }
+//   );
+// }
+
+/**
+ * Use tuple_slice to extract a contiguous subtuple from the argument.
+ *
+ * Example:
+ *  std::tuple<int, const char*, double, bool> t = std::make_tuple(0, "HEY", 2.0, false);
+ *  std::tuple<int, const char*> middle_two = tuple_slice<decltype(t), 1, 2>(t);
+ */
+template <class Tuple, size_t Start, size_t N>
+constexpr auto tuple_slice(Tuple t) {
+  constexpr size_t size = std::tuple_size<Tuple>();
+  static_assert(Start + N <= size, "tuple_slice: Start + N >= size");
+  return tuple_elements(t, make_offset_index_sequence<Start, N>{});
 }
 
 

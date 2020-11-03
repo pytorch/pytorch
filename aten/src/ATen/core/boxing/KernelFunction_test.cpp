@@ -127,27 +127,27 @@ void boxed_func_with_tensor_ref_return(const OperatorHandle& /*opHandle*/, Stack
 }
 
 void boxed_func_with_multiple_tensor_ref_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
-  // (Tensor(a!), Tensor(b!), Scalar, Scalar) -> (Tensor(a!), Tensor(b!))
+  // (Scalar, Scalar, Tensor(a!), Tensor(b!)) -> (Tensor(a!), Tensor(b!))
   EXPECT_EQ(4, stack->size());
 
-  ASSERT_TRUE(stack->at(0).isTensor());
-  auto a = stack->at(0).toTensor();
+  ASSERT_TRUE(stack->at(0).isScalar());
+  auto s1 = stack->at(0).toScalar();
 
-  ASSERT_TRUE(stack->at(1).isTensor());
-  auto b = stack->at(1).toTensor();
+  ASSERT_TRUE(stack->at(1).isScalar());
+  auto s2 = stack->at(1).toScalar();
 
-  ASSERT_TRUE(stack->at(2).isScalar());
-  auto c = stack->at(2).toScalar();
+  ASSERT_TRUE(stack->at(2).isTensor());
+  auto t1 = stack->at(2).toTensor();
 
-  ASSERT_TRUE(stack->at(3).isScalar());
-  auto d = stack->at(3).toScalar();
+  ASSERT_TRUE(stack->at(3).isTensor());
+  auto t2 = stack->at(3).toTensor();
 
-  a.add_(c);
-  b.add_(d);
+  t1.add_(s1);
+  t2.add_(s2);
 
   stack->clear();
-  torch::jit::push(stack, a);
-  torch::jit::push(stack, b);
+  torch::jit::push(stack, t1);
+  torch::jit::push(stack, t2);
 }
 
 //
@@ -220,28 +220,30 @@ void expectBoxedCallingWithTensorRefReturnWorks(const KernelFunction& func) {
 void expectBoxedCallingWithMultipleTensorRefReturnWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto a = at::zeros({1});
-  auto b = at::zeros({1});
-  auto c = 1.0f;
-  auto d = 2.0f;
-  vector<IValue> stack {a, b, c, d};
+  auto s1 = 1.0f;
+  auto s2 = 2.0f;
+  auto t1 = at::zeros({1});
+  auto t2 = at::zeros({1});
+  vector<IValue> stack {s1, s2, t1, t2};
 
   func.callBoxed(dummy, &stack);
 
-  // kernel should have updated args 0 and 1
-  EXPECT_EQ(a.item().toFloat(), 1.0f);
-  EXPECT_EQ(b.item().toFloat(), 2.0f);
+  // kernel should have updated output args
+  EXPECT_EQ(t1.item().toFloat(), 1.0f);
+  EXPECT_EQ(t2.item().toFloat(), 2.0f);
 
   // and pushed them onto the stack
   EXPECT_EQ(2, stack.size());
 
   EXPECT_TRUE(stack[0].isTensor());
-  auto ta = stack[0].toTensor();
-  EXPECT_EQ(ta.item().toFloat(), 1.0f);
+  auto ret1 = stack[0].toTensor();
+  EXPECT_EQ(ret1.item().toFloat(), 1.0f);
+  EXPECT_TRUE(ret1.is_same(t1));
 
   EXPECT_TRUE(stack[1].isTensor());
-  auto tb = stack[1].toTensor();
-  EXPECT_EQ(tb.item().toFloat(), 2.0f);
+  auto ret2 = stack[1].toTensor();
+  EXPECT_EQ(ret2.item().toFloat(), 2.0f);
+  EXPECT_TRUE(ret2.is_same(t2));
 }
 
 void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMessage) {
@@ -316,31 +318,31 @@ void expectUnboxedCallingWithTensorRefReturnWorks(const KernelFunction& func) {
 void expectUnboxedCallingWithMultipleTensorRefReturnWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto a = at::zeros({1});
-  auto b = at::zeros({1});
-  auto c = 1.0f;
-  auto d = 2.0f;
+  auto s1 = 1.0f;
+  auto s2 = 2.0f;
+  auto t1 = at::zeros({1});
+  auto t2 = at::zeros({1});
 
   std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
     std::tuple<at::Tensor&, at::Tensor&>,
-    at::Tensor&,
-    at::Tensor&,
     at::Scalar,
-    at::Scalar
-  >(dummy, a, b, c, d);
+    at::Scalar,
+    at::Tensor&,
+    at::Tensor&
+  >(dummy, s1, s2, t1, t2);
 
-  // kernel should have updated args 0 and 1
-  EXPECT_EQ(a.item().toFloat(), 1.0f);
-  EXPECT_EQ(b.item().toFloat(), 2.0f);
+  // kernel should have updated output args
+  EXPECT_EQ(t1.item().toFloat(), 1.0f);
+  EXPECT_EQ(t2.item().toFloat(), 2.0f);
 
   // and returned a tuple containing them
-  auto ta = std::get<0>(tup);
-  EXPECT_EQ(ta.item().toFloat(), 1.0f);
-  EXPECT_TRUE(a.is_same(ta));
+  auto ret1 = std::get<0>(tup);
+  EXPECT_EQ(ret1.item().toFloat(), 1.0f);
+  EXPECT_TRUE(ret1.is_same(t1));
 
-  auto tb = std::get<1>(tup);
-  EXPECT_EQ(tb.item().toFloat(), 2.0f);
-  EXPECT_TRUE(b.is_same(tb));
+  auto ret2 = std::get<1>(tup);
+  EXPECT_EQ(ret2.item().toFloat(), 2.0f);
+  EXPECT_TRUE(ret2.is_same(t2));
 }
 
 }

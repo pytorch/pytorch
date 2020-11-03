@@ -237,18 +237,32 @@ struct BoxedKernelWrapper<
 
 //
 // 4. signatures returning a tuple of Tensor references, and taking the same
-// number of Tensor refs as their initial arguments.
+// number of Tensor refs as their final arguments.
 //
-// Note that the passed kernels are assumed to be for inplace/outplace ops,
+// Note that the passed kernels are assumed to be for out-of-place ops,
 // and the generated BoxedKernelWrapper specializations will return a tuple
-// of those initial arguments.
+// of those out arguments.
 //
-
 template <class Result, class... Args>
 struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
-    can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value,
+    can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value
+    // this abomination just skips over legacy kernels with out args at front, so they can trigger
+    // the specialization that follows.
+    // note: this test is extra awful because boolean value expressions in templates don't shortcut,
+    // so without the ternary, a result tuple that's wider than the arg list will cause a compile error
+    // even with a length check preceding it in the conjunction. template metaprogramming: no way to live(tm)
+    // TODO remove when hacky_wrapper reorders legacy kernel out args
+    && !std::is_same<
+        Result,
+        guts::typelist::to_tuple_t<
+          guts::typelist::take_t<
+            guts::typelist::typelist<Args...>,
+            sizeof...(Args) >= std::tuple_size<Result>::value ? std::tuple_size<Result>::value : sizeof...(Args)
+          >
+        >
+      >::value,
     void
   >
 > {
@@ -277,13 +291,66 @@ struct BoxedKernelWrapper<
       "but instead returned ", stack.size(), " values."
     );
 
-    auto result = guts::tuple_take<ArgTuple, RetCount>(ArgTuple{args...});
+    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{args...});
     static_assert(
         std::is_same<Result, decltype(result)>::value,
         "The parameter list of an op returning a tuple of Tensor references "
-            "must begin with an equal number of Tensor reference parameters."
+            "must end with an equal number of Tensor reference parameters."
     );
     return result;
+  }
+};
+
+//
+// 5. legacy trap for old-school multi-return out functions with mutable args
+// at start rather than end of arg list.
+// TODO remove when hacky_wrapper reorders legacy kernel out args
+//
+
+template <class Result, class... Args>
+struct BoxedKernelWrapper<
+  Result(Args...),
+  std::enable_if_t<
+    can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value
+    && std::is_same<
+        Result,
+        guts::typelist::to_tuple_t<
+          guts::typelist::take_t<
+            guts::typelist::typelist<Args...>,
+            sizeof...(Args) >= std::tuple_size<Result>::value ? std::tuple_size<Result>::value : sizeof...(Args)
+          >
+        >
+      >::value,
+    void
+  >
+> {
+  static torch::jit::Stack boxArgs(Args... args) {
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(sizeof...(Args));
+    torch::jit::push(stack, std::forward<Args>(args)...);
+    return stack;
+  }
+
+  static Result call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    Args... args
+  ) {
+    using ArgTuple = std::tuple<Args...>;
+    constexpr int RetCount = std::tuple_size<Result>();
+
+    torch::jit::Stack stack = boxArgs(args...);
+    (*boxed_kernel_func)(functor, opHandle, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == RetCount,
+      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
+      "but instead returned ", stack.size(), " values."
+    );
+
+    auto legacy_result = guts::tuple_take<ArgTuple, RetCount>(ArgTuple{args...});
+    return legacy_result;
   }
 };
 
