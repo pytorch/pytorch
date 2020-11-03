@@ -117,8 +117,8 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
-Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
-Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
+Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, acos_stub); }
+Tensor acos(const Tensor& self) { return unary_op_impl_float(self, acos_stub); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
 // arccos, alias for acos
@@ -158,8 +158,8 @@ Tensor& arcsin_out(Tensor& result, const Tensor& self) { return at::asin_out(res
 Tensor arcsin(const Tensor& self) { return self.asin(); }
 Tensor& arcsin_(Tensor& self) { return self.asin_(); }
 
-Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
-Tensor atan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
+Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, atan_stub); }
+Tensor atan(const Tensor& self) { return unary_op_impl_float(self, atan_stub); }
 Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
 
 // arctan, alias of atan
