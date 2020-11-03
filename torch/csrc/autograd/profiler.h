@@ -511,9 +511,9 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
   virtual void reportClientActivity(
     const at::RecordFunction& fn,
-    const at::ObserverContext& ctx) {}
+    const at::ObserverContext* ctx) {}
 
- private:
+ protected:
   std::string getNvtxStr(
       const at::StringView& name,
       const char* msg,

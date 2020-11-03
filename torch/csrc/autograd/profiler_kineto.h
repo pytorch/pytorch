@@ -22,6 +22,19 @@ enum class C10_API_ENUM ActivityType {
 };
 
 #ifdef USE_KINETO
+
+struct KinetoObserverContext : public at::ObserverContext {
+  int64_t startUs;
+  uint64_t correlationId;
+  uint64_t startThreadId;
+  uint64_t endThreadId;
+  c10::optional<std::vector<std::vector<int64_t>>> shapes;
+  int64_t sequenceNr;
+  uint64_t fwdThreadId;
+  uint8_t recFunScope;
+  c10::optional<std::vector<std::string>> stack;
+};
+
 struct TORCH_API KinetoEvent {
   uint64_t startThreadId() const {
     return start_thread_id_;

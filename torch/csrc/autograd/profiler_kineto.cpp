@@ -15,48 +15,47 @@ uint64_t next_correlation_id() {
   return corr_id_++;
 }
 
-struct KinetoObserverContext : public at::ObserverContext {
-  int64_t startUs;
-  uint64_t correlationId;
-  uint64_t startThreadId;
-  uint64_t endThreadId;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes;
-  int64_t sequenceNr;
-  uint64_t fwdThreadId;
-  uint8_t recFunScope;
-  c10::optional<std::vector<std::string>> stack;
-};
+struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
+  using ProfilerThreadLocalState::ProfilerThreadLocalState;
+  virtual ~KinetoThreadLocalState() override = default;
 
-void reportKinetoClientActivity(
-    const at::RecordFunction& fn,
-    const KinetoObserverContext& ctx) {
-  /*TORCH_CHECK((config_.state == ProfilerState::KINETO,
-      "Supported only in Kineto profiler");
-  op.startTime = ctx.startUs;
-  op.endTime = (getTime() / 1000);
-  op.opType = std::string(fn.name().str());
-  op.device = 0; // CPU
-  op.correlation = ctx.correlationId;
-  if (ctx.shapes && !ctx.shapes->empty()) {
-    //op.inputDims = toStr(*ctx.shapes); //
-  }
-  //op.threadId = pthread_self();
-
-  {
-    std::lock_guard<std::mutex> guard(state_mutex_);
-    kineto_client_activities_.emplace_back(std::move(op));
-    kineto_events_.emplace_back();
-    kineto_events_.back()
-        .startThreadId(ctx.startThreadId)
-        .endThreadId(ctx.endThreadId)
-        .sequenceNr(ctx.sequenceNr)
-        .fwdThreadId(ctx.fwdThreadId)
-        .scope(ctx.recFunScope);
-    if (ctx.stack && !ctx.stack->empty()) {
-      kineto_events_.back().stack(*ctx.stack);
+  virtual void reportClientActivity(
+      const at::RecordFunction& fn,
+      const at::ObserverContext* observer_ctx) override {
+    auto ctx = dynamic_cast<const KinetoObserverContext*>(observer_ctx);
+    TORCH_CHECK(ctx);
+    TORCH_CHECK(config_.state == ProfilerState::KINETO,
+        "Supported only in Kineto profiler");
+    libkineto::ClientTraceActivity op;
+    op.startTime = ctx->startUs;
+    op.endTime = (getTime() / 1000);
+    op.opType = std::string(fn.name().str());
+    op.device = 0; // CPU
+    op.correlation = ctx->correlationId;
+    if (ctx->shapes && !ctx->shapes->empty()) {
+      //op.inputDims = toStr(*ctx->shapes); //
     }
-  }*/
-}
+    //op.threadId = pthread_self();
+
+    {
+      std::lock_guard<std::mutex> guard(state_mutex_);
+      kineto_client_activities_.emplace_back(std::move(op));
+      kineto_events_.emplace_back();
+      kineto_events_.back()
+          .startThreadId(ctx->startThreadId)
+          .endThreadId(ctx->endThreadId)
+          .sequenceNr(ctx->sequenceNr)
+          .fwdThreadId(ctx->fwdThreadId)
+          .scope(ctx->recFunScope);
+      if (ctx->stack && !ctx->stack->empty()) {
+        kineto_events_.back().stack(*ctx->stack);
+      }
+    }
+  }
+
+  std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
+  std::vector<KinetoEvent> kineto_events_;
+};
 
 ProfilerThreadLocalState* getProfilerTLSState() {
   const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
@@ -113,7 +112,7 @@ void pushProfilingCallbacks() {
 
         kineto_ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
 
-        //state_ptr->reportKinetoClientActivity(fn, *kineto_ctx_ptr);
+        state_ptr->reportClientActivity(fn, kineto_ctx_ptr);
         libkineto::api().popCorrelationId();
       })
     .needsInputs(state_ptr->config().report_input_shapes)
