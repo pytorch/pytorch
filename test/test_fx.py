@@ -12,6 +12,7 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.experimental.cost_model import estimate_cpu_cost
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
 
@@ -784,6 +785,33 @@ class TestFX(JitTestCase):
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
+
+    def test_cost_model(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = torch.nn.Linear(256, 1024)
+                self.lin2 = torch.nn.Linear(1024, 2048)
+
+            def forward(self, x):
+                return torch.relu(self.lin2(self.lin1(x)))
+
+        m = MyModel()
+        cost, profiling_model = estimate_cpu_cost(m, [torch.rand(50, 256)])
+        self.assertTrue(cost.ops > 0)
+        self.assertTrue(cost.bytes_read > 0)
+        self.assertTrue(cost.bytes_written > 0)
+
+        input = torch.rand(1024, 256)
+        for _ in range(5):
+            profiled_output = profiling_model(input)
+        self.assertEqual(profiled_output, m(input))
+
+        for node in profiling_model.gm.graph.nodes:
+            if hasattr(node, 'profiled_info'):
+                print(node.profiled_info)
+        if hasattr(profiling_model, 'profiled_info'):
+            print(profiling_model.profiled_info)
 
     def test_fn_type_annotations(self):
         class Foo(torch.nn.Module):
