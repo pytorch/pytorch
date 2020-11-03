@@ -11,9 +11,9 @@ Tensor clamp(
     const Tensor& self_arg,
     const c10::optional<Scalar> min_value,
     const c10::optional<Scalar> max_value) {
-  if (!min_value && !max_value) {
-    TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
-  }
+  TORCH_CHECK(
+      min_value || max_value,
+      "At least one of 'min' or 'max' must not be None");
 
   api::Context* const context = api::context();
 
@@ -31,13 +31,9 @@ Tensor clamp(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float min_value;
         float max_value;
       } block {
-        v_output.extents().width,
-        v_output.extents().height,
-        v_output.extents().depth,
         min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
         max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
       };
@@ -76,9 +72,11 @@ Tensor& clamp_(
     const c10::optional<Scalar> min_value,
     const c10::optional<Scalar> max_value) {
   api::Context* const context = api::context();
-  if (!min_value && !max_value) {
-    TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
-  }
+
+  TORCH_CHECK(
+      min_value || max_value,
+      "At least one of 'min' or 'max' must not be None");
+
   TORCH_CHECK(
       self_arg.is_vulkan(),
       "Vulkan: In-place clamp is only supported on Vulkan tensors.");
@@ -90,13 +88,9 @@ Tensor& clamp_(
   {
     if (v_self.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float min_value;
         float max_value;
       } block {
-        v_self.extents().width,
-        v_self.extents().height,
-        v_self.extents().depth,
         min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
         max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
       };
