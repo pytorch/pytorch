@@ -476,9 +476,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   return output;
 }
 
-// implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
-// in the two dimension lists
-Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+Tensor &tensordot_out(Tensor& result, const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
   TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
   int64_t csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
@@ -531,7 +529,16 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   t1 = t1.permute(p1).reshape({size1, csize});
   t2 = t2.permute(p2).reshape({csize, size2});
   // multiply and reshape to target size
-  return at::mm(t1, t2).reshape(rsizes);
+  result.copy_(at::mm(t1, t2).reshape(rsizes));
+  return result;
+}
+
+// implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
+// in the two dimension lists
+Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+  Tensor result = at::empty({0}, input1.options());
+  at::native::tensordot_out(result, input1, input2, dims1, dims2);
+  return result;
 }
 
 }}  // namespace at::native
