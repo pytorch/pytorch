@@ -17343,15 +17343,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # 0.0/-0.0/inf/-inf/nan
         cases = [0.0, -0.0, float('inf'), float('-inf'), float('nan')]
-        if dtypes[0] in torch.testing.get_all_fp_dtypes(include_bfloat16=False):
+        # torch.bfloat16 can not hold '-nan'
+        # torch.half can not hold '-nan' on CUDA
+        types = [torch.float32, torch.float64]
+        if device == 'cpu':
+            types.append(torch.float16)
+        if dtypes[0] in types:
             b = make_tensor((10, 10), device=device, dtype=dtypes[1], low=-9, high=9)
             for case in cases:
-                _test_copysign_numpy(torch.tensor([case], dtype=dtypes[0]), b)
+                _test_copysign_numpy(torch.tensor([case], device=device, dtype=dtypes[0]), b)
 
         if dtypes[1] in torch.testing.get_all_fp_dtypes():
             a = make_tensor((10, 10), device=device, dtype=dtypes[0], low=-9, high=9)
             for case in cases:
-                _test_copysign_numpy(a, torch.tensor([case], dtype=dtypes[1]))
+                _test_copysign_numpy(a, torch.tensor([case], device=device, dtype=dtypes[1]))
 
     @dtypes(torch.bfloat16, torch.float)
     def test_div(self, device, dtype):
