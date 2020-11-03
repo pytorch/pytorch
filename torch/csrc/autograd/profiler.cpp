@@ -211,7 +211,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxMarkA(name.c_str());
     } else {
-      Event evt(
+      LegacyEvent evt(
           EventKind::Mark,
           at::StringView(std::move(name)),
           at::RecordFunction::currentThreadId(),
@@ -223,7 +223,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   }
 
   void setOrAddRemoteProfiledEvents(
-      std::vector<Event>&& remoteProfiledEvents) {
+      std::vector<LegacyEvent>&& remoteProfiledEvents) {
     // Lock to serialize access from multiple callback threads.
     std::lock_guard<std::mutex> guard(state_mutex_);
     if (remoteProfiledEvents_) {
@@ -245,7 +245,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       cuda_stubs->nvtxRangePushA(getNvtxStr(
           fn.name(), msg, fn.seqNr(), shapes).c_str());
     } else {
-      Event evt(
+      LegacyEvent evt(
           EventKind::PushRange,
           fn.name(),
           at::RecordFunction::currentThreadId(),
@@ -282,7 +282,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       // called on a different thread than pushRange
       // As a convention, we put the async pop on the original
       // thread and save current thread id in pop event
-      Event evt(
+      LegacyEvent evt(
           EventKind::PopRange,
           at::StringView(""),
           at::RecordFunction::currentThreadId(),
@@ -307,7 +307,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       c10::Device device) override {
     if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
       uint64_t thread_id = at::RecordFunction::currentThreadId();
-      Event evt(
+      LegacyEvent evt(
           EventKind::MemoryAlloc,
           at::StringView(""),
           thread_id,
@@ -443,7 +443,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
 
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
   at::CallbackHandle handle_ = 0;
-  c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
+  c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
 
 #ifdef USE_KINETO
   std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
@@ -733,13 +733,13 @@ ProfilerResult disableProfiler() {
 }
 #endif
 
-void addEventList(std::vector<Event>&& profiledEvents) {
+void addEventList(std::vector<LegacyEvent>&& profiledEvents) {
   auto state_ptr = getProfilerTLSState();
   TORCH_CHECK(state_ptr, "Profiler must be enabled.");
   state_ptr->setOrAddRemoteProfiledEvents(std::move(profiledEvents));
 }
 
-void Event::record(bool record_cuda) {
+void LegacyEvent::record(bool record_cuda) {
   if (record_cuda) {
     cuda_stubs->record(&device_, &cuda_event, &cpu_ns_);
     return;
@@ -747,7 +747,7 @@ void Event::record(bool record_cuda) {
   cpu_ns_ = getTime();
 }
 
-/* static */ Event Event::fromIValue(const at::IValue& eventIValue) {
+/* static */ LegacyEvent LegacyEvent::fromIValue(const at::IValue& eventIValue) {
   TORCH_INTERNAL_ASSERT(
       eventIValue.isList(),
       "Expected IValue to contain type c10::impl::GenericList");
@@ -756,7 +756,7 @@ void Event::record(bool record_cuda) {
       ivalues.size() >= NUM_EVENT_IVALUE_IDX,
       "Expected at least ",
       NUM_EVENT_IVALUE_IDX,
-      " elements to reconstruct Event.");
+      " elements to reconstruct LegacyEvent.");
 
   // Reconstruct input shapes from ivalues.
   auto shapeListIValue = ivalues.get(EventIValueIdx::SHAPES);
@@ -782,7 +782,7 @@ void Event::record(bool record_cuda) {
     shapes.emplace_back(s);
   }
 
-  Event evt(
+  LegacyEvent evt(
       static_cast<EventKind>(
           ivalues.get(EventIValueIdx::KIND).toInt()), // EventKind
       at::StringView(ivalues.get(EventIValueIdx::NAME).toStringRef()), // name
@@ -802,7 +802,7 @@ void Event::record(bool record_cuda) {
   return evt;
 }
 
-at::IValue Event::toIValue() const {
+at::IValue LegacyEvent::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
   eventIValueList.reserve(NUM_EVENT_IVALUE_IDX);
   eventIValueList.emplace_back(static_cast<int64_t>(kind_));
@@ -834,7 +834,7 @@ at::IValue Event::toIValue() const {
   return at::IValue(eventIValueList);
 }
 
-double Event::cudaElapsedUs(const Event& e) const {
+double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
   TORCH_CHECK(e.hasCuda() && hasCuda(), "Events were not recorded for CUDA");
   TORCH_CHECK(
       e.device() == device(),
@@ -862,10 +862,10 @@ static jit::CodeTemplate event_template(R"(
   "args": {}
 })");
 
-void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& events) {
+void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events) {
   TORCH_CHECK(out, "Could not open file");
-  Event* profiler_start = nullptr;
-  for (Event* e : events) {
+  LegacyEvent* profiler_start = nullptr;
+  for (LegacyEvent* e : events) {
     if (0 == strcmp(e->name(), "__start_profile")) {
       profiler_start = e;
       break;
@@ -879,10 +879,10 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& e
       return std::hash<at::RecordFunctionHandle>()(p.first) ^ std::hash<int64_t>()(p.second);
     }
   };
-  std::unordered_map<std::pair<at::RecordFunctionHandle, int64_t>, Event*, PairHash> events_map;
+  std::unordered_map<std::pair<at::RecordFunctionHandle, int64_t>, LegacyEvent*, PairHash> events_map;
   out << "[\n";
   bool first = true;
-  for (Event* evt : events) {
+  for (LegacyEvent* evt : events) {
     if (evt->kind() == "push") {
       events_map[std::make_pair(evt->handle(), evt->nodeId())] = evt;
     } else if (evt->kind() == "pop") {
@@ -892,7 +892,7 @@ void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& e
       first = false;
       auto it = events_map.find(std::make_pair(evt->handle(), evt->nodeId()));
       TORCH_CHECK(it != events_map.end(), "Unmatched pop event");
-      Event* evt_start = it->second;
+      LegacyEvent* evt_start = it->second;
       events_map.erase(it);
 
       jit::TemplateEnv env;
@@ -923,7 +923,7 @@ void RecordProfile::init() {
 
 RecordProfile::~RecordProfile() {
   thread_event_lists event_lists = disableProfiler();
-  std::vector<Event*> events;
+  std::vector<LegacyEvent*> events;
   for (auto& l : event_lists) {
     for (auto& e : l) {
         events.push_back(&e);
@@ -935,7 +935,7 @@ RecordProfile::~RecordProfile() {
   }
 }
 
-void RecordProfile::processEvents(const std::vector<Event*>& events) {
+void RecordProfile::processEvents(const std::vector<LegacyEvent*>& events) {
   writeProfilerEventsToStream(out_, events);
 }
 
