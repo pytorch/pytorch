@@ -309,35 +309,58 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
 
-    @precisionOverride({torch.float32: 1e-3})
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float32, torch.float64)
+    @precisionOverride({torch.float32: 1e-3})
     def test_cond(self, device, dtype):
         def run_test_case(input, ord):
             result = torch.linalg.cond(input, ord)
-            input_numpy = input.cpu().numpy()
-            result_numpy = np.linalg.cond(input_numpy, ord)
+            result_numpy = np.linalg.cond(input.cpu().numpy(), ord)
 
             self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
 
         norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
-        S = 10
-        test_cases = [
-            # input size, norm types settings
-            ((S, S), norm_types),
-            ((S, S), norm_types),
-            ((S, S), norm_types),
-            ((S, S, S, S), norm_types),
-            ((S, S, S, S), norm_types),
-            ((S, S, S, S), norm_types),
-            ((S, S, S, S), norm_types),
-        ]
-        for input_size, ord_settings in test_cases:
+        input_sizes = [(3, 3), (2, 3, 3, 3)]
+        for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
-            for ord in ord_settings:
+            for ord in norm_types:
                 run_test_case(input, ord)
+
+        # test for singular input
+        a = torch.eye(3, dtype=dtype, device=device)
+        a[-1, -1] = 0 # make 'a' singular
+        # NumPy returns inf for ord=±2
+        # while current PyTorch implementation returns std::numeric_limits<T>::max()
+        norm_types = [1, -1, inf, -inf, 'fro', 'nuc']
+        for ord in norm_types:
+            run_test_case(a, ord)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64)
+    @precisionOverride({torch.float32: 1e-3})
+    def test_cond_errors(self, device, dtype):
+        norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
+
+        # cond expects the input to be non-empty
+        a = torch.zeros((0, 0), dtype=dtype, device=device)
+        for ord in norm_types:
+            with self.assertRaisesRegex(RuntimeError, r'linalg_cond is not defined for empty tensors'):
+                torch.linalg.cond(a, ord)
+
+        # cond expects the input to be at least 2-dimensional
+        a = torch.ones(3, dtype=dtype, device=device)
+        for ord in norm_types:
+            with self.assertRaisesRegex(RuntimeError, r'Tensor of matrices must have at least 2 dimensions'):
+                torch.linalg.cond(a, ord)
+
+        # for some norm types cond expects the input to be square
+        a = torch.ones(3, 2, dtype=dtype, device=device)
+        norm_types = [1, -1, inf, -inf, 'fro', 'nuc']
+        for ord in norm_types:
+            with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+                torch.linalg.cond(a, ord)
 
     # Test autograd and jit functionality for linalg functions.
     # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,

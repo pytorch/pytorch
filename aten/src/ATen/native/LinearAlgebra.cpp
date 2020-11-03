@@ -1630,7 +1630,10 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
     // Ignore errors if not invertible, self_inverse should contain NaNs in this case
     try {
       self_inverse = at::inverse(self);
-    } catch (...) {}
+    } catch (...) {
+      self_inverse = at::empty_like(self);
+      at::fill_(self_inverse, NAN);
+    }
     IntArrayRef dim{-2, -1};
     Tensor norm_self = at::linalg_norm(self, ord, dim);
     Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
@@ -1640,7 +1643,7 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   return result;
 }
 
-// Frobenius norm
+// Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, std::string ord) {
   TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
   squareCheckInputs(self);
@@ -1648,7 +1651,10 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
   Tensor self_inverse;
   try {
     self_inverse = at::inverse(self);
-  } catch (...) {}
+  } catch (...) {
+    self_inverse = at::empty_like(self);
+    at::fill_(self_inverse, NAN);
+  }
   IntArrayRef dim{-2, -1};
   Tensor norm_self = at::linalg_norm(self, ord, dim);
   Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
