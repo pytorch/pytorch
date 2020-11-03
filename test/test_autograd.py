@@ -4697,6 +4697,13 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
             fn(a, b)
 
+    def test_named_tensor_for_complex_views(self):
+        names = ["batch", "height", "width", "complex"]
+        z = torch.ones((5, 12, 14, 2), requires_grad=True).refine_names(*names)
+        z_complex = torch.view_as_complex(z.rename(None)).refine_names(*names[:-1])
+        z_complex.sum().backward()
+        self.assertEqual(z.grad, torch.ones_like(z))
+
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):
             @staticmethod
