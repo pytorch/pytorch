@@ -178,6 +178,12 @@ void enableProfiler(
   state->mark("__start_profile", false);
 }
 
+std::vector<std::vector<KinetoEvent>> filterTrace(
+    std::unique_ptr<libkineto::ActivityTraceInterface>&& trace) {
+  // tbd
+  return std::vector<std::vector<KinetoEvent>>();
+}
+
 ProfilerResult disableProfiler() {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
@@ -196,9 +202,8 @@ ProfilerResult disableProfiler() {
 
   libkineto::api().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
-  //auto trace = libkineto::api().stopTrace();
-  libkineto::api().stopTrace();
-  std::vector<std::vector<KinetoEvent>> kineto_events; // = filterTrace(trace);
+  std::vector<std::vector<KinetoEvent>> kineto_events = filterTrace(
+      std::move(libkineto::api().stopTrace()));
   auto legacy_events = state_ptr->consolidate();
   return ProfilerResult(kineto_events, legacy_events);
 }
