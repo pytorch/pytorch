@@ -141,7 +141,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
-        elif has_special_act_post_process(type(child)):
+        elif has_special_act_post_process(child):
             special_act_post_process = get_default_special_act_post_process(type(child))
             insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:

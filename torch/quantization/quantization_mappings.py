@@ -179,5 +179,5 @@ def get_default_special_act_post_process(module_cls):
     """
     return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(module_cls, None)
 
-def has_special_act_post_process(module_cls):
-    return module_cls in DEFAULT_MODULE_TO_ACT_POST_PROCESS
+def has_special_act_post_process(module):
+    return module.training and type(module) in DEFAULT_MODULE_TO_ACT_POST_PROCESS
