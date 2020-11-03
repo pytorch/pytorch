@@ -13,12 +13,14 @@ layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
+
   const ivec2 size = imageSize(uOutput).xy;
+  const vec2 stride = vec2(textureSize(uInput, 0).xy) / size;
 
   if (all(lessThan(pos.xy, size))) {
-    const vec2 ratio = vec2(textureSize(uInput, 0).xy) / size;
-    const ivec2 start = ivec2(floor(pos.xy * ratio));
-    const ivec2 end = ivec2(ceil((pos.xy + 1) * ratio));
+    const vec2 ipos = pos.xy * stride;
+    const ivec2 start = ivec2(floor(ipos));
+    const ivec2 end = ivec2(ceil(ipos + stride));
     const ivec2 range = end - start;
 
     vec4 acc = vec4(0);

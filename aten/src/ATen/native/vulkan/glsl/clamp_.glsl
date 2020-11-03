@@ -8,8 +8,8 @@ layout(std430) uniform;
 
 layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict image3D uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION restrict         Block {
-  float minValue;
-  float maxValue;
+  float min;
+  float max;
 } uBlock;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
@@ -21,6 +21,6 @@ void main() {
     imageStore(
         uOutput,
         pos,
-        clamp(imageLoad(uOutput, pos), uBlock.minValue, uBlock.maxValue));
+        clamp(imageLoad(uOutput, pos), uBlock.min, uBlock.max));
   }
 }
