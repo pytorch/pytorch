@@ -96,15 +96,15 @@ class Context final : public torch::jit::CustomClassHolder {
   } original_;
 };
 
-vTensor prepack_weights(const Tensor& weight_arg) {
-  const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
-  return convert(weight);
-}
+// vTensor prepack_weights(const Tensor& weight_arg) {
+//   const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+//   return convert(weight);
+// }
 
-vTensor prepack_biases(const c10::optional<Tensor>& bias_arg) {
-  const Tensor bias = bias_arg->is_vulkan() ? *bias_arg : bias_arg->vulkan();
-  return convert(bias);
-}
+// vTensor prepack_biases(const c10::optional<Tensor>& bias_arg) {
+//   const Tensor bias = bias_arg->is_vulkan() ? *bias_arg : bias_arg->vulkan();
+//   return convert(bias);
+// }
 
 bool available(
     const Tensor& weight,
@@ -127,7 +127,8 @@ bool available(
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
                                        (c10::DeviceType::Vulkan == bias->device().type()) &&
                                        (kFloat == bias->scalar_type()) &&
-                                       (weight.size(Layout::Filter::output) == (bias->size(0))))
+                                       ((transposed ? true /* to be addded in the future */
+                                                    : (weight.size(Layout::Filter::output) == (bias->size(0))))))
                                     : true) &&
          // Padding
          (padding[Layout::Parameter::height] >= 0) &&
@@ -163,8 +164,9 @@ bool available(
 //     const float output_min,
 //     const float output_max)
 //   : packed_{
-
-//   },{
+//       prepack_weight(weight),
+//       prepack_biases(bias),
+//   }, {
 // }
 
 // Context Context::create(
@@ -222,18 +224,18 @@ bool available(
 //     });
 // }
 
-// bool usable(const Tensor& input) {
-//        // Input
-//   return (4 == input.ndimension()) &&
-//          (c10::DeviceType::Vulkan == input.device().type()) &&
-//          (kFloat == input.scalar_type()) &&
-//          (input.size(Layout::Activation4D::batch) >= 0) &&
-//          (input.size(Layout::Activation4D::channels) > 0) &&
-//          (input.size(Layout::Activation4D::height) > 0) &&
-//          (input.size(Layout::Activation4D::width) > 0) &&
-//          !input.requires_grad() &&
-//          true;
-// }
+bool usable(const Tensor& input) {
+       // Input
+  return (4 == input.ndimension()) &&
+         (c10::DeviceType::Vulkan == input.device().type()) &&
+         (kFloat == input.scalar_type()) &&
+         (input.size(Layout::Activation4D::batch) >= 0) &&
+         (input.size(Layout::Activation4D::channels) > 0) &&
+         (input.size(Layout::Activation4D::height) > 0) &&
+         (input.size(Layout::Activation4D::width) > 0) &&
+         !input.requires_grad() &&
+         true;
+}
 
 // // Tensor Context::run(const Tensor& input_arg) const {
 // //   api::Context* const context = api::context();

@@ -165,11 +165,11 @@
   self: grad * -((-self * self + 1).rsqrt()).conj()
 
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: grad
-  other: maybe_multiply(grad, alpha)
+  self: handle_r_to_c(self.scalar_type(), grad)
+  other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  self: grad
+  self: handle_r_to_c(self.scalar_type(), grad)
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
@@ -999,11 +999,11 @@
   self: std_backward(result, grad, self, dim, unbiased, keepdim)
 
 - name: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: grad
-  other: -grad * alpha
+  self: handle_r_to_c(self.scalar_type(), grad)
+  other: handle_r_to_c(other.scalar_type(), -grad * alpha.conj())
 
 - name: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  self: grad
+  self: handle_r_to_c(self.scalar_type(), grad)
 
 - name: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: -grad * alpha
