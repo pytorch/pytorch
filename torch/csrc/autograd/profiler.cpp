@@ -358,7 +358,9 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
             .sequenceNr(ctx.sequenceNr)
             .fwdThreadId(ctx.fwdThreadId)
             .scope(ctx.recFunScope)
-            .stack(stack); //
+        if (!stack.empty()) {
+          kineto_events_.back().stack(stack);
+        }
       }
       return;
     }
@@ -475,6 +477,24 @@ ProfilerThreadLocalState* getProfilerTLSState() {
   return dynamic_cast<ProfilerThreadLocalState*>(state.get());
 }
 
+std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
+  std::vector<std::vector<int64_t>> sizes;
+  sizes.reserve(fn.inputs().size());
+  for (const c10::IValue& input : fn.inputs()) {
+    if (!input.isTensor()) {
+      sizes.emplace_back();
+      continue;
+    }
+    const at::Tensor& tensor = input.toTensor();
+    if (tensor.defined()) {
+      sizes.push_back(input.toTensor().sizes().vec());
+    } else {
+      sizes.emplace_back();
+    }
+  }
+  return sizes;
+}
+
 void pushProfilingCallbacksLegacy() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
@@ -492,20 +512,7 @@ void pushProfilingCallbacksLegacy() {
 
         auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (state_ptr->config().report_input_shapes) {
-          std::vector<std::vector<int64_t>> inputSizes;
-          inputSizes.reserve(fn.inputs().size());
-          for (const c10::IValue& input : fn.inputs()) {
-            if (!input.isTensor()) {
-              inputSizes.emplace_back();
-              continue;
-            }
-            const at::Tensor& tensor = input.toTensor();
-            if (tensor.defined()) {
-              inputSizes.push_back(input.toTensor().sizes().vec());
-            } else {
-              inputSizes.emplace_back();
-            }
-          }
+          auto sizes = inputSizes(fn);
           state_ptr->pushRange(fn, record_cuda, msg, std::move(inputSizes));
         } else {
           state_ptr->pushRange(fn, record_cuda, msg);
@@ -548,21 +555,7 @@ void pushProfilingCallbacks() {
         ctx_ptr->startThreadId = at::RecordFunction::currentThreadId();
 
         if (state_ptr->config().report_input_shapes) {
-          std::vector<std::vector<int64_t>> inputSizes;
-          inputSizes.reserve(fn.inputs().size());
-          for (const c10::IValue& input : fn.inputs()) {
-            if (!input.isTensor()) {
-              inputSizes.emplace_back();
-              continue;
-            }
-            const at::Tensor& tensor = input.toTensor();
-            if (tensor.defined()) {
-              inputSizes.push_back(input.toTensor().sizes().vec());
-            } else {
-              inputSizes.emplace_back();
-            }
-          }
-          ctx_ptr->shapes = inputSizes;
+          ctx_ptr->shapes = inputSizes(fn);
         }
 
         ctx_ptr->sequenceNr = fn.seqNr();
@@ -581,7 +574,6 @@ void pushProfilingCallbacks() {
           ctx_ptr->stack = callstackStr(cs);
         }
 #endif
-
         return ctx_ptr;
       },
       [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {) {
@@ -661,38 +653,6 @@ bool kinetoAvailable() {
 #endif
 }
 
-void prepareProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities) {
-#ifdef USE_KINETO
-  if (config.state == ProfilerState::KINETO) {
-    std::set<libkineto::ActivityType> k_activities;
-    if (activities.count(ActivityType::CPU)) {
-      k_activities.insert(libkineto::ActivityType::EXTERNAL_CORRELATION);
-      k_activities.insert(libkineto::ActivityType::CUDA_RUNTIME);
-    }
-    //if (activities.count(ActivityType::CUDA_RUNTIME)) {
-    //  k_activities.insert(libkineto::ActivityType::CUDA_RUNTIME);
-    //}
-    if (activities.count(ActivityType::CUDA)) {
-      k_activities.insert(libkineto::ActivityType::GPU_MEMCPY);
-      k_activities.insert(libkineto::ActivityType::GPU_MEMSET);
-      k_activities.insert(libkineto::ActivityType::CONCURRENT_KERNEL);
-    }
-
-    if (!libkineto::api().hasProfilerRegistered()) {
-      libkineto::api().registerProfiler(
-        std::make_unique<libkineto::ActivityProfilerInterface>(false));
-    }
-    libkineto::api().initProfilerIfRegistered();
-    libkineto::api().prepareTrace(k_activities);
-
-    return;
-  }
-#endif
-  TORCH_CHECK(false, "Supported only in Kineto profiler");
-}
-
 void enableProfilerLegacy(const ProfilerConfig& new_config) {
   TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
@@ -755,6 +715,35 @@ thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisableOptions> p
 }
 
 #ifdef USE_KINETO
+
+void prepareProfiler(
+    const ProfilerConfig& config,
+    const std::set<ActivityType>& activities) {
+  TORCH_CHECK(config.state == ProfilerState::KINETO,
+      "Supported only in Kineto profiler");
+
+  std::set<libkineto::ActivityType> k_activities;
+  if (activities.count(ActivityType::CPU)) {
+    k_activities.insert(libkineto::ActivityType::EXTERNAL_CORRELATION);
+    k_activities.insert(libkineto::ActivityType::CUDA_RUNTIME);
+  }
+  //if (activities.count(ActivityType::CUDA_RUNTIME)) {
+  //  k_activities.insert(libkineto::ActivityType::CUDA_RUNTIME);
+  //}
+  if (activities.count(ActivityType::CUDA)) {
+    k_activities.insert(libkineto::ActivityType::GPU_MEMCPY);
+    k_activities.insert(libkineto::ActivityType::GPU_MEMSET);
+    k_activities.insert(libkineto::ActivityType::CONCURRENT_KERNEL);
+  }
+
+  if (!libkineto::api().hasProfilerRegistered()) {
+    libkineto::api().registerProfiler(
+      std::make_unique<libkineto::ActivityProfilerInterface>(false));
+  }
+  libkineto::api().initProfilerIfRegistered();
+  libkineto::api().prepareTrace(k_activities);
+}
+
 void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities) {
