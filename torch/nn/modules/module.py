@@ -1075,7 +1075,6 @@ class Module:
         missing_keys = []
         unexpected_keys = []
         error_msgs = []
-        state_dict = self._remove_prefix_from_state_dict_if_exists(state_dict, prefix='module.')
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)

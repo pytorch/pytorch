@@ -815,7 +815,7 @@ class TestDataParallel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @skipIfRocm
-    def test_remove_prefix_from_state_dict_if_exists(self):
+    def test_strip_prefix_from_state_dict_if_exists(self):
         model = torch.nn.Sequential(nn.Linear(32, 32),
                                     nn.ReLU(),
                                     nn.Linear(32, 16),
