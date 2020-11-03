@@ -184,7 +184,11 @@ at::Tensor inferAndAlloc(
   const auto maybe_rfactor_domain =
       domain->hasRFactor() ? domain->rfactorDomain() : domain->rootDomain();
 
-  for (auto id : kir::TensorDomain::noReductions(maybe_rfactor_domain)) {
+  for (const auto id : maybe_rfactor_domain) {
+    if (id->isReduction() ||
+        id->iterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    }
     const auto inferred_val = expr_eval.evaluate(id->rawExtent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),

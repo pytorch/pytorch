@@ -75,8 +75,18 @@ class CudaKernelGenerator : private kir::IrVisitor {
     for (auto allocate : kernel_summary.global_allocations) {
       TORCH_INTERNAL_ASSERT(allocate->buffer()->isA<kir::TensorView>());
       const auto tv = allocate->buffer()->as<kir::TensorView>();
-      code_ << ", Tensor<" << tv->dtype() << ", "
-            << tv->domain()->rootDomain().size() << "> " << varName(tv, "T");
+      const auto& maybe_rfactor_domain = tv->domain()->hasRFactor()
+          ? tv->domain()->rfactorDomain()
+          : tv->domain()->rootDomain();
+      const auto nDims = std::count_if(
+          maybe_rfactor_domain.begin(),
+          maybe_rfactor_domain.end(),
+          [](const kir::IterDomain* id) {
+            return !id->isReduction() &&
+                id->iterType() != IterType::BroadcastWithoutStride;
+          });
+      code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
+            << varName(tv, "T");
     }
 
     // Kernels generating random numbers take extra (seed, offset) arguments

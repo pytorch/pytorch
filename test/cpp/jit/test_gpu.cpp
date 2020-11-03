@@ -8905,6 +8905,61 @@ TEST(NVFuserTest, FusionIssue468_CUDA) {
       aten_output.sub(outputs[0]).abs().max());
 }
 
+TEST(NVFuserTest, FusionIssue363_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Symbolic 2D tensors TV0[M, K], TV1[K, N]
+  TensorView* tv0 = makeSymbolicTensor(2);
+  TensorView* tv1 = makeSymbolicTensor(2);
+
+  // Broadcast tv0 to [M, K, *]
+  TensorView* tv2 = broadcast(tv0, {false, false, true});
+  // Broadcast tv1 to [*, K, N]
+  TensorView* tv3 = broadcast(tv1, {true, false, false});
+
+  // Pointwise multiplication resulting in tv3[M, K, N]
+  TensorView* tv4 = mul(tv2, tv3);
+
+  // Sum the K-dim
+  TensorView* tv5 = sum(tv4, {1});
+
+  // Register inputs and outputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(tv5);
+
+  tv2->setMemoryType(MemoryType::Global);
+  tv3->setMemoryType(MemoryType::Global);
+  tv4->setMemoryType(MemoryType::Global);
+
+  tv0->computeAt(tv5, -1);
+  tv1->computeAt(tv5, -1);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDz);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
+
+  tv5->axis(2)->parallelize(ParallelType::BIDx);
+
+  constexpr int M = 3, K = 6, N = 16;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  at::Tensor t0 = at::randn({M, K}, options);
+  at::Tensor t1 = at::randn({K, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
+
+  at::Tensor aten_output = mul(t0.unsqueeze(2), t1.unsqueeze(0)).sum(1);
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0]),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
 TEST(NVFuserTest, FusionIssue477_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -8922,6 +8977,35 @@ TEST(NVFuserTest, FusionIssue477_CUDA) {
 
   TORCH_CHECK(tv1->getThisComputeAtAxis() == 1);
   TORCH_CHECK(tv1->getRelativeComputeAtAxis() == 2);
+}
+
+TEST(NVFuserTest, FusionIssue484_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = add(tv1, new Float(0));
+  fusion.addOutput(tv2);
+
+  tv1->setMemoryType(MemoryType::Global);
+
+  constexpr int M = 100;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({M, M}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0});
+
+  at::Tensor aten_output = t0.sum({1});
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
 }
 
 } // namespace jit
