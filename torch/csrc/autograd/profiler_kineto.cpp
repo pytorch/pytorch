@@ -39,7 +39,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
 
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
-      kineto_client_activities_.emplace_back(std::move(op));
+      cpu_trace->ops.emplace_back(std::move(op));
       kineto_events_.emplace_back();
       kineto_events_.back()
           .startThreadId(ctx->startThreadId)
@@ -53,7 +53,6 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
   }
 
-  std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
   std::vector<KinetoEvent> kineto_events_;
 
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
@@ -197,7 +196,7 @@ ProfilerResult disableProfiler() {
 
   libkineto::api().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
-  //auto trace = std::move(libkineto::api().stopTrace());
+  //auto trace = libkineto::api().stopTrace();
   libkineto::api().stopTrace();
   std::vector<std::vector<KinetoEvent>> kineto_events; // = filterTrace(trace);
   auto legacy_events = state_ptr->consolidate();
