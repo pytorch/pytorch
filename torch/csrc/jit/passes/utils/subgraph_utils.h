@@ -69,7 +69,7 @@ TORCH_API void unmergeSubgraph(
 std::shared_ptr<Graph> getSubgraph(Node* n);
 
 TORCH_API std::string generateNameForGraph(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     size_t maxlen = 40,
     const std::string& prefix = "fused");
 
