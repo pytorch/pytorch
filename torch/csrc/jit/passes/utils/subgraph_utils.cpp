@@ -394,6 +394,31 @@ Node* createSingletonSubgraphAndUpdateAliasing(
       });
 }
 
+std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
+  if (s.size() <= maxlen) {
+    return s;
+  }
+  std::stringstream truncated;
+  truncated << s.substr(0, maxlen);
+  truncated << "_" << std::hash<std::string>{}(s) << "_";
+  return truncated.str();
+}
+
+std::string generateNameForGraph(
+    std::shared_ptr<Graph> graph,
+    size_t maxlen,
+    const std::string& prefix) {
+  std::stringstream graph_name;
+  graph_name << prefix;
+  for (Node* node : graph->nodes()) {
+    if (!node->kind().is_aten()) {
+      continue;
+    }
+    graph_name << "_" << node->kind().toUnqualString();
+  }
+  return truncateStrWithHash(graph_name.str(), maxlen);
+}
+
 } // namespace SubgraphUtils
 } // namespace jit
 } // namespace torch
