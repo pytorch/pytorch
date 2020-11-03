@@ -312,8 +312,8 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         bns = {
             1: nn.BatchNorm1d,
-            2: nn.BatchNorm1d,
-            3: nn.BatchNorm1d,
+            2: nn.BatchNorm2d,
+            3: nn.BatchNorm3d,
         }
         quantized_convs = {
             1: nnq.Conv1d,

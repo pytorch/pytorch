@@ -88,12 +88,16 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
     def _forward(self, input):
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
-        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape([-1, 1, 1, 1]))
+        weight_shape = [1] * len(self.weight.shape)
+        weight_shape[0] = -1
+        bias_shape = [1] * len(self.weight.shape)
+        bias_shape[1] = -1
+        scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
         # this does not include the conv bias
         conv = self._conv_forward(input, scaled_weight)
-        conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+        conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:
-            conv_orig = conv_orig + self.bias.reshape([1, -1, 1, 1])
+            conv_orig = conv_orig + self.bias.reshape(bias_shape)
         conv = self.bn(conv_orig)
         return conv
 
