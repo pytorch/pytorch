@@ -543,6 +543,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     @skipIfTravis
     @skipIfNoLapack
     @skipIfNoCuda
+    @unittest.skip("This model takes too much memory")
     def test_super_resolution(self):
         super_resolution_net = SuperResolutionNet(upscale_factor=3)
         state_dict = model_zoo.load_url(model_urls['super_resolution'], progress=False)
