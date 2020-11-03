@@ -636,7 +636,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
-
     def test_remove_qconfig(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -656,6 +655,29 @@ class TestQuantizeFx(QuantizationTestCase):
         for name, module in m.named_modules():
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
+
+    def test_default_quant_after_none_qconfig(self):
+        """ Make sure default quant is inserted properly"""
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = x.transpose(1, 2)
+                x = self.conv2(x)
+
+        m = M().eval()
+        qconfig_dict = {
+            "": default_qconfig,
+            "module_name": [
+                ("conv1", None)
+            ]
+        }
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
 
     @skipIfNoFBGEMM
     def test_qat_and_script(self):
@@ -960,7 +982,6 @@ class TestQuantizeFx(QuantizationTestCase):
         prepared_copy = copy.deepcopy(prepared)
         # quantize, should run with no errors
         quantized = convert_fx(prepared_copy)
-
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
