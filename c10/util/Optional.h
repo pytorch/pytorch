@@ -25,6 +25,7 @@
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
 
+#include <c10/macros/Macros.h>
 #include <c10/util/in_place.h>
 
 #include <cassert>
@@ -385,7 +386,10 @@ struct small_scalar_optimization_optional_base {
 
 template <class T>
 using OptionalBase = typename std::conditional<
-    std::is_trivially_copyable<T>::value,
+    // Apparently, VS 2019 says std::pair with non-trivial copy
+    // assignment is_trivially_copyable anyway, hence the other two
+    // checks. Think it may be related to CWG 1734?
+    C10_IS_TRIVIALLY_COPYABLE(T) && std::is_copy_constructible<T>::value && std::is_copy_assignable<T>::value,
     small_scalar_optimization_optional_base<T>,
     typename std::conditional<
         std::is_trivially_destructible<T>::value, // if possible
@@ -397,7 +401,7 @@ template <class T>
 class optional : private OptionalBase<T> {
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = typename std::conditional<
-    std::is_trivially_copyable<U>::value,
+      C10_IS_TRIVIALLY_COPYABLE(U) && std::is_copy_constructible<U>::value && std::is_copy_assignable<U>::value,
       small_scalar_optimization_optional_base<U>,
       typename std::conditional<
           std::is_trivially_destructible<U>::value, // if possible
