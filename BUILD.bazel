@@ -1879,7 +1879,7 @@ cc_library(
         ],
         exclude = [
             "torch/lib/c10d/ProcessGroupMPI.hpp",
-            "torch/lib/c10d/ProcessGroupNCCL.hpp",
+            "torch/lib/c10d/cuda/ProcessGroupNCCL.hpp",
             "torch/csrc/autograd/generated/VariableType.h",
             "torch/csrc/autograd/generated/RegistrationDeclarations.h",
             "torch/csrc/autograd/generated/variable_factories.h",

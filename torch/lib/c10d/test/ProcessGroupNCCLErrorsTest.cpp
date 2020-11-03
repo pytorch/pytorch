@@ -1,7 +1,7 @@
 #include <chrono>
 
 #include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <c10d/cuda/ProcessGroupNCCL.hpp>
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 #include <torch/csrc/cuda/nccl.h>

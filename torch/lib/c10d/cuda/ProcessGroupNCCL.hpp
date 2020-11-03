@@ -6,7 +6,7 @@
 #include <thread>
 #include <unordered_map>
 
-#include <c10d/NCCLUtils.hpp>
+#include <c10d/cuda/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 

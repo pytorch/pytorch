@@ -1,4 +1,4 @@
-#include <c10d/NCCLUtils.hpp>
+#include <c10d/cuda/NCCLUtils.hpp>
 #include <mutex>
 
 namespace c10d {

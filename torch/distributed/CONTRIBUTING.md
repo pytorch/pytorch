@@ -20,7 +20,7 @@ Source Code: [ProcessGroup.cpp](../lib/c10d/ProcessGroup.cpp) and  [ProcessGroup
 
 #### Process Group Backends
 
-We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../lib/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../lib/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../torch/lib/c10d/ProcessGroupNCCL.hpp)
+We currently offer three backends for Process Groups: [ProcessGroupGloo.hpp](../lib/c10d/ProcessGroupGloo.hpp), [ProcessGroupMPI.hpp](../lib/c10d/ProcessGroupMPI.hpp) and [ProcessGroupNCCL.hpp](../torch/lib/c10d/cuda/ProcessGroupNCCL.hpp)
 
 #### Store
 

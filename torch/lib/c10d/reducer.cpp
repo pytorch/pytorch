@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <c10d/reducer.hpp>
 
 #include <functional>
 

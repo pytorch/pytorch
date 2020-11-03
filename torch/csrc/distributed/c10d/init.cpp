@@ -13,7 +13,7 @@
 #endif
 
 #ifdef USE_C10D_NCCL
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <c10d/cuda/ProcessGroupNCCL.hpp>
 #endif
 
 #ifdef USE_C10D_MPI

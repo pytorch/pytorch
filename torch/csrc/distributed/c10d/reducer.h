@@ -12,7 +12,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
+#include <c10d/default_comm_hooks.hpp>
 
 namespace c10d {
 

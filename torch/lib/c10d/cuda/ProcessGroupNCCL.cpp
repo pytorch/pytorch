@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <c10d/cuda/ProcessGroupNCCL.hpp>
 
 #include <map>
 #include <tuple>
