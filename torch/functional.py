@@ -943,7 +943,7 @@ def tensordot(a, b, dims=2, out=None):
     if out is None:
         return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
     else:
-        return _VF.tensordot(a, b, dims_a, dims_b, out=out)
+        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
