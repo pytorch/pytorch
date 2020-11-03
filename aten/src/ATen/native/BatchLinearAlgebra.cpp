@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
@@ -591,16 +592,11 @@ Tensor linalg_cholesky(const Tensor &self) {
 }
 
 Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
-  squareCheckInputs(self);
-  CheckedFrom c = "linalg_cholesky_out";
-  TensorArg result_arg(result, "result", 0);
-  TensorArg self_arg(self, "self", 1);
-  checkSameSize(c, result_arg, self_arg);
-  checkSameType(c, result_arg, self_arg);
-  TORCH_CHECK(self.device() == result.device(),
-            "Expected input and out tensors to be on the same device, but found input on ",
-            self.device(), " and out on ", result.device(), " instead.");
-  result.copy_(native::linalg_cholesky(self));
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  Tensor result_tmp = at::linalg_cholesky(self);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 

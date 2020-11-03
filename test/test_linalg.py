@@ -1084,14 +1084,8 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_cholesky_errors(self, device, dtype):
+    def test_cholesky_errors_and_warnings(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        # cholesky requires out to have same shape as input
-        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
-        out = torch.empty(2, 3, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, r'to have same size as tensor for argument'):
-            torch.linalg.cholesky(A, out=out)
 
         # cholesky requires the input to be a square matrix or batch of square matrices
         A = torch.randn(2, 3, device=device, dtype=dtype)
@@ -1126,6 +1120,21 @@ class TestLinalg(TestCase):
         A[4, -1, -1] = 0  # Now A[4] is singular
         with self.assertRaisesRegex(RuntimeError, r'For batch 4: U\(3,3\) is zero, singular U\.'):
             torch.linalg.cholesky(A)
+
+        # if out tensor with wrong shape is passed a warning is given
+        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
+        out = torch.empty(2, 3, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.cholesky(A, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(A).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            torch.linalg.cholesky(A, out=out)
 
     # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
     # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
