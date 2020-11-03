@@ -290,7 +290,7 @@ class TestDistBackend(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
 
-        if torch.cuda.device_count() != self.world_size:
+        if torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
             dist.init_process_group(
