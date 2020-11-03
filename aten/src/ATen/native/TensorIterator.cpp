@@ -406,7 +406,6 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
                                    op.tensor.options().dtype(common_dtype_),
                                    LEGACY_CONTIGUOUS_MEMORY_FORMAT);
         op.current_dtype = common_dtype_;
-        op.target_dtype = common_dtype_;
     }
 
     // Promotes inputs by creating temporaries of the correct dtype
@@ -414,7 +413,6 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
         op.original_tensor = op.tensor;
         op.tensor = op.tensor.to(common_dtype_);
         op.current_dtype = common_dtype_;
-        op.target_dtype = common_dtype_;
       }
     }
   }
@@ -849,15 +847,7 @@ TensorIterator TensorIterator::binary_float_op(Tensor& out, const Tensor& a,
 
 TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     const Tensor& b) {
-  // Note [special-case bool outputs]
-  // We explicitly don't call `cast_common_dtype_to_outputs` when the output tensor
-  // has `bool` dtype. This is a performance optimization: the functional
-  // version of all comparison/logical ops uses a bool output tensor, and we'd like to
-  // avoid creating a temporary copy of the output.
-  // However, note that all kernels using this TensorIterator will need to special-case when
-  // the output tensor has bool dtype, and provide a lambda of type (scalar_t, scalar_t -> bool).
-  if (out.scalar_type() == kBool) {
-    return TensorIteratorConfig()
+  return TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(out)
     .add_input(a)
@@ -865,17 +855,6 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();
-  } else {
-    return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .build();
-  }
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
