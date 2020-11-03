@@ -222,7 +222,7 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
   VmapDimVector all_dims_physical;
   all_dims_physical.reserve(self_physical.tensor().dim());
   for (int64_t bdim = 0; bdim < self_physical.numBatchDims(); bdim++) {
-    all_dims_physical.push_back(bdim); 
+    all_dims_physical.push_back(bdim);
   }
   all_dims_physical.insert(
       all_dims_physical.end(),
