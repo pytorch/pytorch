@@ -195,6 +195,11 @@ namespace impl {
       auto diff_view_meta = static_cast<at::ViewMeta*>(get_view_meta(self));
       diff_view_meta->attr_version = self._version();
     }
+    // Variable::requires_grad = true if one of the following is satisfied:
+    // - requires_grad_ = treu
+    // - grad_fn_ is not null
+    at::DispatchKeySet cur = self.unsafeGetTensorImpl()->key_set();
+    self.unsafeGetTensorImpl()->set_key_set(cur.add(getAutogradKeyFromBackend(cur.highestPriorityBackendTypeId())));
   }
 
   Node* grad_fn_unsafe(const Variable& self) {
@@ -419,7 +424,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       return autograd_meta->grad_fn_;
     }
   }
-  
+
   if (torch::autograd::impl::get_autograd_meta(self)) {
     return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
   } else {

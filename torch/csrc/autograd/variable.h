@@ -225,6 +225,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       !requires_grad || isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
+    // If the tensor requires grad, we add AutogradBackend key to it.
+    if (requires_grad) {
+      at::DispatchKeySet cur = self_impl->key_set();
+      self_impl->set_key_set(cur.add(getAutogradKeyFromBackend(cur.highestPriorityBackendTypeId())));
+    }
   }
 
   bool requires_grad() const override {
