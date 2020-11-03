@@ -126,7 +126,7 @@ class TORCH_API Message final {
 
   // Given an IValue representation of a message from toIValueTuple(),
   // constructs a Message.
-  static Message fromIValueTuple(at::IValue messageTuple);
+  static Message fromIValueTuple(const at::IValue& messageTuple);
 
  private:
   std::vector<char> payload_;

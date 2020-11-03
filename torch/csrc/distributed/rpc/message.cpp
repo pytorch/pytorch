@@ -143,7 +143,7 @@ at::IValue Message::toIValueTuple() const {
       c10::ivalue::Tuple::create(payload, messageTensors, type_, id_));
 }
 
-/* static */ Message Message::fromIValueTuple(at::IValue messageTuple) {
+/* static */ Message Message::fromIValueTuple(const at::IValue& messageTuple) {
   TORCH_INTERNAL_ASSERT(
       messageTuple.isTuple(), "Expected messageTuple to be of type tuple.");
   std::vector<at::IValue> values = messageTuple.toTuple()->elements();
