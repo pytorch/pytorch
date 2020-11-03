@@ -30,7 +30,7 @@ def from_float_helper(cls, mod):
     else:
         assert type(mod) == cls._FLOAT_MODULE, \
             " nnq." + cls.__name__ + ".from_float only works for " + \
-                cls._FLOAT_MODULE.__name__
+            cls._FLOAT_MODULE.__name__
         assert hasattr(mod, "qconfig"), \
             "Input float module must have qconfig defined."
         if type(mod) == _NNI_CONV_RELU_MODULE:
