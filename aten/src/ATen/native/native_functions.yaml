@@ -8912,10 +8912,14 @@
 - func: linalg_cond(Tensor self, Scalar? ord=None) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    Math: linalg_cond
 
 - func: linalg_cond.ord_str(Tensor self, str ord) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    Math: linalg_cond
 
 - func: linalg_tensorsolve(Tensor self, Tensor other, int[]? dims=None) -> Tensor
   python_module: linalg
