@@ -1210,25 +1210,24 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
-    def _test_complex_views(self, op, dtypes, shape_postfix=()):
+    def _test_complex_views(self, op, dtypes):
         test = self._vmap_view_test
 
         def run_test(op, dtype):
             def get(shape):
-                shape = shape + list(shape_postfix)
                 return torch.randn(shape, dtype=dtype)
 
             B0, B1 = 7, 11
-            test = self._vmap_view_test
 
             # Single vmap, various in_dims / out_dims
             test(op, [get([B0, 3])])
+            test(op, [get([3, B0])], in_dims=1)
             test(op, [get([2, 5, B0, 3])], in_dims=2)
             test(op, [get([2, 5, B0, 3])], in_dims=2, out_dims=2)
 
             # Doubly nested vmap
             test(vmap(op), [get([B0, B1])])
-            test(vmap(op), [get([B1, 2, 5, B0, 3])], in_dims=2)
+            test(vmap(op), [get([B1, 2, 5, 3, B0])], in_dims=4)
             test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
                  in_dims=2, out_dims=2)
 
@@ -1245,9 +1244,58 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self._test_complex_views(torch.view_as_real, dtypes=[torch.cfloat, torch.cdouble])
 
     def test_view_as_complex(self):
-        self._test_complex_views(torch.view_as_complex,
-                                 dtypes=[torch.float, torch.double],
-                                 shape_postfix=[2])
+        def run_test(dtype):
+            def get(shape):
+                return torch.randn(shape, dtype=dtype)
+
+            op = torch.view_as_complex
+            test = self._vmap_view_test
+            B0, B1 = 7, 11
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3, 2])])
+            test(op, [get([2, 5, B0, 3, 2])], in_dims=2)
+            test(op, [get([2, 5, B0, 3, 2])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1, 2])])
+            test(vmap(op), [get([B1, 2, 5, B0, 3, 2])], in_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3, 2])],
+                 in_dims=2, out_dims=2)
+
+            # Interesting case #1: Batch dim directly before dim of size 2
+            test(op, [get([3, B0, 2])], in_dims=1)
+            test(vmap(op, in_dims=1), [get([3, B1, B0, 2])], in_dims=2)
+
+            # Interesting case #2: Batch dim at end of tensor
+            # view_as_complex requires that the dim with size 2 have stride 1
+            # in order for the view to function propertly
+            test(op, [get([B0, 2]).transpose(0, 1)], in_dims=1)
+            test(vmap(op, in_dims=1), [get([B0, B1, 2]).movedim(1, 2)])
+            test(vmap(op, in_dims=2), [get([B0, 3, B1, 2]).movedim(2, 3)])
+
+            # Interesting case #2: Batch dim at end of tensor, failure cases
+            msg = "Tensor must have a last dimension with stride 1"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op, in_dims=1)(get([2, B0]))
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(vmap(op, in_dims=1), in_dims=1)(get([2, B0, B1]))
+
+            # Invalid input: no dimension of size 2
+            msg = 'Input tensor must have one or more dimensions'
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op)(get([B0]))
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(vmap(op))(get([B0, B1]))
+
+            # Invalid input: Batch dim has size 2, but the logical last dim does
+            # not have size 2
+            msg = 'Tensor must have a last dimension of size 2'
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op, in_dims=1)(get([3, 2]))
+
+        for dtype in [torch.float, torch.double]:
+            run_test(dtype)
 
     def test_is_complex(self):
         ctensor = torch.randn(3, dtype=torch.cfloat)
