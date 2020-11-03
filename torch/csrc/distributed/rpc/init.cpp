@@ -393,6 +393,43 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   Set future that is completed when the profiling event corresponding
                   to the creation of this RRef on the remote node has been recorded.
               )")
+          .def(
+              "backward",
+              [](PyRRef& self,
+                 int64_t dist_autograd_ctx_id,
+                 bool retain_graph) {
+                self.backward(dist_autograd_ctx_id, retain_graph);
+              },
+              py::arg("dist_autograd_ctx_id") = -1,
+              py::arg("retain_graph") = false,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+                  Runs the backward pass using the RRef as the root of the
+                  backward pass. If ``dist_autograd_ctx_id`` is provided,
+                  we perform a distributed backward pass using the provided
+                  ctx_id starting from the owner of the RRef. In this case,
+                  :meth:`~torch.distributed.autograd.get_gradients` should be
+                  used to retrieve the gradients. If ``dist_autograd_ctx_id``
+                  is ``None``, it is assumed that this is a local autograd graph
+                  and we only perform a local backward pass. The value of the
+                  RRef is expected to be a scalar Tensor.
+
+                Arguments:
+                    dist_autograd_ctx_id (int, optional): The distributed
+                        autograd context id for which we should retrieve the
+                        gradients (default: -1).
+                    retain_graph(bool, optional): If ``False``, the graph used to
+                        compute the grad will be freed. Note that in nearly all
+                        cases setting this option to ``True`` is not needed and
+                        often can be worked around in a much more efficient way.
+                        Usually, you need to set this to ``True`` to run backward
+                        multiple times (default: False).
+
+                Example::
+                    >>> import torch.distributed.autograd as dist_autograd
+                    >>> with dist_autograd.context() as context_id:
+                    >>>     rref.backward(context_id)
+                )")
           // not releasing GIL to avoid context switch
           .def("__repr__", &PyRRef::str);
 
@@ -452,6 +489,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+              ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -548,6 +590,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(

@@ -71,6 +71,7 @@ def backward(
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     grad_variables: Optional[_TensorOrTensors] = None,
+    inputs: Optional[Sequence[torch.Tensor]] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
@@ -95,6 +96,12 @@ def backward(
         If you have to use this function, make sure to reset the ``.grad`` fields of your
         parameters to ``None`` after use to break the cycle and avoid the leak.
 
+    .. note::
+
+        If you run any forward ops, create ``grad_tensors``, and/or call ``backward``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
     Arguments:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
@@ -110,6 +117,11 @@ def backward(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
+        inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
+            accumulated into ``.grad``. All other Tensors will be ignored. If not
+            provided, the gradient is accumulated into all the leaf Tensors that were
+            used to compute the attr::tensors. All the provided inputs must be leaf
+            Tensors.
     """
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
@@ -119,8 +131,11 @@ def backward(
             raise RuntimeError("'grad_tensors' and 'grad_variables' (deprecated) "
                                "arguments both passed to backward(). Please only "
                                "use 'grad_tensors'.")
+    if inputs is not None and len(inputs) == 0:
+        raise RuntimeError("'inputs' argument to backward() cannot be empty.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
+    inputs = tuple(inputs) if inputs is not None else tuple()
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
@@ -128,8 +143,8 @@ def backward(
         retain_graph = create_graph
 
     Variable._execution_engine.run_backward(
-        tensors, grad_tensors_, retain_graph, create_graph,
-        allow_unreachable=True)  # allow_unreachable flag
+        tensors, grad_tensors_, retain_graph, create_graph, inputs,
+        allow_unreachable=True, accumulate_grad=True)  # allow_unreachable flag
 
 
 def grad(
@@ -152,6 +167,12 @@ def grad(
     w.r.t the specified inputs. If it's ``False``, then gradient w.r.t. all remaining
     leaves will still be computed, and will be accumulated into their ``.grad``
     attribute.
+
+    .. note::
+
+        If you run any forward ops, create ``grad_outputs``, and/or call ``grad``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
     Arguments:
         outputs (sequence of Tensor): outputs of the differentiated function.
@@ -184,7 +205,7 @@ def grad(
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
-            only_inputs=only_inputs, 
+            only_inputs=only_inputs,
             allow_unused=allow_unused,
         )
 
@@ -201,7 +222,7 @@ def grad(
 
     return Variable._execution_engine.run_backward(
         outputs, grad_outputs_, retain_graph, create_graph,
-        inputs, allow_unused)
+        inputs, allow_unused, accumulate_grad=False)
 
 
 # This function applies in case of gradient checkpointing for memory

@@ -443,7 +443,7 @@ if _enabled:
             Returns a string representation of the internal graph for the
             ``forward`` method. See :ref:`interpreting-graphs` for details.
             """
-            return self.forward.graph
+            return self._c._get_method("forward").graph
 
         @property
         def inlined_graph(self):
@@ -478,13 +478,13 @@ if _enabled:
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))
 
-        def save(self, *args, **kwargs):
+        def save(self, f, **kwargs):
             r"""
             save(f, _extra_files={})
 
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
-            return self._c.save(*args, **kwargs)
+            return self._c.save(str(f), **kwargs)
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""

@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 import argparse
+import copy
 from datetime import datetime
+import importlib
 import modulefinder
 import os
 import shutil
@@ -19,6 +21,7 @@ from typing import Dict, Optional
 
 TESTS = [
     'test_autograd',
+    'benchmark_utils/test_benchmark_utils',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
@@ -29,14 +32,13 @@ TESTS = [
     'distributed/test_c10d_spawn',
     'test_cuda',
     'test_jit_cuda_fuser',
-    'test_jit_cuda_fuser_legacy',
-    'test_jit_cuda_fuser_profiling',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
-    'test_distributions',
+    'distributions/test_constraints',
+    'distributions/test_distributions',
     'test_expecttest',
     'test_foreach',
     'test_indexing',
@@ -52,6 +54,7 @@ TESTS = [
     'test_numba_integration',
     'test_ops',
     'test_optim',
+    'test_pytree',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
     'test_vulkan',
@@ -90,8 +93,57 @@ TESTS = [
     'test_determination',
     'test_futures',
     'test_fx',
+    'test_fx_experimental',
     'test_functional_autograd_benchmark',
     'test_package',
+    'distributed/_pipeline/sync/skip/test_api',
+    'distributed/_pipeline/sync/skip/test_gpipe',
+    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/_pipeline/sync/skip/test_leak',
+    'distributed/_pipeline/sync/skip/test_portal',
+    'distributed/_pipeline/sync/skip/test_stash_pop',
+    'distributed/_pipeline/sync/skip/test_tracker',
+    'distributed/_pipeline/sync/skip/test_verify_skippables',
+    'distributed/_pipeline/sync/test_balance',
+    'distributed/_pipeline/sync/test_bugs',
+    'distributed/_pipeline/sync/test_checkpoint',
+    'distributed/_pipeline/sync/test_copy',
+    'distributed/_pipeline/sync/test_deferred_batch_norm',
+    'distributed/_pipeline/sync/test_dependency',
+    'distributed/_pipeline/sync/test_inplace',
+    'distributed/_pipeline/sync/test_microbatch',
+    'distributed/_pipeline/sync/test_phony',
+    'distributed/_pipeline/sync/test_pipe',
+    'distributed/_pipeline/sync/test_pipeline',
+    'distributed/_pipeline/sync/test_stream',
+    'distributed/_pipeline/sync/test_transparency',
+    'distributed/_pipeline/sync/test_worker',
+]
+
+# Tests need to be run with pytest.
+USE_PYTEST_LIST = [
+    'distributed/_pipeline/sync/skip/test_api',
+    'distributed/_pipeline/sync/skip/test_gpipe',
+    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/_pipeline/sync/skip/test_leak',
+    'distributed/_pipeline/sync/skip/test_portal',
+    'distributed/_pipeline/sync/skip/test_stash_pop',
+    'distributed/_pipeline/sync/skip/test_tracker',
+    'distributed/_pipeline/sync/skip/test_verify_skippables',
+    'distributed/_pipeline/sync/test_balance',
+    'distributed/_pipeline/sync/test_bugs',
+    'distributed/_pipeline/sync/test_checkpoint',
+    'distributed/_pipeline/sync/test_copy',
+    'distributed/_pipeline/sync/test_deferred_batch_norm',
+    'distributed/_pipeline/sync/test_dependency',
+    'distributed/_pipeline/sync/test_inplace',
+    'distributed/_pipeline/sync/test_microbatch',
+    'distributed/_pipeline/sync/test_phony',
+    'distributed/_pipeline/sync/test_pipe',
+    'distributed/_pipeline/sync/test_pipeline',
+    'distributed/_pipeline/sync/test_stream',
+    'distributed/_pipeline/sync/test_transparency',
+    'distributed/_pipeline/sync/test_worker',
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -128,9 +180,16 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_cuda_primary_ctx',
 ] + [test for test in TESTS if test.startswith('distributed/')]
 
+# These tests use some specific pytest feature like parameterized testing or
+# fixtures that cannot be run by unittest
+PYTEST_TESTS = [
+    'distributions/test_constraints'
+]
+
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first.
 SLOW_TESTS = [
+    'distributions/test_distributions',
     'test_nn',
     'test_autograd',
     'test_cpp_extensions_jit',
@@ -151,7 +210,6 @@ SLOW_TESTS = [
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_aot_no_ninja',
     'test_serialization',
-    'test_distributions',
     'test_optim',
     'test_utils',
     'test_multiprocessing',
@@ -161,6 +219,28 @@ SLOW_TESTS = [
     'test_quantization',
     'test_determination',
     'test_futures',
+    'distributed/_pipeline/sync/skip/test_api',
+    'distributed/_pipeline/sync/skip/test_gpipe',
+    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/_pipeline/sync/skip/test_leak',
+    'distributed/_pipeline/sync/skip/test_portal',
+    'distributed/_pipeline/sync/skip/test_stash_pop',
+    'distributed/_pipeline/sync/skip/test_tracker',
+    'distributed/_pipeline/sync/skip/test_verify_skippables',
+    'distributed/_pipeline/sync/test_balance',
+    'distributed/_pipeline/sync/test_bugs',
+    'distributed/_pipeline/sync/test_checkpoint',
+    'distributed/_pipeline/sync/test_copy',
+    'distributed/_pipeline/sync/test_deferred_batch_norm',
+    'distributed/_pipeline/sync/test_dependency',
+    'distributed/_pipeline/sync/test_inplace',
+    'distributed/_pipeline/sync/test_microbatch',
+    'distributed/_pipeline/sync/test_phony',
+    'distributed/_pipeline/sync/test_pipe',
+    'distributed/_pipeline/sync/test_pipeline',
+    'distributed/_pipeline/sync/test_stream',
+    'distributed/_pipeline/sync/test_transparency',
+    'distributed/_pipeline/sync/test_worker',
 ]
 _DEP_MODULES_CACHE: Dict[str, set] = {}
 
@@ -200,6 +280,13 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
+JIT_EXECUTOR_TESTS = [
+    'test_jit_cuda_fuser',
+    'test_jit_profiling',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
+]
+
 def print_to_stderr(message):
     print(message, file=sys.stderr)
 
@@ -226,6 +313,11 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     if extra_unittest_args:
         assert isinstance(extra_unittest_args, list)
         unittest_args.extend(extra_unittest_args)
+
+    # If using pytest, replace -f with equivalent -x
+    if options.pytest:
+        unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
+
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args
@@ -456,7 +548,12 @@ def parse_args():
         type=int,
         help='runs a shard of the tests (taking into account other selections), e.g., '
         '--shard 2 3 will break up the selected tests into 3 shards and run the tests '
-        'in the 2nd shard (the number of shards will be whichever argument is greater)',
+        'in the 2nd shard (the first number should not exceed the second)',
+    )
+    parser.add_argument(
+        '--exclude-jit-executor',
+        action='store_true',
+        help='exclude tests that are run for a specific jit config'
     )
     return parser.parse_args()
 
@@ -533,7 +630,13 @@ def get_selected_tests(options):
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
         selected_tests = selected_tests[which_shard - 1 :: num_shards]
 
+    if options.exclude_jit_executor:
+        options.exclude.extend(JIT_EXECUTOR_TESTS)
+
     selected_tests = exclude_tests(options.exclude, selected_tests)
+    # exclude PYTEST_TESTS if pytest not installed.
+    if importlib.util.find_spec('pytest') is None:
+        selected_tests = exclude_tests(PYTEST_TESTS, selected_tests, 'PyTest not found.')
 
     if sys.platform == 'win32' and not options.ignore_win_blocklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
@@ -735,12 +838,15 @@ def main():
     failure_messages = []
     try:
         for test in selected_tests:
-            err_message = run_test_module(test, test_directory, options)
+            options_clone = copy.deepcopy(options)
+            if test in USE_PYTEST_LIST:
+                options_clone.pytest = True
+            err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
                 continue
             has_failed = True
             failure_messages.append(err_message)
-            if not options.continue_through_error:
+            if not options_clone.continue_through_error:
                 raise RuntimeError(err_message)
             print_to_stderr(err_message)
     finally:
@@ -754,7 +860,7 @@ def main():
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:
-            print_to_stderr(message)
+            print_to_stderr(err)
         sys.exit(1)
 
 if __name__ == '__main__':

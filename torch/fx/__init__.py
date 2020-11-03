@@ -2,7 +2,7 @@
 r'''
 **This feature is experimental and its stability is not currently guaranteed. Proceed at your own risk**
 
-FX (Functional Transformations) is a toolkit for capturing and transforming functional PyTorch programs. It
+FX is a toolkit for capturing and transforming functional PyTorch programs. It
 consists of GraphModule and a corresponding intermediate representation (IR). When GraphModule is constructed
 with an `nn.Module` instance as its argument, GraphModule will trace through the computation of that Module's
 `forward` method symbolically and record those operations in the FX intermediate representation.
@@ -85,6 +85,6 @@ Because this code is valid PyTorch code, the resulting `GraphModule` can be used
 
 from .graph_module import GraphModule
 from .symbolic_trace import symbolic_trace, Tracer
-from .graph import Graph, map_arg
-from .node import Node
+from .graph import Graph
+from .node import Node, map_arg
 from .proxy import Proxy

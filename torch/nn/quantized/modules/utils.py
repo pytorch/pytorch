@@ -17,7 +17,7 @@ def _quantize_weight(float_wt, observer):
     elif observer.qscheme in [torch.per_channel_affine_float_qparams]:
         qweight = torch.quantize_per_channel(
             float_wt,
-            wt_scale.to(torch.float), wt_zp.to(torch.float), observer.ch_axis, torch.quint8)
+            wt_scale.to(torch.float), wt_zp.to(torch.float), observer.ch_axis, observer.dtype)
     else:
         raise ValueError("Unexpected qscheme " + observer.qscheme)
     return qweight

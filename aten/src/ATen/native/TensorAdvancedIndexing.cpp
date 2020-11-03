@@ -612,7 +612,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   }
   else {
     TORCH_CHECK(false,
-                "reduce argument must be either of add, subtract, multiply or divide.");
+                "reduce argument must be either add or multiply.");
   }
 }
 

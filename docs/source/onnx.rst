@@ -249,6 +249,143 @@ E.g.: ::
     out = model(*inputs)
     torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
 
+Indexing
+--------
+
+Tensor indexing in PyTorch is very flexible and complicated.
+There are two categories of indexing. Both are largely supported in exporting today.
+If you are experiencing issues exporting indexing that belongs to the supported patterns below,
+please double check that you are exporting with the latest opset (opset_version=12).
+
+Getter
+~~~~~~
+
+This type of indexing occurs on the RHS. Export is supported for ONNX opset version >= 9. E.g.: ::
+
+  data = torch.randn(3, 4)
+  index = torch.tensor([1, 2])
+
+  # RHS indexing is supported in ONNX opset >= 11.
+  class RHSIndexing(torch.nn.Module):
+      def forward(self, data, index):
+          return data[index]
+
+  out = RHSIndexing()(data, index)
+
+  torch.onnx.export(RHSIndexing(), (data, index), 'indexing.onnx', opset_version=9)
+
+  # onnxruntime
+  import onnxruntime
+  sess = onnxruntime.InferenceSession('indexing.onnx')
+  out_ort = sess.run(None, {
+      sess.get_inputs()[0].name: data.numpy(),
+      sess.get_inputs()[1].name: index.numpy(),
+  })
+
+  assert torch.all(torch.eq(out, torch.tensor(out_ort)))
+
+Below is the list of supported patterns for RHS indexing. ::
+
+  # Scalar indices
+  data[0, 1]
+
+  # Slice indices
+  data[:3]
+
+  # Tensor indices
+  data[torch.tensor([[1, 2], [2, 3]])]
+  data[torch.tensor([2, 3]), torch.tensor([1, 2])]
+  data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])]
+  data[torch.tensor([2, 3]), :, torch.tensor([1, 2])]
+
+  # Ellipsis
+  # Not supported in scripting
+  # i.e. torch.jit.script(model) will fail if model contains this pattern.
+  # Export is supported under tracing
+  # i.e. torch.onnx.export(model)
+  data[...]
+
+  # The combination of above
+  data[2, ..., torch.tensor([2, 1, 3]), 2:4, torch.tensor([[1], [2]])]
+
+  # Boolean mask (supported for ONNX opset version >= 11)
+  data[data != 1]
+
+And below is the list of unsupported patterns for RHS indexing. ::
+
+  # Tensor indices that includes negative values.
+  data[torch.tensor([[1, 2], [2, -3]]), torch.tensor([-2, 3])]
+
+Setter
+~~~~~~
+
+In code, this type of indexing occurs on the LHS.
+Export is supported for ONNX opset version >= 11. E.g.: ::
+
+  data = torch.zeros(3, 4)
+  new_data = torch.arange(4).to(torch.float32)
+
+  # LHS indexing is supported in ONNX opset >= 11.
+  class LHSIndexing(torch.nn.Module):
+      def forward(self, data, new_data):
+          data[1] = new_data
+          return data
+
+  out = LHSIndexing()(data, new_data)
+
+  data = torch.zeros(3, 4)
+  new_data = torch.arange(4).to(torch.float32)
+  torch.onnx.export(LHSIndexing(), (data, new_data), 'inplace_assign.onnx', opset_version=11)
+
+  # onnxruntime
+  import onnxruntime
+  sess = onnxruntime.InferenceSession('inplace_assign.onnx')
+  out_ort = sess.run(None, {
+      sess.get_inputs()[0].name: torch.zeros(3, 4).numpy(),
+      sess.get_inputs()[1].name: new_data.numpy(),
+  })
+
+  assert torch.all(torch.eq(out, torch.tensor(out_ort)))
+
+Below is the list of supported patterns for LHS indexing. ::
+
+  # Scalar indices
+  data[0, 1] = new_data
+
+  # Slice indices
+  data[:3] = new_data
+
+  # Tensor indices
+  # If more than one tensor are used as indices, only consecutive 1-d tensor indices are supported.
+  data[torch.tensor([[1, 2], [2, 3]])] = new_data
+  data[torch.tensor([2, 3]), torch.tensor([1, 2])] = new_data
+
+  # Ellipsis
+  # Not supported to export in script modules
+  # i.e. torch.onnx.export(torch.jit.script(model)) will fail if model contains this pattern.
+  # Export is supported under tracing
+  # i.e. torch.onnx.export(model)
+  data[...] = new_data
+
+  # The combination of above
+  data[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
+
+  # Boolean mask
+  data[data != 1] = new_data
+
+And below is the list of unsupported patterns for LHS indexing. ::
+
+  # Multiple tensor indices if any has rank >= 2
+  data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])] = new_data
+
+  # Multiple tensor indices that are not consecutive
+  data[torch.tensor([2, 3]), :, torch.tensor([1, 2])] = new_data
+
+  # Tensor indices that includes negative values.
+  data[torch.tensor([1, -2]), torch.tensor([-2, 3])] = new_data
+
+If you are experiencing issues exporting indexing that belongs to the above supported patterns, please double check that
+you are exporting with the latest opset (opset_version=12).
 
 TorchVision support
 -------------------
@@ -649,16 +786,16 @@ This mode is used to export all operators as regular ONNX operators. This is the
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %3 : Float(2:12, 3:4, 4:1) = aten:exp(%0)
-      %4 : Float(2:12, 3:4, 4:1) = aten:div(%0, %3)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:div(%0, %3)
       return (%4)
 
   Is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %1 : Float(2:12, 3:4, 4:1) = onnx:Exp(%0)
-      %2 : Float(2:12, 3:4, 4:1) = onnx:Div(%0, %1)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Exp(%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Div(%0, %1)
       return (%2)
 
 
@@ -668,16 +805,16 @@ This mode is used to export all operators as ATen ops, and avoid conversion to O
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %3 : Float(2:12, 3:4, 4:1) = aten::exp(%0)
-      %4 : Float(2:12, 3:4, 4:1) = aten::div(%0, %3)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%0, %3)
       return (%4)
 
   Is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %1 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="exp"](%0)
-      %2 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="div"](%0, %1)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="exp"](%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="div"](%0, %1)
       return (%2)
 
 ONNX_ATEN_FALLBACK
@@ -707,7 +844,7 @@ To export a raw ir. ::
 
   Example torch ir graph:
 
-    graph(%x.1 : Float(1:1)):
+    graph(%x.1 : Float(1, strides=[1])):
       %1 : Tensor = aten::exp(%x.1)
       %2 : Tensor = aten::div(%x.1, %1)
       %y.1 : Tensor[] = prim::ListConstruct(%2)
@@ -715,7 +852,7 @@ To export a raw ir. ::
 
   is exported as:
 
-    graph(%x.1 : Float(1:1)):
+    graph(%x.1 : Float(1, strides=[1])):
       %1 : Tensor = aten::exp(%x.1)
       %2 : Tensor = aten::div(%x.1, %1)
       %y.1 : Tensor[] = prim::ListConstruct(%2)
@@ -729,18 +866,18 @@ enables users to register and implement the operator as part of their runtime ba
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1),
-          %1 : Float(2:12, 3:4, 4:1)):
-      %6 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
-      %7 : Float(2:12, 3:4, 4:1) = aten::div(%6, %0) # registered op
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %6 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %7 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%6, %0) # registered op
       return (%7))
 
   is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1),
-          %1 : Float(2:12, 3:4, 4:1)):
-      %2 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
-      %3 : Float(2:12, 3:4, 4:1) = onnx::Div(%2, %0) # registered op
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx::Div(%2, %0) # registered op
       return (%3
 
 
@@ -807,32 +944,7 @@ Q: Does ONNX support implicit scalar datatype casting?
 
 Q: Is tensor in-place indexed assignment like `data[index] = new_data` supported?
 
-  Yes, this is supported now for ONNX opset version >= 11. E.g.: ::
-
-    data = torch.zeros(3, 4)
-    new_data = torch.arange(4).to(torch.float32)
-
-    # Assigning to left hand side indexing is supported in ONNX opset >= 11.
-    class InPlaceIndexedAssignment(torch.nn.Module):
-        def forward(self, data, new_data):
-            data[1] = new_data
-            return data
-
-    out = InPlaceIndexedAssignment()(data, new_data)
-
-    data = torch.zeros(3, 4)
-    new_data = torch.arange(4).to(torch.float32)
-    torch.onnx.export(InPlaceIndexedAssignment(), (data, new_data), 'inplace_assign.onnx', opset_version=11)
-
-    # onnxruntime
-    import onnxruntime
-    sess = onnxruntime.InferenceSession('inplace_assign.onnx')
-    out_ort = sess.run(None, {
-        sess.get_inputs()[0].name: torch.zeros(3, 4).numpy(),
-        sess.get_inputs()[1].name: new_data.numpy(),
-    })
-
-    assert torch.all(torch.eq(out, torch.tensor(out_ort)))
+  Yes, this is supported for ONNX opset version >= 11. Please checkout `Indexing`_.
 
 Q: Is tensor list exportable to ONNX?
 

@@ -4,8 +4,10 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Stream.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
@@ -48,6 +50,8 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+
+using Stream = c10::Stream;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
@@ -205,7 +209,7 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  optional<DimnameList> opt_names() const {
+  c10::optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.
@@ -329,6 +333,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;
 
+  /// Returns if a `Tensor` is metal tensor.
+  bool is_metal() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
@@ -447,6 +454,7 @@ class CAFFE2_API Tensor {
   Tensor cuda() const;
   Tensor hip() const;
   Tensor vulkan() const;
+  Tensor metal() const;
 
   // ~~~~~ Autograd API ~~~~~
 

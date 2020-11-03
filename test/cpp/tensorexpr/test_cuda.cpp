@@ -769,14 +769,14 @@ void testCudaSharedMemReduce_1() {
   // Check the c write is not masked, but the d write is.
   const std::string& verification_pattern =
       R"IR(
-# CHECK: c_ = 0
+# CHECK: c_1 = 0
 # CHECK: for (int m = 0; m < 128
-# CHECK:   c_ = c_ +
+# CHECK:   c_1 = c_1 +
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<1
 # CHECK:   b[blockIdx.x] =
 # CHECK: __syncthreads();
-# CHECK: atomicAdd(&b[blockIdx.x], c_)
+# CHECK: atomicAdd(&b[blockIdx.x], c_1)
 )IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());

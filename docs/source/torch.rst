@@ -85,6 +85,7 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    column_stack
     dstack
     gather
     hstack
@@ -94,11 +95,13 @@ Indexing, Slicing, Joining, Mutating Ops
     narrow
     nonzero
     reshape
+    row_stack
     split
     squeeze
     stack
     t
     take
+    tensor_split
     transpose
     unbind
     unsqueeze
@@ -309,6 +312,7 @@ Pointwise Ops
     logit
     hypot
     i0
+    igamma
     mul
     multiply
     mvlgamma
@@ -354,6 +358,7 @@ Reduction Ops
     logsumexp
     mean
     median
+    nanmedian
     mode
     norm
     nansum
@@ -460,6 +465,7 @@ Other Operations
     meshgrid
     lcm
     logcumsumexp
+    ravel
     renorm
     repeat_interleave
     roll

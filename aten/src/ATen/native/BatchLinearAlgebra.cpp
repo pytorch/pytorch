@@ -331,6 +331,7 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
+  auto lda = std::max(int64_t{1}, n);
 
   auto ipiv = at::empty({n}, b.options().dtype(kInt));
   auto ipiv_data = ipiv.data_ptr<int>();
@@ -339,7 +340,7 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, n, ipiv_data, b_working_ptr, n, &info);
+    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -981,20 +982,12 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto m = self.size(-2);
   auto n = self.size(-1);
   auto mn = std::min(m, n);
-  Tensor iwork = at::empty({8*mn}, at::kInt);
+  Tensor iwork = at::empty({8 * mn}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    auto mx = std::max(m, n);
-    int64_t lrwork; // These settings are valid for on LAPACK 3.6+
-    if (jobz == 'N'){
-      lrwork = 7 * mn;
-    }else if (mx > 10 * mn){
-      lrwork = 7 * mn * mn + 7 * mn;
-    } else {
-      lrwork = std::max(7 * mn * mn + 7 * mn, 2 * mx * mn + 2 *mn * mn + mn);
-    }
+    auto lrwork  = computeLRWorkDim(jobz, m, n);
     // rwork is an array of floats or doubles depending on the type
     rwork = at::empty({std::max(int64_t(1), lrwork)}, at::typeMetaToScalarType(S.dtype()));
     rwork_data = rwork.data_ptr<value_t>();
