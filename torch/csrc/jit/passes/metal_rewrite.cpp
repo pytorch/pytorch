@@ -158,16 +158,14 @@ void metalFusePrePackedConvWithClamp(script::Module& module) {
 void metalInsertCopyOps(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   auto&& outputs = graph->outputs();
-  for (int i = 0; i < outputs.size(); ++i) {
+  for (size_t i = 0; i < outputs.size(); ++i) {
     Value* output = outputs[i];
-    std::cout << "find output: " << *output->node() << std::endl;
     auto namedValue = NamedValue("", output);
     if (namedValue.type()->kind() == TypeKind::TensorType) {
       // find the insertion point
       WithInsertPoint ip(output->node()->next());
       Value* replaced_output = graph->insert(
           Symbol::fromQualString("metal::copy_to_host"), {namedValue});
-      std::cout << "insert: " << *replaced_output->node() << std::endl;
       // replaced the output
       graph->block()->replaceOutput(i, replaced_output);
     }
