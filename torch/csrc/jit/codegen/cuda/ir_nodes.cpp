@@ -464,6 +464,62 @@ Val* IterDomain::extent() const {
   return extent_;
 }
 
+namespace {
+
+class RejectMultipleGridReductions : public IterVisitor {
+ public:
+  static void analyze(Fusion* fusion) {
+    RejectMultipleGridReductions multi_grid;
+    multi_grid.traverse(fusion, true);
+  }
+
+ private:
+  void handle(ReductionOp* rop) override {
+    TensorView* out = dynamic_cast<TensorView*>(rop->out());
+    // Filter out non-related ReductionOp
+    if (out == nullptr) {
+      return;
+    }
+    if (!out->domain()->hasGridReduction()) {
+      return;
+    }
+    // rop is a grid reduction. It's an error if we have multiple grid
+    // reductions.
+    TORCH_CHECK(
+        grid_reduction_op_ == nullptr,
+        "Multiple grid reductions in a fusion is not supported:\n",
+        grid_reduction_op_,
+        rop);
+    grid_reduction_op_ = rop;
+  }
+
+ private:
+  ReductionOp* grid_reduction_op_ = nullptr;
+};
+
+} // namespace
+
+void IterDomain::parallelize(ParallelType t) {
+  parallel_type_ = t;
+
+  TORCH_CHECK(t != ParallelType::Vectorize, "Vectorization not yet supported.");
+
+  if (t == ParallelType::Unroll) {
+    TORCH_CHECK(
+        start()->isZeroInt() && extent()->isConstScalar(),
+        "Unrolling only supported with start = 0 and extent as a const int, but got ",
+        "a start of ",
+        start(),
+        " and extent ",
+        extent(),
+        " .");
+  }
+
+  if (isReduction() && isParallelTypeBlockDim(t)) {
+    RejectMultipleGridReductions::analyze(fusion_);
+  }
+}
+
 TensorDomain::TensorDomain(
     std::vector<IterDomain*> domain,
     std::vector<bool> contiguity)

@@ -275,22 +275,7 @@ class TORCH_CUDA_API IterDomain : public Val {
     iter_type_ = IterType::BroadcastWithStride;
   }
 
-  void parallelize(ParallelType t) {
-    parallel_type_ = t;
-
-    TORCH_CHECK(
-        t != ParallelType::Vectorize, "Vectorization not yet supported.");
-
-    if (t == ParallelType::Unroll)
-      TORCH_CHECK(
-          start()->isZeroInt() && extent()->isConstScalar(),
-          "Unrolling only supported with start = 0 and extent as a const int, but got ",
-          "a start of ",
-          start(),
-          " and extent ",
-          extent(),
-          " .");
-  }
+  void parallelize(ParallelType t);
 
   ParallelType getParallelType() const {
     return parallel_type_;
