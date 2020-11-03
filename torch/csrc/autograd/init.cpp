@@ -70,6 +70,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId);
 
+#ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "KinetoEvent")
       .def("name", &KinetoEvent::name)
       .def("thread_id", &KinetoEvent::threadId)
@@ -87,10 +88,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("events", &ProfilerResult::events)
       .def("legacy_events", &ProfilerResult::legacy_events);
 
-  m.def("kineto_available", kinetoAvailable);
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
+#endif
+
+  m.def("kineto_available", kinetoAvailable);
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
