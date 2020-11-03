@@ -238,46 +238,6 @@ TEST(THNNConvTest, Basic) {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
-void testGradSum() {
-
-  auto graph_string = R"IR(
-    graph(%0 : Tensor,
-          %1 : Tensor,
-          %5 : Tensor,
-          %2 : int[]?):
-      %3 : Tensor = aten::mul(%0, %1)
-      %4 : Tensor = aten::_grad_sum_to_size(%3, %2)
-      %6 : Tensor = aten::mul(%4, %5)
-      return (%6))IR";
-  auto g = std::make_shared<Graph>();
-  torch::jit::parseIR(graph_string, g.get());
-
-  auto a = at::randint(0, 10, {4, 5, 6, 7}, TensorOptions(kCPU, 0));
-  auto b = at::randint(0, 10, {4, 5, 6, 7}, TensorOptions(kCPU, 0));
-  auto c = at::randint(0, 10, {5, 6, 7}, TensorOptions(kCPU, 0));
-  c10::IValue axes (std::vector<int64_t>{5, 1, 7});
-  Stack stack {a, b, c, axes};
-  getProfilingMode() = true;
-  setTensorExprFuserEnabled(true);
-  setTexprReductionsEnabled(true);
-  torch::jit::overrideCanFuseOnCPU(true);
-  GraphExecutor ge(g, "fun");
-  ge.run(stack);
-  auto te = stack.back().toTensor();
-  auto te_sizes = te.sizes().vec();
-  stack.pop_back();
-  stack.push_back(a);
-  stack.push_back(b);
-  stack.push_back(c);
-  stack.push_back(axes);
-  ge.run(stack);
-  auto ta = stack.back().toTensor();
-  auto ta_sizes = ta.sizes();
-  ASSERT_TRUE(ta.allclose(te));
-  std::cerr <<  "te sizes = " << c10::Join(",", te_sizes) << std::endl;
-  std::cerr <<  "ta sizes = " << c10::Join(",", ta_sizes) << std::endl;
-}
-
 TEST(ATenNativeBatchNormTest, Basic) {
   // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor
   // running_mean, Tensor running_var, bool training, float momentum, float eps)
@@ -408,6 +368,47 @@ TEST(ATenNativeBatchNormTest, Basic) {
   // Compare results
   assertAllClose(tensors_out, expected_tensors_out);
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
+}
+
+TEST(CustomFusionTest, GradSum) {
+
+  auto graph_string = R"IR(
+    graph(%0 : Tensor,
+          %1 : Tensor,
+          %5 : Tensor,
+          %2 : int[]?):
+      %3 : Tensor = aten::mul(%0, %1)
+      %4 : Tensor = aten::_grad_sum_to_size(%3, %2)
+      %6 : Tensor = aten::mul(%4, %5)
+      return (%4, %6))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  auto a = at::randint(0, 10, {4, 5, 6, 7}, TensorOptions(kCUDA, 0));
+  auto b = at::randint(0, 10, {4, 5, 6, 7}, TensorOptions(kCUDA, 0));
+  auto c = at::randint(0, 10, {5, 6, 7}, TensorOptions(kCUDA, 0));
+  c10::IValue axes (std::vector<int64_t>{5, 1, 7});
+  Stack stack {a, b, c, axes};
+  getProfilingMode() = true;
+  setTensorExprFuserEnabled(true);
+  setTexprReductionsEnabled(true);
+  torch::jit::overrideCanFuseOnCPU(true);
+  GraphExecutor ge(g, "fun");
+  ge.run(stack);
+  auto te = stack.back().toTensor();
+  auto te_sizes = te.sizes().vec();
+  stack.pop_back();
+  stack.pop_back();
+  stack.push_back(a);
+  stack.push_back(b);
+  stack.push_back(c);
+  stack.push_back(axes);
+  ge.run(stack);
+  auto ta = stack.back().toTensor();
+  auto ta_sizes = ta.sizes();
+  ASSERT_TRUE(ta.allclose(te));
+  std::cerr <<  "te sizes = " << c10::Join(",", te_sizes) << std::endl;
+  std::cerr <<  "ta sizes = " << c10::Join(",", ta_sizes) << std::endl;
 }
 
 TEST(CustomFusionTest, Basic) {
