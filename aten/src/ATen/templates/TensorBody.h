@@ -525,7 +525,7 @@ class CAFFE2_API Tensor {
   /// \param inputs Inputs w.r.t. which the gradient will be accumulated into
   ///     ``at::Tensor::grad``. All other Tensors will be ignored. If not
   ///     provided, the gradient is accumulated into all the leaf Tensors
-  ///     that were used to compute the attr::tensors. All the provided inputs
+  ///     that were used to compute the current tensor. All the provided inputs
   ///     must be leaf Tensors.
   void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
