@@ -4070,7 +4070,7 @@ for shape in [(1,), ()]:
                 order.append("Reentrant")
                 if ctx.x < 0:
                     return x
-                with torch.enable_grad():
+                with torch.enable_grad()
                     Reentrant.apply(ctx.x).backward()
                 return x
 
@@ -5187,6 +5187,13 @@ class TestAutogradComplex(TestCase):
         y1.sum().backward()
 
         self.assertEqual(x.grad, y.grad)
+
+    def test_named_tensor_for_complex_views(self):
+        names = ["batch", "height", "width", "complex"]
+        z = torch.ones((5, 12, 14, 2), requires_grad=True).refine_names(*names)
+        z_complex = torch.view_as_complex(z.rename(None)).refine_names(*names[:-1])
+        z_complex.sum().backward()
+        self.assertEqual(z.grad, torch.ones_like(z))
 
     def as_identity(self):
         # view_as_real and view_as_complex behavior should be like an identity
