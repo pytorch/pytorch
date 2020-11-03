@@ -157,7 +157,7 @@ TEST(AutogradAPITests, RetainGrad) {
 
 TEST(AutogradAPITests, AnomalyMode) {
   // Needs to have backtrace as warning and then throw an error
-  torch::autograd::AnomalyMode::set_enabled(true);
+  torch::autograd::DetectAnomalyGuard detect_anomaly;
   {
     WarningCapture warnings;
     auto x = torch::tensor({5.0}, torch::requires_grad());
@@ -186,7 +186,6 @@ TEST(AutogradAPITests, AnomalyMode) {
             "Traceback of forward call that induced the previous calculation") !=
         std::string::npos);
   }
-  torch::autograd::AnomalyMode::set_enabled(false);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
