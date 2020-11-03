@@ -145,7 +145,6 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
- private:
   uint64_t start_thread_id_ = 0;
   uint64_t end_thread_id_ = 0;
   uint64_t fwd_thread_id_ = 0;

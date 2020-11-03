@@ -55,6 +55,8 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
 
   std::vector<libkineto::ClientTraceActivity> kineto_client_activities_;
   std::vector<KinetoEvent> kineto_events_;
+
+  std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
 };
 
 KinetoThreadLocalState* getProfilerTLSState() {
@@ -161,6 +163,11 @@ void enableProfiler(
   auto state = std::make_shared<KinetoThreadLocalState>(config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
+  state->cpu_trace = std::make_unique<libkineto::CpuTraceBuffer>();
+  state->cpu_trace->span.startTime = getTime() / 1000;
+  state->cpu_trace->gpuOpCount = -1;
+  state->cpu_trace->span.name = "PyTorch Profiler";
+
   if (activities.count(ActivityType::CPU)) {
     pushProfilingCallbacks();
   }
@@ -185,6 +192,10 @@ ProfilerResult disableProfiler() {
   }
 
   state_ptr->mark("__stop_profile");
+
+  state_ptr->cpu_trace->span.endTime = getTime() / 1000;
+
+  libkineto::api().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
   //auto trace = std::move(libkineto::api().stopTrace());
   libkineto::api().stopTrace();
