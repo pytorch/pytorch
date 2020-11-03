@@ -133,6 +133,12 @@ allow_list = [
     ("aten::add_relu", datetime.date(2020, 10, 28)),
     ("aten::add_relu_", datetime.date(2020, 10, 28)),
     ("aten::hash", datetime.date(2020, 11, 15)),
+    ("__caffe2::RoIAlign", datetime.date(2020, 11, 15)),
+    ("__caffe2::HeatmapMaxKeypoint", datetime.date(2020, 11, 15)),
+    ("__caffe2::BoxWithNMSLimit", datetime.date(2020, 11, 15)),
+    ("__caffe2::BBoxTransform", datetime.date(2020, 11, 15)),
+    ("__caffe2::GenerateProposals", datetime.date(2020, 11, 15)),
+    ("__caffe2::RoIAlignRotated", datetime.date(2020, 11, 15)),
 ]
 
 def allow_listed(schema, allow_list):
