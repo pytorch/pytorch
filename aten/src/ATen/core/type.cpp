@@ -784,6 +784,26 @@ bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
   return false;
 }
 
+bool DictType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (auto rhs__ = rhs_->cast<DictType>()) {
+    bool keys_match = getKeyType()->isSubtypeOfExt(rhs__->getKeyType(), why_not);
+    if (!keys_match && why_not) {
+        *why_not << "DictType subtyping key mismatch, key type of " << getKeyType()->repr_str() 
+         << " does not exactly match subtype key type of " << rhs__->getKeyType()->repr_str();  
+    }
+    bool values_match = getValueType()->isSubtypeOfExt(rhs__->getValueType(), why_not);
+    if (!values_match && why_not) {
+        *why_not << "DictType subtyping value mismatch, value type of " << getValueType()->repr_str() 
+         << " does not exactly match subtype value type of " << rhs__->getValueType()->repr_str();  
+    }
+    return keys_match && values_match;
+  }
+  return false;
+}
+
  bool TupleType::operator==(const Type& rhs) const {
    bool typesSame =
        compare(rhs, [](const TypePtr a, const TypePtr b) { return *a == *b; });

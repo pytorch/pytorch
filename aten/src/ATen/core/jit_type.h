@@ -924,6 +924,8 @@ struct CAFFE2_API DictType : public Type {
     }
   }
 
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
   // aligned with the format in FunctionSchema
   std::string str() const override {
     std::stringstream ss;

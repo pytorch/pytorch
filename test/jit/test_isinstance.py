@@ -51,6 +51,14 @@ class TestIsinstance(JitTestCase):
         x = ["1", "2", "3"]
         self.checkScript(list_str_test, (x,))
 
+    def test_list_tensor(self):
+        def list_tensor_test(x: Any):
+            assert torch.jit.isinstance(x, List[torch.Tensor])
+            assert not torch.jit.isinstance(x, Tuple[int])
+
+        x = [torch.Tensor([1]), torch.Tensor([2]), torch.Tensor([3])]
+        self.checkScript(list_tensor_test, (x,))
+
     def test_dict(self):
         def dict_str_int_test(x: Any):
             assert torch.jit.isinstance(x, Dict[str, int])
@@ -59,6 +67,14 @@ class TestIsinstance(JitTestCase):
 
         x = {"a": 1, "b": 2}
         self.checkScript(dict_str_int_test, (x,))
+
+    def test_dict_tensor(self):
+        def dict_int_tensor_test(x: Any):
+            print(x)
+            assert torch.jit.isinstance(x, Dict[int, torch.Tensor])
+
+        x = {2: torch.tensor([2])}
+        self.checkScript(dict_int_tensor_test, (x,))
 
     def test_tuple(self):
         def tuple_test(x: Any):
