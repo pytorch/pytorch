@@ -1163,14 +1163,14 @@ void clamp(
     int32_t W;
     int32_t H;
     int32_t C_4;
-    int32_t C;
+    //int32_t C;
     float min;
     float max;
   };
   ConstBlock cb{safe_downcast<int32_t>(W),
                 safe_downcast<int32_t>(H),
                 safe_downcast<int32_t>(C_4),
-                safe_downcast<int32_t>(C),
+                //safe_downcast<int32_t>(C),
                 min,
                 max};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
