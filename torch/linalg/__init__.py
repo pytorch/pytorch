@@ -144,9 +144,12 @@ cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.norm(input, p=None) -> Tensor
 
 Returns the condition number of a matrix.
+The condition number of :attr:`input` is defined as the norm of
+:attr:`input` times the norm of the inverse of :attr:`input`.
 
-.. note:: The condition number of :attr:`input` is defined as the norm of
-    :attr:`input` times the norm of the inverse of :attr:`input`.
+This function supports only real-valued input.
+
+.. note:: For non-invertible :attr:`input` and `ord` equal to ±2 a large number is returned instead of inf.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
@@ -172,8 +175,28 @@ Args:
 
         Default: ``None``
 
-Returns:
-    (Tensor): the condition number of the matrix.
+Examples::
+
+    >>> from torch import linalg as LA
+    >>> a = torch.tensor([[1., 0, -1], [0, 1, 0], [1, 0, 1]])
+    >>> LA.cond(a)
+    tensor(1.4142)
+    >>> LA.cond(a, 'fro')
+    tensor(3.1623)
+    >>> LA.cond(a, 'nuc')
+    tensor(9.2426)
+    >>> LA.cond(a, np.inf)
+    tensor(2.)
+    >>> LA.cond(a, -np.inf)
+    tensor(1.)
+    >>> LA.cond(a, 1)
+    tensor(2.)
+    >>> LA.cond(a, -1)
+    tensor(1.)
+    >>> LA.cond(a, 2)
+    tensor(1.4142)
+    >>> LA.cond(a, -2)
+    tensor(0.7071)
 """)
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
