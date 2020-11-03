@@ -9572,6 +9572,8 @@ class TestTorchDeviceType(TestCase):
         result = input_.sum(dim=0)
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
+        a = torch.zeros(8, 1, 128, 1024, 1024, device=device)
+        self.assertEqual(a.sum(1, keepdim=True), a)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
