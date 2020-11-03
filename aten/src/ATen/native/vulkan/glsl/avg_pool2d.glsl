@@ -8,10 +8,8 @@ layout(std430) uniform;
 
 layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict writeonly image3D   uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
-layout(set = 0, binding = 2)          uniform           restrict           Block {
-  ivec4 inputSize;
-  ivec4 outputSize;
-  ivec2 kernelSize;
+layout(set = 0, binding = 2)          uniform PRECISION restrict           Block {
+  ivec2 kernel;
   ivec2 stride;
   ivec2 padding;
   ivec2 dilate;
@@ -22,11 +20,13 @@ layout(set = 0, binding = 2)          uniform           restrict           Block
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  if (all(lessThan(pos, uBlock.outputSize.xyz))) {
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
+  const ivec2 size = imageSize(uOutput).xy;
+
+  if (all(lessThan(pos, size))) {
     ivec2 s0 = pos.xy * uBlock.stride - uBlock.padding;
     ivec2 sfxy = max(ivec2(0), (UP_DIV(-s0, uBlock.dilate)));
-    ivec2 efxy = min(uBlock.kernelSize, UP_DIV(uBlock.inputSize.xy - s0, uBlock.dilate));
+    ivec2 efxy = min(uBlock.kernel, UP_DIV(uBlock.inputSize.xy - s0, uBlock.dilate));
 
     vec4 r = vec4(1.0) / float(efxy.x - sfxy.x) / float(efxy.x - sfxy.x);
     vec4 acc = vec4(0);
