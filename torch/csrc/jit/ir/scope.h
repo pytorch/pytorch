@@ -70,9 +70,6 @@ struct ModuleInstanceInfo {
   c10::ClassTypePtr class_type() {
     return module_type_;
   }
-  std::string instance_name() {
-    return instance_name_;
-  }
   c10::ClassTypePtr class_type() const {
     return module_type_;
   }
