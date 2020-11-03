@@ -632,35 +632,16 @@ static void eraseListConstruct(Block* block, int opset_version) {
 // For ops such as meshgrid where output is a list of Tensors
 // (returns prim::ListConstruct), we need to unpack the list
 // before the pass which deletes ListConstruct.
-// This pass also covers the case when the input to ListUnpack
-// is int[] comming from some other op than ListConstruct (like Slice or Shape)
-static void fuseListAndListUnpack(Block* b) {
+static void fuseListConstructListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseListAndListUnpack(child_block);
+      fuseListConstructListUnpack(child_block);
     }
-    if (it->kind() == prim::ListUnpack) {
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == prim::ListConstruct) {
       for (size_t i = 0; i < it->outputs().size(); i++) {
         auto output = it->outputs().at(i);
-        if (it->input()->node()->kind() == prim::ListConstruct) {
-          output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
-        } else if (
-            it->input()->type()->cast<ListType>() &&
-            it->input()
-                ->type()
-                ->cast<ListType>()
-                ->getElementType()
-                ->cast<IntType>()) {
-          Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
-          gather_indices->insertBefore(*it);
-          gather_indices->t_(
-              attr::value, at::scalar_to_tensor(at::Scalar(int(i))));
-          Node* gather_node = b->owningGraph()->create(onnx::Gather, 1);
-          gather_node->insertBefore(*it);
-          gather_node->addInput(it->input());
-          gather_node->addInput(gather_indices->output());
-          output->replaceAllUsesWith(gather_node->output());
-        }
+        output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
       }
     }
   }
@@ -885,7 +866,7 @@ void PeepholeOptimizeONNX(
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
-  fuseListAndListUnpack(graph->block());
+  fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
