@@ -70,7 +70,6 @@ class TestIsinstance(JitTestCase):
 
     def test_dict_tensor(self):
         def dict_int_tensor_test(x: Any):
-            print(x)
             assert torch.jit.isinstance(x, Dict[int, torch.Tensor])
 
         x = {2: torch.tensor([2])}

@@ -210,13 +210,18 @@ TEST(TypeEquality, NamedTupleEquality) {
 TEST(TypeSubtyping, DictSubtypeTensors) {
   // Tests to verify that Dict subtyping relationships for tensors make sense
   c10::TensorTypePtr tensorFloatPointer = TensorType::create(at::randn({5, 5}, 
-at::device(kCPU).dtype(at::ScalarType::Float)));
-  c10::TensorTypePtr tensorIntPointer = TensorType::create(at::randint(0, 2, {5, 5}, at::device(kCPU).dtype(at::ScalarType::Int)));
+      at::device(kCPU).dtype(at::ScalarType::Float)));
+  c10::TensorTypePtr tensorIntPointer = TensorType::create(at::randint(0, 2, {5, 5}, 
+      at::device(kCPU).dtype(at::ScalarType::Int)));
 
-  c10::DictTypePtr dictStrTensorPlain = DictType::create(StringType::get(), TensorType::get());
-  c10::DictTypePtr dictIntTensorPlain = DictType::create(IntType::get(), TensorType::get());
-  c10::DictTypePtr dictStrTensorFloat = DictType::create(StringType::get(), tensorFloatPointer);
-  c10::DictTypePtr dictStrTensorInt = DictType::create(StringType::get(), tensorIntPointer);
+  c10::DictTypePtr dictStrTensorPlain = DictType::create(
+                                          StringType::get(), TensorType::get());
+  c10::DictTypePtr dictIntTensorPlain = DictType::create(
+                                          IntType::get(), TensorType::get());
+  c10::DictTypePtr dictStrTensorFloat = DictType::create(
+                                          StringType::get(), tensorFloatPointer);
+  c10::DictTypePtr dictStrTensorInt = DictType::create(
+                                        StringType::get(), tensorIntPointer);
 
   EXPECT_TRUE(dictStrTensorFloat->isSubtypeOfExt(dictStrTensorPlain, nullptr));
   EXPECT_TRUE(dictStrTensorInt->isSubtypeOfExt(dictStrTensorPlain, nullptr));
@@ -225,15 +230,19 @@ at::device(kCPU).dtype(at::ScalarType::Float)));
   EXPECT_FALSE(dictStrTensorPlain->isSubtypeOfExt(dictStrTensorInt, nullptr));
 
   // test error messages
-  std::regex val_regex("DictType subtyping value mismatch, value type of .* does not exactly match subtype value type of .*");
-  std::regex key_regex("DictType subtyping key mismatch, key type of .* does not exactly match subtype key type of .*");
+  std::regex val_regex(
+    "DictType subtyping value mismatch, value type of .* does "
+    "not exactly match subtype value type of .*"
+   );
+  std::regex key_regex(
+    "DictType subtyping key mismatch, key type of .* does "
+    "not exactly match subtype key type of .*"
+   );
   std::ostringstream os;
 
   dictStrTensorPlain->isSubtypeOfExt(dictStrTensorInt, &os);
   EXPECT_TRUE(std::regex_match(os.str().c_str(), val_regex));
-
   os.str("");
-
   dictStrTensorInt->isSubtypeOfExt(dictIntTensorPlain, &os);
   EXPECT_TRUE(std::regex_match(os.str().c_str(), key_regex));
 
