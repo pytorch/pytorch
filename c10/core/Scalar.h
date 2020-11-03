@@ -87,6 +87,8 @@ class C10_API Scalar {
   }
 
   Scalar operator-() const;
+  Scalar conj() const;
+  Scalar log() const;
 
   template<typename T>
   bool equal(T num) const {

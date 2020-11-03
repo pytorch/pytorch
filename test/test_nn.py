@@ -10522,6 +10522,27 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
 
+    def test_pooling_shape(self, device):
+        ''' Test the output shape calculation for pooling functions '''
+
+        # Checks output shape against expected for 1D, 2D and 3D
+        def check(expected_out_shape, sizes, *args, **kwargs):
+            for kernel in ['max', 'avg']:
+                for i in [1, 2, 3]:
+                    if hasattr(torch.nn.functional, f'{kernel}_pool{i}d'):
+                        op = getattr(torch.nn.functional, f'{kernel}_pool{i}d')
+                        t = torch.randn(sizes[:i + 2], device=device)
+                        self.assertEqual(op(t, *args, **kwargs).shape, expected_out_shape[:i + 2])
+
+        check((1, 1, 3, 3, 4), (1, 1, 5, 6, 7), kernel_size=1, stride=2, padding=0, ceil_mode=True)
+        check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=False)
+        check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=True)
+
+        # Test case from issue https://github.com/pytorch/pytorch/issues/45357
+        x = torch.randn(1, 1, 6, 7, device=device)
+        y = torch.nn.functional.max_pool2d(x, 1, stride=(2, 2), padding=0, ceil_mode=True)
+        self.assertEqual(y.size(), (1, 1, 3, 4))
+
     @onlyOnCPUAndCUDA   # TODO: fix on XLA
     def test_adaptive_avg_pool2d_output_size_one(self, device):
         def helper(size, memory_format):
@@ -10612,8 +10633,10 @@ class TestNNDeviceType(NNTestCase):
     def test_max_pool1d_corner_cases(self, device, dtype):
         def check(x, args, expected):
             model = torch.nn.MaxPool1d(*args)
-            tensor = torch.tensor(x, device=device, dtype=dtype)
-            self.assertEqual(model(tensor), torch.tensor(expected, device=device, dtype=dtype))
+            if isinstance(x, list):
+                x = torch.tensor(x, device=device, dtype=dtype)
+                expected = torch.tensor(expected, device=device, dtype=dtype)
+            self.assertEqual(model(x), expected)
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
         check([[]], (1, None, 0, 1, False, False), [[]])
@@ -10625,7 +10648,7 @@ class TestNNDeviceType(NNTestCase):
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
 
-        empty_tensor = torch.empty((2, 0, 1), dtype=torch.float32)
+        empty_tensor = torch.empty((2, 0, 1), device=device, dtype=dtype)
         check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
 
     @onlyCPU
@@ -10635,8 +10658,7 @@ class TestNNDeviceType(NNTestCase):
         def check(x, *args, **kwargs):
             model = torch.nn.MaxPool1d(*args, **kwargs)
             ref_model = torch.nn.MaxPool1d(*args, **kwargs, return_indices=True)
-            tensor = torch.tensor(x, device=device, dtype=dtype)
-            self.assertEqual(model(tensor), ref_model(tensor)[0])
+            self.assertEqual(model(x), ref_model(x)[0])
 
         sizes = [random.sample(range(8, 128), 3) for _ in range(3)]
         kernel_sizes = random.sample(range(1, 5), 3)
@@ -10647,10 +10669,11 @@ class TestNNDeviceType(NNTestCase):
         for size, kernel_size, stride, dilation, ceil_mode in \
                 itertools.product(sizes, kernel_sizes, strides, dilations, ceil_modes):
             padding = random.sample(range(0, math.floor(kernel_size / 2) + 1), 1)
-            check(torch.randn(size), kernel_size, stride, padding, dilation, ceil_mode=ceil_mode)
+            check(torch.randn(size, device=device, dtype=dtype),
+                  kernel_size, stride, padding, dilation, ceil_mode=ceil_mode)
 
         # Non-contiguous test
-        tensor = torch.randn(5, 151, 33)[::2, ::3, ::2]
+        tensor = torch.randn(5, 151, 33, device=device, dtype=dtype)[::2, ::3, ::2]
         check(tensor, 3, 2, 1, 2, ceil_mode=True)
         check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
 

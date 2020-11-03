@@ -188,10 +188,8 @@ Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {
   if (exponent.equal(0.0)) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
-    auto out = AT_DISPATCH_DOUBLE_COMPLEXDOUBLE(exponent.type(), "exponent_val", ([&] {
-      scalar_t val = exponent.to<scalar_t>();
-      return grad * (val * self.pow(val - 1)).conj();
-    }));
+    auto grad_lambda = [&](auto exp) { return grad * (exp * self.pow(exp - 1)).conj(); };
+    Tensor out = (exponent.isComplex()) ? grad_lambda(exponent.toComplexDouble()) : grad_lambda(exponent.toDouble());
     return handle_r_to_c(self, out);
   }
 }
@@ -224,12 +222,7 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& expo
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
-  auto grad_lambda = [](Tensor a, Scalar b) {
-    return AT_DISPATCH_DOUBLE_COMPLEXDOUBLE(b.type(), "scalar_val", ([&] {
-      scalar_t val = b.to<scalar_t>();
-      return (a * std::log(val)).conj();
-    }));
-  };
+  auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
 
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
@@ -2702,7 +2695,7 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
 }
 
 Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indices, int64_t padding_idx) {
-  // since first backward takes care of scaling by frequency, 
+  // since first backward takes care of scaling by frequency,
   // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
 

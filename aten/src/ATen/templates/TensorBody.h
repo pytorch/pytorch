@@ -209,7 +209,7 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  optional<DimnameList> opt_names() const {
+  c10::optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.

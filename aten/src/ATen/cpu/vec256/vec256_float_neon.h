@@ -25,6 +25,8 @@ namespace {
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
 #if defined(__aarch64__)
+// See https://github.com/pytorch/pytorch/issues/47098
+#if defined(__clang__) || (__GNUC__ > 8 || (__GNUC__ == 8 && __GNUC_MINOR__ > 3))
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
@@ -675,6 +677,7 @@ Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const
   return Vec256<float>(r0, r1);
 }
 
-#endif
+#endif /* defined(__clang__) || (__GNUC__ > 8 || (__GNUC__ == 8 && __GNUC_MINOR__ > 3)) */
+#endif /* defined(aarch64) */
 
 }}}

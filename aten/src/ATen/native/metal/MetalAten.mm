@@ -91,7 +91,7 @@ at::Tensor empty_strided(
     optional<Device> device,
     optional<bool> pin_memory) {
   TORCH_CHECK(
-      !pin_memory.has_value(),
+      !pin_memory.has_value() || !pin_memory.value(),
       "'pin_memory' argument is incompatible with Metal tensor");
   MetalTensor mt{size.vec(), stride.vec()};
   return MetalTensor::toTensor(

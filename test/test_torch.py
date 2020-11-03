@@ -26,7 +26,7 @@ from torch import multiprocessing as mp
 from torch.testing._internal.common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
 from torch.testing._internal.common_utils import \
-    (TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, run_tests,
+    (TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ASAN, TEST_WITH_ROCM, run_tests,
      skipIfNoLapack, suppress_warnings, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN,
      do_test_dtypes, IS_SANDCASTLE, load_tests, slowTest,
      skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -5992,6 +5992,41 @@ class TestTorchDeviceType(TestCase):
         expected = xp.numpy().diagonal(0, -2, -1)
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
+
+    def _test_trace(self, device, dtype, legacy):
+        def test(shape):
+            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            diag = tensor.diag()
+            if legacy:
+                # NB: trace on cpu doesn't do type promotion... #47127
+                expected_dtype = dtype
+            else:
+                expected_dtype = tensor.sum().dtype
+            expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
+
+            result = np.trace(tensor.cpu().numpy(), dtype=expected_dtype)
+            expected = torch.tensor(result, device=device)
+            self.assertEqual(tensor.trace(), expected)
+
+        shapes = (
+            [10, 1],
+            [1, 10],
+            [100, 100],
+            [20, 100],
+            [100, 20],
+        )
+        for shape in shapes:
+            test(shape)
+
+    @onlyCPU
+    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
+    def test_trace_legacy(self, device, dtype):
+        self._test_trace(device, dtype, legacy=True)
+
+    @onlyCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
+    def test_trace(self, device, dtype):
+        self._test_trace(device, dtype, legacy=False)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -13949,10 +13984,11 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
     def test_complex_scalar_pow_tensor(self, device, dtype):
-        complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j]
-        tensor = torch.rand(100).to(dtype=dtype, device=device)
+        complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
+        exp = make_tensor((100,), device, dtype, low=-2, high=2)
+        exp[0] = exp[10] = exp[20] = 0
         for base in complexes:
-            self._test_pow(base, tensor)
+            self._test_pow(base, exp)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensor_pow_tensor(self, dev):
@@ -19463,6 +19499,17 @@ else:
                     tp = t.permute(p)
                     compare_helper_(like_fn, tp)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Integer overflows are not allowed under ASAN")
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_muldiv_scalar(self, device, dtype):
+        x = make_tensor((10, 3), device, dtype, low=None, high=None)
+        s = make_tensor((1,), 'cpu', dtype, low=None, high=None).item()
+        y = torch.full_like(x, s)
+        self.assertEqual(x * s, x * y)
+        self.assertEqual(s * x, y * x)
+        self.assertEqual(x / s, x / y)
+        self.assertEqual(s / x, y / x)
+
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
     exact_dtype = True
@@ -21219,6 +21266,7 @@ instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
+
 instantiate_device_type_tests(TestTorchMathOps, globals(), only_for='cpu')
 
 if __name__ == '__main__':
