@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
+#include <nvToolsExt.h>
+
 #include <stdio.h>
 #include <chrono>
 
@@ -41,9 +43,11 @@ class Trace : public NonCopyable {
     if (log_file_ != nullptr) {
       logEvent('B', name);
     }
+    nvtxRangePushA(name);
   }
 
   void endEvent(const char* name) {
+    nvtxRangePop();
     if (log_file_ != nullptr) {
       logEvent('E', name);
     }
