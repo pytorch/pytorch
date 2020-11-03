@@ -1091,8 +1091,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::acos: {
-      return computeOneOperand(
-          "aten_acos", v, [](const ExprHandle& a) { return acos(a); });
+      return computeOneOperand("aten_acos", v, [](const ExprHandle& a) {
+        return acos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::asin: {
@@ -1111,8 +1112,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::atan: {
-      return computeOneOperand(
-          "aten_atan", v, [](const ExprHandle& a) { return atan(a); });
+      return computeOneOperand("aten_atan", v, [](const ExprHandle& a) {
+        return atan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::atan2: {
@@ -1123,8 +1125,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::tanh: {
-      return computeOneOperand(
-          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
+      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
+        return tanh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sqrt: {
@@ -1366,7 +1369,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second) || hasReduction) {
+    if (!l.hasLoopBodyFor(p.second)) {
       continue;
     }
     l.computeInline(p.second->buf());
