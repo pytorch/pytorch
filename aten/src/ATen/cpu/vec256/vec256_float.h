@@ -244,7 +244,7 @@ public:
   }
 
   Vec256<float> operator!=(const Vec256<float>& other) const {
-    return _mm256_cmp_ps(values, other.values, _CMP_NEQ_UQ);
+    return _mm256_cmp_ps(values, other.values, _CMP_NEQ_OQ);
   }
 
   Vec256<float> operator<(const Vec256<float>& other) const {
