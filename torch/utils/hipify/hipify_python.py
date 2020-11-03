@@ -117,7 +117,13 @@ def match_extensions(filename: str, extensions: Iterable) -> bool:
     """Helper method to see if filename ends with certain extension"""
     return any(filename.endswith(e) for e in extensions)
 
-def matched_files_iter(root_path: str, includes: Iterable = ('*',), ignores: Iterable = (), extensions: Iterable = (), out_of_place_only: bool = False, is_pytorch_extension: bool = False) -> Iterator[str]:
+def matched_files_iter(
+        root_path: str,
+        includes: Iterable = ('*',),
+        ignores: Iterable = (),
+        extensions: Iterable = (),
+        out_of_place_only: bool = False,
+        is_pytorch_extension: bool = False) -> Iterator[str]:
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
 
