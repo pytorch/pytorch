@@ -1,6 +1,7 @@
 import sys
 import io
 import inspect
+import itertools
 import math
 import random
 import re
@@ -5921,6 +5922,57 @@ class TestTorchDeviceType(TestCase):
     def test_isinf_type(self, device):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
+
+    @dtypes(*tuple(itertools.combinations_with_replacement(torch.testing.get_all_dtypes(), 2)))
+    def test_comparison_ops_type_promotion_and_broadcasting(self, device, dtypes):
+        # issue #42660
+        # testing all combinations of broadcasting and type promotion
+        # with a range of dtypes and input shapes, and with extremal values
+        def compare_with_numpy_bin_op(torch_fn, np_fn, x, y, out=None):
+            # working around the fact that numpy doesn't support bfloat16
+            # by letting numpy treat them as float32's
+            x_np = x if x.dtype != torch.bfloat16 else x.to(torch.float32)
+            y_np = y.cpu().numpy() if y.dtype != torch.bfloat16 else y.to(torch.float32).cpu().numpy()
+            self.compare_with_numpy(lambda inp: torch_fn(inp, y, out=out) if out else torch_fn(inp, y),
+                                    lambda inp: np_fn(inp, y_np, out=out) if out else np_fn(inp, y_np),
+                                    x_np)
+
+        complex_op_denylist = [torch.lt, torch.le, torch.gt, torch.ge]  # complex not supported
+        input_sizes = [
+            (1,),
+            (10,),
+            (10, 1),
+            (1, 10),
+            (4, 10),
+            (64, 10),
+            (12, 3)]
+        op_pairs = [(torch.lt, np.less),
+                    (torch.le, np.less_equal),
+                    (torch.gt, np.greater),
+                    (torch.ge, np.greater_equal),
+                    (torch.eq, np.equal),
+                    (torch.ne, np.not_equal),
+                    (torch.logical_and, np.logical_and),
+                    (torch.logical_or, np.logical_or),
+                    (torch.logical_xor, np.logical_xor)]
+
+        for size1 in input_sizes:
+            size2 = (2,) + size1  # perform broadcasting
+            for with_extremal in [False, True]:
+                a = self._generate_input(size1, dtypes[0], device, with_extremal)
+                b = self._generate_input(size2, dtypes[1], device, with_extremal)
+                for torch_op, numpy_op in op_pairs:
+                    if (dtypes[0].is_complex or dtypes[1].is_complex) and torch_op in complex_op_denylist:
+                        continue
+                    # functional version of op
+                    compare_with_numpy_bin_op(torch_op, numpy_op, a, b)
+
+                    # functional comparison ops always return bool tensors
+                    self.assertEqual(torch_op(a, b).dtype, torch.bool)
+
+                    # out version of op
+                    out = torch.zeros(1, dtype=torch.complex128)  # all casts to complex128 are safe
+                    compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -18883,7 +18935,12 @@ else:
             x = torch.tensor((), dtype=dtype, device=device)
         else:
             if dtype.is_floating_point or dtype.is_complex:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
+                # work around torch.randn not being implemented for bfloat16
+                if dtype == torch.bfloat16:
+                    x = torch.randn(*shape, device=device) * random.randint(30, 100)
+                    x = x.to(torch.bfloat16)
+                else:
+                    x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
                 x[torch.randn(*shape) > 0.5] = 0
                 if with_extremal and dtype.is_floating_point:
                     # Use extremal values
@@ -18894,6 +18951,9 @@ else:
                     x[torch.randn(*shape) > 0.5] = complex('nan')
                     x[torch.randn(*shape) > 0.5] = complex('inf')
                     x[torch.randn(*shape) > 0.5] = complex('-inf')
+            elif dtype == torch.bool:
+                x = torch.zeros(shape, dtype=dtype, device=device)
+                x[torch.randn(*shape) > 0.5] = True
             else:
                 x = torch.randint(15, 100, shape, dtype=dtype, device=device)
 
