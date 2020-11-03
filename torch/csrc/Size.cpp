@@ -130,9 +130,10 @@ static PyMappingMethods THPSize_as_mapping = {
     nullptr
 };
 
-static PyObject *THPSize_numel(THPSize *self, PyObject *noargs)
+static PyObject *THPSize_numel(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPSize*)_self;
   int64_t numel = 1;
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
     numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
@@ -141,9 +142,10 @@ static PyObject *THPSize_numel(THPSize *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject *THPSize_reduce(THPSize *self, PyObject *noargs)
+static PyObject *THPSize_reduce(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPSize*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret) throw python_error();
 
@@ -168,8 +170,8 @@ static PyObject *THPSize_reduce(THPSize *self, PyObject *noargs)
 }
 
 static PyMethodDef THPSize_methods[] = {
-  {"numel",       (PyCFunction)THPSize_numel,       METH_NOARGS,  nullptr},
-  {"__reduce__",  (PyCFunction)THPSize_reduce,      METH_NOARGS,  nullptr},
+  {"numel",       THPSize_numel,       METH_NOARGS,  nullptr},
+  {"__reduce__",  THPSize_reduce,      METH_NOARGS,  nullptr},
   {nullptr}
 };
 

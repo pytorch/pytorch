@@ -6,6 +6,8 @@ from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
 
 # TODO: make this generated from a matrix rather than just a static list
 IMAGE_NAMES = [
+    "pytorch-linux-bionic-cuda11.1-cudnn8-py3.6-gcc9",
+    "pytorch-linux-bionic-cuda11.1-cudnn8-py3.8-gcc9",
     "pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9",
     "pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9",
     "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9",
@@ -17,6 +19,7 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7",
+    "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
     "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4",
     "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
@@ -40,7 +43,7 @@ def get_workflow_jobs():
         parameters = OrderedDict({
             "name": quote(f"docker-{image_name}"),
             "image_name": quote(image_name),
-        }) 
+        })
         if image_name == "pytorch-linux-xenial-py3.6-gcc5.4":
             # pushing documentation on tags requires CircleCI to also
             # build all the dependencies on tags, including this docker image

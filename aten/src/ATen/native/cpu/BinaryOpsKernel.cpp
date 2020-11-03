@@ -589,17 +589,31 @@ void logit_backward_kernel(TensorIterator& iter, Scalar eps_scalar) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
-    auto one_vec = Vec256<scalar_t>(scalar_t{1});
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+      auto one_vec = Vec256<scalar_t>(scalar_t{1});
     cpu_kernel_vec(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
-        return a * (scalar_t{1} - b * b);
+        return a * std::conj(scalar_t{1} - b * b);
       },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-        return a * (one_vec - b * b);
+        return a * (one_vec - b * b).conj();
       });
   });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+      auto one_vec = Vec256<scalar_t>(scalar_t{1});
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * (scalar_t{1} - b * b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          return a * (one_vec - b * b);
+        });
+    });
+  }
 }
 
 void mse_kernel(TensorIterator& iter) {
@@ -752,6 +766,19 @@ void hypot_kernel(TensorIterator& iter) {
   });
 }
 
+void igamma_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "igamma_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return calc_igamma(a, b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a.igamma(b);
+        });
+  });
+}
+
 void nextafter_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
@@ -810,6 +837,7 @@ REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
+REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
 
