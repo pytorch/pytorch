@@ -467,16 +467,16 @@ struct TORCH_API TLSProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-struct FileLineFunc {
+struct TORCH_API FileLineFunc {
   std::string filename;
   size_t line;
   std::string funcname;
 };
-std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
-std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs);
-std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
+TORCH_API std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
+TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs);
+TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
 
-struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
+struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   explicit ProfilerThreadLocalState(const ProfilerConfig& config)
       : config_(config), remoteProfiledEvents_{c10::nullopt} {}
   ~ProfilerThreadLocalState() override = default;
@@ -508,6 +508,11 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
       c10::Device device) override;
 
   bool memoryProfilingEnabled() const override;
+
+  virtual void reportClientActivity(
+    const at::RecordFunction& fn,
+    const at::ObserverContext& ctx) {}
+
  private:
   std::string getNvtxStr(
       const at::StringView& name,

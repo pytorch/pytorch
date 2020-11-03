@@ -1,5 +1,8 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/runtime/operator.h>
+
 #ifdef USE_KINETO
 #include "libkineto.h"
 
@@ -55,6 +58,11 @@ void reportKinetoClientActivity(
   }*/
 }
 
+ProfilerThreadLocalState* getProfilerTLSState() {
+  const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
+  return dynamic_cast<ProfilerThreadLocalState*>(state.get());
+}
+
 void pushProfilingCallbacks() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
@@ -105,7 +113,7 @@ void pushProfilingCallbacks() {
 
         kineto_ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
 
-        state_ptr->reportKinetoClientActivity(fn, *kineto_ctx_ptr);
+        //state_ptr->reportKinetoClientActivity(fn, *kineto_ctx_ptr);
         libkineto::api().popCorrelationId();
       })
     .needsInputs(state_ptr->config().report_input_shapes)
@@ -194,6 +202,7 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   correlation_id_ = activity.correlationId();
   return *this;
 }
+#endif
 
 bool kinetoAvailable() {
 #ifdef USE_KINETO
