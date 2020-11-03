@@ -149,8 +149,6 @@ The condition number of :attr:`input` is defined as the norm of
 
 This function supports only real-valued input.
 
-.. note:: For non-invertible :attr:`input` and `ord` equal to ±2 a large number is returned instead of inf.
-
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                     batch dimensions.

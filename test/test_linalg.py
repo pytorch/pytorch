@@ -330,9 +330,6 @@ class TestLinalg(TestCase):
         # test for singular input
         a = torch.eye(3, dtype=dtype, device=device)
         a[-1, -1] = 0  # make 'a' singular
-        # NumPy returns inf for ord=±2
-        # while current PyTorch implementation returns std::numeric_limits<T>::max()
-        norm_types = [1, -1, inf, -inf, 'fro', 'nuc']
         for ord in norm_types:
             run_test_case(a, ord)
 

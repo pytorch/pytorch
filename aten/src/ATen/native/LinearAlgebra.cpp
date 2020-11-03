@@ -1639,6 +1639,10 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
     Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
     result = norm_self * norm_inverse;
   }
+  // a trick to convert FLT_MAX or DBL_MAX to INFINITY
+  // result might also contains infs already then inf + inf - inf = nan
+  // this will get replaced by inf
+  result = result + result - result;
   result = at::nan_to_num(result, INFINITY);
   return result;
 }
@@ -1659,6 +1663,11 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
   Tensor norm_self = at::linalg_norm(self, ord, dim);
   Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
   Tensor result = norm_self * norm_inverse;
+  result = at::nan_to_num(result, INFINITY);
+  // a trick to convert FLT_MAX or DBL_MAX to INFINITY
+  // result might also contains infs already then inf + inf - inf = nan
+  // this will get replaced by inf
+  result = result + result - result;
   result = at::nan_to_num(result, INFINITY);
   return result;
 }
