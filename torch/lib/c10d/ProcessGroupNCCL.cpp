@@ -213,7 +213,7 @@ ncclResult_t ncclAlltoallv(
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
 const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
 constexpr int64_t kWaitForAbortCommStoreKey = 1000;
-constexpr int64_t kSynchronizeBusyWaitMillis = 10;
+constexpr int64_t kSynchronizeBusyWaitMillis = 1;
 const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis = 10 * 1000;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
