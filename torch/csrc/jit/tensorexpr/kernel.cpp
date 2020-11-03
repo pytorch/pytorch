@@ -1366,7 +1366,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second) || hasReduction) {
+    if (!l.hasLoopBodyFor(p.second)) {
       continue;
     }
     l.computeInline(p.second->buf());
