@@ -45,9 +45,16 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
   // If bias is enabled, there are 4 such tensors (ih and hh weights, ih and hh biases).
   // If bias is not enabled, there are 2 (ih and hh weights).
   // This organization holds for all rnn types (RNN, GRU, and LSTM).
-  TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
-                        "weight_stride0 must be 2 (if no bias) or 4 (if bias).  Received ",
-                        weight_stride0);
+  if (proj_size > 0 && proj_size != hidden_size) {
+    TORCH_INTERNAL_ASSERT((weight_stride0 == 3) || (weight_stride0 == 5),
+                          "weight_stride0 must be 3 (if no bias) or 5 (if bias) for RNNs with projections.  Received ",
+                          weight_stride0);
+  } else {
+    TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
+                          "weight_stride0 must be 2 (if no bias) or 4 (if bias).  Received ",
+                          weight_stride0);
+  }
+
 
   Tensor weight_buf, redispatch_weight_buf;
   std::vector<Tensor> redispatch_weight;
@@ -66,6 +73,10 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
     // Casts weight tensors to FP16 and ensures all weights for all layers are views into a large flat buffer,
     // with the right locations and layouts expected by cudnn.
     // This is (and should be) autograd-exposed.
+    bool include_bias = true;
+    if (weight_stride0 == 3 || weight_stride0 == 2) {
+      include_bias = false;
+    }
     std::tie(redispatch_weight_buf, redispatch_weight) =
         at::native::cudnn_rnn::copy_weights_to_flat_buf_views(
             weight,
@@ -81,7 +92,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
             /*flat_buf_options=*/weight[0].options().dtype(at::kHalf),
             /*set_orig_weights_to_flat_buf=*/false,
             /*allow_type_change=*/true,
-            /*include_bias=*/weight_stride0 == 4);
+            /*include_bias=*/include_bias);
   }
 
   return at::_cudnn_rnn(
