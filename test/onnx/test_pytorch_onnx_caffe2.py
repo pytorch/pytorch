@@ -470,7 +470,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             assert len(prepared.init_net.op) == 8
             assert len(prepared.predict_net.op) == 997
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @unittest.skip("This model takes too much memory")
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
         self.run_model_test(alexnet(), train=False, batch_size=BATCH_SIZE,
@@ -500,6 +500,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(),
                      "model on net has cuda in it, awaiting fix")
+    @unittest.skip("This model takes too much memory")
     def test_densenet(self):
         state_dict = model_zoo.load_url(model_urls['densenet121'], progress=False)
         self.run_model_test(densenet121(), train=False, batch_size=BATCH_SIZE,
