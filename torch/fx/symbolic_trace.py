@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Optional, List, Callable, Union
+from typing import Any, Dict, Optional, List, Callable, Union
 import torch
 
 from .node import Argument
@@ -60,7 +60,7 @@ class Tracer(TracerBase):
         # retrieve it with a get_attr.
         if isinstance(a, torch.Tensor):
             if not hasattr(self, 'tensor_attrs'):
-                self.tensor_attrs = {}
+                self.tensor_attrs : Dict[torch.Tensor, str] = {}
 
                 def collect_tensor_attrs(m : torch.nn.Module, prefix_atoms : List[str]):
                     for k, v in m.__dict__.items():
