@@ -4313,8 +4313,16 @@ class TestTorchDeviceType(TestCase):
 
     # This test fails with float32 weights because numpy uses sorting and partial pairwise summation
     # instead of linear summation as bincount does, the NumPy implementation is more numerically stable.
-    @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False),
-                     torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False)))
+    # Skipping int8 weights on CUDA because this results in a flaky test from the combination of type promotion
+    # performed by bincount, atomic_add usage and integer overflow when converting back.
+    @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
+                                                  include_bool=False, include_complex=False),
+                     torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
+                                                  include_bool=False, include_complex=False)))
+    @dtypesIfCUDA(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
+                                                  include_bool=False, include_complex=False),
+                           torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
+                           (torch.int16, torch.int32, torch.int64))
     def test_histogram_vs_np_custom_bins(self, device, dtypes):
         # test against numpy.histogram()
         def test_against_np_custombins(tensor, bins, weights=None, density=False, rtol=None, atol=None):
@@ -4375,8 +4383,10 @@ class TestTorchDeviceType(TestCase):
         elif dtypes[1] not in (torch.int8, torch.uint8):
             test_against_np_custombins(sample_noncontig, bins_noncontig, weights_noncontig, density=True)
 
-    @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False),
-                     torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False, include_bool=False, include_complex=False),
+    @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
+                                                  include_bool=False, include_complex=False),
+                     torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
+                                                  include_bool=False, include_complex=False),
                      (torch.float32, torch.float64)))
     def test_histogram_vs_np_uniform_bins(self, device, dtypes):
         # test against numpy.histogram()
