@@ -4,10 +4,10 @@ from enum import Enum
 # Defined in tools/autograd/init.cpp
 
 class ProfilerState(Enum):
-    Disable = 0
-    CPU = 1
-    CUDA = 2
-    NVTX = 3
+    Disable = ...
+    CPU = ...
+    CUDA = ...
+    NVTX = ...
 
 
 class ProfilerConfig:
