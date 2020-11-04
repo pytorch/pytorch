@@ -1440,14 +1440,64 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 
 # Used in test_autograd.py and test_torch.py
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
-                low, high, requires_grad: bool = False) -> torch.Tensor:
+                low=None, high=None, requires_grad: bool = False) -> torch.Tensor:
     """Returns a tensor of the specified size on the given device and dtype.
-       The tensors values are between -9 and 9, inclusive, for most dtypes,
-       unless low (high) is not None in which case the values are between
-       max(-9, low) and min(9, high).
-       For unsigned types the values are between 0 and 9, and for complex
-       dtypes the real and imaginary parts are each between -9 and 9,
-       independently."""
+       The tensor will be filled with random values depending on
+       its dtype:
+
+         Bool tensors will always have both True and False values (unless they only
+           have zero or one elements).
+         Unsigned integer tensors have values in the range [0, 9].
+         Signed integer tensor will have values in the range [-9, 9].
+         Float tensors will have values in the range (-9, 9), exclusive.
+         Complex tensors will have values whose real and imaginary parts are
+          each in the range (-9, 9), exclusive.
+
+       If low is not None then the left side of the range will be
+       low if low is greater than the lower dtype-specific value, and the
+       same applies to high, mutatis mutandi. The inclusivity or exclusivity
+       of the range will remain the same. For example, a low of -1 and a
+       high of 1 with dtype torch.float32 will produce a range (-1, 1).
+    """
+
+    # Helper function that takes the next value "after" the given Python
+    #   Number n in the specified direction ("higher" or "lower") that is
+    #   representable in the given PyTorch dtype.
+    # WARNING: with the exception of bfloat16, which heuristically adds ("higher")
+    #   or subtracts ("lower") .05.
+    # Useful when updating a range to not include its endpoints.
+    def nudge(n, *, dtype, direction):
+        assert isinstance(n, Number)
+        assert isinstance(direction, str)
+        assert (direction == "higher" or direction == "lower")
+
+        # integer dtypes require bounding to handle wraparound
+        delta = 1 if direction == "higher" else -1
+        if dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            result = n + delta
+            iinfo = torch.iinfo(t.dtype)
+            if result > iinfo.max:
+                result = iinfo.max
+            if result < iinfo.min:
+                result = iinfo.min
+            return result
+        elif dtype in (torch.float16, torch.float32, torch.float64):
+            # Uses NumPy's nextafter
+            a = np.array(n, dtype=torch_to_numpy_dtype_dict[dtype])
+            return np.nextafter(a, a + delta).item()
+        elif dtype is torch.bfloat16:
+            # bfloat16 nextafter is not implemented in PyTorch or NumPy
+            # for bfloat16, the highest value lower than 1 is .9961 and lowest value higher than 1 is 1.0078
+            # for bfloat16, the highest value lower than 9 is 8.9375 and the lowest value higher than 9 is 9.0625
+            # until next after is implemented, since make_tensor only supports returning
+            # tensors with values between -9 and 9, a heuristic value of .05 is added/subtracted.
+            # This value is sufficient to shift all values between -9 and 9.
+            towards = .05 if direction == "higher" else -.05
+            return n + towards
+        else:  # dtype is complex, which is not (directly) supported
+            assert False
+
+        return result
 
     assert low is None or low < 9, "low value too high!"
     assert high is None or high > -9, "high value too low!"
@@ -1457,15 +1507,15 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
 
     if dtype is torch.uint8:
         low = math.floor(0 if low is None else max(low, 0))
-        high = math.ceil(10 if high is None else min(high, 10))
+        high = math.ceil(9 if high is None else min(high, 9))
         return torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         low = math.floor(-9 if low is None else max(low, -9))
-        high = math.ceil(10 if high is None else min(high, 10))
+        high = math.ceil(9 if high is None else min(high, 10))
         return torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
+        low = nudge(-9 if low is None else max(low, -9), dtype=dtype, direction="higher")
+        high = nudge(9 if high is None else min(high, 9), dtype=dtype, direction="lower")
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
@@ -1476,10 +1526,10 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         return t
     else:
         assert dtype in complex_types()
-        low = -9 if low is None else max(low, -9)
-        high = 9 if high is None else min(high, 10)
-        span = high - low
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
+        low = nudge(-9 if low is None else max(low, -9), dtype=float_dtype, direction="higher")
+        high = nudge(9 if high is None else min(high, 9), dtype=float_dtype, direction="lower")
+        span = high - low
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         c = torch.complex(real, imag)
