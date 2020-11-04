@@ -24,10 +24,10 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 
+#include <c10d/comm.hpp>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
-#include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
