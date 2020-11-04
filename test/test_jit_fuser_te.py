@@ -285,23 +285,23 @@ class TestTEFuser(JitTestCase):
     def test_chunk_correctness_cuda(self):
         return self._test_chunk_correctness(self, 'cuda')
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_chunk_distributes_cuda(self):
-        def f(x, y):
-            z1, z2 = (x + y).chunk(2, dim=1)
-            return z1 * z2
+    def test_chunk_distributes(self):
+        for device in self.devices:
+            def f(x, y):
+                z1, z2 = (x + y).chunk(2, dim=1)
+                return z1 * z2
 
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
 
-        ge = self.checkTrace(f, (x, y))
-        graph = ge.graph_for(x, y)
-        # XXX: The old fuser does broadcast_tensors but the new fuser doesn't.
-        # FileCheck().check("broadcast_tensors").check('with ' + FUSION_GROUP + '_') \
-        #     .check_count('ConstantChunk', 2, exactly=True).run(str(graph))
-        FileCheck().check("with " + FUSION_GROUP + "_").check_count(
-            "ConstantChunk", 1, exactly=True
-        ).run(str(graph))
+            ge = self.checkTrace(f, (x, y))
+            graph = ge.graph_for(x, y)
+            # XXX: The old fuser does broadcast_tensors but the new fuser doesn't.
+            # FileCheck().check("broadcast_tensors").check('with ' + FUSION_GROUP + '_') \
+            #     .check_count('ConstantChunk', 2, exactly=True).run(str(graph))
+            FileCheck().check("with " + FUSION_GROUP + "_").check_count(
+                "ConstantChunk", 1, exactly=True
+            ).run(str(graph))
 
     def test_chunk_motion_deduplicates_inputs(self):
         for device in self.devices:
@@ -616,7 +616,7 @@ class TestTEFuser(JitTestCase):
             # graph = ge_weight_tensor.graph_for(start, end)
             # self.assertAllFused(graph)
 
-    def test_concat_cuda(self):
+    def test_concat(self):
         for device in self.devices:
             hx = torch.randn(3, 20, dtype=torch.float, device=device)
             cx = torch.randn(3, 20, dtype=torch.float, device=device)
@@ -650,24 +650,24 @@ class TestTEFuser(JitTestCase):
         # the if node and the fusion group inside it should only have one output
         self.assertEqual(len(list(if_nodes[0].outputs())), 1)
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_concat_invariant_cuda(self):
-        # Invariant: the output of prim::FusedConcat may
-        # not be an input to any node inside the FusionGroup.
-        def fn(x, y, z):
-            x1 = x + y
-            y1 = x - y
-            w = torch.cat([x1, y1])
-            return w + z
+    def test_concat_invariant(self):
+        for device in self.devices:
+            # Invariant: the output of prim::FusedConcat may
+            # not be an input to any node inside the FusionGroup.
+            def fn(x, y, z):
+                x1 = x + y
+                y1 = x - y
+                w = torch.cat([x1, y1])
+                return w + z
 
-        x = torch.randn(2, 2, dtype=torch.float, device='cuda')
-        y = torch.randn(2, 2, dtype=torch.float, device='cuda')
-        z = torch.randn(4, 2, dtype=torch.float, device='cuda')
-        ge = self.checkTrace(fn, (x, y, z))
-        graph = ge.graph_for(x, y, z)
-        self.assertAllFused(graph, except_for={'aten::add'})
-        # XXX: TE fuser can handle concats inside a fusion group.
-        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+            x = torch.randn(2, 2, dtype=torch.float, device=device)
+            y = torch.randn(2, 2, dtype=torch.float, device=device)
+            z = torch.randn(4, 2, dtype=torch.float, device=device)
+            ge = self.checkTrace(fn, (x, y, z))
+            graph = ge.graph_for(x, y, z)
+            self.assertAllFused(graph, except_for={'aten::add'})
+            # XXX: TE fuser can handle concats inside a fusion group.
+            # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @staticmethod
     def fn_test_exp(x, y):
@@ -746,29 +746,29 @@ class TestTEFuser(JitTestCase):
             scripted = self.checkScript(f, (x,))
             self.assertAllFused(scripted.graph_for(x))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_scalar_arg_cuda(self):
-        def fn_test_scalar_arg(x, p):
-            # type: (Tensor, float) -> Tensor
-            return p * (x * x + x)
+    def test_scalar_arg(self):
+        for device in self.devices:
+            def fn_test_scalar_arg(x, p):
+                # type: (Tensor, float) -> Tensor
+                return p * (x * x + x)
 
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        p = 3
-        scripted = self.checkScript(fn_test_scalar_arg, (x, p))
-        self.assertAllFused(scripted.graph_for(x, p))
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            p = 3
+            scripted = self.checkScript(fn_test_scalar_arg, (x, p))
+            self.assertAllFused(scripted.graph_for(x, p))
 
-        x.requires_grad_(True)
+            x.requires_grad_(True)
 
-        # use another function otherwise we will bailout
-        # and won't be able to do fused checks
-        def fn_test_scalar_arg_requires_grad(x, p):
-            # type: (Tensor, float) -> Tensor
-            return p * (x * x + x)
+            # use another function otherwise we will bailout
+            # and won't be able to do fused checks
+            def fn_test_scalar_arg_requires_grad(x, p):
+                # type: (Tensor, float) -> Tensor
+                return p * (x * x + x)
 
-        scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
-        out = scripted(x, p)
-        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
-                                                                  "aten::_size_if_not_equal"))
+            scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
+            out = scripted(x, p)
+            self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
+                                                                      "aten::_size_if_not_equal"))
 
     @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
     def test_fuser_deduplication(self):
@@ -899,14 +899,16 @@ class TestTEFuser(JitTestCase):
         for device in self.devices:
             inputs = get_lstm_inputs(device, training=True)
             module = self.checkScript(LSTMCellS, inputs)
+            self.assertLastGraphAllFused()
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_lstm_concat_cuda(self):
-        inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellC, inputs)
-        graph = ge.graph_for(*inputs)
-        # XXX: TE fuser can handle concats inside a fusion group.
-        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+    def test_lstm_concat(self):
+        for device in self.devices:
+            inputs = get_lstm_inputs(device)
+            ge = self.checkTrace(LSTMCellC, inputs)
+            graph = ge.graph_for(*inputs)
+            self.assertLastGraphAllFused()
+            # XXX: TE fuser can handle concats inside a fusion group.
+            # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     def test_lstm_gates_permutations(self):
         for device in self.devices:
@@ -931,42 +933,26 @@ class TestTEFuser(JitTestCase):
                 self.assertGraphContainsExactly(forward_graph, FUSION_GROUP, 1)
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_lstm_traced_cuda(self):
-        inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellF, inputs)
-        graph = ge.graph_for(*inputs)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        FileCheck().check("Chunk").check("aten::sigmoid").check("aten::tanh").run(str(fusion_groups[0]))
-
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
-    def test_lstm_traced_cpu(self):
-        inputs = get_lstm_inputs('cpu')
-        try:
+    def test_lstm_traced(self):
+        for device in self.devices:
+            inputs = get_lstm_inputs(device)
             ge = self.checkTrace(LSTMCellF, inputs)
             graph = ge.graph_for(*inputs)
-            FileCheck.check("FusionGroup").run(str(graph))
-        except RuntimeError as e:
-            if 'Failed to compile' in e.args[0]:
-                warnings.warn('CPU fuser test has failed! This is not a hard failure, '
-                              'because the kernels sometimes trigger bugs in compilers '
-                              '(most notably GCC 7.2).')
-                raise unittest.SkipTest('Failed to compile') from e
-            else:
-                raise
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            FileCheck().check("Chunk").check("aten::sigmoid").check("aten::tanh").run(str(fusion_groups[0]))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_milstm_cuda(self):
-        inputs = get_milstm_inputs('cuda', training=True)
-        module = self.checkScript(MiLSTMCell, inputs)
-        forward_graph = module.graph_for(*inputs)
-        self.assertGraphContainsExactly(
-            forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-        FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
-            .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
-        hy, cy = module(*inputs)
-        warmup_backward((hy + cy).sum())
+    def test_milstm(self):
+        for device in self.devices:
+            inputs = get_milstm_inputs(device, training=True)
+            module = self.checkScript(MiLSTMCell, inputs)
+            forward_graph = module.graph_for(*inputs)
+            self.assertGraphContainsExactly(
+                forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
+            FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+                .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
+            hy, cy = module(*inputs)
+            warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skip("rand_like is not supported yet")
@@ -999,26 +985,26 @@ class TestTEFuser(JitTestCase):
     def fn_test_relu(x, y):
         return F.relu(x + .5 * y)
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_relu_cuda(self):
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+    def test_relu(self):
+        for device in self.devices:
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
 
-        ge = self.checkTrace(self.fn_test_relu, (x, y))
-        self.assertAllFused(ge.graph_for(x, y))
+            ge = self.checkTrace(self.fn_test_relu, (x, y))
+            self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_erf_cuda(self):
-        def fn_test_erf(x):
-            return F.relu(torch.erf(x) - torch.erfc(x))
+    def test_erf(self):
+        for device in self.devices:
+            def fn_test_erf(x):
+                return F.relu(torch.erf(x) - torch.erfc(x))
 
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        ge = self.checkTrace(fn_test_erf, (x,))
-        self.assertAllFused(ge.graph_for(x))
-        x.requires_grad_(True)
-        ge = self.checkTrace(fn_test_erf, (x,))
-        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
-                                                         "aten::_size_if_not_equal"))
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            ge = self.checkTrace(fn_test_erf, (x,))
+            self.assertAllFused(ge.graph_for(x))
+            x.requires_grad_(True)
+            ge = self.checkTrace(fn_test_erf, (x,))
+            self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
+                                                             "aten::_size_if_not_equal"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skip("rand_like is not supported yet")
@@ -1081,67 +1067,68 @@ class TestTEFuser(JitTestCase):
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_small_constant_cuda(self):
-        def fn_test_small_constant(x, y):
-            return (1e-8 * x + 5e-9 * y) * 1e8
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+    def test_small_constant(self):
+        for device in self.devices:
+            def fn_test_small_constant(x, y):
+                return (1e-8 * x + 5e-9 * y) * 1e8
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
 
-        ge = self.checkTrace(fn_test_small_constant, (x, y))
-        self.assertAllFused(ge.graph_for(x, y))
+            ge = self.checkTrace(fn_test_small_constant, (x, y))
+            self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     # Currently we don't pull constants into fusion groups, because in some
     # cases it could remove the constant from the original graph and now our
     # fusion group needs to return that constant for its other users.
     # Instead of never pulling constants into the fusion group, we should just
     # be more careful at how we rewrite its users.
     # TODO: fix that and reenable the test.
-    def test_tensor_scalar_ops_cuda(self):
-        def should_fuse(x):
-            z = 3.
-            y = x + z
-            return x * y
+    def test_tensor_scalar_ops(self):
+        for device in self.devices:
+            def should_fuse(x):
+                z = 3.
+                y = x + z
+                return x * y
 
-        def should_fuse_scalar(x, z):
-            y = x + int(z)
-            return x * y
+            def should_fuse_scalar(x, z):
+                y = x + int(z)
+                return x * y
 
-        inputs = [torch.randn(2, 2, dtype=torch.float, device='cuda')]
-        ge = self.checkScript(should_fuse, inputs)
-        graph = ge.graph_for(*inputs)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        FileCheck().check("aten::add").check("aten::mul").run(str(fusion_groups[0]))
+            inputs = [torch.randn(2, 2, dtype=torch.float, device=device)]
+            ge = self.checkScript(should_fuse, inputs)
+            graph = ge.graph_for(*inputs)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            FileCheck().check("aten::add").check("aten::mul").run(str(fusion_groups[0]))
 
-        inputs = [
-            torch.randn(2, 2, dtype=torch.float, device='cuda'),
-            torch.tensor(3., dtype=torch.float, device='cuda'),
-        ]
-        ge = self.checkScript(should_fuse_scalar, inputs)
-        # Check that the fused graph computes correct results when the scalar
-        # input changes.
-        inputs = [
-            torch.randn(2, 2, dtype=torch.float, device='cuda'),
-            torch.tensor(7., dtype=torch.float, device='cuda'),
-        ]
-        self.assertEqual(ge(*inputs), should_fuse_scalar(*inputs))
-        # The TE fuser supports fusion of non-constant scalars
-        self.assertGraphContainsExactly(
-            ge.graph_for(*inputs), FUSION_GROUP, 1, consider_subgraphs=True)
+            inputs = [
+                torch.randn(2, 2, dtype=torch.float, device=device),
+                torch.tensor(3., dtype=torch.float, device=device),
+            ]
+            ge = self.checkScript(should_fuse_scalar, inputs)
+            # Check that the fused graph computes correct results when the scalar
+            # input changes.
+            inputs = [
+                torch.randn(2, 2, dtype=torch.float, device=device),
+                torch.tensor(7., dtype=torch.float, device=device),
+            ]
+            self.assertEqual(ge(*inputs), should_fuse_scalar(*inputs))
+            # The TE fuser supports fusion of non-constant scalars
+            self.assertGraphContainsExactly(
+                ge.graph_for(*inputs), FUSION_GROUP, 1, consider_subgraphs=True)
 
     def test_where_and_typing(self):
-        def f(x, y):
-            mask = x > y
-            res = torch.where(mask, x, y)
-            return mask, res
+        for device in self.devices:
+            def f(x, y):
+                mask = x > y
+                res = torch.where(mask, x, y)
+                return mask, res
 
-        x = torch.randn(4, 4, dtype=torch.double)
-        y = torch.randn(4, 4, dtype=torch.double)
+            x = torch.randn(4, 4, dtype=torch.double, device=device)
+            y = torch.randn(4, 4, dtype=torch.double, device=device)
 
-        script_f = self.checkScript(f, (x, y))
-        self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
+            script_f = self.checkScript(f, (x, y))
+            self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
