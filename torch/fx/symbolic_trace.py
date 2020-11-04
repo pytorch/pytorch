@@ -1,20 +1,14 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Callable, Optional, List, Union
+from typing import Any, Optional, List, Callable, Union
 import torch
 
 from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import Proxy, _create_proxy, TracerBase
+from .proxy import TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
-
-def _find_module(root: torch.nn.Module, m: torch.nn.Module):
-    for n, p in root.named_modules():
-        if m is p:
-            return n
-    raise NameError('module is not installed as a submodule')
 
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
@@ -39,9 +33,9 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     new_code = CodeType(*co_args)  # type: ignore
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
-    # we need to insert placeholder nodes for *args, and **kwargs,
-    # so we can't call this function normally, otherwise it would try to unpack them
-    # instead, let's make python think that args and kwargs are normay variables
+    # we need to insert placeholder nodes for *args and **kwargs
+    # we can't call this function normally, otherwise it would try to unpack them
+    # instead, let's make python think that args and kwargs are normal variables
 
 class Tracer(TracerBase):
     def __init__(self):
@@ -119,6 +113,52 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
+    def path_of_module(self, mod):
+        for n, p in self.root.named_modules():
+            if mod is p:
+                return n
+        raise NameError('module is not installed as a submodule')
+
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args, kwargs):
+        module_qualified_name = self.path_of_module(m)
+        if not self.is_leaf_module(m, module_qualified_name):
+            return forward(*args, **kwargs)
+        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+
+    def create_args_for_root(self, root_fn, is_module):
+        # In some cases, a function or method has been decorated with a wrapper
+        # defined via `functools.wraps`. In this case, the outer code object
+        # will likely not contain the actual parameters we care about, so unwrap
+        # the function to get to the innermost callable.
+        fn_for_analysis = inspect.unwrap(root_fn)
+        co = fn_for_analysis.__code__
+        total_args = co.co_argcount + co.co_kwonlyargcount
+        names_iter = iter(co.co_varnames)
+        args : List[Any] = []
+        skip_arg_idx = 0
+        if is_module:
+            if total_args == 0:
+                raise RuntimeError('`self` argument cannot be part of *args expansion!')
+            skip_arg_idx = 1
+            next(names_iter)  # skip self
+            args.append(self.root)
+
+        def proxy_placeholder(name: str):
+            return self.create_proxy('placeholder', name, (), {},
+                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
+
+        args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
+
+        if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
+            # TODO: type annotations for *args and **kwargs
+            if co.co_flags & inspect.CO_VARARGS:
+                args.append(proxy_placeholder('*' + next(names_iter)))
+            if co.co_flags & inspect.CO_VARKEYWORDS:
+                args.append(proxy_placeholder('**' + next(names_iter)))
+            root_fn = _patch_function(root_fn, len(args))
+
+        return root_fn, args
+
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
         if isinstance(root, torch.nn.Module):
             self.root = root
@@ -126,51 +166,46 @@ class Tracer(TracerBase):
         else:
             self.root = torch.nn.Module()
             fn = root
-
         self.graph = Graph()
 
         assert isinstance(fn, FunctionType)
-        co = fn.__code__
-        total_args = co.co_argcount + co.co_kwonlyargcount
-        names_iter = iter(co.co_varnames)
-        args : List[Any] = []
-        skip_arg_idx = 0
-        if isinstance(root, torch.nn.Module):
-            skip_arg_idx = 1
-            next(names_iter)  # skip self
-            args.append(root)
 
-        def make_proxy_placeholder():
-            name = next(names_iter)
-            return self._proxy_placeholder(name, fn.__annotations__.get(name, None))
-        args.extend(make_proxy_placeholder() for _ in range(skip_arg_idx, total_args))
-
-        if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
-            # TODO: type annotations for *args and **kwargs
-            if co.co_flags & inspect.CO_VARARGS:
-                args.append(self._proxy_placeholder('*' + next(names_iter)))
-            if co.co_flags & inspect.CO_VARKEYWORDS:
-                args.append(self._proxy_placeholder('**' + next(names_iter)))
-            fn = _patch_function(fn, len(args))
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
         orig_call = torch.nn.Module.__call__
+        orig_getattr = torch.nn.Module.__getattr__
+
+        parameter_proxy_cache = {}  # Reduce number of get_attr calls
+
+        # Method dispatch on parameters is not recorded unless it's directly used.
+        # Thus, we need to insert a proxy when __getattr__ requests a parameter.
+        def module_getattr_wrapper(mod, attr):
+            attr_val = orig_getattr(mod, attr)
+            if isinstance(attr_val, torch.nn.Parameter):
+                for n, p in self.root.named_parameters():
+                    if attr_val is p:
+                        if n not in parameter_proxy_cache:
+                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                        return parameter_proxy_cache[n]
+            return attr_val
 
         def module_call_wrapper(mod, *args, **kwargs):
-            module_qualified_name = _find_module(self.root, mod)
-            if not self.is_leaf_module(mod, module_qualified_name):
+            def forward(*args, **kwargs):
                 return orig_call(mod, *args, **kwargs)
-            else:
-                return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
+
+            return self.call_module(mod, forward, args, kwargs)
+
         try:
+            # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
+            torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
             torch.nn.Module.__call__ = orig_call
+            torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
-    def _proxy_placeholder(self, name: str, type_expr: Optional[Any] = None) -> Proxy:
-        return Proxy(self.create_node('placeholder', name, (), {}, type_expr=type_expr), self)
 
 # Symbolic tracing API
 #

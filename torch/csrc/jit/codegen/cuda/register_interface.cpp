@@ -2,6 +2,8 @@
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 
+#include <torch/csrc/jit/runtime/profiling_record.h>
+
 /*
  * Registers function pointers in interface.h
  */
@@ -19,6 +21,9 @@ class RegisterInterface {
     ptr->fn_compile_n_ = &compileCudaFusionGroup;
     ptr->fn_run_n_s_ = &runCudaFusionGroup;
     ptr->fn_fuse_graph = &CudaFuseGraph;
+    ptr->fn_can_fuse_n_ = &isFusableCudaFusionGroup;
+
+    RegisterProfilingNode(canFuseNode);
   }
 };
 

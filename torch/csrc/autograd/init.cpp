@@ -177,15 +177,15 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-  {"_set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
-  {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
-  {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},
-  {"is_autocast_enabled", (PyCFunction)is_autocast_enabled, METH_NOARGS, nullptr},
-  {"clear_autocast_cache", (PyCFunction)clear_autocast_cache, METH_NOARGS, nullptr},
-  {"autocast_increment_nesting", (PyCFunction)autocast_increment_nesting, METH_NOARGS, nullptr},
-  {"autocast_decrement_nesting", (PyCFunction)autocast_decrement_nesting, METH_NOARGS, nullptr},
-  {"set_anomaly_enabled", (PyCFunction)set_anomaly_mode_enabled, METH_O, nullptr},
-  {"is_anomaly_enabled", (PyCFunction)is_anomaly_mode_enabled, METH_NOARGS, nullptr},
+  {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
+  {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
+  {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
+  {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
+  {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
+  {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
+  {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
+  {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

@@ -194,6 +194,7 @@ namespace jit {
   _(SimplifyMuls)                                   \
   _(SimplifySubs)                                   \
   _(SimplifyDiv)                                    \
+  _(SimplifyMod)                                    \
   _(SimplifyMultiOp)                                \
   _(SimplifyManyOps)                                \
   _(SimplifyFactorization)                          \
@@ -214,6 +215,8 @@ namespace jit {
   _(SimplifyConstantBranches)                       \
   _(SimplifyConstantCond)                           \
   _(SimplifyEliminateEmptyCond)                     \
+  _(SimplifyConstantComparisons)                    \
+  _(SimplifySymbolicComparisons)                    \
   _(SimplifyEliminateZeroLengthFor)                 \
   _(SimplifyOneLoopFor)                             \
   _(SimplifyForWontLoseLoopOptions)                 \
@@ -340,6 +343,13 @@ namespace jit {
   _(NormalizeOnNestedOuterLoop)                     \
   _(NormalizeOnNestedInnerLoop)                     \
   _(NormalizeAndSplitWithTail)                      \
+  _(FlattenSimpleLoopNest2D)                        \
+  _(FlattenSimpleLoopNest3D)                        \
+  _(FlattenLoopNestAfterNormalize)                  \
+  _(FlattenImperfectLoopNest)                       \
+  _(FlattenReductionLoopNest)                       \
+  _(FlattenReductionLoopNestFromTensor)             \
+  _(FlattenIncorrectLoopsAsInput)                   \
   _(DetectInlineRankMismatch)                       \
   _(CacheReadsSimple)                               \
   _(CacheReadsOuter)                                \
@@ -350,12 +360,15 @@ namespace jit {
   _(Kernel_2)                                       \
   _(Kernel_3)                                       \
   _(Kernel_4)                                       \
+  _(KernelCatInputTypesPromotion)                   \
   _(KernelSumAllAxes)                               \
   _(KernelSumOneAxis)                               \
   _(KernelSumMultipleAxes)                          \
   _(KernelSoftmax2D)                                \
   _(KernelSoftmax3D)                                \
   _(KernelSoftmax4D)                                \
+  _(KernelInlineProducerIntoReduction)              \
+  _(KernelInlineReductionIntoConsumer)              \
   _(FuserPass_1)                                    \
   _(FuserPass_2)                                    \
   _(FuserPass_3)                                    \
@@ -493,6 +506,9 @@ namespace jit {
   _(LLVMEmptyStmt)                         \
   _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
+  _(LLVMCondNoFalseBlockTest)              \
+  _(LLVMCondTest)                          \
+  _(LLVMCondNestedTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
   _(LLVMRFactorReduction)

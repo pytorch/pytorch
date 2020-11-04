@@ -16,10 +16,9 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/${ROCM_VERSION}
     # Add rocm repository
-    wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
-    echo "deb [arch=amd64] $DEB_ROCM_REPO xenial main" > /etc/apt/sources.list.d/rocm.list
+    wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
+    echo "deb [arch=amd64] http://repo.radeon.com/rocm/apt/${ROCM_VERSION} xenial main" > /etc/apt/sources.list.d/rocm.list
     apt-get update --allow-insecure-repositories
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \

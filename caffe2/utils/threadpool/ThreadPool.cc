@@ -23,10 +23,6 @@ size_t getDefaultNumThreads() {
   CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
   int numThreads = cpuinfo_get_processors_count();
 
-  if (FLAGS_pthreadpool_size) {
-    numThreads = FLAGS_pthreadpool_size;
-  }
-
   bool applyCap = false;
 #if defined(C10_ANDROID)
   applyCap = FLAGS_caffe2_threadpool_android_cap;
@@ -74,6 +70,11 @@ size_t getDefaultNumThreads() {
         }
         break;
     }
+  }
+
+  if (FLAGS_pthreadpool_size) {
+    // Always give precedence to explicit setting.
+    numThreads = FLAGS_pthreadpool_size;
   }
   return numThreads;
 }
