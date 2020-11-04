@@ -22,7 +22,7 @@ namespace ops {
 //
 
 struct Persistent final {
-  api::Resource::Pool pool_;
+  api::Resource::Pool pool;
 };
 
 Persistent* persistent();

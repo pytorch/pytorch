@@ -137,45 +137,50 @@ TEST(VulkanAPITest, add_scalar_) {
   ASSERT_TRUE(check);
 }
 
-// TEST(VulkanAPITest, addmm) {
-//   auto t_m1 = at::rand({2, 2}, at::device(at::kCPU).dtype(at::kFloat));
-//   auto t_m2 = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
-//   auto t_b = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+TEST(VulkanAPITest, addmm) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
 
-//   float beta = 100;
-//   float alpha = 2;
-//   auto t_out_expected = at::addmm(t_b, t_m1, t_m2, beta, alpha);
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
 
-//   auto tv_m1 = t_m1.vulkan();
-//   auto tv_m2 = t_m2.vulkan();
-//   auto tv_b = t_b.vulkan();
-//   auto tv_out = at::addmm(tv_b, tv_m1, tv_m2, beta, alpha);
-//   auto t_out = tv_out.cpu();
-//   const auto check = almostEqual(t_out, t_out_expected);
-//   if (!check) {
-//     std::cout << "expected:\n" << t_out_expected << std::endl;
-//     std::cout << "got:\n" << t_out << std::endl;
-//   }
-//   ASSERT_TRUE(check);
-// }
+  const auto bias_cpu = at::rand({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
-// TEST(VulkanAPITest, avg_pool2d) {
-//   if (!at::is_vulkan_available()) {
-//     return;
-//   }
+  const auto bias_vulkan = bias_cpu.vulkan();
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto m2_vulkan = m2_cpu.vulkan();
+  const auto out_vulkan = at::addmm(bias_vulkan, m1_vulkan, m2_vulkan, beta, alpha);
 
-//   const auto in_cpu = at::rand({3, 19, 43, 79}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-//   const auto out_cpu = at::avg_pool2d(in_cpu, {2, 2}, 1, 0, 1);
-//   const auto out_vulkan = at::avg_pool2d(in_cpu.vulkan(), {2, 2}, 1, 0, 1);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << out_cpu << std::endl;
+    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
 
-//   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-//   if (!check) {
-//     std::cout << "expected:\n" << out_cpu << std::endl;
-//     std::cout << "got:\n" << out_vulkan.cpu() << std::endl;
-//   }
+  ASSERT_TRUE(check);
+}
 
-//   ASSERT_TRUE(check);
-// }
+TEST(VulkanAPITest, avg_pool2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu = at::rand({3, 19, 43, 79}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::avg_pool2d(in_cpu, {5, 3}, {1, 2}, {2, 0}, true);
+  const auto out_vulkan = at::avg_pool2d(in_cpu.vulkan(), {5, 3}, {1, 2}, {2, 0}, true);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << out_cpu << std::endl;
+    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
 
 TEST(VulkanAPITest, clamp) {
   if (!at::is_vulkan_available()) {
@@ -309,16 +314,15 @@ TEST(VulkanAPITest, empty) {
   ASSERT_NO_THROW(at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
-// TEST(VulkanAPITest, mm) {
-//   auto t_m1 = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
-//   auto t_m2 = at::rand({3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+// TEST(VulkanAPITest, mean) {
+//   auto t_in =
+//       at::rand({5, 3, 9, 9}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+//   auto t_out_expected = at::mean(t_in, {-1, -2}, false);
+//   auto tv_in = t_in.vulkan();
 
-//   auto t_out_expected = t_m1.mm(t_m2);
-
-//   auto tv_m1 = t_m1.vulkan();
-//   auto tv_m2 = t_m2.vulkan();
-//   auto tv_out = tv_m1.mm(tv_m2);
+//   auto tv_out = at::mean(tv_in, {-1, -2}, false);
 //   auto t_out = tv_out.cpu();
+
 //   const auto check = almostEqual(t_out, t_out_expected);
 //   if (!check) {
 //     std::cout << "expected:\n" << t_out_expected << std::endl;
@@ -326,6 +330,46 @@ TEST(VulkanAPITest, empty) {
 //   }
 //   ASSERT_TRUE(check);
 // }
+
+// TEST(VulkanAPITest, mean_keep_dim) {
+//   auto t_in =
+//       at::rand({10, 3, 21, 21}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+//   auto t_out_expected = at::mean(t_in, {-1, -2}, true);
+//   auto tv_in = t_in.vulkan();
+
+//   auto tv_out = at::mean(tv_in, {-1, -2}, true);
+//   auto t_out = tv_out.cpu();
+
+//   const auto check = almostEqual(t_out, t_out_expected);
+//   if (!check) {
+//     // std::cout << "original:\n" << t_in << std::endl;
+//     std::cout << "expected:\n" << t_out_expected << std::endl;
+//     std::cout << "got:\n" << t_out << std::endl;
+//   }
+//   ASSERT_TRUE(check);
+// }
+
+TEST(VulkanAPITest, mm) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto m1_cpu = at::rand({241, 313}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({313, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = m1_cpu.mm(m2_cpu);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto m2_vulkan = m2_cpu.vulkan();
+  const auto out_vulkan = m1_vulkan.mm(m2_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << out_cpu << std::endl;
+    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
 
 TEST(VulkanAPITest, mul_scalar) {
   if (!at::is_vulkan_available()) {

@@ -145,16 +145,13 @@ Tensor avg_pool2d(
         int32_t kernel_width, kernel_height;
         int32_t stride_x, stride_y;
         int32_t padding_x, padding_y;
-        int32_t dilate_x, dilate_y;
       } block {
-        api::utils::safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
         api::utils::safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-        api::utils::safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+        api::utils::safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
         api::utils::safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-        api::utils::safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+        api::utils::safe_downcast<int32_t>(stride[Layout::Parameter::height]),
         api::utils::safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-        api::utils::safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-        api::utils::safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+        api::utils::safe_downcast<int32_t>(padding[Layout::Parameter::height]),
       };
 
       context->dispatch(
