@@ -64,6 +64,17 @@ class Partition:
         for node in self.nodes:
             self.used_mem_bytes += get_extra_size_of(node, self.nodes)
 
+    def add_node(self, node):
+        input_nodes: Dict[Node, None] = {}
+        map_arg(node.args, lambda n: input_nodes.setdefault(n))
+        map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+        # Add current node's input nodes if they are placeholder or constants
+        for n in input_nodes:
+            if n.op in {'placeholder', 'get_attr'}:
+                self.nodes.add(n)
+        self.nodes.add(node)
+
+
 class PartitionResult(NamedTuple):
     """NameTuple used for returning DAG and a new graph module
     """
@@ -224,7 +235,7 @@ class Partitioner:
             """
             partition = self.create_partition()
             total_size_needed = get_extra_size_of(node, set())
-            partition.nodes.add(node)
+            partition.add_node(node)
             partition.used_mem_bytes = total_size_needed
             single_node_partitions.append(partition)
 
@@ -268,7 +279,7 @@ class Partitioner:
                             total_size_of_input_nodes = get_extra_size_of(node, partition.nodes)
                             partition_to_left_mem_bytes[partition] = device.available_mem_bytes
                             partition.logical_device_ids.append(device.logical_id)
-                    partition.nodes.add(node)
+                    partition.add_node(node)
                     partition_to_left_mem_bytes[partition] -= total_size_of_input_nodes
                     partition.used_mem_bytes += total_size_of_input_nodes
                 # No device left, create single node partitions
@@ -363,62 +374,6 @@ class Partitioner:
         self.partitions.append(partition)
         return partition
 
-    def combine_partitions_based_on_size(
-        self,
-        partitions: List[Partition],
-        available_mem_bytes: int
-    ) -> None:
-        """Combining small partitions together to keep as less partitions as possible.
-           Here is an example of the algorithm to do this:
-           Assume some partitions, we first sort them based on partiiton used memory size.
-           [(partition_4, 1), (partition_3, 1), (partition_2, 2), (partition_1, 7), (partition_0, 9)]
-           The available memory is 10.
-           step 1: self.find_partition_to_combine_based_on_size()
-           First, mark bfs level for each partition
-           Second, look the smallest partition, partition_4: 10 - 1 = 9
-           It means any partition has a used memory equal or less than 9 could combine this partition
-           We go from the largest and selection partition_0.
-           Check the bfs level for two partitions, if the level difference is less than 2,
-           it can be combined.
-           Then repeat step 1.
-        """
-        find_combination = True
-        while find_combination:
-            # Sort partitions based on memory size
-            sorted_partitions = sorted(partitions, key=lambda p: p.used_mem_bytes)
-            # Mark bfs level
-            self.get_bfs_level_partition()
-            find_combination, partitions = \
-                self.find_partition_to_combine_based_on_size(
-                    sorted_partitions,
-                    available_mem_bytes,
-                    partitions
-                )
-        return
-
-    def find_partition_to_combine_based_on_size(
-        self,
-        sorted_partitions: List[Partition],
-        available_mem_bytes: int,
-        partitions: List[Partition]
-    ) -> Tuple[bool, List[Partition]]:
-        """step 1 in self.combine_partition_based_on_size()"""
-
-        find_combination = False
-        smallest_partition = sorted_partitions.pop(0)
-        for p in sorted_partitions[::-1]:
-            if abs(smallest_partition.bfs_level - p.bfs_level) <= 1:
-                # Calculate how many bytes needed if combined
-                mem_bytes_needed = calculate_mem_bytes_needed(p, smallest_partition)
-                if mem_bytes_needed <= available_mem_bytes:
-                    self.combine_two_partitions(p, smallest_partition)
-                    partitions.remove(smallest_partition)
-                    partitions.remove(p)
-                    partitions.append(self.partitions[-1])
-                    find_combination = True
-                    break
-        return find_combination, partitions
-
     def combine_two_partitions(
         self,
         partition_0: Partition,
@@ -436,6 +391,7 @@ class Partitioner:
         for partition in self.partitions:
             partition.parents = set()
             partition.children = set()
+        self.reorganize_partitions()
         self.set_parents_and_children()
         return partition
 
@@ -506,6 +462,56 @@ class Partitioner:
            combines with another non-embedding one.
            So as the embedding partitions.
         """
+        def combine_partitions_based_on_size(partitions: List[Partition], available_mem_bytes: int) -> None:
+            """Combining small partitions together to keep as less partitions as possible.
+               Here is an example of the algorithm to do this:
+               Assume some partitions, we first sort them based on partiiton used memory size.
+               [(partition_4, 1), (partition_3, 1), (partition_2, 2), (partition_1, 7), (partition_0, 9)]
+               The available memory is 10.
+               step 1: self.find_partition_to_combine_based_on_size()
+               First, mark bfs level for each partition
+               Second, look the smallest partition, partition_4: 10 - 1 = 9
+               It means any partition has a used memory equal or less than 9 could combine this partition
+               We go from the largest and selection partition_0.
+               Check the bfs level for two partitions, if the level difference is less than 2,
+               it can be combined.
+               Then repeat step 1.
+            """
+            find_combination = True
+            while find_combination:
+                # Sort partitions based on memory size
+                sorted_partitions = sorted(partitions, key=lambda p: p.used_mem_bytes)
+                # Mark bfs level
+                self.get_bfs_level_partition()
+                find_combination, partitions = \
+                    find_partition_to_combine_based_on_size(
+                        sorted_partitions,
+                        available_mem_bytes,
+                        partitions
+                    )
+            return
+
+        def find_partition_to_combine_based_on_size(
+            sorted_partitions: List[Partition],
+            available_mem_bytes: int,
+            partitions: List[Partition]
+        ) -> Tuple[bool, List[Partition]]:
+            """step 1 in combine_partition_based_on_size()"""
+            find_combination = False
+            smallest_partition = sorted_partitions.pop(0)
+            for p in sorted_partitions[::-1]:
+                if abs(smallest_partition.bfs_level - p.bfs_level) <= 1:
+                    # Calculate how many bytes needed if combined
+                    mem_bytes_needed = calculate_mem_bytes_needed(p, smallest_partition)
+                    if mem_bytes_needed <= available_mem_bytes:
+                        self.combine_two_partitions(p, smallest_partition)
+                        partitions.remove(smallest_partition)
+                        partitions.remove(p)
+                        partitions.append(self.partitions[-1])
+                        find_combination = True
+                        break
+            return find_combination, partitions
+
         def reset_partition_in_sparse_nn(partition, new_partition=True):
             if in_embedding_region:
                 embedding_partitions.append(partition)
@@ -551,16 +557,15 @@ class Partitioner:
                     total_size_of_input_nodes = get_extra_size_of(node, partition.nodes)
                     if total_size_of_input_nodes > available_mem_bytes:
                         raise RuntimeError(node.target + 'is too large to fit into a device')
-                partition.nodes.add(node)
+                partition.add_node(node)
                 partition.used_mem_bytes += total_size_of_input_nodes
         reset_partition_in_sparse_nn(partition, new_partition=False)
-        # Set parents and children for each partition
+        # Set parents and children for partitions
         self.set_parents_and_children()
         # Combining non-embedding partitions
-        self.combine_partitions_based_on_size(non_embedding_partitions, available_mem_bytes)
+        combine_partitions_based_on_size(non_embedding_partitions, available_mem_bytes)
         # Combining embedding partitions
-        self.combine_partitions_based_on_size(embedding_partitions, available_mem_bytes)
-        self.reorganize_partitions()
+        combine_partitions_based_on_size(embedding_partitions, available_mem_bytes)
         total_size_of_non_embedding_partitions = 0
         for partition in non_embedding_partitions:
             total_size_of_non_embedding_partitions += partition.used_mem_bytes
