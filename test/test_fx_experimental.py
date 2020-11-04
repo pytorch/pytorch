@@ -74,7 +74,7 @@ class TestFXExperimental(JitTestCase):
         for i, node in enumerate(dag.nodes):
             assert node.logical_device_ids == [i]
 
-    def test_partition_combining(self):
+    def test_partition_device_mapping(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -98,17 +98,18 @@ class TestFXExperimental(JitTestCase):
         partitioner = Partitioner()
         devices = [
             Device('dev_0', 120, 0),
-            Device('dev_1', 144, 1)
+            Device('dev_1', 160, 1)
         ]
         partitioner_config = PartitionerConfig(devices, is_sparse_nn=False)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a), module_with_submodules(a))
-        assert dag.nodes[0].logical_device_ids == [0]
-        assert dag.nodes[0].size_bytes == 80
-        assert dag.nodes[1].logical_device_ids == [1]
-        assert dag.nodes[1].size_bytes == 144
+        for i, node in enumerate(dag.nodes):
+            if i == 1:
+                assert node.logical_device_ids == [1]
+            else:
+                assert node.logical_device_ids == [0]
 
     def test_sparse_nn_partition(self):
         class MyRecommendationModule(torch.nn.Module):
@@ -180,9 +181,9 @@ class TestFXExperimental(JitTestCase):
                 add_1 = a + torch.rand(4)
                 add_2 = add_1 + torch.rand(4)
                 linear_1 = self.linear(add_1)
-                add_4 = add_2 + linear_1
-                add_5 = add_2 + add_4
-                return add_5
+                add_3 = add_2 + linear_1
+                add_4 = add_2 + add_3
+                return add_4
 
         def get_node_to_latency_mapping(fx_module: GraphModule):
             """Given a fx module, generate node latency for each node
@@ -204,7 +205,7 @@ class TestFXExperimental(JitTestCase):
         node_to_latency_mapping = get_node_to_latency_mapping(traced)
         devices = [
             Device('dev_0', 200, 0),
-            Device('dev_1', 200, 0)
+            Device('dev_1', 200, 1)
         ]
         partitioner = Partitioner()
         partitioner_config = PartitionerConfig(devices, False)
