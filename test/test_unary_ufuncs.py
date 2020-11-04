@@ -199,14 +199,20 @@ class TestUnaryUfuncs(TestCase):
     # TODO: should this jitting the method and inplace variants, too?
     @ops(unary_ufuncs)
     def test_variant_consistency(self, device, dtype, op):
+        prev_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+        prev_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._debug_set_fusion_group_inlining(False)
+
         def _fn(t):
             return op(t)
 
         t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         expected = op(t)
+        jit_fn = torch.jit.trace(_fn, (t.clone(),))
 
         for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
-                             (torch.jit.script(_fn), False)):
+                             (jit_fn, False)):
             if alt is None:
                 with self.assertRaises(RuntimeError):
                     alt(t.clone())
@@ -220,7 +226,16 @@ class TestUnaryUfuncs(TestCase):
                 continue
 
             actual = alt(t.clone())
-            self.assertEqual(actual, expected, rtol=0, atol=0)
+            if isinstance(alt, torch.jit.ScriptFunction):
+                # include warmup
+                for _ in range(torch._C._jit_get_num_profiled_runs() + 1):
+                    actual = (alt(t.clone()))
+                self.assertEqual(actual, expected)
+            else:
+                self.assertEqual(actual, expected, rtol=0, atol=0)
+
+        torch._C._jit_override_can_fuse_on_cpu(prev_cpu_fuse)
+        torch._C._debug_set_fusion_group_inlining(prev_fusion_inlining)
 
     # Helper for comparing torch tensors and numpy arrays
     # TODO: should this or assertEqual also validate that strides are equal?
