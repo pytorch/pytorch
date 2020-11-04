@@ -392,11 +392,20 @@ class BuildExtension(build_ext, object):
                 cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
-            _ccbin = os.getenv("CC")
-            return (COMMON_NVCC_FLAGS +
+            cflags = (COMMON_NVCC_FLAGS +
                     ['--compiler-options', "'-fPIC'"] +
-                    cflags + _get_cuda_arch_flags(cflags) +
-                    (['-ccbin', _ccbin] if _ccbin is not None else []))
+                    cflags + _get_cuda_arch_flags(cflags))
+
+            # NVCC does not allow multiple -ccbin/--compiler-bindir to be passed, so we avoid
+            # overriding the option if the user explicitly passed it.
+            _ccbin = os.getenv("CC")
+            if (
+                _ccbin is not None 
+                and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
+            ):
+                cflags.extend(['-ccbin', _ccbin])
+
+            return cflags
 
         def convert_to_absolute_paths_inplace(paths):
             # Helper function. See Note [Absolute include_dirs]
