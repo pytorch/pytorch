@@ -800,6 +800,14 @@ void heaviside_kernel(TensorIterator& iter) {
   });
 }
 
+void copysign_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        return std::copysign(a, b);
+    });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_stub, &add_kernel);
@@ -840,6 +848,7 @@ REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
 REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
+REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 
 } // namespace native
 } // namespace at
