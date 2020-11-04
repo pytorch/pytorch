@@ -415,13 +415,14 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
     def test_add_bool(self):
-        for device in self.devices:
+        sizes = [(1,), (2,), (4, 4)]
+        for device, size in product(self.devices, sizes):
             def f(x, y, z):
                 return x + y + z
 
-            x = torch.randint(0, 2, (4, 4), dtype=torch.bool, device=device)
-            y = torch.randint(0, 2, (4, 4), dtype=torch.bool, device=device)
-            z = torch.randint(0, 2, (4, 4), dtype=torch.bool, device=device)
+            x = torch.randint(0, 2, size, dtype=torch.bool, device=device)
+            y = torch.randint(0, 2, size, dtype=torch.bool, device=device)
+            z = torch.randint(0, 2, size, dtype=torch.bool, device=device)
             ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
             self.assertAllFused(ge.graph_for(x, y, z))
 
