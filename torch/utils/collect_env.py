@@ -276,8 +276,8 @@ def get_env_info():
             cfg = torch._C._show_config().split('\n')
             hip_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'HIP Runtime' in s][0]
             miopen_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'MIOpen' in s][0]
-            cuda_version_str='N/A'
-            hip_compiled_version=torch.version.hip
+            cuda_version_str = 'N/A'
+            hip_compiled_version = torch.version.hip
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
