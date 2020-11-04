@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/c10d/comm.h>
+#include <c10d/comm.hpp>
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>

@@ -1,10 +1,9 @@
-#include <torch/csrc/distributed/c10d/comm.h>
+#include <c10d/comm.hpp>
 
 #include <deque>
 
 #include <ATen/core/functional.h>
-#include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 

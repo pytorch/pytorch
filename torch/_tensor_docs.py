@@ -939,6 +939,19 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('copysign',
+               r"""
+copysign(other) -> Tensor
+
+See :func:`torch.copysign`
+""")
+
+add_docstr_all('copysign_', r"""
+copysign_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.copysign`
+""")
+
 add_docstr_all('cos',
                r"""
 cos() -> Tensor
@@ -1678,7 +1691,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (LongTensor): indices of :attr:`tensor` to select from
+    index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to add
 
 Example::

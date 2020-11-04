@@ -17,7 +17,7 @@ static bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -401,7 +401,7 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_float_float_false__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -425,7 +425,7 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_float_float_true__avx2_fma(
     const int64_t data_size,
     const float* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -883,7 +883,7 @@ static bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -1387,7 +1387,7 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_half_float_false__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -1410,7 +1410,7 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_half_float_true__avx2_fma(
     const int64_t data_size,
     const at::Half* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -1987,7 +1987,7 @@ static bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -2514,7 +2514,7 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float_false__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
@@ -2538,7 +2538,7 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float_true__avx2_fma(
     const int64_t data_size,
     const uint8_t* input,
     const int* indices,
-    const int64_t* offsets,
+    const int* offsets,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
