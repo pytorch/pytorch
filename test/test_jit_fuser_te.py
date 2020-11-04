@@ -1227,7 +1227,7 @@ class TestTEFuser(JitTestCase):
             torch.erf,
             torch.erfc,
             torch.cos,
-            # torch.sin, Note: Reference https://github.com/pytorch/pytorch/issues/46458
+            torch.sin,
             torch.tan,
             torch.acos,
             torch.asin,
@@ -1261,7 +1261,7 @@ class TestTEFuser(JitTestCase):
                 self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device, str(sizes)])
+                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
