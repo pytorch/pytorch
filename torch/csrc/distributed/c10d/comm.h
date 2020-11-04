@@ -41,14 +41,18 @@ class GradBucket {
     return tensors_;
   }
 
+  // Returns the start index of each variable in tensors_[0].
   const std::vector<size_t>& getOffsets() const {
     return offsets_;
   }
 
+  // Returns the total (i.e., flattened) length of each variable in
+  // tensors_[0].
   const std::vector<size_t>& getLengths() const {
     return lengths_;
   }
 
+  // Returns the multi-dimensional sizes/shape of each variable in tensors_[0].
   const std::vector<c10::IntArrayRef>& getSizesVec() const {
     return sizes_vec_;
   }

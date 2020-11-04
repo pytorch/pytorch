@@ -777,8 +777,6 @@ void Reducer::initialize_buckets(
       }
     }
 
-    // Iterate over model replicas.
-    size_t num_variables = 0;
     for (size_t replica_index = 0; replica_index < replica_count;
          replica_index++) {
       BucketReplica replica;
@@ -790,11 +788,12 @@ void Reducer::initialize_buckets(
         replica.variables = {variable};
       } else {
         at::TensorOptions options;
+        // The start index of the variable in the flattened tensor.
         size_t offset = 0;
 
         // Reserve enough space for the per-variable fields stored in bucket
         // replica for efficiency.
-        num_variables += bucket_indices[bucket_index].size();
+        const size_t num_variables = bucket_indices[bucket_index].size();
         replica.variables.reserve(num_variables);
         replica.offsets.reserve(num_variables);
         replica.lengths.reserve(num_variables);
