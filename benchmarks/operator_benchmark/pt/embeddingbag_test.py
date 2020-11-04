@@ -1,7 +1,7 @@
 import operator_benchmark as op_bench
 import torch
 import numpy
-from . import configs
+from pt import configs
 
 """EmbeddingBag Operator Benchmark"""
 

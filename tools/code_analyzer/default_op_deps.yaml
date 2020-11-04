@@ -1903,7 +1903,7 @@
   - name: aten::resize_as_
   - name: aten::scalar_tensor
   - name: aten::to
-- name: aten::add_relu
+- name: aten::_add_relu
   depends:
   - name: aten::as_strided_
   - name: aten::copy_
@@ -1915,7 +1915,7 @@
   - name: aten::resize_
   - name: aten::resize_as_
   - name: aten::to
-- name: aten::add_relu_
+- name: aten::_add_relu_
   depends:
   - name: aten::as_strided_
   - name: aten::copy_
