@@ -1749,6 +1749,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_listunpack(self):
         class ListUnpack(torch.jit.ScriptModule):
             @torch.jit.script_method

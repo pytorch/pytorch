@@ -268,7 +268,8 @@ static void fuseListAndListUnpack(Block* b) {
     if (it->kind() == prim::ListUnpack) {
       for (size_t i = 0; i < it->outputs().size(); i++) {
         auto output = it->outputs().at(i);
-        if (it->input()->node()->kind() != prim::ListConstruct &&
+        if (it->inputs().size() == 1 &&
+            it->input()->node()->kind() != prim::ListConstruct &&
             it->input()->type()->cast<ListType>() &&
             it->input()
                 ->type()
