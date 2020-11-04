@@ -346,142 +346,13 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 }
 
 Tensor view_as_complex_batching_rule(const Tensor& self) {
-  // guard against the a user passing in a batch of scalar tensors with batch
+  // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.
   TORCH_CHECK(self.sizes().size() != 0, "Input tensor must have one or more dimensions");
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::view_as_complex(self_physical.tensor());
   return self_physical.newLogicalFromPhysical(result);
 }
-
-// What are the semantics of as_strided inside of vmap?
-// y = vmap(lambda x: x.as_strided(sizes, strides, offset))(xs)
-// This returns a view on `x`, `y`, such that each y[i] has:
-// - sizes: `sizes`
-// - strides: `strides`
-// - storage_offset: offset + i * x.stride(batch_dim)
-//
-// In other words, it is as if we had treated each x[i] as having storage
-// offset equal to xs.offset() and called as_strided(sizes, sizes, offset).
-// (that is equivalent to x[i].as_strided(
-//    sizes, sizes, offset + x[i].storage_offset() - xs.offset()) for all i)
-//
-// Note that this *may* be different from actually running as_strided
-// in a for-loop. This is due to how as_strided takes in `offset` to be
-// an *absolute* offset. As an example, consider:
-// >>> x = torch.tensor([0., 1., 2., 3., 4.]).as_strided([4], [1], 1)
-// >>> z = [x[i].as_strided([1], [1], 1) for i in range(4)]
-// Each z[i] is actually the same view on x (z[i] == torch.tensor([1.]))!
-// However, we consider the above for-loop comprehension to be a user error:
-// a user should have written the following if they wanted to use as_strided
-// in a per-sample way:
-// >>> z = [x[i].as_strided([1], [1], 1 + x[i].storage_offset() - 1) for i in range(4)]
-Tensor as_strided_batching_rule(
-    const Tensor& tensor,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset) {
-  auto physical_view = at::MultiBatchVmapTransform::logicalToPhysical(tensor);
-  auto num_batch_dims = physical_view.numBatchDims();
-  auto physical_sizes = physical_view.getPhysicalShape(sizes);
-
-  // physical_strides = physical tensor's batch strides + (logical) strides
-  at::VmapDimVector physical_strides;
-  physical_strides.reserve(num_batch_dims + strides.size());
-  physical_strides.insert(
-      physical_strides.end(),
-      physical_view.tensor().strides().begin(),
-      physical_view.tensor().strides().begin() + num_batch_dims);
-  physical_strides.insert(
-      physical_strides.end(),
-      strides.begin(),
-      strides.end());
-
-  // If zi = xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
-  // is valid for all i, then it turns out that
-  // xs.as_strided(physical_sizes, physical_strides, offset) always succeeds
-  // and creates a tensor y such that each y[i] references the same memory
-  // locations as zi. See NOTE: [When will the as_strided batching rule fail?]
-  auto result = physical_view.tensor().as_strided(
-      physical_sizes, physical_strides, storage_offset);
-  return physical_view.newLogicalFromPhysical(result);
-}
-
-// NOTE: [When will the as_strided batching rule fail?]
-// If zi = xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
-// is valid for all i, then it turns out that
-// xs.as_strided(physical_sizes, physical_strides, offset) always succeeds and
-// creates a tensor y such that each y[i] refers to the same memory as zi.
-//
-// Let's say we have xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset()).
-// Furthermore, let's say that as a part of being "valid" this as_strided call
-// does not return a result that can index memory not indexable by xs[i].
-//
-// Assume that there's only one batch dim and it is at the front of the
-// `xs` tensor.
-//
-// Let B be the batch size and S be the stride of the batch dim.
-//
-// [[A]]
-// xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset()) has:
-// - sizes: sizes
-// - strides: strides
-// - offset: offset + S * i
-//
-// x.as_strided itself checks that:
-// - (sizes, strides, offset) are in bounds for `x`'s storage.
-// - strides are positive
-// - offset is positive
-//
-// Claim 1: if xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
-// is valid, then
-// ([B] + sizes, [S] + strides, offset + xs.offset()) are in bounds for `xs`'s storage.
-//
-// If we have the claim, then xs.as_strided([B] + sizes, [S] + strides, offset)
-// won't error out. So all we need to check is that the memory locations are
-// what we expected. See [[B]] for proof (it's not very important)
-//
-// xs.as_strided(physical_sizes, physical_strides, offset) is equivalent to
-// xs.as_strided([B] + sizes, [S] + strides, offset)
-//
-// xs.as_strided([B] + sizes, [S] + strides, offset) has:
-// - sizes: [B] + sizes
-// - strides: [S] + strides
-// - offset: offset
-//
-// xs.as_strided([B] + sizes, [S] + strides, offset)[i] has:
-// - sizes: sizes
-// - strides: strides
-// - offset: offset + S * i
-// These memory locations are exactly the same as what we got for [[A]],
-// so the xs.as_strided([B] + sizes, [S] + strides, offset) is valid.
-//
-// [[B]] Hand-wavy proof of Claim 1:
-// Part of our definition of being valid is that xs[i].as_strided(...)
-// must return a tensor that only uses memory indexable by xs[i].
-// This means that (sizes, strides, offset + xs[i].offset() - xs.offset()) satisfies:
-//    offset + xs[i].offset() - xs.offset() + 1 + \sum_j (sizes[j] - 1) * strides[j]
-//    <= xs[i].offset() + 1 + \sum_j (xs[i].size(j) - 1) * xs[i].stride(j)
-// (the largest-index memory location of xs[i].as_strided(...) must be \leq
-// the largest-index memory location of xs[i])
-//
-// Fiddling that inequality gives us:
-//    offset - xs.offset() + 1 + \sum_j (sizes[j] - 1) * strides[j]
-//    <= 1 + \sum_j (xs[i].size(j) - 1) * xs[i].stride(j)
-//
-//    offset - xs.offset() + 1 + (B-1)*S + \sum_j (sizes[j] - 1) * strides[j]
-//    <= 1 + (B-1)*S + \sum_j (xs[i].size(j) - 1) * xs[i].stride(j)
-//
-//    offset - xs.offset() + 1 + (B-1)*S + \sum_j (sizes[j] - 1) * strides[j]
-//    <= 1 + \sum_j (xs.size(j) - 1) * xs.stride(j)
-//
-//    offset + 1 + (B-1)*S + \sum_j (sizes[j] - 1) * strides[j]
-//    <= xs.offset() + 1 + \sum_j (xs.size(j) - 1) * xs.stride(j)
-// (the largest-index memory location of xs.as_strided(size, stride, offset)
-// is \leq than the largest-index memory location of xs)
-//
-// Therefore ([B] + sizes, [S] + strides, offset) are in bounds for
-// `xs`'s storage.
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
@@ -728,17 +599,27 @@ Tensor new_empty_strided_batching_rule(
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
 
-  // Let [B0, B1, B2] be the shape of the batch dims. We know what the physical
-  // shape of the result should be ([B0, B1, B2] + size), but what about
-  // the physical strides?
+  // Let [B0, B1, B2] be the shape of the batch dims. We're going to create
+  // the batch dimensions at the front of the tensor (in memory layout),
+  // irrespective of whether or not they are actually at the front (in memory layout)
+  // in the original `self` tensor. This is because when a user calls
+  // `new_empty_strided` in general, the `strides` they provide are for a new
+  // tensor and have no relation to the strides of the original tensor.
+  //
+  // So, the physical shape of the result should be ([B0, B1, B2] + size),
+  // but what about the physical strides?
   //
   // We're actually free to pick whatever stride we want:
   // e.g., for size=[5, 3], stride=[0, 1], we could decide to
   // use
   // - physical size: [B0, B1, B2, 5, 3]
-  // - physical stride: [100*B1*B2, 100*B2, 100, 0, 1]
+  // - physical stride: [9999*B1*B2, 9999*B2, 9999, 0, 1]
   //
-  // Let's select the strides that result in the smallest memory usage.
+  // Let's select some reasonable strides such that:
+  // - The batch dims are "contiguous" with respect to each other
+  // - if empty_strided(size, stride) would have created a contiguous Tensor,
+  // then this new physical Tensor (with batch dims) is also contiguous
+  //
   // Let S be the size of the storage if one were to construct a tensor
   // with `size` and `stride` via empty_strided(size, stride).
   // Then the physical sizes/strides should be:
@@ -753,9 +634,9 @@ Tensor new_empty_strided_batching_rule(
         "new_empty_strided(sizes, strides): dimensionality of sizes (",
         size.size(), ") must match dimensionality of strides (",
         stride.size(), ")");
-  auto example_storage_size = native::storage_size_for(size, stride);
+  auto storage_size = native::storage_size_for(size, stride);
   for (int64_t idx = 0; idx < physical_strides.size(); ++idx) {
-    physical_strides[idx] *= example_storage_size;
+    physical_strides[idx] *= storage_size;
   }
 
   // physical_strides = [B1 * B2 * S, B2 * S, S] + strides
@@ -785,7 +666,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("conj", native::conj);
 
   // view operations
-  m.impl("as_strided", as_strided_batching_rule);
   m.impl("chunk", chunk_batching_rule);
   m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);

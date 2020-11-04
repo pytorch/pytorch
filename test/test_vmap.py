@@ -135,7 +135,7 @@ class TestVmapAPI(TestCase):
             r"fallback path doesn't work on out= or view ops"
         )
         with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(torch.ravel)(tensor)
+            vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
 
         def out_op(x, y):
             return torch.abs(x, out=y)
@@ -1078,38 +1078,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             # self._test_unary(lambda t: op(number, t), getter, device='cuda')
             # self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
-    def test_as_strided(self):
-        def _test(sizes, strides, offset, tensor, lambd):
-            result = vmap(lambda t: t.as_strided(sizes, strides, offset))(tensor)
-            expected = vmap(lambd)(tensor)
-            self.assertTrue(result._base is expected._base)
-            self.assertEqual(result, expected)
-
-        B0 = 5
-        tensors = [
-            # contiguous
-            torch.randn(B0, 2, 3),
-            # non-contiguous
-            torch.randn(2, B0, 3).movedim(1, 0),
-            # non-zero storage offset
-            torch.randn(2, B0, 2, 3)[1],
-            # non-contiguous strides, zero storage offset
-            torch.randn(B0, 2, 4, 3, 7)[:, :, 0, :, 0],
-            # non-contiguous strides, non-zero storage offset
-            torch.randn(B0, 2, 4, 3, 7)[:, :, 2, :, 1],
-        ]
-
-        for x in tensors:
-            S0, S1 = x.stride()[1:]
-            offset = x.storage_offset()
-
-            # Broadcast
-            _test([5, 5, 2, 3], [0, 0, S0, S1], offset, x, lambda x: x.expand(5, 5, 2, 3))
-            # transpose
-            _test([3, 2], [S1, S0], offset, x, lambda x: x.transpose(0, 1))
-            # select
-            _test([2], [S0], offset + S1, x, lambda x: x[:, 1])
-
     def test_bmm(self):
         op = torch.bmm
         test = self._vmap_test
@@ -1312,14 +1280,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
             test(op, [get([3, B0, 2])], in_dims=1)
             test(vmap(op, in_dims=1), [get([3, B1, B0, 2])], in_dims=2)
 
-            # Interesting case #2: Batch dim at end of tensor
+            # Interesting case #2: Batch dim at end of tensor, success cases
             # view_as_complex requires that the dim with size 2 have stride 1
             # in order for the view to function propertly
             test(op, [get([B0, 2]).transpose(0, 1)], in_dims=1)
             test(vmap(op, in_dims=1), [get([B0, B1, 2]).movedim(1, 2)])
             test(vmap(op, in_dims=2), [get([B0, 3, B1, 2]).movedim(2, 3)])
 
-            # Interesting case #2: Batch dim at end of tensor, failure cases
+            # Interesting case #3: Batch dim at end of tensor, failure cases
             msg = "Tensor must have a last dimension with stride 1"
             with self.assertRaisesRegex(RuntimeError, msg):
                 vmap(op, in_dims=1)(get([2, B0]))
