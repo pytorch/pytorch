@@ -29,7 +29,7 @@ constexpr int kUnsetDivFactor = -1;
 Reducer::Reducer(
     std::vector<std::vector<torch::autograd::Variable>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
-    std::shared_ptr<c10d::ProcessGroup> process_group,
+    c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,

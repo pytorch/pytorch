@@ -199,7 +199,7 @@ void ProcessGroupMPI::initMPIOnce() {
   });
 }
 
-std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
+c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
     std::vector<int> ranks) {
   // Once initialization
   initMPIOnce();
@@ -238,7 +238,7 @@ std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
   // process group instance. This is in line with the semantics of the
   // other process group types.
   if (groupComm == MPI_COMM_NULL) {
-    return std::shared_ptr<ProcessGroupMPI>();
+    return c10::intrusive_ptr<ProcessGroupMPI>();
   }
 
   return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);

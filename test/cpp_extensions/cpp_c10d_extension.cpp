@@ -107,7 +107,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::recvAnysource(
   throw std::runtime_error("ProcessGroupTest does not support recvAnysource");
 }
 
-std::shared_ptr<ProcessGroup> ProcessGroupTest::createProcessGroupTest(
+c10::intrusive_ptr<ProcessGroup> ProcessGroupTest::createProcessGroupTest(
     const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,
