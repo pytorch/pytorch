@@ -24,7 +24,7 @@ void main() {
     const ivec2 end = ivec2(ceil(ipos + stride));
     const ivec2 range = end - start;
 
-    vec4 sum = vec4();
+    vec4 sum = vec4(0);
 
     for (int y = start.y; y < end.y; ++y) {
       for (int x = start.x; x < end.x; ++x) {

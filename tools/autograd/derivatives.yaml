@@ -340,6 +340,13 @@
 - name: _conj(Tensor self) -> Tensor
   self: grad.conj()
 
+- name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
+  self: copysign_tensor_self_backward(grad, self, result)
+  other: zeros_like(other)
+
+- name: copysign.Scalar(Tensor self, Scalar other) -> Tensor
+  self: copysign_tensor_self_backward(grad, self, result)
+
 - name: cos(Tensor self) -> Tensor
   self: grad * -self.sin().conj()
 
