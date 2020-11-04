@@ -814,6 +814,34 @@ class TestFX(JitTestCase):
         if hasattr(profiling_model, 'profiled_info'):
             print(profiling_model.profiled_info)
 
+    @skipIfNoTorchVision
+    def test_cost_model_resnet(self):
+        rn18 = resnet18()
+        rn18.eval()
+
+        input = torch.randn(5, 3, 224, 224)
+        cost, profiling_model = estimate_cpu_cost(rn18, [input])
+
+        self.assertTrue(cost.ops > 0)
+        self.assertTrue(cost.bytes_read > 0)
+        self.assertTrue(cost.bytes_written > 0)
+
+        for _ in range(5):
+            profiled_output = profiling_model(input)
+        self.assertEqual(profiled_output, rn18(input))
+
+        if hasattr(profiling_model, 'profiled_info'):
+            total_info = profiling_model.profiled_info
+            print(total_info)
+        for node in profiling_model.gm.graph.nodes:
+            if hasattr(node, 'profiled_info'):
+                if total_info:
+                    percentage = node.profiled_info.average_runtime_sec / total_info.average_runtime_sec
+                    print(f'{percentage:.2f}%', node.profiled_info)
+                else:
+                    print(node.profiled_info)
+
+
     def test_fn_type_annotations(self):
         class Foo(torch.nn.Module):
             def forward(self, p : Pair, z : torch.Tensor, i : int) -> Dict[str, torch.Tensor]:

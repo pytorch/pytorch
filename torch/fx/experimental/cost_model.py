@@ -102,6 +102,35 @@ class CalculateCPUCost:
 
         node.cpu_cost = cpu_cost
 
+    def _operator_add(self, node : torch.fx.Node):
+        cpu_cost = CPUNodeCost('__add__')
+
+        assert len(node.args) == 2
+
+        # Bytes read at input tensors
+        for arg in node.args:
+            assert isinstance(arg, torch.fx.Node)
+            assert hasattr(arg, 'shape') and hasattr(arg, 'dtype')
+            cpu_cost.bytes_read += arg.shape.numel() * self.dtype_to_element_size(arg.dtype)
+
+        # Account for bytes written at output
+        assert hasattr(node, 'shape') and hasattr(node, 'dtype')
+        cpu_cost.bytes_written += node.shape.numel() * self.dtype_to_element_size(node.dtype)
+
+        # Flops
+        # Each output element is the result of (#args - 1) additions
+        cpu_cost.ops += node.shape.numel() * (len(node.args) - 1)
+
+        node.cpu_cost = cpu_cost
+
+    def torch_flatten(self, node : torch.fx.Node):
+        cpu_cost = CPUNodeCost('__add__')
+
+        # Assuming this is only a viewing operation. TODO: handle contiguous if
+        # we see it.
+
+        node.cpu_cost = cpu_cost
+
     # Modules
     def torch_nn_modules_linear_Linear(self, node : torch.fx.Node, mod : torch.nn.Module):
         cpu_cost = CPUNodeCost(torch.typename(mod))
@@ -124,6 +153,96 @@ class CalculateCPUCost:
 
         # FLOPS = M * K * N
         cpu_cost.ops = input_val.shape.numel() * weight.size(0)
+
+        node.cpu_cost = cpu_cost
+
+    def torch_nn_modules_conv_Conv2d(self, node : torch.fx.Node, mod : torch.nn.Module):
+        if mod.dilation != (1, 1):
+            raise RuntimeError('Dilated convolution currently not supported')
+        if mod.groups != 1:
+            raise RuntimeError('Grouped convolution currently not supported')
+
+        cpu_cost = CPUNodeCost(torch.typename(mod))
+
+        # Bytes read for input value
+        assert len(node.args) == 1
+        input_val, *_ = node.args
+        assert isinstance(input_val, torch.fx.Node)
+        assert hasattr(input_val, 'shape') and hasattr(input_val, 'dtype')
+        cpu_cost.bytes_read += input_val.shape.numel() * self.dtype_to_element_size(input_val.dtype)
+
+        # Bytes read for weights and biases
+        cpu_cost.bytes_read += mod.weight.numel() * mod.weight.element_size()
+        if mod.bias is not None:
+            cpu_cost.bytes_read += mod.bias.numel() * mod.bias.element_size()
+
+        # Bytes written at output
+        assert hasattr(node, 'shape') and hasattr(node, 'dtype')
+        cpu_cost.bytes_written += node.shape.numel() * self.dtype_to_element_size(node.dtype)
+
+        # Flops
+        N, C_out, H_out, W_out = node.shape
+        _, C_in, H_k, W_k = mod.weight.shape
+
+        # TODO: verify
+        # TODO: bias
+        cpu_cost.ops = N * (C_out * (C_in * (H_out * W_out) * (2 * (H_k * W_k) - 1)))
+
+        node.cpu_cost = cpu_cost
+
+    def torch_nn_modules_batchnorm_BatchNorm2d(self, node : torch.fx.Node, mod : torch.nn.Module):
+        cpu_cost = CPUNodeCost(torch.typename(mod))
+
+        if mod.training:
+            # TODO
+            pass
+        else:
+            # TODO
+            pass
+
+        node.cpu_cost = cpu_cost
+
+    def torch_nn_modules_activation_ReLU(self, node : torch.fx.Node, mod : torch.nn.Module):
+        self.torch_relu(node)
+
+    def torch_nn_modules_pooling_MaxPool2d(self, node : torch.fx.Node, mod : torch.nn.Module):
+        cpu_cost = CPUNodeCost(torch.typename(mod))
+
+        # Bytes read for input value
+        assert len(node.args) == 1
+        input_val, *_ = node.args
+        assert isinstance(input_val, torch.fx.Node)
+        assert hasattr(input_val, 'shape') and hasattr(input_val, 'dtype')
+        cpu_cost.bytes_read += input_val.shape.numel() * self.dtype_to_element_size(input_val.dtype)
+
+        # Bytes written at output
+        assert hasattr(node, 'shape') and hasattr(node, 'dtype')
+        cpu_cost.bytes_written += node.shape.numel() * self.dtype_to_element_size(node.dtype)
+
+        # FLOPS
+        N, C_out, H_out, W_out = node.shape
+        kernel_size = mod.kernel_size
+
+        cpu_cost.ops = N * (H_out * W_out * (kernel_size * kernel_size))
+
+        node.cpu_cost = cpu_cost
+
+    def torch_nn_modules_pooling_AdaptiveAvgPool2d(self, node : torch.fx.Node, mod : torch.nn.Module):
+        cpu_cost = CPUNodeCost(torch.typename(mod))
+
+        # Bytes read for input value
+        assert len(node.args) == 1
+        input_val, *_ = node.args
+        assert isinstance(input_val, torch.fx.Node)
+        assert hasattr(input_val, 'shape') and hasattr(input_val, 'dtype')
+        cpu_cost.bytes_read += input_val.shape.numel() * self.dtype_to_element_size(input_val.dtype)
+
+        # Bytes written at output
+        assert hasattr(node, 'shape') and hasattr(node, 'dtype')
+        cpu_cost.bytes_written += node.shape.numel() * self.dtype_to_element_size(node.dtype)
+
+        # FLOPS
+        # TODO
 
         node.cpu_cost = cpu_cost
 
