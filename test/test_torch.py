@@ -5993,15 +5993,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    def _test_trace(self, device, dtype, legacy):
+    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
+    def test_trace(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
             diag = tensor.diag()
-            if legacy:
-                # NB: trace on cpu doesn't do type promotion... #47127
-                expected_dtype = dtype
-            else:
-                expected_dtype = tensor.sum().dtype
+            expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
             result = np.trace(tensor.cpu().numpy(), dtype=expected_dtype)
@@ -6017,16 +6014,6 @@ class TestTorchDeviceType(TestCase):
         )
         for shape in shapes:
             test(shape)
-
-    @onlyCPU
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
-    def test_trace_legacy(self, device, dtype):
-        self._test_trace(device, dtype, legacy=True)
-
-    @onlyCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
-    def test_trace(self, device, dtype):
-        self._test_trace(device, dtype, legacy=False)
 
     @onlyCPU
     @dtypes(torch.float)
