@@ -38,7 +38,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off
