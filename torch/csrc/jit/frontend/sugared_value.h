@@ -139,7 +139,8 @@ struct TORCH_API SugaredValue
   virtual std::shared_ptr<SugaredValue> getitem(
       const SourceRange& loc,
       Function& m,
-      Value* idx) {
+      Value* idx,
+      TypePtr type_hint = nullptr) {
     throw ErrorReport(loc) << "'" << kind() << "'"
                            << " object is not subscriptable";
   }
@@ -193,8 +194,11 @@ struct TORCH_API SimpleValue : public SugaredValue {
   }
 
   Value* len(const SourceRange& loc, Function& m) override;
-  SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
-      override;
+  SugaredValuePtr getitem(
+      const SourceRange& loc,
+      Function& m,
+      Value* idx,
+      TypePtr type_hint = nullptr) override;
 
  private:
   Value* value_;
@@ -251,8 +255,11 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
     return "Tuple";
   }
 
-  SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
-      override {
+  SugaredValuePtr getitem(
+      const SourceRange& loc,
+      Function& m,
+      Value* idx,
+      TypePtr type_hint = nullptr) override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
       throw ErrorReport(loc)
           << "Expected integer literal for index. "
@@ -603,8 +610,11 @@ struct TORCH_API RangeValue : SugaredValue {
     return "range";
   }
   Value* len(const SourceRange& loc, Function& m) override;
-  SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
-      override;
+  SugaredValuePtr getitem(
+      const SourceRange& loc,
+      Function& m,
+      Value* idx,
+      TypePtr type_hint = nullptr) override;
   std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
       override;
 
@@ -679,8 +689,11 @@ struct TORCH_API IterableTree : SugaredValue {
   std::vector<SugaredValuePtr> get_base_iterables();
 
   Value* len(const SourceRange& loc, Function& m) override;
-  SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
-      override;
+  SugaredValuePtr getitem(
+      const SourceRange& loc,
+      Function& m,
+      Value* idx,
+      TypePtr type_hint = nullptr) override;
 
  private:
   c10::optional<int64_t> unroll_length_ = c10::nullopt;

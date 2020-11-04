@@ -1937,6 +1937,53 @@ Example::
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args))
 
+add_docstr(torch.copysign,
+           r"""
+copysign(input, other, *, out=None) -> Tensor
+
+Create a new floating-point tensor with the magnitude of :attr:`input` and the sign of :attr:`other`, elementwise.
+
+.. math::
+    \text{out}_{i} = \begin{cases}
+        -|\text{input}_{i}| & \text{if} \text{other}_{i} \leq -0.0 \\
+        |\text{input}_{i}| & \text{if} \text{other}_{i} \geq 0.0 \\
+    \end{cases}
+""" + r"""
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+and integer and float inputs.
+
+Args:
+    input (Tensor): magnitudes.
+    other (Tensor or Number): contains value(s) whose signbit(s) are
+        applied to the magnitudes in :attr:`input`.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(5)
+    >>> a
+    tensor([-1.2557, -0.0026, -0.5387,  0.4740, -0.9244])
+    >>> torch.copysign(a, 1)
+    tensor([1.2557, 0.0026, 0.5387, 0.4740, 0.9244])
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.7079,  0.2778, -1.0249,  0.5719],
+            [-0.0059, -0.2600, -0.4475, -1.3948],
+            [ 0.3667, -0.9567, -2.5757, -0.1751],
+            [ 0.2046, -0.0742,  0.2998, -0.1054]])
+    >>> b = torch.randn(4)
+    tensor([ 0.2373,  0.3120,  0.3190, -1.1128])
+    >>> torch.copysign(a, b)
+    tensor([[ 0.7079,  0.2778,  1.0249, -0.5719],
+            [ 0.0059,  0.2600,  0.4475, -1.3948],
+            [ 0.3667,  0.9567,  2.5757, -0.1751],
+            [ 0.2046,  0.0742,  0.2998, -0.1054]])
+
+""".format(**common_args))
+
 add_docstr(torch.cos,
            r"""
 cos(input, *, out=None) -> Tensor
@@ -3410,7 +3457,7 @@ of :attr:`index`; other dimensions have the same size as in the original tensor.
 Args:
     {input}
     dim (int): the dimension in which we index
-    index (LongTensor): the 1-D tensor containing the indices to index
+    index (IntTensor or LongTensor): the 1-D tensor containing the indices to index
 
 Keyword args:
     {out}
@@ -3668,6 +3715,64 @@ Examples::
     ...
     RuntimeError: bool value of Tensor with no values is ambiguous
 """.format(**common_args))
+
+add_docstr(torch.kron,
+           r"""
+kron(input, other, *, out=None) -> Tensor
+
+Computes the Kronecker product, denoted by :math:`\otimes`, of :attr:`input` and :attr:`other`.
+
+If :attr:`input` is a :math:`(a_0 \times a_1 \times \dots \times a_n)` tensor and :attr:`other` is a
+:math:`(b_0 \times b_1 \times \dots \times b_n)` tensor, the result will be a
+:math:`(a_0*b_0 \times a_1*b_1 \times \dots \times a_n*b_n)` tensor with the following entries:
+
+.. math::
+    (\text{input} \otimes \text{other})_{k_0, k_1, \dots, k_n} =
+        \text{input}_{i_0, i_1, \dots, i_n} * \text{other}_{j_0, j_1, \dots, j_n},
+
+where :math:`k_t = i_t * b_t + j_t` for :math:`0 \leq t \leq n`.
+If one tensor has fewer dimensions than the other it is unsqueezed until it has the same number of dimensions.
+
+Supports real-valued and complex-valued inputs.
+
+.. note::
+    This function generalizes the typical definition of the Kronecker product for two matrices to two tensors,
+    as described above. When :attr:`input` is a :math:`(m \times n)` matrix and :attr:`other` is a
+    :math:`(p \times q)` matrix, the result will be a :math:`(p*m \times q*n)` block matrix:
+
+    .. math::
+        \mathbf{A} \otimes \mathbf{B}=\begin{bmatrix}
+        a_{11} \mathbf{B} & \cdots & a_{1 n} \mathbf{B} \\
+        \vdots & \ddots & \vdots \\
+        a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B} \end{bmatrix}
+
+    where :attr:`input` is :math:`\mathbf{A}` and :attr:`other` is :math:`\mathbf{B}`.
+
+Arguments:
+    input (Tensor)
+    other (Tensor)
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.ones(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 1., 0., 0.],
+            [1., 1., 0., 0.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.]])
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.arange(1, 5).reshape(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 2., 0., 0.],
+            [3., 4., 0., 0.],
+            [0., 0., 1., 2.],
+            [0., 0., 3., 4.]])
+""")
 
 add_docstr(torch.kthvalue,
            r"""
