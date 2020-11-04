@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
      torch_to_numpy_dtype_dict, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
-     onlyCPU, skipCUDAIfNotRocm, largeCUDATensorTest, precisionOverride, dtypes,
+     onlyCPU, skipCUDAIfNotRocm, largeTensorTest, precisionOverride, dtypes,
      onlyCUDA, skipCPUIf, dtypesIfCUDA)
 
 if TEST_NUMPY:
@@ -774,7 +774,8 @@ class TestTensorCreation(TestCase):
     def test_logspace_steps_warning(self, device, dtype):
         self._linspace_logspace_warning_helper(torch.logspace, device, dtype)
 
-    @largeCUDATensorTest('16GB')
+    @slowTest
+    @largeTensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
         t = torch.arange(bigint, dtype=torch.long, device=device)
@@ -1199,7 +1200,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
 
-    @dtypes(torch.half, torch.float, torch.double,
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         SIZE = 100

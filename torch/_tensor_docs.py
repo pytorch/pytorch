@@ -1956,6 +1956,13 @@ Example::
 
 """)
 
+add_docstr_all('kron',
+               r"""
+kron(other) -> Tensor
+
+See :func:`torch.kron`
+""")
+
 add_docstr_all('kthvalue',
                r"""
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)

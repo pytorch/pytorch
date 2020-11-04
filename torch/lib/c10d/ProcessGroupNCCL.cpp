@@ -8,6 +8,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
@@ -337,6 +338,7 @@ void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
         "might run on corrupted/incomplete data. To avoid this inconsistency, ",
         "we are taking the entire process down.");
     LOG(ERROR) << exceptionMsg;
+    C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleNCCLGuard");
     std::rethrow_exception(exception_);
   }
 }
@@ -392,16 +394,10 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
           LOG(INFO) << "[Rank " << rank_
                     << "] Wrote aborted communicator id to store: " << storeKey;
         }
-        auto currentTimepoint = std::chrono::steady_clock::now();
-        auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            currentTimepoint - workStartTime_);
-        std::string exceptionMsg = c10::str("[Rank ", rank_, "] ",
-                                            "Caught collective operation timeout: ",
-                                            (*this),
-                                            " ran for ",
-                                            timeElapsed.count(),
-                                            " milliseconds before timing out.");
-        throw std::runtime_error(exceptionMsg);
+        LOG(INFO) << "[Rank " << rank_
+                  << "] Caught collective operation timeout for work: "
+                  << (*this);
+        throw std::runtime_error("Operation timed out!");
       }
       // Check for errors and throw appropriate exception.
       checkAndThrowException();
@@ -510,18 +506,12 @@ void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>&
     // Check for Timeouts in the WorkNCCL Operations, and abort all
     // communicators accordingly.
     if (work.timedOut()) {
-      auto currentTimepoint = std::chrono::steady_clock::now();
-      auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-          currentTimepoint - work.workStartTime_);
-      std::string exceptionMsg = c10::str("[Rank ", rank_, "] ",
-                                          "Watchdog caught collective operation timeout: ",
-                                          work,
-                                          " ran for ",
-                                          timeElapsed.count(),
-                                          " milliseconds before timing out.");
-      LOG(INFO) << exceptionMsg;
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] Watchdog caught collective operation timeout for work: "
+          << work;
       std::exception_ptr exception_ptr = std::make_exception_ptr(
-          std::runtime_error(exceptionMsg));
+          std::runtime_error("NCCL Operation Timed Out"));
       work.setException(exception_ptr);
       for (const auto& ncclComm : work.ncclComms_) {
         ncclComm->ncclCommAbort();
