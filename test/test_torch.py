@@ -18017,7 +18017,7 @@ else:
             if dtype == torch.bfloat16:
                 self.precision = 1  # 43 vs 43.75
         else:
-            is_supported = dtype != torch.bfloat16 or AMPERE_OR_ROCM
+            is_supported = (dtype != torch.bfloat16 or AMPERE_OR_ROCM)
 
         if not is_supported:
             b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
