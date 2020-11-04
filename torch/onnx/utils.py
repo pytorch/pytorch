@@ -316,6 +316,18 @@ def _decide_external_data_format(use_external_data_format, operator_export_type,
     model_file_location = f if val_use_external_data_format and isinstance(f, str) else str()
     return val_use_external_data_format, model_file_location
 
+def _decide_input_format(model, args):
+    import inspect
+    sig = inspect.signature(model.forward)
+    ordered_list_keys = list(sig.parameters.keys())
+    if isinstance(args[-1], dict):
+        args_dict = args[-1]
+        args = list(args)[:-1]
+        for optional_arg in ordered_list_keys:
+            if optional_arg in args_dict:
+                args.append(args_dict[optional_arg])
+        args = tuple(args)
+    return args
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
@@ -624,6 +636,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
                                                                                              operator_export_type,
                                                                                              f)
+            args = _decide_input_format(model, args)
             if dynamic_axes is None:
                 dynamic_axes = {}
             _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
