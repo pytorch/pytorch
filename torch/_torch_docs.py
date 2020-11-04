@@ -3410,7 +3410,7 @@ of :attr:`index`; other dimensions have the same size as in the original tensor.
 Args:
     {input}
     dim (int): the dimension in which we index
-    index (LongTensor): the 1-D tensor containing the indices to index
+    index (IntTensor or LongTensor): the 1-D tensor containing the indices to index
 
 Keyword args:
     {out}
