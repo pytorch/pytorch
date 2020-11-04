@@ -3367,7 +3367,7 @@ If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
 .. math::
     \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
 
-See :func:`torch.lgamma` for a related function.
+See :func:`torch.igammac` and :func:`torch.lgamma` for related functions.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
@@ -3408,7 +3408,7 @@ If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
 .. math::
     \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
 
-See :func:`torch.lgamma` for a related function.
+See :func:`torch.igamma` and :func:`torch.lgamma` for related functions.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
