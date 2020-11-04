@@ -7,12 +7,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10d/comm.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
-#include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
 
 namespace c10d {
 

@@ -1,7 +1,8 @@
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <c10d/reducer.hpp>
 
 #include <functional>
 
+#include <c10d/comm.hpp>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
@@ -12,7 +13,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
-#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -777,6 +777,7 @@ void Reducer::initialize_buckets(
       }
     }
 
+    // Iterate over model replicas.
     for (size_t replica_index = 0; replica_index < replica_count;
          replica_index++) {
       BucketReplica replica;

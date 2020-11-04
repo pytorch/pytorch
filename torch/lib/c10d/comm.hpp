@@ -60,6 +60,7 @@ class GradBucket {
  private:
   std::vector<at::Tensor> tensors_;
 
+  // Per-variable info in tensors_[0].
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
