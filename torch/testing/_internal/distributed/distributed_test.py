@@ -1001,7 +1001,6 @@ class DistributedTest:
             "Only NCCL backend supports high priority stream",
         )
         @skip_if_no_gpu
-        @skip_if_rocm
         def test_nccl_high_priority_stream(self):
             group, _, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -3999,29 +3998,38 @@ class DistributedTest:
         @skip_if_rocm
         def test_ddp_control_flow_same_across_ranks(self):
             # Control flow that is the same across ranks.
+            batch = 20
+            dim = 10
+
             class ToyModel(nn.Module):
                 def __init__(self):
                     super(ToyModel, self).__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
-                    self.counter = 0
 
                 def forward(self, x):
-                    self.counter += 1
-                    if self.counter % 2 == 0:
+                    # Second layer is used dependent on input x.
+                    use_second_layer = torch.equal(
+                        x, torch.ones(batch, dim, device=x.device)
+                    )
+                    if use_second_layer:
                         return self.lin2(F.relu(self.lin1(x)))
                     else:
                         return F.relu(self.lin1(x))
 
             torch.cuda.set_device(self.rank)
             model = torch.nn.parallel.DistributedDataParallel(
-                ToyModel().cuda(self.rank), device_ids=[self.rank], find_unused_parameters=True
+                ToyModel().cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True,
             )
-            batch = 20
-            dim = 10
-            inp = torch.randn(batch, dim, device=self.rank)
+            random_input = torch.randn(batch, dim, device=self.rank)
+            ones_input = torch.ones(batch, dim, device=self.rank)
             for i in range(6):
-                out = model(inp)
+                if i % 2 == 0:
+                    out = model(random_input)
+                else:
+                    out = model(ones_input)
                 loss = out.sum()
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
@@ -4036,37 +4044,63 @@ class DistributedTest:
                 variable_usage_tensor = local_used_maps[0]
                 self.assertEqual(variable_usage_tensor, expected)
 
+            # Validate appropriate error message when DDP is used with
+            # find_unused_parameters=False.
+            model = torch.nn.parallel.DistributedDataParallel(
+                ToyModel().cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=False,
+            )
+            for i in range(2):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to have finished reduction in the prior iteration before starting a new one",
+                ) if i == 1 else suppress():
+                    loss = model(random_input).sum()
+                    loss.backward()
+
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_control_flow_different_across_ranks(self):
             # Control flow that is different across ranks.
+            batch = 20
+            dim = 10
+
             class ToyModel(nn.Module):
                 def __init__(self, rank):
                     super(ToyModel, self).__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
-                    self.counter = 0
                     self.rank = rank
 
                 def forward(self, x):
-                    self.counter += 1
-                    # Unused parameter on even iterations for rank 1.
-                    if self.counter % 2 == 0 and self.rank == 1:
+                    # Control-flow that is rank and input dependent for the
+                    # model.
+                    use_second_layer = (
+                        torch.equal(x, torch.ones(batch, dim, device=x.device))
+                        and self.rank == 1
+                    )
+
+                    if use_second_layer:
                         return self.lin2(F.relu(self.lin1(x)))
                     else:
                         return F.relu(self.lin1(x))
 
             torch.cuda.set_device(self.rank)
             model = torch.nn.parallel.DistributedDataParallel(
-                ToyModel(self.rank).cuda(self.rank), device_ids=[self.rank], find_unused_parameters=True
+                ToyModel(self.rank).cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True,
             )
-            batch = 20
-            dim = 10
-            inp = torch.randn(batch, dim, device=self.rank)
+            random_input = torch.randn(batch, dim, device=self.rank)
+            ones_input = torch.ones(batch, dim, device=self.rank)
             for i in range(6):
-                out = model(inp)
+                if i % 2 == 0:
+                    out = model(random_input)
+                else:
+                    out = model(ones_input)
                 loss = out.sum()
                 loss.backward()
                 # On even iterations, 2nd param goes unused, on odd iterations,
@@ -4082,3 +4116,18 @@ class DistributedTest:
                 # Validate parameter usage. On odd iterations, 2nd param is only
                 # used on rank 1.
                 self.assertEqual(variable_usage_tensor, expected)
+
+            # Validate appropriate error message when DDP is used with
+            # find_unused_parameters=False.
+            model = torch.nn.parallel.DistributedDataParallel(
+                ToyModel(self.rank).cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=False,
+            )
+            for i in range(2):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to have finished reduction in the prior iteration before starting a new one",
+                ) if i == 1 else suppress():
+                    loss = model(random_input).sum()
+                    loss.backward()

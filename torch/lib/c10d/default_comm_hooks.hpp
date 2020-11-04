@@ -1,7 +1,7 @@
 #pragma once
 
+#include <c10d/comm.hpp>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/comm.h>
 
 namespace c10d {
 

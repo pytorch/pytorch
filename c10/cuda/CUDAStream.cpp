@@ -43,12 +43,9 @@ static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
 
-// Note: stream priority is not supported by HIP
 // Note: lower numbers are higher priorities, zero is default priority
-#ifndef __HIP_PLATFORM_HCC__
 static int kHighPriority = -1;
 static int kLowPriority = 0;
-#endif // __HIP_PLATFORM_HCC__
 
 // Default streams
 static std::once_flag init_flag;
@@ -229,17 +226,10 @@ static void initDeviceStreamState(DeviceIndex device_index) {
     lowpri_stream.device_index = device_index;
     hipri_stream.device_index = device_index;
 
-#ifndef __HIP_PLATFORM_HCC__
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &lowpri_stream.stream, kDefaultFlags, kLowPriority));
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &hipri_stream.stream, kDefaultFlags, kHighPriority));
-#else
-    C10_CUDA_CHECK(
-        cudaStreamCreateWithFlags(&lowpri_stream.stream, kDefaultFlags));
-    C10_CUDA_CHECK(
-        cudaStreamCreateWithFlags(&hipri_stream.stream, kDefaultFlags));
-#endif // __HIP_PLATFORM_HCC__
   }
 }
 
