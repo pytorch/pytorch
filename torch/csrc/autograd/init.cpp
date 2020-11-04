@@ -80,6 +80,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.endThreadId();
       })
       .def("device_index", &KinetoEvent::deviceIndex)
+      .def("device_resource_id", &KinetoEvent::deviceResourceId)
       .def("start_us", &KinetoEvent::startUs)
       .def("duration_us", &KinetoEvent::durationUs)
       .def("correlation_id", [](const KinetoEvent& e) {
@@ -107,6 +108,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       })
       .def("legacy_events",  [](const ProfilerResultWrapper& r) {
         return r.result_->legacy_events();
+      })
+      .def("save",  [](const ProfilerResultWrapper& r, const std::string& path) {
+        return r.result_->save(path);
       });
 
   m.def("_enable_profiler", enableProfiler);

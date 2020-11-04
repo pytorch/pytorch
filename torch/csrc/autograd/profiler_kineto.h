@@ -38,6 +38,8 @@ struct KinetoObserverContext : public at::ObserverContext {
 };
 
 struct TORCH_API KinetoEvent {
+  KinetoEvent();
+
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -46,7 +48,7 @@ struct TORCH_API KinetoEvent {
     return end_thread_id_;
   }
 
-  c10::DeviceType deviceType() const {
+  uint8_t deviceType() const {
     return device_type_;
   }
 
@@ -85,11 +87,6 @@ struct TORCH_API KinetoEvent {
 
   KinetoEvent& endThreadId(uint64_t end_thread_id) {
     end_thread_id_ = end_thread_id;
-    return *this;
-  }
-
-  KinetoEvent& deviceType(c10::DeviceType device_type) {
-    device_type_ = device_type;
     return *this;
   }
 
@@ -147,13 +144,17 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  int64_t deviceResourceId() const {
+    return device_resource_id_;
+  }
+
   uint64_t start_thread_id_ = 0;
   uint64_t end_thread_id_ = 0;
   uint64_t fwd_thread_id_ = 0;
   int64_t sequence_nr_ = 0;
   uint8_t scope_ = 0;
 
-  c10::DeviceType device_type_ = c10::DeviceType::CPU;
+  uint8_t device_type_;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
 
@@ -162,15 +163,16 @@ struct TORCH_API KinetoEvent {
   uint64_t start_us_ = 0;
   uint64_t duration_us_ = 0;
   uint64_t correlation_id_ = 0;
+  int64_t device_resource_id_ = 0;
 };
 
 struct TORCH_API ProfilerResult {
   ProfilerResult(
-      std::vector<std::vector<KinetoEvent>> events,
+      std::vector<KinetoEvent> events,
       thread_event_lists legacy_events,
       std::unique_ptr<libkineto::ActivityTraceInterface> trace);
 
-  const std::vector<std::vector<KinetoEvent>>& events() const {
+  const std::vector<KinetoEvent>& events() const {
     return events_;
   }
 
@@ -178,8 +180,10 @@ struct TORCH_API ProfilerResult {
     return legacy_events_;
   }
 
+  void save(const std::string& path);
+
  private:
-  std::vector<std::vector<KinetoEvent>> events_;
+  std::vector<KinetoEvent> events_;
   thread_event_lists legacy_events_; // tensor mem alloc, start/stop
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
 };

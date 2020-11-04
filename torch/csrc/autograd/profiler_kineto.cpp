@@ -41,7 +41,8 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.startTime = ctx->startUs;
     op.endTime = getTimeUs();
     op.opType = std::string(fn.name().str());
-    op.device = 0; // CPU
+    op.device = 0;
+    op.threadId = ctx->startThreadId;
     op.correlation = ctx->correlationId;
     if (ctx->shapes && !ctx->shapes->empty()) {
       op.inputDims = shapesToStr(*ctx->shapes);
@@ -58,8 +59,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .endThreadId(ctx->endThreadId)
           .sequenceNr(ctx->sequenceNr)
           .fwdThreadId(ctx->fwdThreadId)
-          .scope(ctx->recFunScope)
-          .deviceType(c10::DeviceType::CPU);
+          .scope(ctx->recFunScope);
       if (ctx->shapes && !ctx->shapes->empty()) {
           kineto_events_.back().shapes(*ctx->shapes);
       }
@@ -71,12 +71,18 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   }
 
   void addTraceEvents(libkineto::ActivityTraceInterface& trace) {
-    // tbd
-  }
-
-  std::vector<std::vector<KinetoEvent>> events() {
-    // tbd
-    return std::vector<std::vector<KinetoEvent>>();
+    const auto& events = *(trace.activities());
+    for (const auto& ev_ptr : events) {
+      // TODO: API to get the source of activity,
+      // using dynamic_cast
+      auto is_client = dynamic_cast<libkineto::ClientTraceActivity*>(
+          ev_ptr.get()) != nullptr;
+      if (!is_client) { // ClientTraceActivity events are already processed
+        kineto_events_.emplace_back();
+        kineto_events_.back()
+            .activity(*ev_ptr);
+      }
+    }
   }
 
   std::vector<KinetoEvent> kineto_events_;
@@ -194,7 +200,9 @@ void prepareProfiler(
   //  libkineto::api().registerProfiler(
   //    std::make_unique<libkineto::ActivityProfilerInterface>(false));
   //}
-  libkineto::api().initProfilerIfRegistered();
+  if (!libkineto::api().isProfilerInitialized()) {
+    libkineto::api().initProfilerIfRegistered();
+  }
   libkineto::api().prepareTrace(k_activities);
 }
 
@@ -247,7 +255,7 @@ ProfilerResultWrapper disableProfiler() {
   TORCH_CHECK(trace);
   state_ptr->addTraceEvents(*trace);
   return ProfilerResultWrapper(std::make_shared<ProfilerResult>(
-      std::move(state_ptr->events()),
+      std::move(state_ptr->kineto_events_),
       std::move(state_ptr->consolidate()),
       std::move(trace)));
 }
@@ -255,19 +263,27 @@ ProfilerResultWrapper disableProfiler() {
 KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   name_ = activity.name();
   device_index_ = activity.deviceId();
+  device_resource_id_ = activity.resourceId();
   start_us_ = activity.timestamp();
   duration_us_ = activity.duration();
   correlation_id_ = activity.correlationId();
+  device_type_ = (uint8_t)activity.deviceType();
   return *this;
 }
 
+KinetoEvent::KinetoEvent() : device_type_((uint8_t)libkineto::DeviceType::CPU) {}
+
 ProfilerResult::ProfilerResult(
-    std::vector<std::vector<KinetoEvent>> events,
+    std::vector<KinetoEvent> events,
     thread_event_lists legacy_events,
     std::unique_ptr<libkineto::ActivityTraceInterface> trace)
   : events_(std::move(events)),
     legacy_events_(std::move(legacy_events)),
     trace_(std::move(trace)) {}
+
+void ProfilerResult::save(const std::string& path) {
+  trace_->save(path);
+}
 
 #endif
 
