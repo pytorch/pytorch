@@ -619,12 +619,10 @@ from ._vmap_internals import vmap
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
 
-from .overrides import has_torch_function, handle_torch_function
-
 def Assert(condition, message):
     r"""A wrapper around Python's assert which is symbolically traceable.
     """
 
-    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
-        return handle_torch_function(Assert, (condition,), condition, message)
+    if type(condition) is not torch.Tensor and torch.overrides.has_torch_function((condition,)):
+        return torch.overrides.handle_torch_function(Assert, (condition,), condition, message)
     assert condition, message
