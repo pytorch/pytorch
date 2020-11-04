@@ -1315,6 +1315,14 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
+void ClassType::unsafeChangeAttributeType(const std::string& name, TypePtr new_ty) {
+  auto slot = getAttributeSlot(name);
+  auto old_attr_info = attributes_[slot];
+  AT_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
+  attributes_[slot] = ClassAttribute(old_attr_info.getKind(), new_ty, old_attr_info.getName());
+  attributeTypes_[slot] = new_ty;
+}
+
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {
   checkNotExist(name, "constant");
   size_t slot = constantNames_.size();
