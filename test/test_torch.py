@@ -37,7 +37,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCUDAIfNotRocm, \
     onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
+    PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
@@ -1618,23 +1618,25 @@ class AbstractTestCases:
                 reference[0.0, :, 0.0] = 1
 
         def test_index_add(self):
-            for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
-                for other_sizes in ((), (4, 5)):
-                    num_copy, num_dest = 3, 3
-                    dest = torch.randn(num_dest, *other_sizes)
-                    if not dest_contig:
-                        dest = torch.testing.make_non_contiguous(dest)
-                    src = torch.randn(num_copy, *other_sizes)
-                    if not src_contig:
-                        src = torch.testing.make_non_contiguous(src)
-                    idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
-                    if not index_contig:
-                        idx = torch.testing.make_non_contiguous(idx)
-                    dest2 = dest.clone()
-                    dest.index_add_(0, idx, src)
-                    for i in range(idx.size(0)):
-                        dest2[idx[i]] += src[i]
-                    self.assertEqual(dest, dest2)
+            for device in torch.testing.get_all_device_types():
+                for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+                    for other_sizes in ((), (4, 5)):
+                        for dtype in [torch.int, torch.long]:
+                            num_copy, num_dest = 3, 3
+                            dest = torch.randn(num_dest, *other_sizes, device=device)
+                            if not dest_contig:
+                                dest = torch.testing.make_non_contiguous(dest)
+                            src = torch.randn(num_copy, *other_sizes, device=device)
+                            if not src_contig:
+                                src = torch.testing.make_non_contiguous(src)
+                            idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
+                            if not index_contig:
+                                idx = torch.testing.make_non_contiguous(idx)
+                            dest2 = dest.clone()
+                            dest.index_add_(0, idx, src)
+                            for i in range(idx.size(0)):
+                                dest2[idx[i]] += src[i]
+                            self.assertEqual(dest, dest2)
 
         # add coverage for issue with atomic add that appeared only for
         # specific dtypes on cuda:
@@ -1642,23 +1644,24 @@ class AbstractTestCases:
         def test_index_add_all_dtypes(self):
             for device in torch.testing.get_all_device_types():
                 for dtype in torch.testing.get_all_math_dtypes(device):
-                    size = [5, 5]
-                    if dtype.is_floating_point or dtype.is_complex:
-                        tensor = torch.rand(size, dtype=dtype, device=device)
-                    elif dtype.is_signed:
-                        tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
-                    else:
-                        tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
+                    for idx_dtype in [torch.int, torch.long]:
+                        size = [5, 5]
+                        if dtype.is_floating_point or dtype.is_complex:
+                            tensor = torch.rand(size, dtype=dtype, device=device)
+                        elif dtype.is_signed:
+                            tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
+                        else:
+                            tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
 
-                    # index_add calls atomicAdd on cuda.
-                    zeros = torch.zeros(size, dtype=dtype, device=device)
+                        # index_add calls atomicAdd on cuda.
+                        zeros = torch.zeros(size, dtype=dtype, device=device)
 
-                    # index_add is not supported for complex dtypes on cuda yet
-                    if device.startswith('cuda') and dtype.is_complex:
-                        continue
+                        # index_add is not supported for complex dtypes on cuda yet
+                        if device.startswith('cuda') and dtype.is_complex:
+                            continue
 
-                    added = zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
-                    self.assertEqual(added, tensor)
+                        added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor)
+                        self.assertEqual(added, tensor)
 
         def test_t(self):
             # Test 0D tensors
@@ -9599,7 +9602,8 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
-    @largeCUDATensorTest('10GB')
+    @slowTest
+    @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
         # https://github.com/pytorch/pytorch/issues/37583
@@ -12637,6 +12641,11 @@ class TestTorchDeviceType(TestCase):
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=([1, 0], [0, 1])))
         self.assertEqual(c, cn)
+
+        cout = torch.zeros((5, 2))
+        torch.tensordot(a, b, dims=([1, 0], [0, 1]), out=cout).cpu()
+        self.assertEqual(c, cout)
+
         a = torch.randn(2, 3, 4, 5, device=device)
         b = torch.randn(4, 5, 6, 7, device=device)
         c = torch.tensordot(a, b, dims=2).cpu()
@@ -12729,36 +12738,37 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
 
     def test_index_select(self, device):
-        src = torch.randn(3, 4, 5, device=device)
-        # Index can be duplicated.
-        idx = torch.tensor([2, 1, 0, 1, 2], dtype=torch.long, device=device)
-        dest = torch.index_select(src, 0, idx)
-        self.assertEqual(dest.shape, (5, 4, 5))
-        for i in range(idx.size(0)):
-            self.assertEqual(dest[i], src[idx[i]])
+        for dtype in [torch.int, torch.long]:
+            src = torch.randn(3, 4, 5, device=device)
+            # Index can be duplicated.
+            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
+            dest = torch.index_select(src, 0, idx)
+            self.assertEqual(dest.shape, (5, 4, 5))
+            for i in range(idx.size(0)):
+                self.assertEqual(dest[i], src[idx[i]])
 
-        # Check that 'out' is used correctly.
-        out = torch.randn(5 * 4 * 5, device=device)
-        dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
-        self.assertEqual(dest.shape, (5, 4, 5))
-        for i in range(idx.size(0)):
-            self.assertEqual(dest[i], src[idx[i]])
-        out.fill_(0.123)
-        self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
+            # Check that 'out' is used correctly.
+            out = torch.randn(5 * 4 * 5, device=device)
+            dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
+            self.assertEqual(dest.shape, (5, 4, 5))
+            for i in range(idx.size(0)):
+                self.assertEqual(dest[i], src[idx[i]])
+            out.fill_(0.123)
+            self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
 
-        # Bool tensor
-        src = torch.tensor([False, True, False, False], device=device, dtype=torch.bool)
-        idx = torch.tensor([1], dtype=torch.long, device=device)
-        dest = torch.index_select(src, 0, idx)
-        self.assertEqual(torch.tensor([True]), dest)
+            # Bool tensor
+            src = torch.tensor([False, True, False, False], device=device, dtype=torch.bool)
+            idx = torch.tensor([1], dtype=dtype, device=device)
+            dest = torch.index_select(src, 0, idx)
+            self.assertEqual(torch.tensor([True]), dest)
 
-        # Complex Tensor
-        src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
-        idx = torch.tensor([2, 1, 0, 1, 2], dtype=torch.long, device=device)
-        dest = torch.index_select(src, 0, idx)
-        self.assertEqual(dest.shape, (5, 4, 5))
-        for i in range(idx.size(0)):
-            self.assertEqual(dest[i], src[idx[i]])
+            # Complex Tensor
+            src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
+            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
+            dest = torch.index_select(src, 0, idx)
+            self.assertEqual(dest.shape, (5, 4, 5))
+            for i in range(idx.size(0)):
+                self.assertEqual(dest[i], src[idx[i]])
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
