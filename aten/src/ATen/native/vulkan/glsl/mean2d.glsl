@@ -16,12 +16,14 @@ void main() {
   vec4 r = vec4(1.0) / (float(uBlock.W) * float(uBlock.H));
   vec4 acc = vec4(0);
   int xi, yi;
+  int zi = (imageSize(uOutput).x*pos.y + pos.x)/4;
+  int zo = (imageSize(uOutput).x*pos.y + pos.x)%4;
   for (yi = 0; yi < uBlock.H; ++yi) {
     for (xi = 0; xi < uBlock.W; ++xi) {
-      acc += texelFetch(uInput, ivec3(xi, yi, pos.z), 0);
+      acc += texelFetch(uInput, ivec3(xi, yi, zi), 0);
     }
   }
   vec4 outValue = r * acc;
 
-  imageStore(uOutput, pos, outValue);
+  imageStore(uOutput, pos, vec4(outValue[zo], 0,0,0));
 }
