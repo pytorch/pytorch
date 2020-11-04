@@ -59,18 +59,6 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, torch.Tensor):
-            if not hasattr(self, 'tensor_attrs'):
-                self.tensor_attrs : Dict[torch.Tensor, str] = {}
-
-                def collect_tensor_attrs(m : torch.nn.Module, prefix_atoms : List[str]):
-                    for k, v in m.__dict__.items():
-                        if isinstance(v, torch.Tensor):
-                            self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
-                    for k, v in m.named_children():
-                        collect_tensor_attrs(v, prefix_atoms + [k])
-
-                collect_tensor_attrs(self.root, [])
-
             qualname : Optional[str] = self.tensor_attrs[a] if a in self.tensor_attrs else None
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -161,6 +149,21 @@ class Tracer(TracerBase):
             self.root = torch.nn.Module()
             fn = root
         self.graph = Graph()
+
+        # When we encounter a Tensor value that's not a parameter, we look if it
+        # is some other attribute on the model. Construct a dict mapping Tensor
+        # values to the qualified name here for efficiency. This is used downstream
+        # in create_arg
+        self.tensor_attrs : Dict[torch.Tensor, str] = {}
+
+        def collect_tensor_attrs(m : torch.nn.Module, prefix_atoms : List[str]):
+            for k, v in m.__dict__.items():
+                if isinstance(v, torch.Tensor):
+                    self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
+            for k, v in m.named_children():
+                collect_tensor_attrs(v, prefix_atoms + [k])
+
+        collect_tensor_attrs(self.root, [])
 
         assert isinstance(fn, FunctionType)
 
