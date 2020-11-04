@@ -2,11 +2,40 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
+#include <mutex>
 
 namespace torch {
 namespace autograd {
 
 bool AnomalyMode::_enabled = false;
+
+namespace {
+std::mutex& get_anomaly_guard_lock() {
+  static std::mutex anomaly_guard_lock{};
+  return anomaly_guard_lock;
+}
+
+uint32_t& get_anomaly_counter() {
+  static uint32_t counter = 0;
+  return counter;
+}
+} // namespace
+
+DetectAnomalyGuard::DetectAnomalyGuard() {
+  TORCH_WARN_ONCE(
+      "This mode should be enabled only for debugging as the different tests will slow down your program execution.");
+  std::lock_guard<std::mutex> lock(get_anomaly_guard_lock());
+  uint32_t& counter = get_anomaly_counter();
+  counter++;
+  AnomalyMode::set_enabled(true);
+}
+
+DetectAnomalyGuard::~DetectAnomalyGuard() {
+  std::lock_guard<std::mutex> lock(get_anomaly_guard_lock());
+  uint32_t& counter = get_anomaly_counter();
+  counter--;
+  AnomalyMode::set_enabled(counter > 0);
+}
 
 AnomalyMetadata::~AnomalyMetadata() = default;
 
