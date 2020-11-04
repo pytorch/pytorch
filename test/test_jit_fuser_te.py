@@ -484,7 +484,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_minmax_int_ops(self):
         def apply(fn):
             return lambda x, y, z: fn(fn(x, y), z)
@@ -501,7 +500,7 @@ class TestTEFuser(JitTestCase):
             torch.min,
             torch.max
         ]
-        devices = ["cuda"]
+        devices = self.devices
         for dtype, op, device in product(dtypes, binary_ops, devices):
             try:
                 x = self.data_for(dtype, device)
