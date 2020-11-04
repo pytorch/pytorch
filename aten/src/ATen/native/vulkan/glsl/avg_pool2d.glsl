@@ -29,7 +29,7 @@ void main() {
     const ivec2 start = max(ivec2(0), ipos);
     const ivec2 end = min(ipos + uBlock.kernel, isize);
 
-    vec4 sum = vec4(0);
+    vec4 sum = vec4();
 
     for (int y = start.y; y < end.y; ++y) {
       for (int x = start.x; x < end.x; ++x) {
