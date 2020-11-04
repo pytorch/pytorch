@@ -150,12 +150,44 @@ class TestForeach(TestCase):
     # Unary ops
     #
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
-    def test_sqrt(self, device, dtype):
-        self._test_unary_op(device, dtype, torch._foreach_sqrt, torch._foreach_sqrt_, torch.sqrt)
+    def test_unary_ops_with_complex(self, device, dtype):
+        ops = [
+            (torch._foreach_sqrt, torch._foreach_sqrt_, torch.sqrt),
+            (torch._foreach_exp, torch._foreach_exp_, torch.exp),
+            (torch._foreach_acos, torch._foreach_acos_, torch.acos),
+            (torch._foreach_asin, torch._foreach_asin_, torch.asin),
+            (torch._foreach_atan, torch._foreach_atan_, torch.atan),
+            (torch._foreach_cos, torch._foreach_cos_, torch.cos),
+            (torch._foreach_cosh, torch._foreach_cosh_, torch.cosh),
+            (torch._foreach_log, torch._foreach_log_, torch.log),
+            (torch._foreach_log10, torch._foreach_log10_, torch.log10),
+            (torch._foreach_log2, torch._foreach_log2_, torch.log2),
+            (torch._foreach_neg, torch._foreach_neg_, torch.neg),
+            (torch._foreach_tan, torch._foreach_tan_, torch.tan),
+            (torch._foreach_tanh, torch._foreach_tanh_, torch.tanh),
+            (torch._foreach_sin, torch._foreach_sin_, torch.sin),
+            (torch._foreach_sinh, torch._foreach_sinh_, torch.sinh)
+        ]
 
-    @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
-    def test_exp(self, device, dtype):
-        self._test_unary_op(device, dtype, torch._foreach_exp, torch._foreach_exp_, torch.exp)
+        for fe_op, fe_op_, torch_op in ops:
+            self._test_unary_op(device, dtype, fe_op, fe_op_, torch_op)
+
+
+    @dtypes(*[torch.float, torch.double])
+    def test_unary_ops(self, device, dtype):
+        ops = [
+            (torch._foreach_abs, torch._foreach_abs_, torch.abs),
+            (torch._foreach_ceil, torch._foreach_ceil_, torch.ceil),
+            (torch._foreach_erf, torch._foreach_erf_, torch.erf),
+            (torch._foreach_erfc, torch._foreach_erfc_, torch.erfc),
+            (torch._foreach_expm1, torch._foreach_expm1_, torch.expm1),
+            (torch._foreach_floor, torch._foreach_floor_, torch.floor),
+            (torch._foreach_log1p, torch._foreach_log1p_, torch.log1p),
+            (torch._foreach_round, torch._foreach_round_, torch.round)
+        ]
+
+        for fe_op, fe_op_, torch_op in ops:
+            self._test_unary_op(device, dtype, fe_op, fe_op_, torch_op)
 
     #
     # Pointwise ops
