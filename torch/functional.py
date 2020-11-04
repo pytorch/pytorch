@@ -901,7 +901,7 @@ unique_consecutive = boolean_dispatch(
 unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
 
-def tensordot(a, b, dims=2):
+def tensordot(a, b, dims=2, out=None):
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -964,7 +964,10 @@ def tensordot(a, b, dims=2):
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    if out is None:
+        return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    else:
+        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
