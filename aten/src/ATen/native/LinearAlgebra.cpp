@@ -196,32 +196,15 @@ Tensor& inner_out(Tensor& out, const Tensor& self, const Tensor& other) {
     return out;
   }
 
-  // Last dimension should match
+  // Last dimension should match (tensordot does not enforce this)
   TORCH_CHECK(
       self.size(-1) == other.size(-1),
       "inner() the last dimension must match on both input tensors but got shapes ",
       self.sizes(),
       " and ",
       other.sizes());
-
-  // out_shape = self_shape[:-1] + other_shape[:-1]
-  std::vector<int64_t> shape(
-      self.sizes().begin(), self.sizes().begin() + self.dim() - 1);
-  shape.insert(
-      shape.end(),
-      other.sizes().begin(),
-      other.sizes().begin() + other.dim() - 1);
-  at::native::resize_output(out, shape);
-
-  // Reshape self to include dimensions other_shape[:-1] so it broadcasts with other in
-  // torch.mul resulting in the correct out_shape after summing last dimension
-  std::vector<int64_t> sizes = self.sizes().vec();
-  sizes.insert(sizes.begin() + self.dim() - 1, other.dim() - 1, 1);
-  Tensor input = self.reshape(sizes);
-
-  // Compute result
-  at::sum_out(out, input * other, -1);
-
+  
+  at::tensordot_out(out, self, other, -1, -1);
   return out;
 }
 
@@ -233,7 +216,7 @@ Tensor inner(const Tensor& self, const Tensor& other) {
     return self * other;
   }
 
-  // Last dimension should match
+  // Last dimension should match (tensordot does not enforce this)
   TORCH_CHECK(
       self.size(-1) == other.size(-1),
       "inner() the last dimension must match on both input tensors but got shapes ",
@@ -241,15 +224,7 @@ Tensor inner(const Tensor& self, const Tensor& other) {
       " and ",
       other.sizes());
 
-  // out_shape = self_shape[:-1] + other_shape[:-1]
-  // Reshape self to include dimensions other_shape[:-1] so it broadcasts with other in
-  // torch.mul resulting in the correct out_shape after summing last dimension
-  std::vector<int64_t> sizes = self.sizes().vec();
-  sizes.insert(sizes.begin() + self.dim() - 1, other.dim() - 1, 1);
-  Tensor input = self.reshape(sizes);
-
-  // Compute result
-  return (input * other).sum(-1);
+  return at::tensordot(self, other, -1, -1);
 }
 
 Tensor& outer_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
@@ -1802,6 +1777,72 @@ Tensor chain_matmul(TensorList matrices) {
     // We use the result from the algorithm to compute the matrix chain product via recursion
     return _chain_matmul_general(matrices, s, 0, n - 1);
   }
+}
+
+/*
+Calculates the Kronecker product between two Tensors.
+*/
+Tensor kron(const Tensor& self, const Tensor& other) {
+  /*
+  We can obtain the kron result using tensordot or einsum. The implementation below uses tensordot.
+  In einsum notation suppose we have `self` with dim 4 and `other` with dim 2
+  the result of below tensordot is in einsum 0123, 45 -> 012345.
+  To obtain the correct kron we need to permute and reshape the array.
+  The permutation rule is the following: going from right to left
+  take axes in turn to form the permutation
+  with our example the correct permutation is 012435 and
+  the kron shape is (shape_self[0], shape_self[1], shape_self[3]*shape_other[0],
+  shape_self[4]*shape_other[1])
+  */
+  std::vector<int64_t> self_sizes = self.sizes().vec();
+  std::vector<int64_t> other_sizes = other.sizes().vec();
+  int64_t self_ndim = self.dim();
+  int64_t other_ndim = other.dim();
+  int64_t min_ndim = std::min(self_ndim, other_ndim);
+  int64_t ndim_diff = std::abs(self_ndim - other_ndim);
+
+  std::vector<int64_t> a_axes(self_ndim);
+  std::vector<int64_t> b_axes(other_ndim);
+  std::iota(a_axes.begin(), a_axes.end(), 0);
+  std::iota(b_axes.begin(), b_axes.end(), 0 + self_ndim);
+
+  bool is_a_larger = self_ndim >= other_ndim;
+  std::vector<int64_t> kron_permutation(self_ndim + other_ndim);
+  for (int64_t i = 0; i < ndim_diff; i++) {
+    kron_permutation[i] = is_a_larger ? a_axes[i] : b_axes[i];
+  }
+  for (int64_t i = 0, j = 0; i < min_ndim; i++, j += 2) {
+    kron_permutation[self_ndim + other_ndim - 1 - j] = b_axes[other_ndim - 1 - i];
+    kron_permutation[self_ndim + other_ndim - 1 - j - 1] = a_axes[self_ndim - 1 - i];
+  }
+
+  std::vector<int64_t> result_shape(std::max(self_ndim, other_ndim));
+  for (int64_t i = 0; i < ndim_diff; i++) {
+    result_shape[i] = is_a_larger ? self_sizes[i] : other_sizes[i];
+  }
+  for (int64_t i = 0; i < min_ndim; i++) {
+    result_shape[ndim_diff + i] = is_a_larger
+        ? self_sizes[ndim_diff + i] * other_sizes[i]
+        : other_sizes[ndim_diff + i] * self_sizes[i];
+  }
+
+  Tensor result = at::tensordot(self, other, {}, {});
+  // Step 2: now permute result
+  result = result.permute(kron_permutation);
+  // Step 3: reshape
+  result = result.reshape(result_shape);
+
+  return result;
+}
+
+Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+
+  Tensor result_tmp = at::kron(self, other);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
 }
 
 } // namespace native

@@ -68,7 +68,8 @@ variable_list run_backward(
     bool keep_graph,
     bool create_graph,
     const variable_list& inputs,
-    bool allow_unused) {
+    bool allow_unused,
+    bool accumulate_grad) {
   size_t num_tensors = outputs.size();
   edge_list roots;
   roots.reserve(num_tensors);
@@ -104,7 +105,7 @@ variable_list run_backward(
   }
 
   variable_list grad_inputs = Engine::get_default_engine().execute(
-      roots, grad_outputs, keep_graph, create_graph, output_edges);
+      roots, grad_outputs, keep_graph, create_graph, accumulate_grad, output_edges);
   // check if grad_inputs contains None or not base on the allow_unused flag
   if (!inputs.empty() && !allow_unused) {
     size_t num_inputs = inputs.size();
@@ -129,7 +130,7 @@ void backward(
   if (!retain_graph) {
     retain_graph = create_graph;
   }
-  run_backward(tensors, gradients, retain_graph.value(), create_graph, {}, /*allow_unused=*/true);
+  run_backward(tensors, gradients, retain_graph.value(), create_graph, {}, /*allow_unused=*/true, /*accumulate_grad=*/true);
 }
 
 variable_list grad(
@@ -144,7 +145,7 @@ variable_list grad(
     retain_graph = create_graph;
   }
   return run_backward(
-    outputs, gradients, retain_graph.value(), create_graph, inputs, allow_unused);
+    outputs, gradients, retain_graph.value(), create_graph, inputs, allow_unused, /*accumulate_grad=*/false);
 }
 
 } // namespace autograd
