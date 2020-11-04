@@ -121,16 +121,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
           .def(
-              "shutdown", &RpcAgent::shutdown, py::call_guard<py::gil_scoped_release>())
+              "shutdown",
+              &RpcAgent::shutdown,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_info",
-              (const WorkerInfo& (void)const) &
-              &RpcAgent::getWorkerInfo,
+              (const WorkerInfo& (void)const) &RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
         .def(
               "get_worker_info",
-              (const WorkerInfo& (const std::string&)const) &
-              &RpcAgent::getWorkerInfo,
+              (const WorkerInfo& (const std::string&)const) &RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_infos",
