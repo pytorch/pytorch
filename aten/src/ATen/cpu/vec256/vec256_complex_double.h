@@ -252,6 +252,9 @@ public:
   Vec256<c10::complex<double>> hypot(const Vec256<c10::complex<double>> &b) const {
     AT_ERROR("not supported for complex numbers");
   }
+  Vec256<c10::complex<double>> igamma(const Vec256<c10::complex<double>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
@@ -306,7 +309,7 @@ public:
     return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
   }
   Vec256<c10::complex<double>> operator!=(const Vec256<c10::complex<double>>& other) const {
-    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
   Vec256<c10::complex<double>> operator<(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
