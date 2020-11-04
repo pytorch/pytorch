@@ -194,7 +194,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init<
               std::vector<std::vector<torch::autograd::Variable>>,
               std::vector<std::vector<size_t>>,
-              std::shared_ptr<::c10d::ProcessGroup>,
+              c10::intrusive_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
               bool,
@@ -613,7 +613,7 @@ Arguments:
       .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
-      shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+      intrusive_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
 
@@ -878,13 +878,13 @@ Arguments:
 #ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
-      [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
-          -> std::shared_ptr<::c10d::ProcessGroup> {
+      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
+          -> c10::intrusive_ptr<::c10d::ProcessGroup> {
         if (processGroups.size() == 0) {
           throw std::invalid_argument("Specify at least 1 process group");
         }
         const auto& first = processGroups.front();
-        return std::make_shared<::c10d::ProcessGroupRoundRobin>(
+        return c10::make_intrusive<::c10d::ProcessGroupRoundRobin>(
             first->getRank(), first->getSize(), std::move(processGroups));
       },
       py::arg("process_groups"),
@@ -892,7 +892,7 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
+  auto processGroupGloo = intrusive_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
@@ -952,7 +952,7 @@ Arguments:
 
             options.timeout = timeout;
             options.threads = options.devices.size() * 2;
-            return std::make_shared<::c10d::ProcessGroupGloo>(
+            return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
           }),
           py::arg("store"),
@@ -964,7 +964,7 @@ Arguments:
 
 #ifdef USE_C10D_NCCL
   auto processGroupNCCL =
-      shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+      intrusive_ptr_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
@@ -982,7 +982,7 @@ Arguments:
                 auto options = ::c10d::ProcessGroupNCCL::Options::create();
                 options->isHighPriorityStream = false;
                 options->opTimeout = timeout;
-                return std::make_shared<::c10d::ProcessGroupNCCL>(
+                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
                     store, rank, size, options);
               }),
               py::arg("store"),
@@ -1007,7 +1007,7 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_MPI
-  auto processGroupMPI = shared_ptr_class_<::c10d::ProcessGroupMPI>(
+  auto processGroupMPI = intrusive_ptr_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup);
 
   // Define static create function instead of a constructor, because
@@ -1121,7 +1121,7 @@ Arguments:
       // Define a lambda such that the pybind11 prototype can take a std::vector
       // for the tensor list argument, but still pass it to the underlying
       // function as a c10::ArrayRef.
-      [](std::shared_ptr<::c10d::ProcessGroup> process_group,
+      [](c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
          std::vector<at::Tensor> tensors, // NOLINT
          size_t buffer_size,
          int rank) {
@@ -1196,8 +1196,33 @@ Arguments:
 
 // NOTE: Below are TorchBind bindings for c10d, these bindings will
 // live together with those pybind11 bindings above until we resolve
-// all the TorchBind issues and merge these two together
+// all the TorchBind issues and merge these two together. we shouldn't
+// document this until we finish the migration.
+
+// struct Millisecond : public torch::CustomClassHolder {
+//   std::chrono::milliseconds time;
+// };
+
+// static auto MillisecondTorchBind = torch::class_<Millisecond>("c10",
+// "millisecond")
+
 static auto StoreTorchBind = torch::class_<::c10d::Store>("dist_c10d", "Store");
+// static auto TCPStoreTorchBind =
+//     torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
+// .def(torch::init([](const std::string& host_name,
+//                     int64_t port,
+//                     int64_t world_size,
+//                     bool is_master) {
+
+//                     });
+// .def(torch::init<>())
+// .def_static([]->intrusive_ptr<TPCStore>)
+
+// .def(torch:init<>())
+// .def("create" -> intrusive_ptr<TCPStore>())
+
+// dummy_tcp_store = torch.classes.dist_c10d.TCPSTore()
+// real_tcp_store =
 
 // Torchbind the ProcessGroup to make it available in TorchScript
 static auto ProcessGroupWorkTorchBind =
@@ -1221,7 +1246,7 @@ static auto ProcessGroupTorchBind =
 static auto ProcessGroupNCCLOptionsTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL::Options>(
         "dist_c10d",
-        "ProcessGroupNCCL.Options");
+        "ProcessGroupNCCLOptions");
 
 static auto ProcessGroupNCCLTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")

@@ -29,7 +29,7 @@ class Reducer {
   explicit Reducer(
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
-      std::shared_ptr<c10d::ProcessGroup> process_group,
+      c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
@@ -125,7 +125,7 @@ class Reducer {
 
   mutable std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
-  std::shared_ptr<c10d::ProcessGroup> process_group_;
+  c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>

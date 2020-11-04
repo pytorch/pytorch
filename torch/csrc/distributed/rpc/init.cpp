@@ -471,7 +471,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(py::init([](std::string workerName,
-                       const std::shared_ptr<::c10d::ProcessGroup>& pg,
+                       const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(
@@ -557,7 +557,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                       std::string selfName,
                       worker_id_t selfId,
                       int worldSize,
-                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
+                      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
             return std::make_shared<TensorPipeAgent>(
                 store,
