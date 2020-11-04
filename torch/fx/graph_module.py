@@ -201,7 +201,6 @@ class GraphModule(torch.nn.Module):
                 return cls_call(self, *args, **kwargs)
             finally:
                 sys.excepthook = old_excepthook
-            return out
         cls.__call__ = wrapped_call
 
     def __reduce__(self):
