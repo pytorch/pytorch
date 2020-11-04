@@ -393,8 +393,8 @@ class BuildExtension(build_ext, object):
 
         def unix_cuda_flags(cflags):
             cflags = (COMMON_NVCC_FLAGS +
-                    ['--compiler-options', "'-fPIC'"] +
-                    cflags + _get_cuda_arch_flags(cflags))
+                      ['--compiler-options', "'-fPIC'"] +
+                      cflags + _get_cuda_arch_flags(cflags))
 
             # NVCC does not allow multiple -ccbin/--compiler-bindir to be passed, so we avoid
             # overriding the option if the user explicitly passed it.
