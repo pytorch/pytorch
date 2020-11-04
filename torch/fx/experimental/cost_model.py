@@ -193,12 +193,35 @@ class CalculateCPUCost:
     def torch_nn_modules_batchnorm_BatchNorm2d(self, node : torch.fx.Node, mod : torch.nn.Module):
         cpu_cost = CPUNodeCost(torch.typename(mod))
 
-        if mod.training:
-            # TODO
-            pass
-        else:
-            # TODO
-            pass
+        # Bytes read for input value
+        assert len(node.args) == 1
+        input_val, *_ = node.args
+        assert isinstance(input_val, torch.fx.Node)
+        assert hasattr(input_val, 'shape') and hasattr(input_val, 'dtype')
+        cpu_cost.bytes_read += input_val.shape.numel() * self.dtype_to_element_size(input_val.dtype)
+
+        # 1 read for mean, 1 read for variance, 1 read for normalization
+        cpu_cost.bytes_read *= 3
+
+        # Bytes read for weight and bias
+        cpu_cost.bytes_read += mod.weight.numel() * mod.weight.element_size()
+        cpu_cost.bytes_read += mod.bias.numel() * mod.bias.element_size()
+
+        # TODO: special case for inference?
+
+        # Mean calculation. \mu_B = \frac{1}{m}\sum_{i=1}^{m} x_{i}
+        cpu_cost.ops += input_val.shape.numel() + 1
+        # Std calculation. \sigma_B = \frac{1}{m}\sum_{i=1}^{m} (x_i - \mu_B)^2
+        cpu_cost.ops += input_val.shape.numel() * 2 + 1
+        # Normalize calculation. \hat{x} = (x_i - \mu_B) / \sqrt(\sigma_B^2 + \epsilon)
+        cpu_cost.ops += input_val.shape.numel() * 4
+        # Apply weight and bias. y_i = \gamma \hat{x} + \beta
+        cpu_cost.ops += input_val.shape.numel() * 2
+
+
+        # Bytes written at output
+        assert hasattr(node, 'shape') and hasattr(node, 'dtype')
+        cpu_cost.bytes_written += node.shape.numel() * self.dtype_to_element_size(node.dtype)
 
         node.cpu_cost = cpu_cost
 

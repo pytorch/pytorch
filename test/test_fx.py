@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_W
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
-    from torchvision.models import resnet18
+    from torchvision.models import resnet18, resnet50
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -830,16 +830,18 @@ class TestFX(JitTestCase):
             profiled_output = profiling_model(input)
         self.assertEqual(profiled_output, rn18(input))
 
-        if hasattr(profiling_model, 'profiled_info'):
-            total_info = profiling_model.profiled_info
-            print(total_info)
-        for node in profiling_model.gm.graph.nodes:
-            if hasattr(node, 'profiled_info'):
-                if total_info:
-                    percentage = node.profiled_info.average_runtime_sec / total_info.average_runtime_sec
-                    print(f'{percentage:.2f}%', node.profiled_info)
-                else:
-                    print(node.profiled_info)
+        with open('log.txt', 'w') as f:
+            if hasattr(profiling_model, 'profiled_info'):
+                total_info = profiling_model.profiled_info
+                print(total_info, file=f)
+
+            for node in profiling_model.gm.graph.nodes:
+                if hasattr(node, 'profiled_info'):
+                    if total_info:
+                        percentage = (node.profiled_info.average_runtime_sec / total_info.average_runtime_sec) * 100
+                        print(f'{percentage:.2f}%', node.profiled_info, file=f)
+                    else:
+                        print(node.profiled_info)
 
 
     def test_fn_type_annotations(self):
