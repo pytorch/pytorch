@@ -137,10 +137,9 @@ constexpr struct trivial_init_t {
 
 // 20.5.7, Disengaged state indicator
 struct nullopt_t {
-  struct init {};
-  constexpr explicit nullopt_t(init) {}
+  constexpr explicit nullopt_t(int) {}
 };
-constexpr nullopt_t nullopt{nullopt_t::init()};
+constexpr nullopt_t nullopt {0};
 
 // 20.5.8, class bad_optional_access
 class bad_optional_access : public std::logic_error {
