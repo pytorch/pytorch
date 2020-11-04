@@ -978,6 +978,7 @@ void tracingFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   if (jit::tracer::isTracing()) {
     tracer_state = jit::tracer::getTracingState();
     auto symbol = Symbol::fromQualString(op.schema().name());
+    std::cout << "TRACING SYMBOL: " << symbol << std::endl;
     const auto& graph = tracer::getTracingState()->graph;
     node = graph->create(symbol, 0);
     tracer::recordSourceLocation(node);
