@@ -1406,6 +1406,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
+  // if cells are of different size, that means projections are used.
+  // Need to stop here, because it's only supported for CuDNN
+  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "lstm with projections is only supported with CuDNN");
+
   if (use_miopen(_input, dropout_p)) {
     Tensor output, hy, cy;
     lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
@@ -1434,6 +1438,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
+
+  // if cells are of different size, that means projections are used.
+  // Need to stop here, because it's only supported for CuDNN
+  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "lstm with projections is only supported with CuDNN");
 
   if (use_miopen(data, dropout_p)) {
     Tensor output, hy, cy;

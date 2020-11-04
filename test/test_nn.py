@@ -2560,6 +2560,7 @@ class TestNN(NNTestCase):
         pruned_tensor = p.prune(t, default_mask)
         self.assertEqual(t * expected_mask, pruned_tensor)
 
+# TODO (igor): Add projections test (do I need to support that?)
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
         # This Module has 4 parameters called:
@@ -2592,6 +2593,7 @@ class TestNN(NNTestCase):
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
 
 
+# TODO (igor): Add projections test
     def test_rnn_weight_norm(self):
         l = torch.nn.LSTM(32, 32)
         # This Module has 4 parameters called:
@@ -4538,6 +4540,7 @@ class TestNN(NNTestCase):
         self.assertEqual(g1, g2, atol=1e-4, rtol=0)
         self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
 
+# TODO (igor): Add projections test (support in cells?)
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
@@ -5711,6 +5714,7 @@ class TestNN(NNTestCase):
         hx = torch.randn(2, 4, 20).cuda(device)
         output = rnn(input, hx)
 
+    # TODO (igor): Add projections test
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
     def test_cudnn_weight_format(self):
@@ -5762,6 +5766,7 @@ class TestNN(NNTestCase):
             self.assertEqual(weight_data, all_vars[4].data)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    # TODO (igor): Add projections test
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
@@ -5973,6 +5978,7 @@ class TestNN(NNTestCase):
                 model = getattr(nn, model_name)(d_model, nhead, dim_feedforward,
                                                 dropout, wrong_activation)
 
+# TODO (igor): Add projections test
     def test_rnn_args_check(self):
         input_size = 3
         hidden_size = 5
@@ -6038,6 +6044,7 @@ class TestNN(NNTestCase):
             test(input_shape, hidden_shape, mode)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    # TODO (igor): Add projections test
     def test_rnn_check_device(self):
         input_size = 3
         hidden_size = 5
@@ -6074,6 +6081,7 @@ class TestNN(NNTestCase):
                                             "Input and hidden tensors are not at the same device"):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
+# TODO (igor): Add projections test
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
         for mode in rnn_modes:
@@ -6088,6 +6096,7 @@ class TestNN(NNTestCase):
             self.assertEqual(output1, output2)
             self.assertEqual(hidden1, hidden2)
 
+# TODO (igor): Add projections test (probably just that CPU is disabled)
     def _test_RNN_cpu_vs_cudnn(self, dropout, dtype=torch.double):
 
         def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
@@ -6412,6 +6421,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(output1.data, prev_output)
                         self.assertNotEqual(output2.data, prev_output)
                 prev_output = output1.data
+# TOOD (igor): all up to here from last TODO
 
     def _verify_pixel_shuffle(self, input, output, upscale_factor):
         for c in range(output.size(1)):
@@ -12404,6 +12414,7 @@ class TestNNDeviceType(NNTestCase):
         out = torch.nn.functional.dropout(x)
         self.assertEqual(out.size(), x.size())
 
+# TODO (igor): Add projections test
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     def test_variable_sequence(self, device, dtype):
