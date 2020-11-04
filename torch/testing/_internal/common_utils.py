@@ -1498,7 +1498,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
             towards = .05 if direction == "higher" else -.05
             return n + towards
         else:  # dtype is complex, which is not (directly) supported
-            assert False
+            raise AssertionError("Unsupported dtype")
 
         return result
 
