@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
@@ -601,6 +602,7 @@ class TensorExprFuser {
       return false;
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
+    ConstantPooling(subgraph);
     size_t num_modes = blockSize(subgraph->block());
     if (num_modes < min_group_size_) {
       GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
