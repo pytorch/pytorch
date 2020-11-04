@@ -29,17 +29,17 @@ void main() {
     const ivec2 start = max(ivec2(0), ipos);
     const ivec2 end = min(ipos + uBlock.kernel, isize);
 
-    vec4 acc = vec4(0);
+    vec4 sum = vec4(0);
 
     for (int y = start.y; y < end.y; ++y) {
       for (int x = start.x; x < end.x; ++x) {
-        acc += texelFetch(uInput, ivec3(x, y, pos.z), 0);
+        sum += texelFetch(uInput, ivec3(x, y, pos.z), 0);
       }
     }
 
     imageStore(
         uOutput,
         pos,
-        acc / range);
+        sum / range);
   }
 }
