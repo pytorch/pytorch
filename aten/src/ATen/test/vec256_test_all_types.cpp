@@ -198,7 +198,14 @@ namespace {
             [](vec v) { return v.sqrt(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-
+    TYPED_TEST(SqrtAndReciprocalReal, Frac) {
+        using vec = TypeParam;
+        test_unary<vec>(
+            NAME_INFO(frac),
+            RESOLVE_OVERLOAD(frac),
+            [](vec v) { return v.frac(); },
+            createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
+    }
     TYPED_TEST(SqrtAndReciprocalReal, RSqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -1311,12 +1318,12 @@ namespace {
           return a - (static_cast<int32_t>(a));
       }
     }
-    TranscedentalTester(Impl, frac)
+    //TranscedentalTester(Impl, frac)
     TranscedentalTester2(fmod)
 
-    TEST(Vec256TestFloat, frac) {
+    /*TEST(Vec256TestFloat, frac) {
       TranscedentalHelper_frac();
-    }
+    }*/
 
     TEST(Vec256TestFloat, fmod) {
       TranscedentalHelper_fmod();

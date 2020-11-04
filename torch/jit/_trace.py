@@ -1010,7 +1010,6 @@ class TracedModule(ScriptModule):
                     "TracedModules don't support parameter sharing between modules"
                 )
             id_set.add(param)
-
         tmp_module.training = orig.training
 
         for name, param in orig._parameters.items():
@@ -1046,7 +1045,7 @@ class TracedModule(ScriptModule):
 
         self.__dict__["_name"] = type(orig).__name__
         self.__dict__["_actual_script_module"] = script_module
-        for name in ("_parameters", "_buffers", "_modules"):
+        for name in ("_parameters", "_buffers", "_modules", "training"):
             delattr(self, name)
 
     def forward(self, *args, **kwargs):
