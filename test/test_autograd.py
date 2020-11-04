@@ -4984,7 +4984,8 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # and only run for floating point
 
 separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos', 'div', 'log',
-                          'log10', 'log1p', 'log2', 'pow', 'tan', 'reciprocal', 'rsqrt', '__rdiv__']
+                          'log10', 'log1p', 'log2', 'pow', 'tan', 'reciprocal', 'rsqrt',
+                          '__rdiv__', 'add', 'sub']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
