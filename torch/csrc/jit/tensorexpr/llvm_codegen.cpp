@@ -27,7 +27,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
-#include <c10/util/Exception.h>
 
 #define DEBUG_PRINT 0
 
