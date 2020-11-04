@@ -39,12 +39,18 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
+// The requires_grad argument is used to know if the inplace operation needs
+// gradient to be setup for it.
+// In particular, we can have tensor.requires_grad() != requires_grad when writing
+// a Tensor that requires gradients inplace into a Tensor that does not require gradients:
+// a = torch.rand(2)
+// b = torch.rand(2, requires_grad=True)
+// a.copy_(b)
 inline void check_inplace(const Tensor& tensor, bool requires_grad) {
-  auto& var = static_cast<const Variable&>(tensor);
   if (requires_grad && GradMode::is_enabled()) {
-    if (var.is_view()) {
+    if (tensor.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(tensor));
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
       if (tensor._base().is_leaf()) {
@@ -52,7 +58,7 @@ inline void check_inplace(const Tensor& tensor, bool requires_grad) {
             "a view of a leaf Variable that requires grad is being used in an in-place operation.");
       }
     }
-    if (tensor.requires_grad() && var.is_leaf()) {
+    if (tensor.requires_grad() && tensor.is_leaf()) {
       AT_ERROR(
         "a leaf Variable that requires grad is being used in an in-place operation.");
     }

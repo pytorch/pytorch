@@ -485,7 +485,8 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
 
       if (!indirect && !grad_fn && diff_view_meta->requires_grad()) {
         // This view is (wrongly) detected as a leaf that requires grad and would raise the surprising: "a leaf Variable that
-        // requires grad is being used in an in-place operation." after the warning. So we make the warning an error directly.
+        // requires grad is being used in an in-place operation." after the warning from the `check_inplace` function in
+        // VariabbleTypeUtils.h. So we make the warning an error directly.
         TORCH_CHECK(false, msg);
       } else {
         TORCH_WARN(msg);
