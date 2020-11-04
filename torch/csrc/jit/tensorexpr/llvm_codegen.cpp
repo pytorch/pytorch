@@ -1,6 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
 #include <memory>
@@ -22,6 +23,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+#include <torch/csrc/jit/tensorexpr/half_support.h>
 
 #define DEBUG_PRINT 0
 
@@ -286,6 +288,11 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(cantFail(JTMB.getDefaultDataLayoutForTarget()));
   module_->setTargetTriple(JTMB.getTargetTriple().str());
+
+  // We support float16 ops by casting expr inputs to float32
+  // and then casting the result back to float16
+  HalfChecker halfChecker;
+  stmt = stmt->accept_mutator(&halfChecker);
 
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
@@ -1592,6 +1599,20 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         throw unimplemented_lowering(v);
       } break;
     }
+  } else if (v->dtype().is_integral() && v->op_type() == kFabs) {
+    // abs is only intrinsic defined for integer inputs in pytorch eager
+    v->params().front()->accept(this);
+    if (is_unsigned_integral(v->dtype().scalar_type())) {
+      return;
+    }
+    // TODO: use llvm.abs intrinsic for LLVM 12
+    auto zero = llvm::ConstantInt::get(value_->getType(), 0);
+    auto neg_value = irb_.CreateSub(zero, value_);
+    auto icmp = irb_.CreateICmpSGT(value_, zero);
+    value_ = irb_.CreateSelect(icmp, value_, neg_value);
+    return;
+  } else {
+    TORCH_INTERNAL_ASSERT(false, v, "Unimplemented lowering:", v->op_type(), " for input of dtype", v->dtype().scalar_dtype());
   }
 
   std::vector<llvm::Value*> params;

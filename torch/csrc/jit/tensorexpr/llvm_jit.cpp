@@ -1,6 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
+#include <torch/csrc/jit/runtime/runtime_fp16.h>
 
 #include <llvm/ExecutionEngine/ExecutionEngine.h>
 #include <llvm/ExecutionEngine/JITSymbol.h>
@@ -435,6 +436,15 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_fmodd4"),
         {llvm::pointerToJITTargetAddress(&Sleef_fmodd4), {}}));
 #endif
+
+    // register half -> float & float -> half conversions
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("__gnu_h2f_ieee"),
+        {llvm::pointerToJITTargetAddress(&c10::detail::fp16_ieee_to_fp32_value), {}}));
+
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("__gnu_f2h_ieee"),
+        {llvm::pointerToJITTargetAddress(&c10::detail::fp16_ieee_from_fp32_value), {}}));
   }
 
   Error addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C) {

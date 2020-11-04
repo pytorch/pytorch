@@ -64,6 +64,9 @@ class TestTEFuser(JitTestCase):
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
 
+        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
+        torch._C._debug_set_fusion_group_inlining(False)
+
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
@@ -76,6 +79,7 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
+        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
 
@@ -1183,8 +1187,11 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
 
-    def data_for(self, dtype, device="cuda"):
-        v = torch.arange(1, 3, dtype=torch.float, device=device)
+    def data_for(self, dtype, device="cuda", size=None):
+        if size is None:
+            v = torch.arange(1, 3, dtype=torch.float, device=device)
+        else:
+            v = torch.rand(*size, device=device)
         if dtype == torch.bool:
             return v > 2
         elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
@@ -1192,10 +1199,9 @@ class TestTEFuser(JitTestCase):
         else:
             return v.to(dtype)
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unary_ops(self):
         def apply(fn):
-            return lambda x: fn(2 * x)
+            return lambda x: fn(x)
 
         dtypes = [
             torch.int8,
@@ -1238,10 +1244,10 @@ class TestTEFuser(JitTestCase):
             torch.trunc,
             torch.frac,
         ]
-        devices = ["cuda"]
-        for dtype, op, device in product(dtypes, unary_ops, devices):
+        sizes = [(1,), (2,), (4, 4)]
+        for dtype, op, device, size in product(dtypes, unary_ops, self.devices, sizes):
             try:
-                x = self.data_for(dtype, device)
+                x = self.data_for(dtype, device, size=size)
                 fn = apply(op)
                 ref = fn(x)
             except Exception:
@@ -1255,7 +1261,7 @@ class TestTEFuser(JitTestCase):
                 self.assertAllFused(t.graph_for(x))
             except Exception as e:
                 raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                    " ".join(["Failed:", str(dtype), op.__name__, device, str(sizes)])
                 )
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
