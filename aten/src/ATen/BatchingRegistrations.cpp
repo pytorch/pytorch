@@ -345,7 +345,7 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 }
 
 Tensor view_as_complex_batching_rule(const Tensor& self) {
-  // guard against the a user passing in a batch of scalar tensors with batch
+  // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.
   TORCH_CHECK(self.sizes().size() != 0, "Input tensor must have one or more dimensions");
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
