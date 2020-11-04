@@ -27,6 +27,11 @@ detail::types<void, Types...> init() {
   return detail::types<void, Types...>{};
 }
 
+template <class... Types, class Func>
+detail::types<void, Types...> init(Func f) {
+  return detail::types<void, Types...>{};
+}
+
 /// Entry point for custom C++ class registration. To register a C++ class
 /// in PyTorch, instantiate `torch::class_` with the desired class as the
 /// template parameter. Typically, this instantiation should be done in

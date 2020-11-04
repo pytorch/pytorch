@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/frontend.h>
+#include <c10d/frontend.hpp>
 
 #include <c10/util/Exception.h>
 
