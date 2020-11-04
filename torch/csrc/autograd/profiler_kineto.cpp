@@ -194,7 +194,7 @@ void prepareProfiler(
   //  libkineto::api().registerProfiler(
   //    std::make_unique<libkineto::ActivityProfilerInterface>(false));
   //}
-  //libkineto::api().initProfilerIfRegistered();
+  libkineto::api().initProfilerIfRegistered();
   libkineto::api().prepareTrace(k_activities);
 }
 
