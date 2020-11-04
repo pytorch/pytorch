@@ -283,6 +283,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.clone: lambda input: -1,
         torch.combinations: lambda input, r=2, with_replacement=False: -1,
         torch.complex: lambda real, imag: -1,
+        torch.copysign: lambda input, other, out=None: -1,
         torch.polar: lambda abs, ang: -1,
         torch.conj: lambda input, out=None: -1,
         torch.constant_pad_nd: lambda input, pad, value=0: -1,
