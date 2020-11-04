@@ -331,7 +331,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
-    case TaG::ComplexDouble:
+    case Tag::ComplexDouble:
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
