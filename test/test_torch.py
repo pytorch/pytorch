@@ -17961,46 +17961,46 @@ else:
                         f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
                         + e.output.decode("utf-8")))
 
-    def _test_addbmm_baddbmm(self, func, b1, b2, ref, res2):
-        res3 = res2.clone()
+    def _test_addbmm_baddbmm(self, func, b1, b2, ref, out_tensor):
+        res3 = out_tensor.clone()
 
-        getattr(res2, func + "_")(b1, b2)
-        self.assertEqual(res2, ref)
-        res3.copy_(res2)
+        getattr(out_tensor, func + "_")(b1, b2)
+        self.assertEqual(out_tensor, ref)
+        res3.copy_(out_tensor)
 
         with self.maybeWarnsRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
-            getattr(res2, func + "_")(1, b1, b2)
-        self.assertEqual(res2, ref * 2),
+            getattr(out_tensor, func + "_")(1, b1, b2)
+        self.assertEqual(out_tensor, ref * 2),
         getattr(res3, func + "_")(b1, b2, beta=1)
-        self.assertEqual(res2, res3)
+        self.assertEqual(out_tensor, res3)
 
         with self.maybeWarnsRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
-            getattr(res2, func + "_")(1., .5, b1, b2)
-        self.assertEqual(res2, ref * 2.5)
+            getattr(out_tensor, func + "_")(1., .5, b1, b2)
+        self.assertEqual(out_tensor, ref * 2.5)
         getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
-        self.assertEqual(res2, res3)
+        self.assertEqual(out_tensor, res3)
 
         with self.maybeWarnsRegex(
                 UserWarning, f"This overload of {func} is deprecated"):
-            self.assertEqual(res2, getattr(torch, func)(1, res2, 0, b1, b2))
+            self.assertEqual(out_tensor, getattr(torch, func)(1, out_tensor, 0, b1, b2))
 
-        res4 = getattr(torch, func)(res2, b1, b2, beta=1, alpha=.5)
+        res4 = getattr(torch, func)(out_tensor, b1, b2, beta=1, alpha=.5)
         self.assertEqual(res4, ref * 3),
 
-        nan = torch.full_like(res2, math.nan)
+        nan = torch.full_like(out_tensor, math.nan)
         res5 = getattr(torch, func)(nan, b1, b2, beta=0, alpha=1)
         self.assertEqual(res5, ref)
 
         if b1.is_complex():
-            res6 = getattr(torch, func)(res2, b1, b2, beta=.1j, alpha=.5j)
-            self.assertEqual(res6, res2 * .1j + .5j * ref)
+            res6 = getattr(torch, func)(out_tensor, b1, b2, beta=.1j, alpha=.5j)
+            self.assertEqual(res6, out_tensor * .1j + .5j * ref)
         else:
-            res6 = getattr(torch, func)(res2, b1, b2, beta=.1, alpha=.5)
-            self.assertEqual(res6, res2 * .1 + .5 * ref)
+            res6 = getattr(torch, func)(out_tensor, b1, b2, beta=.1, alpha=.5)
+            self.assertEqual(res6, out_tensor * .1 + .5 * ref)
 
-        res7 = torch.full_like(res2, math.nan)
+        res7 = torch.full_like(out_tensor, math.nan)
         getattr(torch, func)(nan, b1, b2, beta=0, out=res7)
         self.assertEqual(res7, ref)
 
@@ -18039,25 +18039,25 @@ else:
                     b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
                     b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                     b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
-                    res = torch.from_numpy(
+                    ref = torch.from_numpy(
                         b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                     ).to(device=device, dtype=dtype).sum(0)
-                    res2 = torch.zeros_like(res).permute(perm3).contiguous().permute(perm3)
-                    yield b1, b2, res, res2
+                    out_tensor = torch.zeros_like(ref).permute(perm3).contiguous().permute(perm3)
+                    yield b1, b2, ref, out_tensor
             # broadcasting tensors
             for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
                 b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
                 b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
-                res = torch.from_numpy(
+                ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
-                res2 = torch.zeros_like(res)
-                yield b1, b2, res, res2
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
 
-        for b1, b2, res, res2 in generate_tensor():
-            self._test_addbmm_baddbmm("addbmm", b1, b2, res, res2)
+        for b1, b2, ref, out_tensor in generate_tensor():
+            self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.5})
     @onlyOnCPUAndCUDA
@@ -18091,25 +18091,24 @@ else:
                 b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
-                res = torch.from_numpy(
+                ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
-                res2 = torch.zeros_like(res)
-                res3 = torch.zeros_like(res)
-                res2 = res2.permute(perm3).contiguous().permute(invert_perm(perm3))
-                yield b1, b2, res, res2 
+                out_tensor = torch.zeros_like(ref)
+                out_tensor = out_tensor.permute(perm3).contiguous().permute(invert_perm(perm3))
+                yield b1, b2, ref, out_tensor 
             # broadcasting tensors
             for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
                 b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
                 b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
-                res = torch.from_numpy(
+                ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
-                res2 = torch.zeros_like(res)
-                yield b1, b2, res, res2
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
 
-        for b1, b2, res, res2 in generate_tensor():
-            self._test_addbmm_baddbmm("baddbmm", b1, b2, res, res2)
+        for b1, b2, ref, out_tensor in generate_tensor():
+            self._test_addbmm_baddbmm("baddbmm", b1, b2, ref, out_tensor)
 
     def _test_cop(self, torchfn, mathfn, dtype, device):
         def reference_implementation(res2):
