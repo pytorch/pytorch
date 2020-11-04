@@ -64,6 +64,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
+            op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
         ]
 
         for op in operators:
@@ -72,7 +73,10 @@ class TestNamedTupleAPI(unittest.TestCase):
                 for i, name in enumerate(op.names):
                     self.assertIs(getattr(ret, name), ret[i])
                 if op.hasout:
-                    ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
+                    if 'linalg_' in f:
+                        ret1 = getattr(torch.linalg, f[7:])(a, *op.input, out=tuple(ret))
+                    else:
+                        ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
                     for i, name in enumerate(op.names):
                         self.assertIs(getattr(ret, name), ret[i])
 

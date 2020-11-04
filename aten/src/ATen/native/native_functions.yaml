@@ -8900,7 +8900,7 @@
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
   use_c10_dispatcher: full
-  variants: function
+  variants: method, function
   dispatch:
     DefaultBackend: linalg_eigh
 
@@ -8912,7 +8912,7 @@
 - func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   python_module: linalg
   use_c10_dispatcher: full
-  variants: function
+  variants: method, function
   dispatch:
     DefaultBackend: linalg_eigvalsh
 
