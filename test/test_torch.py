@@ -7943,6 +7943,7 @@ class TestTorchDeviceType(TestCase):
         B = torch.mm(L, L.t().conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
+    @skipIfROCm
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
         template = torch.rand(3, 5, device=device)
