@@ -645,14 +645,11 @@ void testKernelSoftmax2D() {
         # CHECK: for (int i${other_dim} = 0; i${other_dim} < ${other_dim_size}
         # CHECK: for (int i${softmax_dim} = 0; i${softmax_dim} < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_max
-        # CHECK: for (int i0_1 = 0; i0_1 < 5
-        # CHECK-NEXT: for (int i1_1 = 0; i1_1 < 3
-        # CHECK-NEXT: aten_softmax_exp
-        # CHECK: for (int i${other_dim}_2 = 0; i${other_dim}_2 < ${other_dim_size}
-        # CHECK: for (int i${softmax_dim}_2 = 0; i${softmax_dim}_2 < ${softmax_dim_size}
+        # CHECK: for (int i${other_dim}_1 = 0; i${other_dim}_1 < ${other_dim_size}
+        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_sum
-        # CHECK: for (int i0_3 = 0; i0_3 < 5
-        # CHECK-NEXT: for (int i1_3 = 0; i1_3 < 3
+        # CHECK: for (int i0_2 = 0; i0_2 < 5
+        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 3
         # CHECK-NEXT: aten_softmax)IR";
 
   for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
@@ -707,17 +704,13 @@ void testKernelSoftmax3D() {
         # CHECK-NEXT: for (int i${dim2} = 0; i${dim2} < ${dim2_size}
         # CHECK: for (int i${softmax_dim} = 0; i${softmax_dim} < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_max
-        # CHECK: for (int i0_1 = 0; i0_1 < 3
-        # CHECK-NEXT: for (int i1_1 = 0; i1_1 < 4
-        # CHECK-NEXT: for (int i2_1 = 0; i2_1 < 5
-        # CHECK-NEXT: aten_softmax_exp
-        # CHECK: for (int i${dim1}_2 = 0; i${dim1}_2 < ${dim1_size}
-        # CHECK-NEXT: for (int i${dim2}_2 = 0; i${dim2}_2 < ${dim2_size}
-        # CHECK: for (int i${softmax_dim}_2 = 0; i${softmax_dim}_2 < ${softmax_dim_size}
+        # CHECK: for (int i${dim1}_1 = 0; i${dim1}_1 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_1 = 0; i${dim2}_1 < ${dim2_size}
+        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_sum
-        # CHECK: for (int i0_3 = 0; i0_3 < 3
-        # CHECK-NEXT: for (int i1_3 = 0; i1_3 < 4
-        # CHECK-NEXT: for (int i2_3 = 0; i2_3 < 5
+        # CHECK: for (int i0_2 = 0; i0_2 < 3
+        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 4
+        # CHECK-NEXT: for (int i2_2 = 0; i2_2 < 5
         # CHECK-NEXT: aten_softmax)IR";
 
   for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
@@ -781,20 +774,15 @@ void testKernelSoftmax4D() {
         # CHECK-NEXT: for (int i${dim3} = 0; i${dim3} < ${dim3_size}
         # CHECK: for (int i${softmax_dim} = 0; i${softmax_dim} < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_max
-        # CHECK: for (int i0_1 = 0; i0_1 < 2
-        # CHECK-NEXT: for (int i1_1 = 0; i1_1 < 3
-        # CHECK-NEXT: for (int i2_1 = 0; i2_1 < 2
-        # CHECK-NEXT: for (int i3_1 = 0; i3_1 < 3
-        # CHECK-NEXT: aten_softmax_exp
-        # CHECK: for (int i${dim1}_2 = 0; i${dim1}_2 < ${dim1_size}
-        # CHECK-NEXT: for (int i${dim2}_2 = 0; i${dim2}_2 < ${dim2_size}
-        # CHECK-NEXT: for (int i${dim3}_2 = 0; i${dim3}_2 < ${dim3_size}
-        # CHECK: for (int i${softmax_dim}_2 = 0; i${softmax_dim}_2 < ${softmax_dim_size}
+        # CHECK: for (int i${dim1}_1 = 0; i${dim1}_1 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_1 = 0; i${dim2}_1 < ${dim2_size}
+        # CHECK-NEXT: for (int i${dim3}_1 = 0; i${dim3}_1 < ${dim3_size}
+        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
         # CHECK-NEXT: aten_softmax_sum
-        # CHECK: for (int i0_3 = 0; i0_3 < 2
-        # CHECK-NEXT: for (int i1_3 = 0; i1_3 < 3
-        # CHECK-NEXT: for (int i2_3 = 0; i2_3 < 2
-        # CHECK-NEXT: for (int i3_3 = 0; i3_3 < 3
+        # CHECK: for (int i0_2 = 0; i0_2 < 2
+        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 3
+        # CHECK-NEXT: for (int i2_2 = 0; i2_2 < 2
+        # CHECK-NEXT: for (int i3_2 = 0; i3_2 < 3
         # CHECK-NEXT: aten_softmax)IR";
 
   for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {

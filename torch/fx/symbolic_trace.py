@@ -59,7 +59,7 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, torch.Tensor):
-            qualname : Optional[str] = self.tensor_attrs[a] if a in self.tensor_attrs else None
+            qualname : Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -202,6 +202,7 @@ class Tracer(TracerBase):
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
+
 
 # Symbolic tracing API
 #

@@ -2,6 +2,7 @@
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <c10/core/CPUAllocator.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -65,6 +66,7 @@ struct TORCH_API InferenceModule {
   std::unique_ptr<c10::FunctionSchema> schema;
 
   std::unordered_map<Value*, size_t> value_to_reg;
+  std::vector<Value*> values; // useful for debugging
   std::vector<size_t> input_regs; // inputs to the graph
   std::vector<size_t> output_regs; // outputs of the graph
   std::vector<size_t> internals;
@@ -83,6 +85,7 @@ inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
   return std::make_shared<InferenceModule>(g);
 }
 
+class MemoryPlanner;
 class ProcessedNode;
 class TORCH_API StaticRuntime {
  public:
@@ -96,25 +99,25 @@ class TORCH_API StaticRuntime {
       const torch::jit::Module& m,
       const StaticRuntimeOptions& opts = StaticRuntimeOptions());
 
-  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps) const;
+  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps);
 
   // This interface only works module_ that has a non-empty TorchScript module
   // member; otherwise use the above interface
   c10::IValue run(
       const std::vector<c10::IValue>& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs) const;
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   void benchmark(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
-      const int main_runs) const;
+      const int main_runs);
 
   float benchmark_model(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
-      const int main_runs) const;
+      const int main_runs);
 
   struct IndividualMetrics {
     float setup_time;
@@ -129,19 +132,40 @@ class TORCH_API StaticRuntime {
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs,
       const int warmup_runs,
-      const int main_runs) const;
+      const int main_runs);
+
+  const InferenceModule* get_inference_module() {
+    return module_.get();
+  }
+
+  const std::vector<ProcessedNode>& get_nodes() {
+    return nodes_;
+  }
+
+  const std::vector<IValue>& get_registers() {
+    return reg_;
+  }
 
  private:
   // Static runtime states
   std::shared_ptr<InferenceModule> module_;
   StaticRuntimeOptions opts_;
   // IValue table (including inputs, outputs, intermediates, and weights)
-  mutable std::vector<IValue> reg_;
+  std::vector<IValue> reg_;
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
 
+  // Memory planning is only enabled if opts_.cleanup_activations is true.
+  // Otherwise, the memory used by activations is cached inside the static
+  // runtime.
+  std::unique_ptr<MemoryPlanner> planner_;
+  // The memory planner does not take care of the IValues that are stored in the
+  // registers but don't participate in memory planning. They need to be cleaned
+  // up if cleanup_activations is enabled to avoid memory leak.
+  void deallocate_registers(const std::vector<size_t>& internals);
+
   // Input is readwrite
-  IValue& Input(size_t i) const {
+  IValue& Input(size_t i) {
     DCHECK(i < module_->input_regs.size());
     return reg_[module_->input_regs[i]];
   }
@@ -151,6 +175,52 @@ class TORCH_API StaticRuntime {
     DCHECK(i < module_->output_regs.size());
     return reg_[module_->output_regs[i]];
   }
+};
+
+/// There are three types of ops in a processed graph in Static Runtime:
+///   1. op with _out variant
+///   2. view producing op
+///   3. tensor producing op (could be replaced with 1 by adding the _out
+///      variant to Static Runtime)
+/// The memory planner only manages tensors that are outputs of type 1 ops,
+/// because type 2 ops don't incur memory allocation and for type 3, the output
+/// tensors are allocated inside the operator and can't be directly managed by
+/// memory planner.
+///
+/// Memory planner tries to minimize the number of memory allocations by
+/// tracking the unique StorageImpls of the output tensors of ops with _out
+/// variants. It tries to do this in several steps:
+///   1. record the max memory usage for each StorageImpl at the end of each
+///      iteration
+///   2. in the next iteration, allocate the buffer for the max total usage and
+///      compute the offset of each allocation with regard to the single memory
+///      buffer. In the first iteration, we rely on the default allocator for
+///      memory allocation.
+///   3. free the buffer at the end of each iteration
+/// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
+/// Only models with simple output types are supported, i.e. None, Tensor or
+/// List/Tuple of Tensors. Complex output types such as List of Lists are not
+/// supported.
+
+class MemoryPlanner {
+ public:
+  explicit MemoryPlanner(StaticRuntime* runtime);
+
+  void allocate();
+  void deallocate();
+
+ private:
+  const std::vector<IValue>& reg_;
+  std::unordered_set<size_t> reg_out_variant_;
+  std::vector<c10::StorageImpl*> internal_storages_;
+  std::vector<size_t> internal_blob_max_sizes_;
+  size_t internal_blob_max_sizes_sum_{0};
+  at::DataPtr buffer_; // allocated each time we call Run()
+
+  static size_t compute_aligned_tensor_size(size_t nbytes);
+  static at::DataPtr allocate_buffer(size_t size);
+  std::unordered_set<c10::StorageImpl*> reg_to_storage_impls();
+  void verify_internal_storages();
 };
 
 class ProcessedNode {
@@ -178,11 +248,25 @@ class ProcessedNode {
     return reg[output_regs_[i]];
   }
 
+  bool has_out_variant() const {
+    return fn_.has_value();
+  }
+
+  const std::vector<size_t>& input_regs() const {
+    return input_regs_;
+  }
+
+  const std::vector<size_t>& output_regs() const {
+    return output_regs_;
+  }
+
  private:
   Node* node_;
   c10::optional<Operation> op_;
   c10::optional<std::function<void(const ProcessedNode*, std::vector<IValue>&)>>
       fn_;
+  c10::optional<std::function<void(const ProcessedNode*, std::vector<IValue>&)>>
+      native_fn_;
 
   std::vector<size_t> input_regs_;
   std::vector<size_t> output_regs_;
