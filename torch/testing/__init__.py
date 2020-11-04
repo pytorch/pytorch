@@ -313,20 +313,25 @@ _all_types_and_half = _all_types + (torch.half,)
 def all_types_and_half():
     return _all_types_and_half
 
-def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True) -> List[torch.dtype]:
+def get_all_dtypes(include_half=True,
+                   include_bfloat16=True,
+                   include_bool=True,
+                   include_complex=True,
+                   include_complex32=False
+                   ) -> List[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(include_half=include_half, include_bfloat16=include_bfloat16)
     if include_bool:
         dtypes.append(torch.bool)
     if include_complex:
-        dtypes += get_all_complex_dtypes()
+        dtypes += get_all_complex_dtypes(include_complex32)
     return dtypes
 
 def get_all_math_dtypes(device) -> List[torch.dtype]:
     return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'),
                                                     include_bfloat16=False) + get_all_complex_dtypes()
 
-def get_all_complex_dtypes() -> List[torch.dtype]:
-    return [torch.complex64, torch.complex128]
+def get_all_complex_dtypes(include_complex32=False) -> List[torch.dtype]:
+    return [torch.complex32, torch.complex64, torch.complex128] if include_complex32 else [torch.complex64, torch.complex128]
 
 
 def get_all_int_dtypes() -> List[torch.dtype]:

@@ -1,11 +1,12 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/ir/subgraph_matcher.h"
 
 namespace torch {
 namespace jit {
 
-void testTrivial1() {
+TEST(SubgraphMatcherTest, Trivial1) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -22,7 +23,7 @@ graph(%0):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testTrivial2() {
+TEST(SubgraphMatcherTest, Trivial2) {
   Graph graph;
   auto* g_in = graph.addInput();
   auto* g_tanh = graph.insertNode(graph.create(aten::tanh, /*num_outputs =*/1));
@@ -45,7 +46,7 @@ void testTrivial2() {
   }
 }
 
-void testTrivial3() {
+TEST(SubgraphMatcherTest, Trivial3) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -64,7 +65,7 @@ graph(%a, %b):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testTrivial4() {
+TEST(SubgraphMatcherTest, Trivial4) {
   Graph graph;
   auto* g_in0 = graph.addInput();
   auto* g_in1 = graph.addInput();
@@ -92,7 +93,7 @@ void testTrivial4() {
   }
 }
 
-void testLinear1() {
+TEST(SubgraphMatcherTest, Linear1) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -114,7 +115,7 @@ graph(%0):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testLinear2() {
+TEST(SubgraphMatcherTest, Linear2) {
   Graph graph;
   auto* g_in = graph.addInput();
 
@@ -164,7 +165,7 @@ void testLinear2() {
  *      |
  *     eee
  */
-void testDiamond1() {
+TEST(SubgraphMatcherTest, Diamond1) {
   Graph graph, pattern1, pattern2;
   parseIR(
       R"IR(
@@ -215,7 +216,7 @@ graph(%0):
  *      |
  *      o1
  */
-void testDiamond2() {
+TEST(SubgraphMatcherTest, Diamond2) {
   Graph graph;
   auto* g_in = graph.addInput();
 
@@ -253,7 +254,7 @@ void testDiamond2() {
   }
 }
 
-void testXPattern() {
+TEST(SubgraphMatcherTest, XPattern) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -280,7 +281,7 @@ graph(%0, %1):
   AT_ASSERT(!findPatternMatches(pattern, graph).empty());
 }
 
-void testMultipleMatches() {
+TEST(SubgraphMatcherTest, MultipleMatches) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -301,7 +302,7 @@ graph(%t0):
   AT_ASSERT(matches.size() == 4);
 }
 
-void testOverlappingMatches() {
+TEST(SubgraphMatcherTest, OverlappingMatches) {
   Graph graph, pattern;
   parseIR(
       R"IR(
@@ -323,7 +324,7 @@ graph(%t0):
   AT_ASSERT(matches.size() == 3);
 }
 
-void testMatchInBasicBlocks1() {
+TEST(SubgraphMatcherTest, MatchInBasicBlocks1) {
   Graph graph;
   parseIR(
       R"IR(
@@ -360,7 +361,7 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
-void testMatchInBasicBlocks2() {
+TEST(SubgraphMatcherTest, MatchInBasicBlocks2) {
   Graph graph;
   parseIR(
       R"IR(
@@ -395,7 +396,7 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
-void testMatchesAttributes() {
+TEST(SubgraphMatcherTest, MatchesAttributes) {
   Graph graph;
   parseIR(
       R"IR(
@@ -479,7 +480,7 @@ graph(%a, %b):
   }
 }
 
-void testBadPattern() {
+TEST(SubgraphMatcherTest, BadPattern) {
   Graph graph, pattern1, pattern2;
   parseIR(
       R"IR(
@@ -507,24 +508,6 @@ graph(%x):
   return (%y, %z))IR",
       &pattern2);
   ASSERT_ANY_THROW(findPatternMatches(pattern2, graph));
-}
-
-void testSubgraphMatching() {
-  testTrivial1();
-  testTrivial2();
-  testTrivial3();
-  testTrivial4();
-  testLinear1();
-  testLinear2();
-  testDiamond1();
-  testDiamond2();
-  testXPattern();
-  testMultipleMatches();
-  testOverlappingMatches();
-  testMatchInBasicBlocks1();
-  testMatchInBasicBlocks2();
-  testMatchesAttributes();
-  testBadPattern();
 }
 
 } // namespace jit

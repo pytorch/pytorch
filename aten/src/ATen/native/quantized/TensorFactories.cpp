@@ -31,7 +31,7 @@ Tensor empty_affine_quantized(
           scale, zero_point, typeMetaToScalarType(options.dtype())));
 }
 
-Tensor empty_per_channel_affine_quantized_cpu(
+Tensor empty_per_channel_affine_quantized(
     IntArrayRef size,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -46,9 +46,6 @@ Tensor empty_per_channel_affine_quantized_cpu(
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
-  TORCH_CHECK(
-      options.dtype() == kQInt8 || options.dtype() == kQUInt8,
-      "Supported data type for tensor creation is int8 or uint8");
   QuantizerPtr quantizer = make_per_channel_affine_quantizer(
           scales, zero_points, axis, typeMetaToScalarType(options.dtype()));
   return new_qtensor(

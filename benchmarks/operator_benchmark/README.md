@@ -344,7 +344,7 @@ class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self):
         return self.op_func(self.input_one)
 
-op_bench.generate_pt_tests_from_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
@@ -388,10 +388,10 @@ class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
 ```
 
 #### Part 3. Register a List of Operators
-To register multiple operators,  we introduced the `generate_pt_tests_from_list` function which takes three parameters. First, the list of operators. Second,the configs. Third, the benchmark class.  
+To register multiple operators,  we introduced the `generate_pt_tests_from_op_list` function which takes three parameters. First, the list of operators. Second,the configs. Third, the benchmark class.  
 Here is an example:
 ```
-op_bench.generate_pt_tests_from_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
 ```
 
 

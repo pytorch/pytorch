@@ -138,8 +138,8 @@ struct TORCH_API GraphsAttr : public AttributeValue {
   ValueType value_;
 };
 
-struct AttributeError : public std::exception {
-  AttributeError(Symbol name, bool defined) {
+struct IRAttributeError : public std::exception {
+  IRAttributeError(Symbol name, bool defined) {
     std::stringstream ss;
     if (!defined) {
       ss << "required keyword attribute '" << name.toUnqualString()

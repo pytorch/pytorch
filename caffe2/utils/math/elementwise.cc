@@ -313,7 +313,7 @@ CAFFE2_SPECIALIZED_AXPBY(float, float)
 #define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                               \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha alpha,                                                     \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -327,7 +327,7 @@ CAFFE2_SPECIALIZED_AXPBY(float, float)
   }                                                                           \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha* alpha,                                                    \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -375,28 +375,56 @@ CAFFE2_SPECIALIZED_AXPY(float, float)
 #define DELEGATE_SCALE(TAlpha, TData, MKLFunc1, MKLFunc2)            \
   template <>                                                        \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                  \
-      const int N,                                                   \
+      const std::int64_t N,                                          \
       const TAlpha alpha,                                            \
       const TData* X,                                                \
       TData* Y,                                                      \
       CPUContext* /* context */) {                                   \
-    if (Y == X) {                                                    \
-      MKLFunc1(N, static_cast<TData>(alpha), Y, 1);                  \
-    } else {                                                         \
-      MKLFunc2(N, static_cast<TData>(alpha), X, 1, TData(0), Y, 1);  \
+    const int max_int = std::numeric_limits<int32_t>::max();         \
+    int batch = N / max_int;                                         \
+    int remainder = N % max_int;                                     \
+    std::int64_t offset = 0;                                         \
+    for (int i = 0; i < batch; i ++) {                               \
+      if (Y == X) {                                                  \
+        MKLFunc1(max_int, static_cast<TData>(alpha), Y + offset, 1); \
+      } else {                                                       \
+        MKLFunc2(max_int, static_cast<TData>(alpha), X + offset, 1, TData(0), Y + offset, 1);  \
+      }                                                              \
+      offset += max_int;                                             \
+    }                                                                \
+    if (remainder != 0) {                                            \
+      if (Y == X) {                                                  \
+        MKLFunc1(remainder, static_cast<TData>(alpha), Y + offset, 1); \
+      } else {                                                       \
+        MKLFunc2(remainder, static_cast<TData>(alpha), X + offset, 1, TData(0), Y + offset, 1);  \
+      }                                                              \
     }                                                                \
   }                                                                  \
   template <>                                                        \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                  \
-      const int N,                                                   \
+      const std::int64_t N,                                          \
       const TAlpha* alpha,                                           \
       const TData* X,                                                \
       TData* Y,                                                      \
       CPUContext* /* context */) {                                   \
-    if (Y == X) {                                                    \
-      MKLFunc1(N, static_cast<TData>(*alpha), Y, 1);                 \
-    } else {                                                         \
-      MKLFunc2(N, static_cast<TData>(*alpha), X, 1, TData(0), Y, 1); \
+    const int max_int = std::numeric_limits<int32_t>::max();         \
+    int batch = N / max_int;                                         \
+    int remainder = N % max_int;                                     \
+    std::int64_t offset = 0;                                         \
+    for (int i = 0; i < batch; i ++) {                               \
+      if (Y == X) {                                                  \
+        MKLFunc1(max_int, static_cast<TData>(*alpha), Y + offset, 1); \
+      } else {                                                       \
+        MKLFunc2(max_int, static_cast<TData>(*alpha), X + offset, 1, TData(0), Y + offset, 1);  \
+      }                                                              \
+      offset += max_int;                                             \
+    }                                                                \
+    if (remainder != 0) {                                            \
+      if (Y == X) {                                                  \
+        MKLFunc1(remainder, static_cast<TData>(*alpha), Y + offset, 1); \
+      } else {                                                       \
+        MKLFunc2(remainder, static_cast<TData>(*alpha), X + offset, 1, TData(0), Y + offset, 1); \
+      }                                                              \
     }                                                                \
   }
 DELEGATE_SCALE(float, float, cblas_sscal, cblas_saxpby)
@@ -409,7 +437,7 @@ DELEGATE_SCALE(float, double, cblas_dscal, cblas_daxpby)
 #define DELEGATE_SCALE(TAlpha, TData, BLASFunc)                               \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha alpha,                                                     \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -423,7 +451,7 @@ DELEGATE_SCALE(float, double, cblas_dscal, cblas_daxpby)
   }                                                                           \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha* alpha,                                                    \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -534,7 +562,7 @@ CAFFE2_SPECIALIZED_NEG(double)
 #define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                               \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha alpha,                                                     \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -548,7 +576,7 @@ CAFFE2_SPECIALIZED_NEG(double)
   }                                                                           \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha* alpha,                                                    \
       const TData* X,                                                         \
       TData* Y,                                                               \

@@ -66,14 +66,16 @@ extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 
 // syev
+extern "C" void zheev_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *info);
+extern "C" void cheev_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *info);
 extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
 extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
-                        double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, int *rwork, int *iwork, int *info);
+                        double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info);
 extern "C" void cgesdd_(char *jobz, int *m, int *n, std::complex<float> *a, int *lda,
-                        float *s, std::complex<float> *u, int *ldu, std::complex<float> *vt, int *ldvt, std::complex<float> *work, int *lwork, int *rwork, int *iwork, int *info);
+                        float *s, std::complex<float> *u, int *ldu, std::complex<float> *vt, int *ldvt, std::complex<float> *work, int *lwork, float *rwork, int *iwork, int *info);
 extern "C" void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda,
                         double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
 extern "C" void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda,
@@ -116,12 +118,12 @@ void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *wo
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
-template<class scalar_t>
-void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info);
+template<class scalar_t, class value_t=scalar_t>
+void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
-               value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *rwork, int *iwork, int *info);
+               value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 
 template<class scalar_t>
 void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
@@ -255,33 +257,43 @@ template<> void lapackOrgqr<float>(int m, int n, int k, float *a, int lda, float
   sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
 }
 
-template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, int *info) {
+template<> void lapackSymeig<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int *info) {
+  zheev_(&jobz, &uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, w, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, info);
+}
+
+template<> void lapackSymeig<c10::complex<float>, float>(char jobz, char uplo, int n, c10::complex<float> *a, int lda, float *w, c10::complex<float> *work, int lwork, float *rwork, int *info) {
+  cheev_(&jobz, &uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, w, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, info);
+}
+
+template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double* rwork, int *info) {
+  (void)rwork;  // unused
   dsyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 
-template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, int *info) {
+template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float* rwork, int *info) {
+  (void)rwork;  // unused
   ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 
 template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
-                                  double *s, c10::complex<double> *u, int ldu, c10::complex<double> *vt, int ldvt, c10::complex<double> *work, int lwork, int *rwork, int *iwork, int *info) {
+                                  double *s, c10::complex<double> *u, int ldu, c10::complex<double> *vt, int ldvt, c10::complex<double> *work, int lwork, double *rwork, int *iwork, int *info) {
   zgesdd_(&jobz, &m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, s, reinterpret_cast<std::complex<double>*>(u), &ldu,
           reinterpret_cast<std::complex<double>*>(vt), &ldvt, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, iwork, info);
 }
 
 template<> void lapackSvd<c10::complex<float>, float>(char jobz, int m, int n, c10::complex<float> *a, int lda,
-                                 float *s, c10::complex<float> *u, int ldu, c10::complex<float> *vt, int ldvt, c10::complex<float> *work, int lwork, int *rwork, int *iwork, int *info) {
+                                 float *s, c10::complex<float> *u, int ldu, c10::complex<float> *vt, int ldvt, c10::complex<float> *work, int lwork, float *rwork, int *iwork, int *info) {
   cgesdd_(&jobz, &m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, s, reinterpret_cast<std::complex<float>*>(u), &ldu,
           reinterpret_cast<std::complex<float>*>(vt), &ldvt, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, iwork, info);
 }
 
 template<> void lapackSvd<double>(char jobz, int m, int n, double *a, int lda,
-                                  double *s, double *u, int ldu, double *vt, int ldvt, double *work, int lwork, int *rwork, int *iwork, int *info) {
+                                  double *s, double *u, int ldu, double *vt, int ldvt, double *work, int lwork, double *rwork, int *iwork, int *info) {
   dgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
 template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
-                                 float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, int *rwork, int *iwork, int *info) {
+                                 float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, float *rwork, int *iwork, int *info) {
   sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
@@ -431,7 +443,7 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
 }
 
 Tensor inverse(const Tensor &self) {
-  if (self.size(-1) == 0) {
+  if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
@@ -504,7 +516,7 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
 
 Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
   Tensor result_tmp;
-  result_tmp = at::_cholesky_solve_helper(self, A, upper);
+  result_tmp = at::cholesky_solve(self, A, upper);
   result.resize_as_(result_tmp).copy_(result_tmp);
   return result;
 }
@@ -632,7 +644,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
+static void apply_triangular_solve(Tensor& b, Tensor& A, Tensor& infos, bool upper, bool transpose, bool unitriangular) {
 #ifndef USE_LAPACK
   AT_ERROR("triangular_solve: LAPACK library not found in compilation");
 #else
@@ -647,12 +659,13 @@ static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transp
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
+  auto infos_data = infos.data_ptr<int>();
 
-  int info;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+    int* infos_working_ptr = &infos_data[i];
+    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, infos_working_ptr);
   }
 #endif
 }
@@ -661,9 +674,15 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cpu(const Tensor& self, cons
                                                         bool upper, bool transpose, bool unitriangular) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
+  auto infos_tensor = at::empty(batchCount(self), self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "triangular_solve_cpu", [&]{
-    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
+    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, infos_tensor, upper, transpose, unitriangular);
   });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos_tensor, "triangular_solve_cpu");
+  } else {
+    singleCheckErrors(infos_tensor.item<int64_t>(), "triangular_solve_cpu");
+  }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
@@ -852,7 +871,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
-  auto eigvals_data = eigvals.data_ptr<scalar_t>();
+  auto eigvals_data = eigvals.data_ptr<value_t>();
   auto self_matrix_stride = matrixStride(self);
   auto eigvals_stride = eigvals.size(-1);
   auto batch_size = batchCount(self);
@@ -868,16 +887,26 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  lapackSymeig<scalar_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, &info);
+
+  Tensor rwork;
+  value_t* rwork_data = nullptr;
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+    int64_t lrwork = std::max(int64_t(1), 3 * n - 2);
+    ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    rwork = at::empty({lrwork}, self.options().dtype(dtype));
+    rwork_data = rwork.data_ptr<value_t>();
+  }
+
+  lapackSymeig<scalar_t, value_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, rwork_data, &info);
   lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    scalar_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
+    value_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
 
     // now compute the eigenvalues and the eigenvectors (optionally)
-    lapackSymeig<scalar_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
+    lapackSymeig<scalar_t, value_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -891,14 +920,15 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
 
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
-  auto eigvals = at::empty(self_sizes, self.options());
+  ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
 
   if (self.numel() == 0) {
     return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   }
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "symeig_cpu", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "symeig_cpu", [&]{
     apply_symeig<scalar_t>(self_working_copy, eigvals, eigenvectors, upper, infos);
   });
 
@@ -951,22 +981,15 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto m = self.size(-2);
   auto n = self.size(-1);
   auto mn = std::min(m, n);
-  Tensor iwork = at::empty({8*mn}, at::kInt);
+  Tensor iwork = at::empty({8 * mn}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
   Tensor rwork;
-  int* rwork_data = nullptr;
+  value_t* rwork_data = nullptr;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    auto mx = std::max(m, n);
-    int64_t lrwork; // These settings are valid for on LAPACK 3.6+
-    if (jobz == 'N'){
-      lrwork = 7 * mn;
-    }else if (mx > 10 * mn){
-      lrwork = 7 * mn * mn + 7 * mn;
-    } else {
-      lrwork = std::max(7 * mn * mn + 7 * mn, 2 * mx * mn + 2 *mn * mn + mn);
-    }
-    rwork = at::empty({std::max(int64_t(1), lrwork)}, at::kInt);
-    rwork_data = rwork.data_ptr<int>();
+    auto lrwork  = computeLRWorkDim(jobz, m, n);
+    // rwork is an array of floats or doubles depending on the type
+    rwork = at::empty({std::max(int64_t(1), lrwork)}, at::typeMetaToScalarType(S.dtype()));
+    rwork_data = rwork.data_ptr<value_t>();
   }
 
   // Run once, first to get the optimum work size.
@@ -985,7 +1008,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
     value_t* S_working_ptr = &S_data[i * S_stride];
     scalar_t* U_working_ptr = &U_data[i * U_stride];
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
-    
+
     // Compute S, U (optionally) and VT (optionally)
     lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
                         S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, rwork_data, iwork_data, &info);
@@ -1001,7 +1024,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
-  
+
   char jobz = compute_uv ? (some ? 'S' : 'A') : 'N';
 
   Tensor U_working_copy, S_working_copy, VT_working_copy;

@@ -200,3 +200,44 @@ class TestRemoveMutation(JitTestCase):
         # it is possible to remove the append here but don't currently have the logic for it
         FileCheck().check_not("append").run(graph)
         self.assertEqual(intermediary_use(), fn())
+
+    def test_common_pytorch_list_ops(self):
+        for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
+            class OpMod(torch.nn.Module):
+                def __init__(self, op):
+                    super(OpMod, self).__init__()
+                    self.op = torch_op
+
+                def forward(self):
+                    x = torch.tensor([1, 2, 3, 4])
+                    x.add_(3)
+                    y = [x, x]
+                    return self.op(y) + 3
+
+            torch_op = getattr(torch, op)
+            mod = OpMod(torch_op)
+            mod_script = torch.jit.script(mod)
+            self.run_pass('remove_mutation', mod_script.forward.graph)
+            FileCheck().check_not("aten::add_").run(mod_script.forward.graph)
+            self.assertEqual(mod(), mod_script())
+
+            # test that the output doesnt alias the input
+            for inputs in [torch.rand(2, 2)], [torch.rand(2, 2) for _ in range(2)]:
+                result = torch_op(inputs)
+                sums = [ten.sum() for ten in result]
+
+                for inp in inputs:
+                    inp.fill_(10)
+
+                self.assertEqual(sums, [ten.sum() for ten in result])
+
+
+        @torch.jit.script
+        def test_multiple_uses():
+            x = torch.tensor([1, 2, 3, 4])
+            x.add_(3)
+            y = [x, x]
+            return torch.cat(y), y
+
+        self.run_pass('remove_mutation', mod_script.forward.graph)
+        FileCheck().check("aten::add_").run(test_multiple_uses.graph)

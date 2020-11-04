@@ -4,10 +4,6 @@
 #include <THC/THCNumerics.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
-#include <thrust/execution_policy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/scan.h>
 #include <cub/device/device_scan.cuh>
 
 
@@ -361,7 +357,7 @@ template <
     int num_threads_x,
     int num_threads_y,
     class BinaryFunction>
-__global__ typename std::enable_if<!c10::is_complex_t<T>::value, void>::type
+__global__ typename std::enable_if<!c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
@@ -381,7 +377,7 @@ template <
     int num_threads_x,
     int num_threads_y,
     class BinaryFunction>
-__global__ typename std::enable_if<c10::is_complex_t<T>::value, void>::type
+__global__ typename std::enable_if<c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
@@ -460,31 +456,8 @@ __global__ void transform_vals(scalar_t * a, scalar_t * b, scalar_t * out, func_
    *out = binary_op(*a, *b);
 }
 
-#ifdef __HIP_PLATFORM_HCC__
-template<typename T>
-struct ROCm_Bug {
-  char bytes[sizeof(T)];
-};
-#endif
-
 template<typename scalar_t, typename BinaryFunction>
-void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
-  #ifdef __HIP_PLATFORM_HCC__
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  using rocm_bug_t = ROCm_Bug<scalar_t>;
-  thrust::device_ptr<rocm_bug_t> src_data(reinterpret_cast<rocm_bug_t *>(self.data_ptr<scalar_t>()));
-  thrust::device_ptr<rocm_bug_t> dst_data(reinterpret_cast<rocm_bug_t *>(result.data_ptr<scalar_t>()));
-  ptrdiff_t size = self.numel();
-  auto rocm_bug_binary_op = [=]C10_HOST_DEVICE(const rocm_bug_t a, const rocm_bug_t b) -> rocm_bug_t {
-    auto result = binary_op((*reinterpret_cast<const scalar_t*>(&a)),
-    (*reinterpret_cast<const scalar_t*>(&b)));
-    return *reinterpret_cast<rocm_bug_t *>(&result);
-  };
-  thrust::inclusive_scan(
-      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
-      src_data, src_data + size, dst_data,
-      rocm_bug_binary_op);
-  #else
+void scan_cub(const Tensor& self, Tensor& result, scalar_t init, BinaryFunction binary_op) {
   int64_t size = self.numel();
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
@@ -533,8 +506,6 @@ void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, Binar
       }
     }
   }
-
-#endif
 }
 
 template<typename scalar_t, typename BinaryFunction>
@@ -546,7 +517,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   Tensor result_ = result.contiguous();
 
   if (self.numel() == self.size(dim)) {
-    scan_thrust_or_cub<scalar_t>(self_, result_, init, binary_op);
+    scan_cub<scalar_t>(self_, result_, init, binary_op);
   } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(self_, result_, init, binary_op);
   } else {

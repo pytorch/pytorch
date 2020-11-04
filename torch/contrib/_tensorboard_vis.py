@@ -14,7 +14,7 @@ try:
     from tensorflow.python.summary.writer.writer import FileWriter
 except ImportError:
     raise ImportError("TensorBoard visualization of GraphExecutors requires having "
-                      "TensorFlow installed")
+                      "TensorFlow installed") from None
 
 
 def dump_tensorboard_summary(graph_executor, logdir):

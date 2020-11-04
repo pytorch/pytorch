@@ -1,10 +1,12 @@
 import os
 import io
+import pathlib
 import sys
 import random
 import torch
 from itertools import product as product
 from torch import Tensor
+from torch.testing._internal.common_utils import TemporaryFileName
 from typing import NamedTuple
 
 # Make the helper files in test/ importable
@@ -127,8 +129,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 3)
+        self._verify_count("aten::div", v3_module, 3)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 3)
 
         current_module = self._save_load_module(MyModule)
@@ -171,8 +172,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 1)
+        self._verify_count("aten::div", v3_module, 1)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 1)
 
         current_module = self._save_load_module(MyModule)
@@ -217,8 +217,7 @@ class TestSaveLoad(JitTestCase):
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
-        self._verify_no("aten::div", v3_module)
-        self._verify_count("aten::true_divide", v3_module, 1)
+        self._verify_count("aten::div", v3_module, 1)  # true_divide aliases to div
         self._verify_count("aten::floor_divide", v3_module, 1)
 
         current_module = self._save_load_module(MyModule)
@@ -277,8 +276,7 @@ class TestSaveLoad(JitTestCase):
             self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
-            self._verify_no("aten::div", m)
-            self._verify_count("aten::true_divide", m, 1)
+            self._verify_count("aten::div", m, 1)  # true_divide aliases to div
             self._verify_count("aten::floor_divide", m, 1)
 
         current_module_float = self._save_load_module(MyModuleFloat)
@@ -413,8 +411,7 @@ class TestSaveLoad(JitTestCase):
             self.skipTest("Failed to load fixture!")
 
         for m in (v3_module_float, v3_module_int):
-            self._verify_no("aten::div", m)
-            self._verify_count("aten::true_divide", m, 1)
+            self._verify_count("aten::div", m, 1)  # true_divide aliases to div
             self._verify_count("aten::floor_divide", m, 1)
 
         current_module_float = self._save_load_module(MyModuleFloat)
@@ -874,3 +871,70 @@ class TestSaveLoad(JitTestCase):
         torch.jit.save(sm, contains_both)
         contains_both.seek(0)
         sm = torch.jit.load(contains_both)
+
+    def test_save_load_with_extra_files(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return a
+
+        # specifically test binary data
+        value = b"bar\x00\xffbaz"
+
+        expected_extra_files = {}
+        expected_extra_files['foo'] = value
+        # verify that str to bytes conversion also works
+        expected_extra_files['foo2'] = "bar"
+        m = MyMod()
+
+        # Save to file.
+        with TemporaryFileName() as fname:
+            m.save(fname, _extra_files=expected_extra_files)
+            # values don't matter
+            extra_files = {'foo': '', 'foo2': None}
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual(value, extra_files['foo'])
+            # results come back always as bytes
+            self.assertEqual(b"bar", extra_files['foo2'])
+
+            # Use torch.jit API
+            torch.jit.save(m, fname, _extra_files=expected_extra_files)
+            extra_files['foo'] = ''
+            torch.jit.load(fname, _extra_files=extra_files)
+            self.assertEqual(value, extra_files['foo'])
+
+        # Save to buffer.
+        buffer = io.BytesIO(m.save_to_buffer(_extra_files=expected_extra_files))
+        extra_files = {'foo': ''}
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual(value, extra_files['foo'])
+
+        # Use torch.jit API
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer, _extra_files=expected_extra_files)
+        buffer.seek(0)
+        extra_files = {'foo': ''}
+        torch.jit.load(buffer, _extra_files=extra_files)
+        self.assertEqual(value, extra_files['foo'])
+
+        # Non-existent file 'bar'
+        with self.assertRaises(RuntimeError):
+            extra_files['bar'] = ''
+            torch.jit.load(buffer, _extra_files=extra_files)
+
+    def test_save_load_using_pathlib(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return 2 * a
+
+        m = MyMod()
+
+        # Save then load.
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            m.save(path)
+            m2 = torch.jit.load(path)
+
+        x = torch.tensor([1., 2., 3., 4.])
+        self.assertTrue(torch.equal(m(x), m2(x)))

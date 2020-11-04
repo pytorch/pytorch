@@ -2,10 +2,16 @@
 
 #include <c10d/GlooDeviceFactory.hpp>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <gloo/common/win.h>
+#else
 #include <netdb.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
+#endif
+#include <sys/types.h>
 
 #include <type_traits>
 
@@ -36,6 +42,36 @@
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
+#ifdef _WIN32
+#define GENERATE_ALL_TYPES(type, func, ...)            \
+  switch (type) {                                      \
+    case ::at::ScalarType::Float:                      \
+      func<float>(__VA_ARGS__);                        \
+      break;                                           \
+    case ::at::ScalarType::Double:                     \
+      func<double>(__VA_ARGS__);                       \
+      break;                                           \
+    case ::at::ScalarType::Half:                       \
+      func<gloo::float16>(__VA_ARGS__);                \
+      break;                                           \
+    case ::at::ScalarType::Char:                       \
+      func<int8_t>(__VA_ARGS__);                       \
+      break;                                           \
+    case ::at::ScalarType::Byte:                       \
+      func<uint8_t>(__VA_ARGS__);                      \
+      break;                                           \
+    case ::at::ScalarType::Int:                        \
+      func<int32_t>(__VA_ARGS__);                      \
+      break;                                           \
+    case ::at::ScalarType::Long:                       \
+      func<int64_t>(__VA_ARGS__);                      \
+      break;                                           \
+    default:                                           \
+      throw std::runtime_error("Invalid scalar type"); \
+  }
+
+#define HOST_NAME_MAX 256
+#else
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
     case ::at::ScalarType::Float:                      \
@@ -62,6 +98,7 @@
     default:                                           \
       throw std::runtime_error("Invalid scalar type"); \
   }
+#endif
 
 namespace c10d {
 
@@ -409,12 +446,19 @@ ProcessGroupGloo::Options::Options()
 
 namespace {
 
+void socketInitialize() {
+#ifdef _WIN32
+  ::gloo::init_winsock();
+#endif
+}
+
 // Gloo assumes that this machine's hostname can always be resolved
 // to an address. If it doesn't it throws a runtime error saying
 // that it can't be resolved. Instead of catching it, we choose
 // to proactively check if an address can be resolved, so we can
 // gracefully fall back to an alternative if it doesn't.
 bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
+  socketInitialize();
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
@@ -431,7 +475,11 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
       continue;
     }
     rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
+#ifdef _WIN32
+    closesocket(fd);
+#else
     close(fd);
+#endif
     if (rv == -1) {
       continue;
     }
@@ -443,14 +491,11 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 
 } // namespace
 
-#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForInterface(const std::string& interface) {
-  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface);
+    createDeviceForInterface(const std::string& interface_name) {
+  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface_name);
 }
-#endif
 
-#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   TORCH_CHECK(
@@ -460,14 +505,14 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
       " to a (local) address");
   return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
 }
-#endif
 
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice() {
   // Use the hostname to resolve the network address to
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
+  socketInitialize();
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
@@ -796,14 +841,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   void run() override {
     allreduce(inputs);
-
-    // Only the first output in the tensor list contains the results.
-    // See https://github.com/facebookincubator/gloo/issues/152.
-    // The contents is the same for every entry in the tensor list, so
-    // we can use the first entry as the source of the copy below.
-    for (size_t i = 1; i < inputs.size(); i++) {
-      inputs[i].copy_(inputs[0]);
-    }
+    outputs_ = inputs;
   }
 
   template <typename T>
@@ -818,6 +856,18 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
+
+
+  std::vector<at::Tensor> result() override {
+    TORCH_CHECK(
+        isCompleted(),
+        "Work needs to be completed before calling result(). "
+        "Should call wait() before result().");
+    return outputs_;
+  }
+
+ protected:
+  std::vector<at::Tensor> outputs_;
 };
 
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
@@ -1008,7 +1058,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
-  std::vector<at::Tensor> result() const override {
+  std::vector<at::Tensor> result() override {
     return outputs;
   }
 
@@ -1159,17 +1209,14 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     // Run allreduce on host side tensors.
     allreduce(tmp);
 
-    // Kick off copy back to the CUDA tensors.
-    // Only the first output in the tensor list contains the results.
-    // See https://github.com/facebookincubator/gloo/issues/152.
-    // The contents is the same for every entry in the tensor list, so
-    // we can use the first entry as the source of the copy below.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
-      inputs[i].copy_(tmp[0], /* non_blocking */ true);
+      inputs[i].copy_(tmp[i], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
+
+    outputs_ = inputs;
   }
 
   void synchronize() override {

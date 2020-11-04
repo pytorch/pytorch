@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ATen/core/functional.h>
@@ -22,7 +24,6 @@
 #include <memory>
 #include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 namespace torch {
@@ -177,6 +178,10 @@ class EncoderBase {
     return model_proto_;
   }
 
+  SymbolDimMap get_symbol_dim_param_map() {
+    return symbol_dim_map_;
+  }
+
  protected:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph constructor so that the order in which initializers
@@ -242,6 +247,7 @@ class EncoderBase {
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  SymbolDimMap symbol_dim_map_;
   onnx::ModelProto model_proto_;
   size_t num_blocks_;
   size_t num_op_nodes_;
@@ -315,30 +321,56 @@ void EncoderBase::EncodeValueInfo(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
-    if (!node_type->isComplete()) {
-      return;
-    }
-    onnx::TypeProto* t = v->mutable_type();
-    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
-    onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-    std::vector<std::int64_t> sizes =
-        node_type->sizes().concrete_sizes().value();
-    for (size_t i = 0; i < sizes.size(); i++) {
-      shape->add_dim();
-      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
-          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
-        shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
-      } else {
-        shape->mutable_dim(i)->set_dim_value(sizes[i]);
+  auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
+                                  TensorTypePtr t,
+                                  onnx::TypeProto_Tensor* tensor_type) {
+    if (t->dim()) {
+      onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
+      auto sizes = t->symbolic_sizes().sizes().value();
+      for (size_t i = 0; i < sizes.size(); i++) {
+        shape->add_dim();
+        if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
+            (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
+          shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
+          if (!sizes[i].is_static()) {
+            symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
+          }
+        } else if (sizes[i].is_static()) {
+          shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
+        } else {
+          if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
+            symbol_dim_map_[sizes[i]] = name + "_" + std::to_string(i);
+          }
+          shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
+        }
       }
     }
-    tensor_type->set_elem_type(
-        ATenTypeToOnnxType(node_type->scalarType().value()));
+    if (t->scalarType()) {
+      tensor_type->set_elem_type(ATenTypeToOnnxType(t->scalarType().value()));
+    }
+  };
+
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+    if (node_type->dim() || node_type->scalarType()) {
+      // Encode type if either shape or dtype exists.
+      onnx::TypeProto* onnx_type = v->mutable_type();
+      onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
+      tensorTypeToONNXType(node_type, tensor_type);
+    }
   } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
-    onnx::TypeProto* t = v->mutable_type();
-    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
+    onnx::TypeProto* onnx_type = v->mutable_type();
+    onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
     tensor_type->set_elem_type(ATenTypeToOnnxType(at::kBool));
+  } else if (ListTypePtr list_type = n->type()->cast<ListType>()) {
+    auto elem_type = list_type->getElementType();
+    if (TensorTypePtr inner_node_type = elem_type->cast<TensorType>()) {
+      onnx::TypeProto* onnx_type = v->mutable_type();
+      onnx::TypeProto_Sequence* sequence_type =
+          onnx_type->mutable_sequence_type();
+      onnx::TypeProto_Tensor* tensor_type =
+          sequence_type->mutable_elem_type()->mutable_tensor_type();
+      tensorTypeToONNXType(inner_node_type, tensor_type);
+    }
   }
 }
 
@@ -794,181 +826,6 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
-// Pretty printing for ONNX
-constexpr char indent_char = ' ';
-constexpr size_t indent_multiplier = 2;
-
-std::string idt(size_t indent) {
-  return std::string(indent * indent_multiplier, indent_char);
-}
-
-std::string nlidt(size_t indent) {
-  return std::string("\n") + idt(indent);
-}
-
-void dump(const onnx::TensorProto& tensor, std::ostream& stream) {
-  stream << "TensorProto shape: [";
-  for (int i = 0; i < tensor.dims_size(); ++i) {
-    stream << tensor.dims(i) << (i == tensor.dims_size() - 1 ? "" : " ");
-  }
-  stream << "]";
-}
-
-void dump(const onnx::TensorShapeProto& shape, std::ostream& stream) {
-  for (int i = 0; i < shape.dim_size(); ++i) {
-    auto& dim = shape.dim(i);
-    if (dim.has_dim_value()) {
-      stream << dim.dim_value();
-    } else {
-      stream << "?";
-    }
-    stream << (i == shape.dim_size() - 1 ? "" : " ");
-  }
-}
-
-void dump(const onnx::TypeProto_Tensor& tensor_type, std::ostream& stream) {
-  stream << "Tensor dims: ";
-  dump(tensor_type.shape(), stream);
-}
-
-void dump(const onnx::TypeProto& type, std::ostream& stream) {
-  dump(type.tensor_type(), stream);
-}
-
-void dump(const onnx::ValueInfoProto& value_info, std::ostream& stream) {
-  stream << "{name: \"" << value_info.name() << "\", type:";
-  dump(value_info.type(), stream);
-  stream << "}";
-}
-
-void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent);
-
-void dump(
-    const onnx::AttributeProto& attr,
-    std::ostream& stream,
-    size_t indent) {
-  stream << "{ name: '" << attr.name() << "', type: ";
-  if (attr.has_f()) {
-    stream << "float, value: " << attr.f();
-  } else if (attr.has_i()) {
-    stream << "int, value: " << attr.i();
-  } else if (attr.has_s()) {
-    stream << "string, value: '" << attr.s() << "'";
-  } else if (attr.has_g()) {
-    stream << "graph, value:\n";
-    dump(attr.g(), stream, indent + 1);
-    stream << nlidt(indent);
-  } else if (attr.has_t()) {
-    stream << "tensor, value:";
-    dump(attr.t(), stream);
-  } else if (attr.floats_size()) {
-    stream << "floats, values: [";
-    for (int i = 0; i < attr.floats_size(); ++i)
-      stream << attr.floats(i) << (i == attr.floats_size() - 1 ? "" : " ");
-    stream << "]";
-  } else if (attr.ints_size()) {
-    stream << "ints, values: [";
-    for (int i = 0; i < attr.ints_size(); ++i)
-      stream << attr.ints(i) << (i == attr.ints_size() - 1 ? "" : " ");
-    stream << "]";
-  } else if (attr.strings_size()) {
-    stream << "strings, values: [";
-    for (int i = 0; i < attr.strings_size(); ++i)
-      stream << "'" << attr.strings(i) << "'"
-             << (i == attr.strings_size() - 1 ? "" : " ");
-    stream << "]";
-  } else if (attr.tensors_size()) {
-    stream << "tensors, values: [";
-    for (auto& t : attr.tensors()) {
-      dump(t, stream);
-    }
-    stream << "]";
-  } else if (attr.graphs_size()) {
-    stream << "graphs, values: [";
-    for (auto& g : attr.graphs()) {
-      dump(g, stream, indent + 1);
-    }
-    stream << "]";
-  } else {
-    stream << "UNKNOWN";
-  }
-  stream << "}";
-}
-
-void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
-  stream << "Node {type: \"" << node.op_type() << "\", inputs: [";
-  for (int i = 0; i < node.input_size(); ++i) {
-    stream << node.input(i) << (i == node.input_size() - 1 ? "" : ",");
-  }
-  stream << "], outputs: [";
-  for (int i = 0; i < node.output_size(); ++i) {
-    stream << node.output(i) << (i == node.output_size() - 1 ? "" : ",");
-  }
-  stream << "], attributes: [";
-  for (int i = 0; i < node.attribute_size(); ++i) {
-    dump(node.attribute(i), stream, indent + 1);
-    stream << (i == node.attribute_size() - 1 ? "" : ",");
-  }
-  stream << "]}";
-}
-
-void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent) {
-  stream << idt(indent) << "GraphProto {" << nlidt(indent + 1) << "name: \""
-         << graph.name() << "\"" << nlidt(indent + 1) << "inputs: [";
-  for (int i = 0; i < graph.input_size(); ++i) {
-    dump(graph.input(i), stream);
-    stream << (i == graph.input_size() - 1 ? "" : ",");
-  }
-  stream << "]" << nlidt(indent + 1) << "outputs: [";
-  for (int i = 0; i < graph.output_size(); ++i) {
-    dump(graph.output(i), stream);
-    stream << (i == graph.output_size() - 1 ? "" : ",");
-  }
-  stream << "]" << nlidt(indent + 1) << "initializers: [";
-  for (int i = 0; i < graph.initializer_size(); ++i) {
-    dump(graph.initializer(i), stream);
-    stream << (i == graph.initializer_size() - 1 ? "" : ",");
-  }
-  stream << "]" << nlidt(indent + 1) << "nodes: [" << nlidt(indent + 2);
-  for (int i = 0; i < graph.node_size(); ++i) {
-    dump(graph.node(i), stream, indent + 2);
-    if (i != graph.node_size() - 1)
-      stream << "," << nlidt(indent + 2);
-  }
-  stream << nlidt(indent + 1) << "]\n" << idt(indent) << "}\n";
-}
-
-void dump(
-    const onnx::OperatorSetIdProto& operator_set_id,
-    std::ostream& stream) {
-  stream << "OperatorSetIdProto { domain: " << operator_set_id.domain() << "}";
-}
-
-void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
-  stream << idt(indent) << "ModelProto {" << nlidt(indent + 1)
-         << "producer_name: \"" << model.producer_name() << "\""
-         << nlidt(indent + 1) << "domain: \"" << model.domain() << "\""
-         << nlidt(indent + 1) << "doc_string: \"" << model.doc_string() << "\"";
-  if (model.has_graph()) {
-    stream << nlidt(indent + 1) << "graph:\n";
-    dump(model.graph(), stream, indent + 2);
-  }
-  if (model.opset_import_size()) {
-    stream << idt(indent + 1) << "opset_import: [";
-    for (auto& opset_imp : model.opset_import()) {
-      dump(opset_imp, stream);
-    }
-    stream << "],\n";
-  }
-  stream << idt(indent) << "}\n";
-}
-
-std::string prettyPrint(const onnx::ModelProto& model) {
-  std::ostringstream ss;
-  dump(model, ss, 0);
-  return ss.str();
-}
-
 } // namespace
 
 std::string pretty_print_onnx(
@@ -1007,7 +864,11 @@ std::string pretty_print_onnx(
 // conform to the ONNX op specification. Thus, the output will not
 // be interpretable by a ONNX-compatible framework. However, PyTorch or
 // libtorch will be able to import the IR and play it back.
-std::tuple<std::string, RawDataExportMap> export_onnx(
+std::tuple<
+    std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
+    RawDataExportMap,
+    SymbolDimMap>
+export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
@@ -1040,9 +901,17 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       proto_size <= INT_MAX,
       "Exporting model exceed maximum protobuf size of 2GB. "
       "Please call torch.onnx.export with use_external_data_format=True.");
+  GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
-      graph_encoder.get_model_proto().SerializeAsString(),
-      graph_encoder.get_raw_data_export_map());
+      std::make_shared<::ONNX_NAMESPACE::ModelProto>(
+          graph_encoder.get_model_proto()),
+      graph_encoder.get_raw_data_export_map(),
+      graph_encoder.get_symbol_dim_param_map());
+}
+
+std::string serialize_model_proto_to_string(
+    const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
+  return model_proto->SerializeAsString();
 }
 
 void check_onnx_proto(const std::string& proto_string) {

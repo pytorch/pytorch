@@ -1,5 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@//third_party:substitution.bzl", "template_rule")
+load("@//third_party:substitution.bzl", "header_template_rule")
 
 LIBUV_COMMON_SRCS = [
     "third_party/libuv/src/fs-poll.c",
@@ -59,56 +59,61 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-proto_library(
-    name = "tensorpipe_proto_source",
-    srcs = glob([
-        "tensorpipe/proto/*.proto",
-        "tensorpipe/proto/*/*.proto",
-    ]),
-    visibility = ["//visibility:public"],
+cc_library(
+    name = "libnop",
+    srcs = [],
+    includes = ["third_party/libnop/include"],
+    hdrs = glob(["third_party/libnop/include/**/*.h"]),
 )
 
-cc_proto_library(
-    name = "tensorpipe_protos",
-    deps = [":tensorpipe_proto_source"],
-)
-
-template_rule(
-    name = "tensorpipe_header_template",
-    src = "tensorpipe/tensorpipe.h.in",
-    out = "tensorpipe/tensorpipe.h",
+header_template_rule(
+    name = "tensorpipe_config_header",
+    src = "tensorpipe/config.h.in",
+    out = "tensorpipe/config.h",
     substitutions = {
-        "cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "define TENSORPIPE_HAS_SHM_TRANSPORT 0",
-        "cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "define TENSORPIPE_HAS_CMA_CHANNEL 0",
+        "#cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "",
+        "#cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "",
+        "#cmakedefine01 TENSORPIPE_HAS_CUDA_IPC_CHANNEL": "",
+        "#cmakedefine01 TENSORPIPE_HAS_IBV_TRANSPORT": "",
+        "#cmakedefine01 TENSORPIPE_SUPPORTS_CUDA": "",
     },
 )
 
+TENSORPIPE_HEADERS = glob([
+    "tensorpipe/*.h",
+    "tensorpipe/channel/*.h",
+    "tensorpipe/channel/*/*.h",
+    "tensorpipe/common/*.h",
+    "tensorpipe/core/*.h",
+    "tensorpipe/transport/*.h",
+    "tensorpipe/transport/*/*.h",
+    "tensorpipe/util/*/*.h",
+])
+
+TENSORPIPE_BASE_SRCS = glob([
+    "tensorpipe/*.cc",
+    "tensorpipe/channel/*.cc",
+    "tensorpipe/common/*.cc",
+    "tensorpipe/core/*.cc",
+    "tensorpipe/transport/*.cc",
+    "tensorpipe/util/*/*.cc",
+])
+
+TENSORPIPE_SRCS = TENSORPIPE_BASE_SRCS + glob([
+    "tensorpipe/channel/basic/*.cc",
+    "tensorpipe/channel/mpt/*.cc",
+    "tensorpipe/channel/xth/*.cc",
+    "tensorpipe/transport/uv/*.cc",
+])
+
+TENSORPIPE_SRCS_CUDA = TENSORPIPE_SRCS + glob([
+    "tensorpipe/channel/cuda_ipc/*.cc",
+])
+
 cc_library(
     name = "tensorpipe",
-    srcs = glob(
-        [
-            "tensorpipe/*.cc",
-            "tensorpipe/channel/*.cc",
-            "tensorpipe/channel/*/*.cc",
-            "tensorpipe/common/*.cc",
-            "tensorpipe/core/*.cc",
-            "tensorpipe/transport/*.cc",
-            "tensorpipe/transport/*/*.cc",
-            "tensorpipe/util/*/*.cc",
-        ],
-    ),
-    hdrs = glob(
-        [
-            "tensorpipe/*.h",
-            "tensorpipe/channel/*.h",
-            "tensorpipe/channel/*/*.h",
-            "tensorpipe/common/*.h",
-            "tensorpipe/core/*.h",
-            "tensorpipe/transport/*.h",
-            "tensorpipe/transport/*/*.h",
-            "tensorpipe/util/*/*.h",
-        ],
-    ),
+    srcs = TENSORPIPE_SRCS + [":tensorpipe_config_header"],
+    hdrs = TENSORPIPE_HEADERS,
     includes = [
         ".",
     ],
@@ -116,5 +121,26 @@ cc_library(
         "-std=c++14",
     ],
     visibility = ["//visibility:public"],
-    deps = [":tensorpipe_protos", ":libuv"],
+    deps = [
+        ":libnop",
+        ":libuv",
+    ],
+)
+
+cc_library(
+    name = "tensorpipe_cuda",
+    srcs = TENSORPIPE_SRCS_CUDA + [":tensorpipe_config_header"],
+    hdrs = TENSORPIPE_HEADERS,
+    includes = [
+        ".",
+    ],
+    copts = [
+        "-std=c++14",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":libnop",
+        ":libuv",
+        "@cuda",
+    ],
 )

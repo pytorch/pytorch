@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -13,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Generates a DOT (https://www.graphviz.org) graph
 // representation of a fuser IR
@@ -66,7 +66,6 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const TensorDomain*) override;
   void handle(const TensorView*) override;
   void handle(const IterDomain*) override;
-  void handle(const kir::TensorIndex*) override;
 
   void handle(const Bool*) override;
   void handle(const Float*) override;
@@ -79,12 +78,6 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const TernaryOp*) override;
   void handle(const BroadcastOp*) override;
   void handle(const ReductionOp*) override;
-  void handle(const kir::GridReduction*) override;
-
-  void handle(const kir::ForLoop*) override;
-  void handle(const kir::IfThenElse*) override;
-  void handle(const kir::Allocate*) override;
-  void handle(const kir::Sync*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;
@@ -117,6 +110,7 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   int next_id_ = 1;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

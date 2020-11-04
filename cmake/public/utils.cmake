@@ -52,7 +52,9 @@ macro(caffe2_interface_library SRC DST)
     elseif(MSVC)
       # In MSVC, we will add whole archive in default.
       target_link_libraries(
-          ${DST} INTERFACE -WHOLEARCHIVE:\"$<TARGET_FILE:${SRC}>\")
+         ${DST} INTERFACE "$<TARGET_FILE:${SRC}>")
+      target_link_options(
+         ${DST} INTERFACE "-WHOLEARCHIVE:$<TARGET_FILE:${SRC}>")
     else()
       # Assume everything else is like gcc
       target_link_libraries(${DST} INTERFACE

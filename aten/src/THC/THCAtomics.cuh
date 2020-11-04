@@ -7,6 +7,71 @@
 #include <THC/THCNumerics.cuh>
 #include <ATen/ATen.h>
 
+template <typename T>
+struct AtomicFPOp;
+
+template <>
+struct AtomicFPOp<at::Half> {
+  template <typename func_t>
+  inline __device__ at::Half operator() (at::Half *address, at::Half val, const func_t& func) {
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
+
+    at::Half hsum;
+    do {
+      assumed = old;
+      hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      hsum = func(hsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+    return hsum;
+  }
+};
+
+template <>
+struct AtomicFPOp<at::BFloat16> {
+  template <typename func_t>
+  inline __device__ at::BFloat16 operator() (at::BFloat16 *address, at::BFloat16 val, const func_t& func) {
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
+
+    at::BFloat16 bsum;
+    do {
+      assumed = old;
+      bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      bsum = func(bsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.x << 16) : (old & 0xffff0000) | bsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+    bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+    return bsum.x;
+  }
+};
+
+template <>
+struct AtomicFPOp<double> {
+  template <typename func_t>
+  inline __device__ double operator() (double * address, double val, const func_t& func) {
+    unsigned long long int* address_as_ull = (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull;
+    unsigned long long int assumed;
+
+    do {
+      assumed = old;
+      old = atomicCAS(address_as_ull, assumed, func(val, assumed));
+      // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+  }
+};
+
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
 
@@ -117,44 +182,21 @@ static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
-  #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-    unsigned int * address_as_ui =
-      (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui;
-    unsigned int assumed;
-
-    at::Half hsum;
-    do {
-      assumed = old;
-      hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-      hsum = THCNumerics<at::Half>::add(hsum, val);
-      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
-      old = atomicCAS(address_as_ui, assumed, old);
-    } while (assumed != old);
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    return hsum;
-  #else
-    return atomicAdd(reinterpret_cast<__half*>(address), val);
-  #endif
-
+#if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+  return AtomicFPOp<at::Half>()(address, val,
+                                [](at::Half hsum, at::Half val) {
+                                  return THCNumerics<at::Half>::add(hsum, val);
+                                });
+#else
+  return atomicAdd(reinterpret_cast<__half*>(address), val);
+#endif
 }
 
 static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
-    unsigned int * address_as_ui =
-      (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui;
-    unsigned int assumed;
-
-    at::BFloat16 bsum;
-    do {
-      assumed = old;
-      bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-      bsum = THCNumerics<at::BFloat16>::add(bsum, val);
-      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.x << 16) : (old & 0xffff0000) | bsum.x;
-      old = atomicCAS(address_as_ui, assumed, old);
-    } while (assumed != old);
-    bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    return bsum.x;
+  return AtomicFPOp<at::BFloat16>()(address, val,
+                                    [](at::BFloat16 bsum, at::BFloat16 val) {
+                                      return THCNumerics<at::BFloat16>::add(bsum, val);
+                                    });
 }
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
@@ -167,19 +209,11 @@ static inline __device__ double atomicAdd(double* address, double val)
 #pragma GCC diagnostic pop
 #endif
 {
-  unsigned long long int* address_as_ull = (unsigned long long int*)address;
-  unsigned long long int old = *address_as_ull;
-  unsigned long long int assumed;
 
-  do {
-    assumed = old;
-    old = atomicCAS(address_as_ull, assumed,
-                    __double_as_longlong(val +
-                    __longlong_as_double(assumed)));
-
-    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-  } while (assumed != old);
-  return __longlong_as_double(old);
+  return AtomicFPOp<double>()(address, val,
+                              [](double val, unsigned long long int assumed) {
+                                return __double_as_longlong(val + __longlong_as_double(assumed));
+                              });
 }
 #elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
 
@@ -247,4 +281,44 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
   gpuAtomicAdd(address, val);
 }
 
+// Atomic multiplication implementation.
+
+inline __device__ at::Half gpuAtomicMul(at::Half * address, at::Half val) {
+  return AtomicFPOp<at::Half>()(address, val,
+                                [](at::Half bsum, at::Half val) {
+                                  return THCNumerics<at::Half>::mul(bsum, val);
+                                });
+}
+
+inline __device__ at::BFloat16 gpuAtomicMul(at::BFloat16 * address, at::BFloat16 val) {
+  return AtomicFPOp<at::BFloat16>()(address, val,
+                                    [](at::BFloat16 bsum, at::BFloat16 val) {
+                                      return THCNumerics<at::BFloat16>::mul(bsum, val);
+                                    });    
+}
+    
+inline __device__ double gpuAtomicMul(double * address, double val) {
+  return AtomicFPOp<double>()(address, val,
+                              [](double val, unsigned long long int assumed) {
+                                return __double_as_longlong(val * __longlong_as_double(assumed));
+                              });
+}
+
+// Dont use a templated function for this since the addition function defaults to the CUDA built-in.
+inline __device__ float gpuAtomicMul (float * address, float val) {
+  unsigned int* address_as_ull = (unsigned int*)address;
+  unsigned int old = *address_as_ull;
+  unsigned int assumed;
+
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+                    __float_as_int(val *
+                                   __int_as_float(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+  } while (assumed != old);
+
+  return __int_as_float(old);
+}
 #endif // THC_ATOMICS_INC

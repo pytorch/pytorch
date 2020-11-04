@@ -18,11 +18,45 @@ RecordFunctionHandle next_unique_record_function_handle() {
   return RecordFunctionHandle(++unique_rf_id);
 }
 
-// Thread local vector of callbacks, holds pairs (callbacks, unique_id);
-// must be sorted in increasing handles order
-thread_local RecordFunctionCallbacks sorted_tls_callbacks_;
+thread_local RecordFunctionTLS rf_tls_;
 
 std::atomic<int64_t> defaultNodeId(-1);
+
+// Enumerates thread ids logically;
+// note: std::this_thread::get_id may return potentially
+// reused thread id
+std::atomic<uint64_t> next_thread_id_ {0};
+thread_local uint64_t current_thread_id_ = 0;
+
+thread_local bool tls_record_function_enabled_ = true;
+
+// Low probability constant
+const double kLowProb = 0.001;
+thread_local int tries_left_ = 0;
+
+int sample_geometric() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::geometric_distribution<int> dist(kLowProb);
+  return dist(*gen);
+}
+
+double sample_zero_one() {
+  static thread_local auto gen =
+      std::make_unique<std::mt19937>(std::random_device()());
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  return dist(*gen);
+}
+
+} // namespace
+
+const RecordFunctionTLS& get_record_function_tls_() {
+  return rf_tls_;
+}
+
+void set_record_function_tls_(const RecordFunctionTLS& tls) {
+  rf_tls_ = tls;
+}
 
 class CallbackManager {
  public:
@@ -30,7 +64,7 @@ class CallbackManager {
     // note: monotonically increasing callbacks_unique_id keeps
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
-    sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
+    rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
     return handle;
   }
 
@@ -57,7 +91,7 @@ class CallbackManager {
       }
       return false;
     };
-    auto found = find_and_remove(sorted_tls_callbacks_);
+    auto found = find_and_remove(rf_tls_.sorted_tls_callbacks_);
     if (!found) {
       found = find_and_remove(sorted_global_callbacks_);
     }
@@ -71,7 +105,7 @@ class CallbackManager {
   }
 
   void clearThreadLocalCallbacks() {
-    sorted_tls_callbacks_.clear();
+    rf_tls_.sorted_tls_callbacks_.clear();
   }
 
   inline bool hasGlobalCallbacks() const {
@@ -79,7 +113,7 @@ class CallbackManager {
   }
 
   inline bool hasThreadLocalCallbacks() const {
-    return !sorted_tls_callbacks_.empty();
+    return !rf_tls_.sorted_tls_callbacks_.empty();
   }
 
   // init is called by RecordFunction in constructor to
@@ -92,11 +126,14 @@ class CallbackManager {
     bool found_needs_ids = false;
     auto init_handles = [
         scope, &found_active_cb, &found_needs_inputs, &found_needs_ids](
-          CallbackHandles& handles, RecordFunctionCallbacks& cbs) {
+          CallbackHandles& handles, RecordFunctionCallbacks& cbs, ObserverContextList& ctx_list) {
       handles.clear();
+
+      size_t num_callbacks = 0;
       for (const auto& cb : cbs) {
         if (cb.first.shouldRun(scope)) {
           handles.push_back(cb.second);
+          ++num_callbacks;
           found_active_cb = true;
           if (cb.first.needsInputs()) {
             found_needs_inputs = true;
@@ -106,10 +143,12 @@ class CallbackManager {
           }
         }
       }
+      // Pre-allocate observer context list with nullptr.
+      ctx_list.resize(num_callbacks);
     };
 
-    init_handles(rec_fn.sorted_active_tls_handles_, sorted_tls_callbacks_);
-    init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_);
+    init_handles(rec_fn.sorted_active_tls_handles_, rf_tls_.sorted_tls_callbacks_, rec_fn.tls_ctx_);
+    init_handles(rec_fn.sorted_active_global_handles_, sorted_global_callbacks_, rec_fn.global_ctx_);
     rec_fn.active = found_active_cb;
     rec_fn.needs_inputs = found_needs_inputs;
     if (found_needs_ids && found_active_cb) {
@@ -121,11 +160,13 @@ class CallbackManager {
     mergeRunCallbacks(
         sorted_global_callbacks_,
         rf.sorted_active_global_handles_,
+        rf.global_ctx_,
         /* is_start */ true,
         rf);
     mergeRunCallbacks(
-        sorted_tls_callbacks_,
+        rf_tls_.sorted_tls_callbacks_,
         rf.sorted_active_tls_handles_,
+        rf.tls_ctx_,
         /* is_start */ true,
         rf);
     rf.called_start_callbacks_ = true;
@@ -135,21 +176,33 @@ class CallbackManager {
     mergeRunCallbacks(
         sorted_global_callbacks_,
         rf.sorted_active_global_handles_,
+        rf.global_ctx_,
         /* is_start */ false,
         rf);
     mergeRunCallbacks(
-        sorted_tls_callbacks_,
+        rf_tls_.sorted_tls_callbacks_,
         rf.sorted_active_tls_handles_,
+        rf.tls_ctx_,
         /* is_start */ false,
         rf);
   }
 
+  // Global callbacks; must be sorted in increasing handle order
+  RecordFunctionCallbacks sorted_global_callbacks_;
+
  private:
   bool tryRunCallback(
-      const std::function<void(const RecordFunction&)>& fn,
-      RecordFunction& rf) {
+      const RecordFunctionCallback& rfcb,
+      RecordFunction& rf,
+      std::unique_ptr<ObserverContext>& ctx,
+      bool is_start) {
     try {
-      fn(rf);
+      if (is_start) {
+        ctx = rfcb.start()(rf);
+      }
+      else {
+        rfcb.end()(rf, ctx.get());
+      }
       return true;
     } catch (const std::exception &e) {
       LOG(WARNING) << "Exception in RecordFunction callback: "
@@ -165,11 +218,12 @@ class CallbackManager {
   void mergeRunCallbacks(
       const RecordFunctionCallbacks& sorted_callbacks,
       const CallbackHandles& sorted_handles,
+      ObserverContextList& ctx_list,
       bool is_start,
       RecordFunction& rf) {
     size_t num_executed = 0;
     size_t idx_c = 0;
-    for (size_t idx_h = 0; idx_h < sorted_handles.size(); ++idx_h) {
+    for (size_t idx_h = 0; idx_h < sorted_handles.size() && idx_h < ctx_list.size(); ++idx_h) {
       while (idx_c < sorted_callbacks.size() &&
             sorted_callbacks[idx_c].second < sorted_handles[idx_h]) {
         ++idx_c;
@@ -178,11 +232,7 @@ class CallbackManager {
         break;
       }
       if (sorted_callbacks[idx_c].second == sorted_handles[idx_h]) {
-        if (is_start) {
-          tryRunCallback(sorted_callbacks[idx_c].first.start(), rf);
-        } else {
-          tryRunCallback(sorted_callbacks[idx_c].first.end(), rf);
-        }
+        tryRunCallback(sorted_callbacks[idx_c].first, rf, ctx_list[idx_h], is_start);
         ++num_executed;
       }
     }
@@ -194,42 +244,14 @@ class CallbackManager {
           << "the code after profiler is finished";
     }
   }
-
-  // Global callbacks; must be sorted in increasing handle order
-  RecordFunctionCallbacks sorted_global_callbacks_;
 };
 
-// Enumerates thread ids logically;
-// note: std::this_thread::get_id may return potentially
-// reused thread id
-std::atomic<uint64_t> next_thread_id_ {0};
-thread_local uint64_t current_thread_id_ = 0;
-
-inline CallbackManager& manager() {
-  static CallbackManager _manager;
-  return _manager;
-}
-
-thread_local bool tls_record_function_enabled_ = true;
-
-// Low probability constant
-const double kLowProb = 0.001;
-thread_local int tries_left_ = 0;
-
-int sample_geometric() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::geometric_distribution<int> dist(kLowProb);
-  return dist(*gen);
-}
-
-double sample_zero_one() {
-  static thread_local auto gen =
-      std::make_unique<std::mt19937>(std::random_device()());
-  std::uniform_real_distribution<double> dist(0.0, 1.0);
-  return dist(*gen);
-}
-
+namespace {
+  // Keeping this static manager local.
+  CallbackManager& manager() {
+    static CallbackManager _manager;
+    return _manager;
+  }
 } // namespace
 
 bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
@@ -265,15 +287,15 @@ bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
 }
 
 RecordFunctionCallbacks _getTLSCallbacks() {
-  return sorted_tls_callbacks_;
+  return rf_tls_.sorted_tls_callbacks_;
 }
 
 void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks) {
   // keep the original handles
-  sorted_tls_callbacks_ = callbacks;
+  rf_tls_.sorted_tls_callbacks_ = callbacks;
   std::sort(
-      sorted_tls_callbacks_.begin(),
-      sorted_tls_callbacks_.end(),
+      rf_tls_.sorted_tls_callbacks_.begin(),
+      rf_tls_.sorted_tls_callbacks_.end(),
       [](const std::pair<RecordFunctionCallback, CallbackHandle>& l,
           const std::pair<RecordFunctionCallback, CallbackHandle>& r) {
         return l.second < r.second;
@@ -322,16 +344,19 @@ void clearCallbacks() {
 }
 
 bool isRecordFunctionEnabled() {
-  return tls_record_function_enabled_;
+  return rf_tls_.tls_record_function_enabled_;
 }
 
 void enableRecordFunction(bool enable) {
-  tls_record_function_enabled_ = enable;
+  rf_tls_.tls_record_function_enabled_ = enable;
 }
 
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
-  if (hasCallbacks() && isRecordFunctionEnabled()) {
-    manager().init(*this);
+  auto* rf_tls_ptr = &rf_tls_;
+  auto& m = manager();
+  if (rf_tls_ptr->tls_record_function_enabled_ &&
+      (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty())) {
+    m.init(*this);
   }
 }
 

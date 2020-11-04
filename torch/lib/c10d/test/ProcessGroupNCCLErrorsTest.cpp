@@ -16,8 +16,10 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
   WorkNCCLSimulateErrors(
       const std::vector<at::Device>& devices,
-      bool simulate_error)
-      : WorkNCCL(devices), simulate_error_(simulate_error) {}
+      bool simulate_error,
+      int rank,
+      c10d::OpType opType)
+      : WorkNCCL(devices, rank, opType), simulate_error_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
@@ -38,8 +40,8 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const std::shared_ptr<c10d::Store>& store,
       int rank,
       int size,
-      std::chrono::milliseconds timeout)
-      : ProcessGroupNCCL(store, rank, size, timeout), simulate_error_(false) {}
+      c10d::ProcessGroupNCCL::Options opts)
+      : ProcessGroupNCCL(store, rank, size, opts), simulate_error_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms) override {
@@ -55,8 +57,11 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   }
 
   std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices) override {
-    return std::make_shared<WorkNCCLSimulateErrors>(devices, simulate_error_);
+      std::vector<at::Device> devices,
+      int rank,
+      c10d::OpType opType) override {
+    return std::make_shared<WorkNCCLSimulateErrors>(
+        devices, simulate_error_, rank, opType);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -79,8 +84,11 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
   WorkNCCLTimedoutErrors(
       const std::vector<at::Device>& devices,
-      bool set_timedout_error)
-      : WorkNCCL(devices), set_timedout_error_(set_timedout_error) {}
+      bool set_timedout_error,
+      int rank,
+      c10d::OpType opType)
+      : WorkNCCL(devices, rank, opType),
+        set_timedout_error_(set_timedout_error) {}
 
  private:
   bool isCompleted() override {
@@ -100,14 +108,16 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const std::shared_ptr<c10d::Store>& store,
       int rank,
       int size,
-      std::chrono::milliseconds timeout)
-      : ProcessGroupNCCLSimulateErrors(store, rank, size, timeout),
+      c10d::ProcessGroupNCCL::Options opts)
+      : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
         set_timedout_error_(false) {}
 
   std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices) override {
+      std::vector<at::Device> devices,
+      int rank,
+      c10d::OpType opType) override {
     return std::make_shared<WorkNCCLTimedoutErrors>(
-        devices, set_timedout_error_);
+        devices, set_timedout_error_, rank, opType);
   }
 
   void set_timedout_error() {
@@ -165,8 +175,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  c10d::ProcessGroupNCCL::Options options;
+  options.opTimeout = std::chrono::milliseconds(1000);
   ProcessGroupNCCLSimulateErrors pg(
-      store_, 0, 1, std::chrono::milliseconds(1000));
+      store_, 0, 1, options);
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -192,8 +204,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  c10d::ProcessGroupNCCL::Options options;
+  options.opTimeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLTimedOutErrors pg(
-      store_, 0, 1, std::chrono::milliseconds(3000));
+      store_, 0, 1, options);
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -213,8 +227,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
     return;
   }
 
+  c10d::ProcessGroupNCCL::Options options;
+  options.opTimeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(
-      store_, 0, 1, std::chrono::milliseconds(3000));
+      store_, 0, 1, options);
 
   auto work = pg.allreduce(tensors_);
   pg.barrier()->wait();

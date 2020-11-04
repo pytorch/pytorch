@@ -84,6 +84,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const std::exception& e,
       const MessageType messageType,
       int64_t messageId) const;
+
+  virtual bool cudaAvailable() const;
 };
 
 } // namespace rpc

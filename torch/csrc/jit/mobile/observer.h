@@ -2,6 +2,7 @@
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <string>
+#include <unordered_map>
 
 namespace torch {
 
@@ -67,13 +68,21 @@ class MobileModuleObserver {
  public:
   virtual ~MobileModuleObserver() = default;
 
-  virtual void onEnterRunMethod(const std::string&, const std::string&) {}
-  virtual void onExitRunMethod() {}
-  virtual void onCancelRunMethod(const std::string&) {}
-  virtual void onFailRunMethod(const std::string&) {}
-  virtual void onEnterLoadModel() {}
-  virtual void onExitLoadModel(const std::string&) {}
-  virtual void onFailLoadModel(const std::string&) {}
+  virtual void onEnterRunMethod(
+      const std::unordered_map<std::string, std::string>&,
+      const int32_t,
+      const std::string&) {}
+  virtual void onExitRunMethod(const int32_t) {}
+  virtual void onFailRunMethod(const int32_t, const char*) {}
+  virtual void onEnterLoadModel(const int32_t) {}
+  virtual void onExitLoadModel(
+      const int32_t,
+      const std::unordered_map<std::string, std::string>&) {}
+  virtual void onFailLoadModel(const int32_t, const char*) {}
+  virtual void onFailLoadModel(
+      const int32_t,
+      const char*,
+      const std::unordered_map<std::string, std::string>&) {}
 };
 
 class MobileObserverConfig {

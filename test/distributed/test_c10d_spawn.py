@@ -10,8 +10,10 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_gloo
-from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, skipIfRocm
+from torch.testing._internal.common_distributed import requires_gloo, \
+    create_device
+from torch.testing._internal.common_utils import TestCase, load_tests, \
+    run_tests, skipIfRocm
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
 
 
@@ -39,7 +41,7 @@ class ProcessGroupShareTensorTest(TestCase):
     @classmethod
     def opts(cls, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_device(interface="lo")]
+        opts.devices = [create_device(interface='lo')]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
@@ -229,9 +231,18 @@ class DistributedDataParallelSingleProcessTest(TestCase):
     def _test_base(self, net, inp, check_allclose=True):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        if inp[0].is_cuda:
+            num_gpus = torch.cuda.device_count()
+            batch_size = inp[0].size(0)
+            # batch_size must be evenly divisible by num_gpus_used, take the largest one
+            num_gpus_used = [i for i in range(1, num_gpus + 1) if batch_size % i == 0][-1]
+            device_ids = list(range(num_gpus_used))
+        else:
+            device_ids = None
 
         ddp = nn.parallel.DistributedDataParallel(
             copy.deepcopy(net),
+            device_ids=device_ids,
             process_group=process_group
         )
 
@@ -270,7 +281,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
     def test_rnn(self):
         # This test is inspired by the bug reported in
         # https://github.com/pytorch/pytorch/issues/36268
-        BATCH_SIZE = 4
+        BATCH_SIZE = 12  # Divisible by 2, 3, 4
         INPUT_DIM = 256
         OUTPUT_DIM = 256
         HIDDEN_DIM = 256

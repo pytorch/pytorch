@@ -2,19 +2,24 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 
 #include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class TORCH_CUDA_API IndexLowering : public OptInDispatch {
  public:
   static std::vector<Expr*> getIndexedExprs(
       Fusion* fusion,
       std::vector<Expr*> incoming_exprs) {
+    FUSER_PERF_SCOPE("IndexLowering::getIndexedExprs");
     FusionGuard fg(fusion);
     IndexLowering il;
     il.generate(incoming_exprs);
@@ -22,6 +27,8 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   }
 
  private:
+  IndexLowering();
+
   // Wrap pushBack, if active_scope is null we want it to go
   // straight to lower_exprs
   void pushBack(Expr*);
@@ -57,8 +64,11 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   // to understand the nesting of IfThenElse/ForLoop nodes.
   kir::Scope* active_scope = nullptr;
   Expr* active_scope_expr = nullptr;
+
+  kir::IrBuilder ir_builder_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

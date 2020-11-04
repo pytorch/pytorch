@@ -107,30 +107,9 @@ void adjustLdLevel3(char transa, char transb, int64_t m, int64_t n, int64_t k, i
 
 }
 
-// Check https://github.com/pytorch/pytorch/issues/22078
-// for information about the bug. We don't know the exact conditions that trigger it,
-// but using Sgemm or Hgemm on Maxwell or Pascal seems to be a
-// necessary condition.
-static void checkCuda90Bug(int i_m, int i_n, int i_k)
-{
-#if CUDA_VERSION < 9200 && CUDA_VERSION >= 9000
-  static std::once_flag alreadyWarned;
-  const int LIMIT = 1 << 21;
-  if (i_m > LIMIT || i_n > LIMIT || i_k > LIMIT) {
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    if (prop->major == 5 || prop->major == 6) {
-      std::call_once(alreadyWarned, []() {
-        TORCH_WARN("Matrix multiplication for dimensions larger than 2^21 has known bugs on your combination of CUDA version and device type. Please consider upgrading to CUDA 9.2 or later.");
-      });
-    }
-  }
-#endif
-}
-
 /* Level 3 */
 void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
-  checkCuda90Bug((int)m, (int)n, (int)k);
   at::cuda::blas::gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -141,27 +120,74 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 
 void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
 {
-  checkCuda90Bug((int)m, (int)n, (int)k);
   at::cuda::blas::gemm<at::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-#ifdef __HIP_PLATFORM_HCC__
 void THCudaBlas_Bgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::BFloat16 alpha, at::BFloat16 *a, int64_t lda, at::BFloat16 *b, int64_t ldb, at::BFloat16 beta, at::BFloat16 *c, int64_t ldc)
 {
   at::cuda::blas::gemm<at::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
-#endif
 
 void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, double alpha, double *a, int64_t lda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
   at::cuda::blas::gemm<double>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-#if CUDA_VERSION >= 9010  || defined __HIP_PLATFORM_HCC__
+#ifndef __HIP_PLATFORM_HCC__
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11200
+#define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
+#else
+// Workaround for https://github.com/pytorch/pytorch/issues/45724
+cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
+  cublasOperation_t transa,
+  cublasOperation_t transb,
+  int m,
+  int n,
+  int k,
+  const void    *alpha,
+  const void     *A,
+  cudaDataType Atype,
+  int lda,
+  long long int strideA,
+  const void     *B,
+  cudaDataType Btype,
+  int ldb,
+  long long int strideB,
+  const void    *beta,
+  void           *C,
+  cudaDataType Ctype,
+  int ldc,
+  long long int strideC,
+  int64_t batchCount,
+  cudaDataType computeType,
+  cublasGemmAlgo_t algo)
+{
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major != 7) {
+    return cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
+  }
+  cublasStatus_t result;
+  constexpr int64_t split = 63 * 1024;
+  for(int64_t i = 0; i < batchCount; i += split) {
+    int64_t count = std::min<int64_t>(split, batchCount - i);
+    result = cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha,
+      (char *)A + i * strideA * 2, Atype, lda, strideA,
+      (char *)B + i * strideB * 2, Btype, ldb, strideB,
+      beta,
+      (char *)C + i * strideC * 2, Ctype, ldc, strideC,
+      (int)count, computeType, algo);
+    THCublasCheck(result);
+  }
+  return result;
+}
+#endif
+#endif
+
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              at::Half alpha, const at::Half *a, int64_t lda, int64_t strideA, const at::Half *b, int64_t ldb, int64_t strideB,
                              at::Half beta, at::Half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
+  // See Note [Writing Nondeterministic Operations]
   at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
@@ -191,7 +217,7 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
 #endif  // CUDA_VERSION < 11000 
-  THCublasCheck(cublasGemmStridedBatchedEx(handle,
+  THCublasCheck(cublasGemmStridedBatchedExFix(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&fAlpha, a, CUDA_R_16F, (int)lda, strideA,
                                    b, CUDA_R_16F, (int)ldb, strideB,
@@ -204,19 +230,19 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
 #endif  // CUDA_VERSION < 11000
 #endif // __HIP_PLATFORM_HCC__
 }
-#endif // CUDA_VERSION or __HIP_PLATFORM_HCC__
 
-#ifdef __HIP_PLATFORM_HCC__
 void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              at::BFloat16 alpha, const at::BFloat16 *a, int64_t lda, int64_t strideA, const at::BFloat16 *b, int64_t ldb, int64_t strideB,
                              at::BFloat16 beta, at::BFloat16 *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
+  at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
   {
     THError("Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount"
             "with the bound [val] <= %d", INT_MAX);
   }
+
 
   adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
@@ -225,20 +251,36 @@ void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, i
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   float fAlpha = alpha;
   float fBeta = beta;
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major < 8) {
+    TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
+  }
+  THCublasCheck(cublasGemmStridedBatchedExFix(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   (void*)&fAlpha, a, CUDA_R_16BF, (int)lda, strideA,
+                                   b, CUDA_R_16BF, (int)ldb, strideB,
+                                   (void*)&fBeta, c, CUDA_R_16BF, (int)ldc, strideC,
+                                   (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#elif defined(__HIP_PLATFORM_HCC__)
   THCublasCheck(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
-                                   (void*)&fAlpha, a, rocblas_datatype_bf16_r, (int)lda, strideA,
-                                   b, rocblas_datatype_bf16_r, (int)ldb, strideB,
-                                   (void*)&fBeta, c, rocblas_datatype_bf16_r, (int)ldc, strideC,
-                                   c, rocblas_datatype_bf16_r, (int)ldc, strideC,
-                                   (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
-                                   0, 0, NULL, NULL));
+                                  (void*)&fAlpha, a, rocblas_datatype_bf16_r, (int)lda, strideA,
+                                  b, rocblas_datatype_bf16_r, (int)ldb, strideB,
+                                  (void*)&fBeta, c, rocblas_datatype_bf16_r, (int)ldc, strideC,
+                                  c, rocblas_datatype_bf16_r, (int)ldc, strideC,
+                                  (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
+                                  0, 0, NULL, NULL));
+#else
+  TORCH_CHECK(false, "THCudaBlas_BgemmStridedBatched is only available on CUDA_VERSION >= 11");
+#endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
-#endif // __HIP_PLATFORM_HCC__
 
 void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,
                              float beta, float *c[], int64_t ldc, int64_t batchCount)
 {
+  // See Note [Writing Nondeterministic Operations]
   at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
   {
@@ -268,11 +310,11 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
 #endif
 }
 
-#if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a, int64_t lda, int64_t strideA, const float *b, int64_t ldb, int64_t strideB,
                              float beta, float *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
+  // See Note [Writing Nondeterministic Operations]
   at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
@@ -291,12 +333,12 @@ void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, i
                                    &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
                                    (int)batchCount));
 }
-#endif
 
 void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              double alpha, const double *a[], int64_t lda, const double *b[], int64_t ldb,
                              double beta, double *c[], int64_t ldc, int64_t batchCount)
 {
+  // See Note [Writing Nondeterministic Operations]
   at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
   {
@@ -326,11 +368,11 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
 #endif
 }
 
-#if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
 void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              double alpha, const double *a, int64_t lda, int64_t strideA, const double *b, int64_t ldb, int64_t strideB,
                              double beta, double *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
+  // See Note [Writing Nondeterministic Operations]
   at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
   {
@@ -348,5 +390,3 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
                                    &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
                                    (int)batchCount));
 }
-#endif
-

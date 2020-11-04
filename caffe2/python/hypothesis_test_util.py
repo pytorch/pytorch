@@ -34,10 +34,10 @@ The key functions are:
   implemented on the CPU.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.proto import caffe2_pb2
 from caffe2.python import (
     workspace, device_checker, gradient_checker, test_util, core)
@@ -55,11 +55,7 @@ import struct
 
 
 def is_sandcastle():
-    if os.getenv('SANDCASTLE') == '1':
-        return True
-    elif os.getenv('TW_JOB_USER') == 'sandcastle':
-        return True
-    return False
+    return os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def is_travis():
@@ -110,10 +106,10 @@ hypothesis.settings.register_profile(
         derandomize=True,
         suppress_health_check=[hypothesis.HealthCheck.too_slow],
         database=None,
-        max_examples=100,
+        max_examples=50,
         min_satisfying_examples=1,
         verbosity=hypothesis.Verbosity.verbose,
-        deadline=1000))
+        deadline=10000))
 hypothesis.settings.register_profile(
     "dev",
     settings(
@@ -121,7 +117,8 @@ hypothesis.settings.register_profile(
         database=None,
         max_examples=10,
         min_satisfying_examples=1,
-        verbosity=hypothesis.Verbosity.verbose))
+        verbosity=hypothesis.Verbosity.verbose,
+        deadline=10000))
 hypothesis.settings.register_profile(
     "debug",
     settings(
@@ -129,7 +126,8 @@ hypothesis.settings.register_profile(
         database=None,
         max_examples=1000,
         min_satisfying_examples=1,
-        verbosity=hypothesis.Verbosity.verbose))
+        verbosity=hypothesis.Verbosity.verbose,
+        deadline=50000))
 
 hypothesis.settings.load_profile(
     'sandcastle' if is_sandcastle() else os.getenv('CAFFE2_HYPOTHESIS_PROFILE',
@@ -300,10 +298,13 @@ cpu_do = caffe2_pb2.DeviceOption()
 cuda_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
 hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
 gpu_do = caffe2_pb2.DeviceOption(device_type=workspace.GpuDeviceType)  # CUDA or ROCm
+_cuda_do_list = ([cuda_do] if workspace.has_cuda_support else [])
+_hip_do_list = ([hip_do] if workspace.has_hip_support else [])
+_gpu_do_list = ([gpu_do] if workspace.has_gpu_support else [])
 # (bddppq) Do not rely on this no_hip option! It's just used to
 # temporarily skip some flaky tests on ROCM before it's getting more mature.
-_device_options_no_hip = [cpu_do] + ([cuda_do] if workspace.has_cuda_support else [])
-device_options = _device_options_no_hip + ([hip_do] if workspace.has_hip_support else [])
+_device_options_no_hip = [cpu_do] + _cuda_do_list
+device_options = _device_options_no_hip + _hip_do_list
 
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + [
@@ -325,8 +326,8 @@ gcs = dict(
 )
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
-gcs_cuda_only = dict(gc=st.sampled_from([cuda_do]), dc=st.just([cuda_do]))
-gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))  # CUDA or ROCm
+gcs_cuda_only = dict(gc=st.sampled_from(_cuda_do_list), dc=st.just(_cuda_do_list))
+gcs_gpu_only = dict(gc=st.sampled_from(_gpu_do_list), dc=st.just(_gpu_do_list))  # CUDA or ROCm
 gcs_no_hip = dict(gc=st.sampled_from(_device_options_no_hip), dc=st.just(_device_options_no_hip))
 
 

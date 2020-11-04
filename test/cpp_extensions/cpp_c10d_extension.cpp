@@ -63,7 +63,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::allgather_base(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::barrier(
     const BarrierOptions& opts) {
-  throw std::runtime_error("ProcessGroupTest does not support barrier");
+  return std::make_shared<ProcessGroupTest::WorkTest>();
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::gather(

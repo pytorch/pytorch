@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import hypothesis.strategies as st
 import numpy as np
@@ -16,7 +16,7 @@ class TestArgOps(serial.SerializedTestCase):
     @given(
         X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
         keepdims=st.booleans(), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_argmax(self, X, axis, keepdims, gc, dc):
         if axis >= len(X.shape):
             axis %= len(X.shape)
@@ -38,7 +38,7 @@ class TestArgOps(serial.SerializedTestCase):
     @given(
         X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
         keepdims=st.booleans(), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_argmin(self, X, axis, keepdims, gc, dc):
         if axis >= len(X.shape):
             axis %= len(X.shape)

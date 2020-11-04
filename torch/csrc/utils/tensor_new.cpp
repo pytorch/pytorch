@@ -337,7 +337,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
     TORCH_CHECK(dispatch_key == c10::DispatchKey::CPU
                 || dispatch_key == c10::DispatchKey::CUDA
                 || dispatch_key == c10::DispatchKey::HIP
-                || c10::XLA().has(dispatch_key),
+                || dispatch_key == c10::DispatchKey::XLA,
                 "new(): expected DispatchKey: ", c10::DispatchKey::CPU,
                 " or ", c10::DispatchKey::CUDA,
                 " or ", c10::DispatchKey::HIP,
@@ -360,9 +360,8 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
 void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Device> device) {
   if (device.has_value()) {
     TORCH_CHECK(computeDeviceType(dispatch_key) == device.value().type(),
-             "legacy constructor for device type: ", computeDeviceType(dispatch_key),
-             " was passed device type: ", device.value().type(),
-             ", but device type must be: ", computeDeviceType(dispatch_key));
+             "legacy constructor expects device type: ", computeDeviceType(dispatch_key),
+             "but device type: ", device.value().type(), " was passed");
   }
 }
 
@@ -702,9 +701,10 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
     if (THPVariable_Check(data)) {
-      PyErr_WarnEx(PyExc_UserWarning,
+      auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
         "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+      if (ret != 0) throw python_error();
     }
 
     bool type_inference = r.isNone(1);
@@ -762,9 +762,10 @@ Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyO
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
     if (THPVariable_Check(data)) {
-      PyErr_WarnEx(PyExc_UserWarning,
+      auto ret = PyErr_WarnEx(PyExc_UserWarning,
         "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
         "or sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).", 1);
+      if (ret != 0) throw python_error();
     }
 
     bool args_requires_grad = r.toBool(3);
