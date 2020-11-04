@@ -1146,7 +1146,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
         self.assertEqual(torch.full(size, 1, out=o).dtype, o.dtype)
 
-    def test_tensor_from_writable_numpy(self, device):
+    def test_tensor_from_non_writable_numpy(self, device):
         with warnings.catch_warnings(record=True) as w:
             a = np.arange(5.)
             a.flags.writeable = False
