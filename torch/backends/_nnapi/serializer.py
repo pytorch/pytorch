@@ -1,6 +1,7 @@
 import enum
 import collections
 import struct
+import array
 import operator
 import functools
 import logging
@@ -303,6 +304,7 @@ class _NnapiSerializer(object):
 
         self.modules = {}
         self.constants = {}
+        self.tensor_tuples = {}
         self.jitval_operand_map = {}
         self.cached_immediates = {}
         self.used_weights = []
@@ -311,6 +313,7 @@ class _NnapiSerializer(object):
         if config is None:
             config = {}
 
+        # XXX get rid of this
         self.solid_weights = config.get("solid_weights", False)
 
 
@@ -417,6 +420,13 @@ class _NnapiSerializer(object):
                 ())
 
 
+    def add_immediate_int_vector(self, value):
+        return self.add_immediate_operand(
+                NNAPI_OperandCode.TENSOR_INT32,
+                array.array("i", value).tobytes(),
+                (len(value),))
+
+
     def get_tensor_operand_by_jitval(self, jitval):
         operand_id = self.jitval_operand_map[jitval]
         return (operand_id, self.operands[operand_id])
@@ -439,6 +449,12 @@ class _NnapiSerializer(object):
     def add_operation(self, opcode, inputs, outputs):
         self.operations.append((opcode, len(inputs), len(outputs)))
         self.operation_args.extend(inputs + outputs)
+
+
+    def add_tensor_tuple(self, jitval, values):
+        assert jitval not in self.tensor_tuples
+        self.tensor_tuples[jitval] = values
+
 
     def add_constant_value(self, jitval, ctype, value):
         assert jitval not in self.constants
@@ -526,12 +542,17 @@ class _NnapiSerializer(object):
         retn = model.graph.return_node()
         assert retn.inputsSize() == 1
         assert retn.outputsSize() == 0
-        # TODO: Make outputs a local variable? 
-        # TODO: Handle tuple-of-tensor return
-        for idx in range(1):
-            op_id = self.jitval_operand_map[retn.inputsAt(0)]
+        retn_input = retn.inputsAt(0)
+        if retn_input.type().kind() == "TensorType":
+            op_id = self.jitval_operand_map[retn_input]
+            # TODO: Make outputs a local variable?
             self.outputs.append(op_id)
             out_dim_orders.append(self.operands[op_id].dim_order.value)
+        elif retn_input.type().kind() == "TupleType":
+            for v in self.tensor_tuples[retn_input]:
+                op_id = self.jitval_operand_map[v]
+                self.outputs.append(op_id)
+                out_dim_orders.append(self.operands[op_id].dim_order.value)
 
         model = []
 
@@ -591,6 +612,10 @@ class _NnapiSerializer(object):
                 self.add_constant_node(node),
             "prim::ListConstruct": lambda self, node:
                 self.add_list_construct(node),
+            "prim::TupleConstruct": lambda self, node:
+                self.add_tuple_construct(node),
+            "aten::reshape": lambda self, node:
+                self.add_reshape(node),
             "aten::quantize_per_tensor": lambda self, node:
                 self.add_quantize(node),
             "aten::dequantize": lambda self, node:
@@ -605,14 +630,24 @@ class _NnapiSerializer(object):
                 self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.RELU),
             "aten::sigmoid": lambda self, node:
                 self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.LOGISTIC),
+            "aten::hardtanh": lambda self, node:
+                self.add_hardtanh(node),
             "aten::max_pool2d": lambda self, node:
                 self.add_pool2d_node(node, NNAPI_OperationCode.MAX_POOL_2D),
+            "aten::adaptive_avg_pool2d": lambda self, node:
+                self.add_adaptive_avg_pool2d(node),
             "aten::upsample_nearest2d": lambda self, node:
                 self.add_upsample_nearest2d(node),
             "aten::prelu": lambda self, node:
                 self.add_prelu_op(node),
+            "aten::addmm": lambda self, node:
+                self.add_addmm(node),
             "aten::_convolution": lambda self, node:
-                self.add_conv(node),
+                self.add_conv_underscore(node),
+            "aten::conv2d": lambda self, node:
+                self.add_conv2d(node),
+            "quantized::linear": lambda self, node:
+                self.add_qlinear(node),
             "quantized::conv2d": lambda self, node:
                 self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE),
             "quantized::conv2d_relu": lambda self, node:
@@ -627,8 +662,7 @@ class _NnapiSerializer(object):
     def add_node(self, node):
         adder = self.ADDER_MAP.get(node.kind())
         if not adder:
-            print(node)
-            raise Exception("Unsupported node type: %r" % node.kind())
+            raise Exception("Unsupported node kind (%r) in node %r" % (node.kind(), node))
         adder(self, node)
 
 
@@ -670,6 +704,45 @@ class _NnapiSerializer(object):
             _, val = self.get_constant_value(inp)
             values.append(val)
         self.add_constant_value(output, ctype, values)
+
+
+    def add_tuple_construct(self, node):
+        assert node.outputsSize() == 1
+        output = node.outputsAt(0)
+        #ctype = output.type()
+        values = []
+        for inp in node.inputs():
+            values.append(inp)
+        self.add_tensor_tuple(output, values)
+
+
+    def add_reshape(self, node):
+        assert node.inputsSize() == 2
+        assert node.outputsSize() == 1
+
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+
+        shape_ctype, shape = self.get_constant_value(node.inputsAt(1))
+        assert shape_ctype.kind() == "ListType"
+        assert shape_ctype.getElementType().kind() == "IntType"
+        is_trivial_reshape = len(shape) == 2 and shape[1] == -1
+
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_reshape:
+            raise Exception(
+                "Currently, reshape is only supported on NHWC tensors if the target size is [X, -1].")
+
+        # Bit of a hack here.  Use a real tensor to infer the output shape.
+        out_shape = torch.zeros(1).expand(in_oper.shape).reshape(shape).shape
+        out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
+
+        inputs = [None] * 2
+        inputs[0] = in_id
+        inputs[1] = self.add_immediate_int_vector(shape)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+        self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
 
 
     def add_quantize(self, node):
@@ -781,7 +854,7 @@ class _NnapiSerializer(object):
 
         _, alpha = self.get_constant_value(node.inputsAt(2), "IntType")
         if alpha != 1:
-            raise Exception(f"NNAPI does not support add/sub with alpha.")
+            raise Exception("NNAPI does not support add/sub with alpha.")
 
         self._do_add_binary(node, opcode, fuse_code)
 
@@ -793,6 +866,32 @@ class _NnapiSerializer(object):
         _, zero_point = self.get_constant_value(node.inputsAt(3), "IntType")
 
         self._do_add_binary(node, opcode, fuse_code, qparams=(scale, zero_point))
+
+
+    def add_hardtanh(self, node):
+        assert node.inputsSize() == 3
+        assert node.outputsSize() == 1
+
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        _, min_val = self.get_constant_value(node.inputsAt(1), "FloatType")
+        _, max_val = self.get_constant_value(node.inputsAt(2), "FloatType")
+
+        op_map = {
+            1: NNAPI_OperationCode.RELU1,
+            6: NNAPI_OperationCode.RELU6,
+        }
+
+        if min_val != 0 or max_val not in op_map:
+            raise Exception("NNAPI only supports hardtanh with args (0, 1) or (0, 6).")
+        opcode = op_map[max_val]
+
+        inputs = [None] * 1
+        inputs[0] = in_id
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), in_oper)
+
+        self.add_operation(opcode, inputs, outputs)
 
 
     def add_prelu_op(self, node):
@@ -859,6 +958,41 @@ class _NnapiSerializer(object):
         self.add_operation(opcode, inputs, outputs)
 
 
+    def add_adaptive_avg_pool2d(self, node):
+        assert node.inputsSize() == 2
+        assert node.outputsSize() == 1
+
+        image_id, image_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        assert len(image_oper.shape) == 4
+
+        size_ctype, size_arg = self.get_constant_value(node.inputsAt(1))
+        assert size_ctype.kind() == "ListType"
+        assert size_ctype.getElementType().kind() == "IntType"
+        if size_arg != [1, 1]:
+            raise Exception("NNAPI only supports adaptive_avg_pool2d with output size (1, 1).")
+
+        out_shape = image_oper.shape[0:2] + tuple(size_arg)
+        use_nchw = image_oper.use_nchw()
+
+        inputs = [None] * 11
+        inputs[0] = image_id
+        inputs[1] = self.add_immediate_int_scalar(0)
+        inputs[2] = self.add_immediate_int_scalar(0)
+        inputs[3] = self.add_immediate_int_scalar(0)
+        inputs[4] = self.add_immediate_int_scalar(0)
+        inputs[5] = self.add_immediate_int_scalar(1)
+        inputs[6] = self.add_immediate_int_scalar(1)
+        inputs[7] = self.add_immediate_int_scalar(image_oper.shape[3])
+        inputs[8] = self.add_immediate_int_scalar(image_oper.shape[2])
+        inputs[9] = self.add_immediate_int_scalar(NNAPI_FuseCode.FUSED_NONE)
+        inputs[10] = self.add_immediate_bool_scalar(use_nchw)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), image_oper._replace(shape=out_shape))
+
+        self.add_operation(NNAPI_OperationCode.AVERAGE_POOL_2D, inputs, outputs)
+
+
     def add_upsample_nearest2d(self, node):
         assert node.inputsSize() == 3
         assert node.outputsSize() == 1
@@ -919,7 +1053,160 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.RESIZE_NEAREST_NEIGHBOR, inputs, outputs)
 
 
-    def add_conv(self, node):
+    def add_addmm(self, node):
+        assert node.inputsSize() == 5
+        assert node.outputsSize() == 1
+        jit_bias, jit_input, jit_weight, jit_beta, jit_alpha = node.inputs()
+
+        for jitval in (jit_beta, jit_alpha):
+            scale_ctype, scale_value = self.get_constant_value(jitval)
+            assert scale_ctype.kind() in ("IntType", "FloatType")
+            if scale_value != 1:
+                raise Exception("NNAPI Fully-Connected does not support alpha and beta.")
+
+        input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
+        bias_id, bias_oper = self.get_tensor_operand_for_weight(jit_bias)
+
+        assert len(input_oper.shape) == 2
+        assert len(bias_oper.shape) == 1
+
+        # TODO: Transform at load time to share weights with CPU model.
+        _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
+        assert len(weight_tensor.shape) == 2
+        nnapi_weight_tensor = weight_tensor.t().contiguous()
+        weight_id = self.add_tensor_operand_for_weight(nnapi_weight_tensor)
+        weight_oper = self.operands[weight_id]
+
+        out_shape = (input_oper.shape[0], weight_oper.shape[0])
+
+        inputs = [None] * 4
+        inputs[0] = input_id
+        inputs[1] = weight_id
+        inputs[2] = bias_id
+        inputs[3] = self.add_immediate_int_scalar(NNAPI_FuseCode.FUSED_NONE)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
+
+        self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
+
+
+    def add_qlinear(self, node):
+        assert node.inputsSize() == 4
+        assert node.outputsSize() == 1
+        (
+                jit_input,
+                jit_packed_weight,
+                jit_scale,
+                jit_zero_point,
+        ) = node.inputs()
+
+        input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
+        # TODO: Support automatic reshape
+        assert len(input_oper.shape) == 2
+
+        _, out_scale = self.get_constant_value(jit_scale, "FloatType")
+        _, out_zero_point = self.get_constant_value(jit_zero_point, "IntType")
+        weight_ctype, packed_weight = self.get_constant_value(jit_packed_weight)
+        assert weight_ctype.name() == "LinearPackedParamsBase"
+        raw_weight, raw_bias = packed_weight.__getstate__()[0]
+        assert raw_bias is not None
+
+        assert len(raw_weight.shape) == 2
+        assert len(raw_bias.shape) == 1
+        assert raw_bias.shape[0] == raw_weight.shape[0]
+        assert raw_weight.shape[1] == input_oper.shape[1]
+
+        assert raw_weight.qscheme() == torch.per_tensor_affine
+        if raw_weight.dtype == torch.quint8:
+            unsigned_weight = raw_weight
+        else:
+            assert raw_weight.dtype == torch.qint8
+            unsigned_weight = torch._make_per_tensor_quantized_tensor(
+                    (raw_weight.int_repr().int() + 128).to(torch.uint8),
+                    scale=raw_weight.q_scale(),
+                    zero_point=raw_weight.q_zero_point() + 128)
+        weight_scale = unsigned_weight.q_scale()
+        bias_scale = input_oper.scale * weight_scale
+        int_bias = torch.quantize_per_tensor(raw_bias, bias_scale, 0, torch.qint32)
+        bias_id = self.add_tensor_operand_for_weight(int_bias)
+
+        multiplier = input_oper.scale * weight_scale / out_scale
+        assert multiplier > 0
+        if multiplier >= 1:
+            raise Exception(
+                "Quantized convolution multiplier is greater than 1.  "
+                "This is supported by NNAPI, but not by most hardware backends.  "
+                "Try training a model without quantization-aware training.  ")
+
+        # TODO: Transform at load time to share weights with CPU model.
+        nnapi_weight_tensor = unsigned_weight.contiguous()
+        weight_id = self.add_tensor_operand_for_weight(nnapi_weight_tensor)
+        weight_oper = self.operands[weight_id]
+
+        out_shape = (input_oper.shape[0], weight_oper.shape[0])
+        out_oper = input_oper._replace(
+                shape=out_shape,
+                scale=out_scale,
+                zero_point=out_zero_point,
+                )
+
+        inputs = [None] * 4
+        inputs[0] = input_id
+        inputs[1] = weight_id
+        inputs[2] = bias_id
+        inputs[3] = self.add_immediate_int_scalar(NNAPI_FuseCode.FUSED_NONE)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+        self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
+
+
+    def get_optional_bias(self, jit_bias, weight_tensor):
+        ctype, value = self.get_constant_value(jit_bias)
+        if ctype.kind() == "NoneType":
+            nnapi_bias_tensor = torch.zeros(weight_tensor.size()[0], dtype=weight_tensor.dtype)
+            bias_id = self.add_tensor_operand_for_weight(nnapi_bias_tensor)
+            bias_oper = self.operands[bias_id]
+            return bias_id, bias_oper
+        else:
+            return self.get_tensor_operand_for_weight(jit_bias)
+
+
+
+    def add_conv2d(self, node):
+        assert node.inputsSize() == 7
+        assert node.outputsSize() == 1
+
+        (
+                jit_image,
+                jit_weight,
+                jit_bias,
+                jit_stride,
+                jit_pad,
+                jit_dilation,
+                jit_groups,
+        ) = node.inputs()
+
+        _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
+        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor)
+        args = self.get_conv_pool_args_2d_from_jit(weight_tensor.shape[2:4], jit_stride, jit_pad, jit_dilation, jit_groups)
+
+        return self.add_conv2d_common(
+                node.outputsAt(0),
+                0.0,
+                0,
+                jit_image,
+                weight_tensor,
+                bias_id,
+                args,
+                False, # transpose
+                NNAPI_FuseCode.FUSED_NONE,
+                )
+
+
+    def add_conv_underscore(self, node):
         assert node.inputsSize() == 13
         assert node.outputsSize() == 1
 
@@ -939,8 +1226,10 @@ class _NnapiSerializer(object):
                 _,
         ) = node.inputs()
 
+        # XXX check jit_transpose
+
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
-        bias_id, bias_oper = self.get_tensor_operand_for_weight(jit_bias)
+        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor)
         args = self.get_conv_pool_args_2d_from_jit(weight_tensor.shape[2:4], jit_stride, jit_pad, jit_dilation, jit_groups)
 
         return self.add_conv2d_common(

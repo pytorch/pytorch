@@ -235,18 +235,22 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
         switch (vec_size) {
          case 4:
           fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
           break;
          case 2:
           fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 2><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
       } else {
         switch (self_info.dims) {
           case 1:
               fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
               break;
           default:
               fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
      });
@@ -269,24 +273,27 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
         switch (vec_size) {
          case 4:
           fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
           break;
          case 2:
           fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 2><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
       } else {
         switch (self_info.dims) {
           case 1:
               fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
               break;
           default:
               fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
         }
       }
      });
    });
   }
-  AT_CUDA_CHECK(cudaGetLastError());
   return std::tuple<Tensor,Tensor>(ret, mask);
 }
 

@@ -868,6 +868,18 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
     .build();
 }
 
+TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
+  return TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .promote_integer_inputs_to_float(true)
+      .build();
+}
+
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
   return TensorIteratorConfig()
     .set_check_mem_overlap(true)

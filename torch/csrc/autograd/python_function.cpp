@@ -611,9 +611,9 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
   return outputs.release();
 }
 
-PyObject* THPFunction_name(THPFunction *self, PyObject* noargs) {
+PyObject* THPFunction_name(PyObject *self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto cdata = self->cdata.lock();
+  auto cdata = ((THPFunction*)self)->cdata.lock();
   return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
 }
@@ -733,7 +733,7 @@ static void _trim_grad_input(const std::shared_ptr<PyNode>& cdata, THPFunction *
   }
 }
 
-PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
+PyObject * THPFunction_do_backward(PyObject *_self, PyObject *args)
 {
   try {
     Py_ssize_t num_args = args ? PyTuple_GET_SIZE(args) : 0;
@@ -744,6 +744,8 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
       THPUtils_invalidArguments(args, nullptr, "_do_backward", 1, "(tuple, bool)");
       return nullptr;
     }
+
+    auto self = (THPFunction*)_self;
     auto cdata = self->cdata.lock();
     // In obscure situations, cdata might be nullptr because it's expired.  THAT
     // is an internal error and I'd like to know about it, but since this is
@@ -800,13 +802,14 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
 // Other methods / attributes
 ////////////////////////////////////////////////////////////////////////////////
 
-PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
+PyObject* THPFunction__register_hook_dict(PyObject *_self, PyObject *_var)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
   THPVariable *var = (THPVariable*)_var;
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
       var->backward_hooks, var->cdata.output_nr()));
+  auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
     "Legacy autograd function had register_hook called before the function was "
@@ -818,9 +821,10 @@ PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
+PyObject* THPFunction_register_hook(PyObject *_self, PyObject *hook)
 {
   HANDLE_TH_ERRORS
+  auto self= (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
     "Legacy autograd function had _register_hook called before the function was "
@@ -1012,11 +1016,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
 };
 
 static struct PyMethodDef THPFunction_methods[] = {
-  {(char*)"name", (PyCFunction)THPFunction_name, METH_NOARGS, nullptr},
-  {(char*)"apply", (PyCFunction)THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
-  {(char*)"_do_backward", (PyCFunction)THPFunction_do_backward, METH_VARARGS, nullptr},
-  {(char*)"_register_hook_dict", (PyCFunction)THPFunction__register_hook_dict, METH_O, nullptr},
-  {(char*)"register_hook", (PyCFunction)THPFunction_register_hook, METH_O, nullptr},
+  {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
+  {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
+  {(char*)"_do_backward", THPFunction_do_backward, METH_VARARGS, nullptr},
+  {(char*)"_register_hook_dict", THPFunction__register_hook_dict, METH_O, nullptr},
+  {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
   {nullptr}
 };
 

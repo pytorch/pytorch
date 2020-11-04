@@ -35,12 +35,12 @@ class NnapiModule(torch.nn.Module):
         comp = torch.classes._nnapi.Compilation()
         comp.init(self.ser_model, self.weights)
         self.comp = comp
-        
+
     def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
         comp = self.comp
         assert comp is not None
         outs = [ torch.empty_like(out) for out in self.out_templates ]
-        
+
         assert len(args) == len(self.inp_mem_fmts)
         fixed_args = []
         for idx in range(len(args)):
@@ -62,21 +62,21 @@ class NnapiModule(torch.nn.Module):
             else:
                 raise Exception("Invalid mem_fmt")
         return outs
-    
+
 
 class NnapiInitWrapper(torch.nn.Module):
     """Wrapper module to ensure NNAPI init is called."""
     def __init__(self, nnapi_module):
         super().__init__()
         self.nnapi_module = nnapi_module
-        
+
     def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
         return self.nnapi_module(args)
-    
+
     @torch.jit.export
     def __getstate__(self):
         return self.nnapi_module
-        
+
     @torch.jit.export
     def __setstate__(self, nnapi_module):
         self.training = False
@@ -93,10 +93,10 @@ class ListWrapper(torch.nn.Module):
     def __init__(self, mod):
         super().__init__()
         self.mod = mod
-        
+
     def forward(self, t: torch.Tensor) -> List[torch.Tensor]:
         return self.mod([t])
-        
+
 class DelistWrapper(torch.nn.Module):
     """NNAPI de-list-ifying wrapper.
 
@@ -106,7 +106,7 @@ class DelistWrapper(torch.nn.Module):
     def __init__(self, mod):
         super().__init__()
         self.mod = mod
-        
+
     def forward(self, ts: List[torch.Tensor]) -> torch.Tensor:
         outs = self.mod(ts)
         assert len(outs) == 1
@@ -122,34 +122,50 @@ class ListDelistWrapper(torch.nn.Module):
     def __init__(self, mod):
         super().__init__()
         self.mod = mod
-        
+
     def forward(self, t: torch.Tensor) -> torch.Tensor:
         outs = self.mod([t])
         assert len(outs) == 1
         return outs[0]
 
 
+def _condensed_zeros_like(t):
+    """Get a small-storage deterministic tensor with the same shape and dtype as t
+
+    Similar to `torch.zeros(1, dtype=out.dtype).expand(out.shape)`,
+    but this works with quantized dtypes as well.
+
+    Similar to `torch.empty(1, dtype=out.dtype).expand(out.shape)`,
+    but always returns the same data.
+    """
+
+    ret = torch.empty_like(t).flatten()[1].clone().expand(t.shape)
+    assert ret.storage().size() == 1
+    ret.storage()[0] = 0
+    return ret
+
+
 def convert_model_to_nnapi(model, inputs):
     model = torch.jit.freeze(model)
 
-    outputs = model(inputs)
-
     if isinstance(inputs, torch.Tensor):
-        nnapi_inputs = [inputs]
+        inputs = [inputs]
         list_inputs = True
     else:
         list_inputs = False
+
+    outputs = model(*inputs)
 
     if isinstance(outputs, torch.Tensor):
         outputs = [outputs]
         delist_outputs = True
     else:
-        delist_outptus = False
+        delist_outputs = False
 
-    ser_model, used_weights, inp_mem_fmts, out_mem_fmts = serialize_model(model, nnapi_inputs)
+    ser_model, used_weights, inp_mem_fmts, out_mem_fmts = serialize_model(model, inputs)
     ser_model_tensor = torch.tensor(list(ser_model), dtype=torch.uint8)
 
-    out_templates = [torch.zeros(1, dtype=out.dtype).expand(out.shape) for out in outputs]
+    out_templates = [_condensed_zeros_like(out) for out in outputs]
     nnapi_model = NnapiInitWrapper(NnapiModule(
         ser_model_tensor,
         used_weights,
@@ -164,4 +180,4 @@ def convert_model_to_nnapi(model, inputs):
     elif delist_outputs:
         nnapi_model = DelistWrapper(nnapi_model)
 
-    return nnapi_model
+    return torch.jit.script(nnapi_model)

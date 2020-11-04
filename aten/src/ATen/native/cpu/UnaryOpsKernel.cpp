@@ -294,7 +294,7 @@ static void signbit_kernel(TensorIterator& iter){
 }
 
 static void sgn_kernel(TensorIterator& iter){
-  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), 'sgn_cpu', [&]() {
+  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cpu", [&]() {
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
@@ -587,7 +587,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), op##_vml_cpu, [&]() {            \
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {            \
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) { \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
@@ -618,7 +618,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), op##_vml_cpu, [&]() {\
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {\
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) {              \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \

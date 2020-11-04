@@ -69,6 +69,9 @@ NNAPI_FUNCTIONS = [
     ("void", "ANeuralNetworksEvent_free", "ANeuralNetworksEvent* event"),
     ("int", "ANeuralNetworksExecution_getOutputOperandRank", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* rank"),
     ("int", "ANeuralNetworksExecution_getOutputOperandDimensions", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions"),
+    ("int", "ANeuralNetworksBurst_create", "ANeuralNetworksCompilation* compilation, ANeuralNetworksBurst** burst"),
+    ("void", "ANeuralNetworksBurst_free", "ANeuralNetworksBurst* burst"),
+    ("int", "ANeuralNetworksExecution_burstCompute", "ANeuralNetworksExecution* execution, ANeuralNetworksBurst* burst"),
 ]
 
 
@@ -126,7 +129,9 @@ def main(argv):
     (out_dir / "nnapi_wrapper.cpp").write_text(
         PREFIX + 
         textwrap.dedent("""\
+            #ifndef _WIN32
             #include <dlfcn.h>
+            #endif
             #include "nnapi_wrapper.h"
             #include "c10/util/Logging.h"
             static int loaded = 0;
@@ -134,6 +139,9 @@ def main(argv):
             static struct nnapi_wrapper check_nnapi_;
             __DEFINE_CHECK_FUNCTIONS__
             void nnapi_wrapper_load(struct nnapi_wrapper** nnapi, struct nnapi_wrapper** check_nnapi) {
+            #ifdef _WIN32
+              TORCH_CHECK(false, "Running NNAPI models is not supported on Windows.");
+            #else
               if (!loaded) {
                 // Clear error flag.
                 dlerror();
@@ -144,6 +152,7 @@ def main(argv):
               }
               *nnapi = &nnapi_;
               *check_nnapi = &check_nnapi_;
+            #endif
             }
             """)
         .replace("__DEFINE_CHECK_FUNCTIONS__", "\n".join(define_checks))

@@ -63,3 +63,10 @@ struct TanhFakeIdealFp16Functor {
 };
 
 } // namespace caffe2
+
+namespace fake_fp16 {
+
+at::Half CalcSigmoidByLUT(at::Half x);
+at::Half CalcTanhByLUT(at::Half input);
+
+} // namespace fake_fp16

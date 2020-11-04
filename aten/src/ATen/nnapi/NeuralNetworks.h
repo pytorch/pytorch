@@ -69,6 +69,7 @@ typedef struct ANeuralNetworksModel ANeuralNetworksModel;
 typedef struct ANeuralNetworksDevice ANeuralNetworksDevice;
 typedef struct ANeuralNetworksCompilation ANeuralNetworksCompilation;
 typedef struct ANeuralNetworksExecution ANeuralNetworksExecution;
+typedef struct ANeuralNetworksBurst ANeuralNetworksBurst;
 typedef struct ANeuralNetworksEvent ANeuralNetworksEvent;
 
 typedef int32_t ANeuralNetworksOperationType;

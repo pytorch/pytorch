@@ -21,6 +21,7 @@ void load_platform_library() {
     CAFFE_ENFORCE(nnapi->Model_free);
     CAFFE_ENFORCE(nnapi->Compilation_free);
     CAFFE_ENFORCE(nnapi->Execution_free);
+    CAFFE_ENFORCE(nnapi->Burst_free);
     return 0;
   }();
   (void)run_once;
@@ -38,6 +39,7 @@ void load_platform_library() {
 MAKE_SMART_PTR(Model)
 MAKE_SMART_PTR(Compilation)
 MAKE_SMART_PTR(Execution)
+MAKE_SMART_PTR(Burst)
 
 #undef MAKE_SMART_PTR
 
@@ -96,12 +98,20 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 
     check_nnapi->Model_finish(model_.get());
 
+    ANeuralNetworksDevice* devices[1] = {nullptr};
+    check_nnapi->_getDevice(1, &devices[0]);
+
     ANeuralNetworksCompilation* compilation;
     check_nnapi->Compilation_create(model_.get(), &compilation);
+    //check_nnapi->Compilation_createForDevices(model_.get(), devices, 1, &compilation);
     // TODO: Make this configurable.
     check_nnapi->Compilation_setPreference(compilation, ANEURALNETWORKS_PREFER_SUSTAINED_SPEED);
     check_nnapi->Compilation_finish(compilation);
     compilation_.reset(compilation);
+
+    ANeuralNetworksBurst* burst;
+    check_nnapi->Burst_create(compilation_.get(), &burst);
+    burst_.reset(burst);
   }
 
   void run(
@@ -139,7 +149,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
           t.nbytes());
     }
 
-    check_nnapi->Execution_compute(execution);
+    check_nnapi->Execution_burstCompute(execution, burst_.get());
     
     // TODO: Maybe skip this for fixed-size outputs?
     for (size_t i = 0; i < outputs.size(); i++) {
@@ -163,10 +173,17 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
       (*dims)[i] = t.sizes()[i];
       TORCH_CHECK((*dims)[i] == t.sizes()[i]); // Check for overflow.
     }
-    if (t.scalar_type() == torch::kFloat32) {
+    if (t.scalar_type() == c10::kFloat) {
       operand->type = ANEURALNETWORKS_TENSOR_FLOAT32;
       operand->scale = 0;
       operand->zeroPoint = 0;
+      return;
+    }
+    if (t.scalar_type() == c10::kQUInt8) {
+      TORCH_CHECK(t.is_quantized());
+      operand->type = ANEURALNETWORKS_TENSOR_QUANT8_ASYMM;
+      operand->scale = t.q_scale();
+      operand->zeroPoint = t.q_zero_point();
       return;
     }
     // TODO: Support more dtypes.
@@ -175,6 +192,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 
   ModelPtr model_;
   CompilationPtr compilation_;
+  BurstPtr burst_;
   int32_t num_inputs_;
   int32_t num_outputs_;
 };
