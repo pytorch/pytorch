@@ -7433,6 +7433,22 @@
     CPU: foreach_tensor_lgamma_slow_
     CUDA: foreach_tensor_lgamma_cuda_
 
+- func: _foreach_frac(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_frac_slow
+    CUDA: foreach_tensor_frac_cuda
+
+- func: _foreach_frac_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_frac_slow_
+    CUDA: foreach_tensor_frac_cuda_
+
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   use_c10_dispatcher: full
   device_guard: False

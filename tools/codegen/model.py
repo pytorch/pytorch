@@ -404,6 +404,7 @@ class FunctionSchema:
                     '_foreach_sinh_',
                     '_foreach_round_',
                     '_foreach_lgamma_',
+                    '_foreach_frac_',
                     '_foreach_addcmul_.Scalar',
                     '_foreach_addcdiv_.Scalar',
                     '_foreach_addcmul_.ScalarList',

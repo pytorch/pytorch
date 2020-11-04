@@ -287,6 +287,48 @@ struct UnaryOpFunctor {
         }
 };
 
+template<typename T, int depth, int r_args_depth, int res_arg_index>
+struct FracFunctor {
+    using opmath_t = typename get_opmath_t<T>::opmath_t;
+    template<typename Op> __device__ __forceinline__ void operator() (
+        int chunk_size,
+        TensorListMetadata<depth>& tl,
+        Op op) {
+            int tensor_loc = tl.block_to_tensor[blockIdx.x];
+            int chunk_idx = tl.block_to_chunk[blockIdx.x];
+            int n = tl.sizes[tensor_loc];
+
+            T* args[depth];
+            bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+            n -= chunk_idx * chunk_size;
+            T r_args[r_args_depth][kILP];
+
+            // to make things simple, we put aligned case in a different code path
+            if(n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+                for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
+                    // load
+                    load_store(r_args[0], args[0], 0, i_start);
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_args[0][ii] = static_cast<T>(r_args[0][ii] - op(static_cast<opmath_t>(r_args[0][ii])));
+                    }
+                    // store
+                    load_store(args[res_arg_index], r_args[0], i_start, 0);
+                }
+            }
+            else {
+                for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+                    load_args<depth>(r_args, args, i_start, chunk_size, n);
+#pragma unroll
+                    for(int ii = 0; ii < kILP; ii++) {
+                        r_args[0][ii] = static_cast<T>(r_args[0][ii] - op(static_cast<opmath_t>(r_args[0][ii])));
+                    }
+                    store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
+                }
+            }
+        }
+};
+
 //
 // Pointwise Functors
 //

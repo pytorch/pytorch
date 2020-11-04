@@ -161,6 +161,9 @@ FOREACH_UNARY_OP_NO_COMPLEX(floor, Floor);
 FOREACH_UNARY_OP_NO_COMPLEX(round, Round);
 FOREACH_UNARY_OP_NO_COMPLEX(lgamma, Lgamma);
 
+//
+// Special cases
+//
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
 
@@ -179,6 +182,61 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
     }
 
     foreach_unary_op_<std::negate>(tensors);
+}
+
+template<typename T>
+struct Trunc {
+    __device__ T operator()(T t) const { return std::trunc(t); }
+};
+
+std::vector<Tensor> foreach_tensor_frac_cuda(TensorList tensors) {
+    check_foreach_api_restrictions(tensors);
+
+    if (!can_use_fast_route(tensors)) {
+        return at::native::foreach_tensor_frac_slow(tensors);
+    }
+
+    std::vector<std::vector<at::Tensor>> tensor_lists;
+    std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
+    for (const auto& t: tensors) {
+        vec_res.emplace_back(at::native::empty_like(t));
+    }
+
+    tensor_lists.emplace_back(tensors.vec());
+    tensor_lists.emplace_back(std::move(vec_res));
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<2>(tensor_lists,
+                              FracFunctor<scalar_t,
+                                          /* depth */ 2,
+                                          /* r_args_depth */ 1, 
+                                          /* res_arg_index */ 1>(),
+                              Trunc<opmath_t>());
+    });
+    return tensor_lists[1];
+}
+
+void foreach_tensor_frac_cuda_(TensorList tensors) {
+    check_foreach_api_restrictions(tensors);
+
+    if (!can_use_fast_route(tensors)) {
+        return at::native::foreach_tensor_frac_slow_(tensors);
+    }
+
+    std::vector<std::vector<at::Tensor>> tensor_lists;
+    tensor_lists.emplace_back(tensors.vec());
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<1>(tensor_lists,
+                              FracFunctor<scalar_t,
+                                          /* depth */ 1,
+                                          /* r_args_depth */ 1, 
+                                          /* res_arg_index */ 0>(),
+                              Trunc<opmath_t>());
+    });
 }
 
 }} // namespace at::native
