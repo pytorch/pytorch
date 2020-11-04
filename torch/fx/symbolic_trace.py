@@ -206,6 +206,7 @@ class Tracer(TracerBase):
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
+
 # Symbolic tracing API
 #
 # Given an `nn.Module` or function instance `root`, this function will return a `GraphModule`
