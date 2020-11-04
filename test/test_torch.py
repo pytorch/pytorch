@@ -4320,9 +4320,9 @@ class TestTorchDeviceType(TestCase):
                      torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
                                                   include_bool=False, include_complex=False)))
     @dtypesIfCUDA(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
-                                                  include_bool=False, include_complex=False),
+                                                        include_bool=False, include_complex=False),
                            torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-                           (torch.int16, torch.int32, torch.int64))
+                           (torch.int16, torch.int32, torch.int64)))
     def test_histogram_vs_np_custom_bins(self, device, dtypes):
         # test against numpy.histogram()
         def test_against_np_custombins(tensor, bins, weights=None, density=False, rtol=None, atol=None):
