@@ -222,12 +222,19 @@ TEST(TypeSubtyping, DictSubtypeTensors) {
       StringType::get(), tensorFloatPointer);
   c10::DictTypePtr dictStrTensorInt = DictType::create(
       StringType::get(), tensorIntPointer);
+  c10::DictTypePtr dictTensorPlainTensorPlain = DictType::create(
+      TensorType::get(), TensorType::get());
+  c10::DictTypePtr dictTensorIntTensorFloat = DictType::create(
+      tensorIntPointer, tensorFloatPointer);
 
-  EXPECT_TRUE(dictStrTensorFloat->isSubtypeOfExt(dictStrTensorPlain, nullptr));
-  EXPECT_TRUE(dictStrTensorInt->isSubtypeOfExt(dictStrTensorPlain, nullptr));
-  EXPECT_FALSE(dictStrTensorInt->isSubtypeOfExt(dictIntTensorPlain, nullptr));
-  EXPECT_FALSE(dictStrTensorInt->isSubtypeOfExt(dictStrTensorFloat, nullptr));
-  EXPECT_FALSE(dictStrTensorPlain->isSubtypeOfExt(dictStrTensorInt, nullptr));
+
+  EXPECT_TRUE(dictStrTensorFloat->isSubtypeOf(dictStrTensorPlain));
+  EXPECT_TRUE(dictStrTensorInt->isSubtypeOf(dictStrTensorPlain));
+  EXPECT_TRUE(dictTensorIntTensorFloat->isSubtypeOf(dictTensorPlainTensorPlain));
+  EXPECT_FALSE(dictStrTensorInt->isSubtypeOf(dictIntTensorPlain));
+  EXPECT_FALSE(dictStrTensorInt->isSubtypeOf(dictStrTensorFloat));
+  EXPECT_FALSE(dictStrTensorPlain->isSubtypeOf(dictStrTensorInt));
+
 
   // test error messages
   std::regex val_regex(

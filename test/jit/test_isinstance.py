@@ -84,6 +84,13 @@ class TestIsinstance(JitTestCase):
         x = ("a", 1, "b")
         self.checkScript(tuple_test, (x,))
 
+    def test_tuple_tensor(self):
+        def tuple_tensor_test(x: Any):
+            assert torch.jit.isinstance(x, Tuple[torch.Tensor, torch.Tensor])
+
+        x = (torch.tensor([1]), torch.tensor([[2], [3]]))
+        self.checkScript(tuple_tensor_test, (x,))
+
     def test_optional(self):
         def optional_test(x: Any):
             assert torch.jit.isinstance(x, Optional[torch.Tensor])
