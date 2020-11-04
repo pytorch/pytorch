@@ -1142,35 +1142,69 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_matrix_rank(self, device, dtype):
-        # for matrix_rank in [torch.matrix_rank, torch.linalg.matrix_rank]:
-        matrix_rank = torch.matrix_rank
+        for matrix_rank in [torch.matrix_rank, torch.linalg.matrix_rank]:
+            matrix_rank = torch.linalg.matrix_rank
+            a = torch.eye(10, dtype=dtype, device=device)
+            self.assertEqual(matrix_rank(a).item(), 10)
+            self.assertEqual(matrix_rank(a, hermitian=True).item(), 10)
+
+            a[5, 5] = 0
+            self.assertEqual(matrix_rank(a).item(), 9)
+            self.assertEqual(matrix_rank(a, hermitian=True).item(), 9)
+
+            a = torch.randn(24, 42, dtype=dtype, device=device)
+            self.assertEqual(matrix_rank(a), matrix_rank(a.t()))
+            aaT = torch.mm(a, a.conj().t())
+            self.assertEqual(matrix_rank(aaT), matrix_rank(aaT, hermitian=True))
+            aTa = torch.mm(a.conj().t(), a)
+            self.assertEqual(matrix_rank(aTa), matrix_rank(aTa, hermitian=True))
+
+            a = torch.randn(35, 75, dtype=dtype, device=device)
+            result = matrix_rank(a)
+            self.assertEqual(matrix_rank(a), np.linalg.matrix_rank(a.cpu().numpy()))
+            self.assertEqual(matrix_rank(a, 0.01), np.linalg.matrix_rank(a.cpu().numpy(), 0.01))
+
+            aaT = torch.mm(a, a.conj().t())
+            self.assertEqual(matrix_rank(aaT), np.linalg.matrix_rank(aaT.cpu().numpy()))
+            self.assertEqual(matrix_rank(aaT, 0.01), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01))
+
+            if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
+                self.assertEqual(matrix_rank(aaT, hermitian=True),
+                                 np.linalg.matrix_rank(aaT.cpu().numpy(), hermitian=True))
+                self.assertEqual(matrix_rank(aaT, 0.01, True),
+                                 np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_matrix_rank(self, device, dtype):
         a = torch.eye(10, dtype=dtype, device=device)
-        self.assertEqual(matrix_rank(a).item(), 10)
-        self.assertEqual(matrix_rank(a, True).item(), 10)
+        self.assertEqual(torch.matrix_rank(a).item(), 10)
+        self.assertEqual(torch.matrix_rank(a, True).item(), 10)
 
         a[5, 5] = 0
-        self.assertEqual(matrix_rank(a).item(), 9)
-        self.assertEqual(matrix_rank(a, True).item(), 9)
+        self.assertEqual(torch.matrix_rank(a).item(), 9)
+        self.assertEqual(torch.matrix_rank(a, True).item(), 9)
 
         a = torch.randn(24, 42, dtype=dtype, device=device)
-        self.assertEqual(matrix_rank(a), matrix_rank(a.t()))
+        self.assertEqual(torch.matrix_rank(a), torch.matrix_rank(a.t()))
         aaT = torch.mm(a, a.conj().t())
-        self.assertEqual(matrix_rank(aaT), matrix_rank(aaT, True))
+        self.assertEqual(torch.matrix_rank(aaT), torch.matrix_rank(aaT, True))
         aTa = torch.mm(a.conj().t(), a)
-        self.assertEqual(matrix_rank(aTa), matrix_rank(aTa, True))
+        self.assertEqual(torch.matrix_rank(aTa), torch.matrix_rank(aTa, True))
 
         a = torch.randn(35, 75, dtype=dtype, device=device)
-        result = matrix_rank(a)
-        self.assertEqual(matrix_rank(a), np.linalg.matrix_rank(a.cpu().numpy()))
-        self.assertEqual(matrix_rank(a, 0.01), np.linalg.matrix_rank(a.cpu().numpy(), 0.01))
+        result = torch.matrix_rank(a)
+        self.assertEqual(torch.matrix_rank(a), np.linalg.matrix_rank(a.cpu().numpy()))
+        self.assertEqual(torch.matrix_rank(a, 0.01), np.linalg.matrix_rank(a.cpu().numpy(), 0.01))
 
         aaT = torch.mm(a, a.conj().t())
-        self.assertEqual(matrix_rank(aaT), np.linalg.matrix_rank(aaT.cpu().numpy()))
-        self.assertEqual(matrix_rank(aaT, 0.01), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01))
+        self.assertEqual(torch.matrix_rank(aaT), np.linalg.matrix_rank(aaT.cpu().numpy()))
+        self.assertEqual(torch.matrix_rank(aaT, 0.01), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01))
 
         if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
-            self.assertEqual(matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
-            self.assertEqual(matrix_rank(aaT, 0.01, True),
+            self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
+            self.assertEqual(torch.matrix_rank(aaT, 0.01, True),
                                 np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
 instantiate_device_type_tests(TestLinalg, globals())
