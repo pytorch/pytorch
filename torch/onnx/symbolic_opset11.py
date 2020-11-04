@@ -102,7 +102,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         if bool_inp.type() is not None and bool_inp.type().scalarType() is not None:
             if bool_inp.type().scalarType() == 'Bool':
                 if values.type() is not None:
-                    if len(values.type().dim()) == 0:
+                    if values.type().dim() == 0:
                         from torch.onnx.symbolic_opset9 import masked_fill
                         return masked_fill(g, self, bool_inp, values)
                     return masked_scatter(g, self, bool_inp, values)
