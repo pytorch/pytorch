@@ -1633,7 +1633,8 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   // ord == ±1 ord == ±inf
   else {
     squareCheckInputs(self);
-    IntArrayRef dim({-2, -1});
+    std::array<int64_t, 2> dim_arr = {-2, -1};
+    optional<IntArrayRef> dim = IntArrayRef(dim_arr);
     // Ignore errors if not invertible, result is INFINITY in this case
     try {
       self_inverse = at::inverse(self);
@@ -1674,7 +1675,8 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
   squareCheckInputs(self);
 
   Tensor self_inverse, result;
-  IntArrayRef dim({-2, -1});
+  std::array<int64_t, 2> dim_arr = {-2, -1};
+  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
   // Ignore errors if not invertible, result is INFINITY in this case
   try {
     self_inverse = at::inverse(self);
