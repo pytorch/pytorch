@@ -128,3 +128,13 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(float_one.item<int32_t>(), 1);
   ASSERT_EQ(float_one.item<at::Half>(), 1);
 }
+
+TEST(TestScalar, TestConj) {
+  Scalar int_scalar = 257;
+  Scalar float_scalar = 3.0;
+  Scalar complex_scalar = c10::complex<double>(2.3, 3.5);
+
+  ASSERT_EQ(int_scalar.conj().toInt(), 257);
+  ASSERT_EQ(float_scalar.conj().toDouble(), 3.0);
+  ASSERT_EQ(complex_scalar.conj().toComplexDouble(), c10::complex<double>(2.3, -3.5));
+}

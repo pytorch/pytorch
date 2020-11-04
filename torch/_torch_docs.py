@@ -2565,7 +2565,7 @@ add_docstr(torch.dot,
            r"""
 dot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two 1D tensors.
+Computes the dot product of two 1D tensors.
 
 .. note::
 
@@ -3423,7 +3423,7 @@ of :attr:`index`; other dimensions have the same size as in the original tensor.
 Args:
     {input}
     dim (int): the dimension in which we index
-    index (LongTensor): the 1-D tensor containing the indices to index
+    index (IntTensor or LongTensor): the 1-D tensor containing the indices to index
 
 Keyword args:
     {out}
@@ -3681,6 +3681,64 @@ Examples::
     ...
     RuntimeError: bool value of Tensor with no values is ambiguous
 """.format(**common_args))
+
+add_docstr(torch.kron,
+           r"""
+kron(input, other, *, out=None) -> Tensor
+
+Computes the Kronecker product, denoted by :math:`\otimes`, of :attr:`input` and :attr:`other`.
+
+If :attr:`input` is a :math:`(a_0 \times a_1 \times \dots \times a_n)` tensor and :attr:`other` is a
+:math:`(b_0 \times b_1 \times \dots \times b_n)` tensor, the result will be a
+:math:`(a_0*b_0 \times a_1*b_1 \times \dots \times a_n*b_n)` tensor with the following entries:
+
+.. math::
+    (\text{input} \otimes \text{other})_{k_0, k_1, \dots, k_n} =
+        \text{input}_{i_0, i_1, \dots, i_n} * \text{other}_{j_0, j_1, \dots, j_n},
+
+where :math:`k_t = i_t * b_t + j_t` for :math:`0 \leq t \leq n`.
+If one tensor has fewer dimensions than the other it is unsqueezed until it has the same number of dimensions.
+
+Supports real-valued and complex-valued inputs.
+
+.. note::
+    This function generalizes the typical definition of the Kronecker product for two matrices to two tensors,
+    as described above. When :attr:`input` is a :math:`(m \times n)` matrix and :attr:`other` is a
+    :math:`(p \times q)` matrix, the result will be a :math:`(p*m \times q*n)` block matrix:
+
+    .. math::
+        \mathbf{A} \otimes \mathbf{B}=\begin{bmatrix}
+        a_{11} \mathbf{B} & \cdots & a_{1 n} \mathbf{B} \\
+        \vdots & \ddots & \vdots \\
+        a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B} \end{bmatrix}
+
+    where :attr:`input` is :math:`\mathbf{A}` and :attr:`other` is :math:`\mathbf{B}`.
+
+Arguments:
+    input (Tensor)
+    other (Tensor)
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.ones(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 1., 0., 0.],
+            [1., 1., 0., 0.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.]])
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.arange(1, 5).reshape(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 2., 0., 0.],
+            [3., 4., 0., 0.],
+            [0., 0., 1., 2.],
+            [0., 0., 3., 4.]])
+""")
 
 add_docstr(torch.kthvalue,
            r"""

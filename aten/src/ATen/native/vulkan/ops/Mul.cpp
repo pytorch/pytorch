@@ -71,7 +71,7 @@ Tensor& mul_scalar_(
 
   TORCH_CHECK(
       self_arg.is_vulkan(),
-      "Vulkan: In-place add is only supported on Vulkan tensors.");
+      "Vulkan: In-place mul_scalar is only supported on Vulkan tensors.");
 
   vTensor& v_self = convert(self_arg);
 

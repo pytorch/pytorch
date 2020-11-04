@@ -3,7 +3,7 @@ import unittest
 import itertools
 import warnings
 from math import inf, nan, isnan
-from random import randint, randrange
+from random import randrange
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
@@ -182,6 +182,107 @@ class TestLinalg(TestCase):
         t = torch.randn(1, device=device, dtype=dtype)
         with self.assertRaises(RuntimeError):
             op(t)
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_kron(self, device, dtype):
+
+        def run_test_case(a_shape, b_shape):
+            a = torch.rand(a_shape, dtype=dtype, device=device)
+            b = torch.rand(b_shape, dtype=dtype, device=device)
+
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            result = torch.kron(a, b)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty_like(result)
+            ans = torch.kron(a, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        shapes = [(4,), (2, 2), (1, 2, 3), (1, 2, 3, 3)]
+        for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
+            run_test_case(a_shape, b_shape)
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_kron_non_contiguous(self, device, dtype):
+
+        def run_test_transposed(a_shape, b_shape):
+            # check for transposed case
+            a = torch.rand(a_shape, dtype=dtype, device=device).transpose(-2, -1)
+            b = torch.rand(b_shape, dtype=dtype, device=device).transpose(-2, -1)
+            self.assertFalse(a.is_contiguous())
+            self.assertFalse(b.is_contiguous())
+
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            result = torch.kron(a, b)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty(result.transpose(-2, -1).shape, dtype=dtype, device=device).transpose(-2, -1)
+            self.assertFalse(out.is_contiguous())
+            ans = torch.kron(a, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        def run_test_skipped_elements(a_shape, b_shape):
+            # check for transposed case
+            a = torch.rand(2 * a_shape[0], *a_shape[1:], dtype=dtype, device=device)[::2]
+            b = torch.rand(2 * b_shape[0], *b_shape[1:], dtype=dtype, device=device)[::2]
+            self.assertFalse(a.is_contiguous())
+            self.assertFalse(b.is_contiguous())
+
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            result = torch.kron(a, b)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
+            self.assertFalse(out.is_contiguous())
+            ans = torch.kron(a, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        shapes = [(2, 2), (2, 2, 3), (2, 2, 3, 3)]
+        for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
+            # run_test_transposed(a_shape, b_shape)
+            run_test_skipped_elements(a_shape, b_shape)
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_kron_empty(self, device, dtype):
+
+        def run_test_case(empty_shape):
+            a = torch.eye(3, dtype=dtype, device=device)
+            b = torch.empty(empty_shape, dtype=dtype, device=device)
+            result = torch.kron(a, b)
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            self.assertEqual(result, expected)
+
+            # NumPy doesn't work if the first argument is empty
+            result = torch.kron(b, a)
+            self.assertEqual(result.shape, expected.shape)
+
+        empty_shapes = [(0,), (2, 0), (1, 0, 3)]
+        for empty_shape in empty_shapes:
+            run_test_case(empty_shape)
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_kron_errors_and_warnings(self, device, dtype):
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.eye(3, dtype=dtype, device=device)
+        b = torch.ones((2, 2), dtype=dtype, device=device)
+        out = torch.empty_like(a)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.kron(a, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            torch.kron(a, b, out=out)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
@@ -1038,59 +1139,49 @@ class TestLinalg(TestCase):
             torch.linalg.tensorsolve(a, b, out=out)
 
     def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
-        def compare_with_numpy_bin_op(torch_fn, np_fn, x, y):
-            y_np = y.cpu().numpy()
-
-            # `compare_with_numpy` takes care of moving `x` to correct device for calling np_fn.
-            self.compare_with_numpy(lambda inp: torch_fn(inp, y), lambda inp: np_fn(inp, y_np), x)
+        def check(x, y):
+            # Compare with numpy
+            res = torch_fn(x, y)
+            ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
+            self.assertEqual(res.cpu(), ref)
 
             # Test out variant
-            ref = torch_fn(x, y)
-            out = torch.zeros_like(ref)
+            out = torch.empty_like(res)
             torch_fn(x, y, out=out)
-            self.assertEqual(ref, out)
+            self.assertEqual(out, res)
 
-        # Use this tensor for out variant tests.
-        out = torch.randn((), dtype=dtype, device=device)
+        # Empty
+        x = torch.tensor([], dtype=dtype, device=device)
+        y = torch.tensor([], dtype=dtype, device=device)
+        check(x, y)
 
-        def compare_out_variant(torch_fn, x, y):
-            torch_fn(v1, v2, out=out)
-            self.assertEqual(torch_fn(v1, v2), out)
+        # Contiguous
+        x = torch.randn(10, dtype=dtype, device=device)
+        y = torch.randn(10, dtype=dtype, device=device)
+        check(x, y)
 
-        for _ in range(10):
-            numel = randint(10, 1000)
-            v1 = torch.randn(numel, dtype=dtype, device=device)
-            v2 = torch.randn(numel, dtype=dtype, device=device)
-            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v2)
-            compare_out_variant(torch_fn, v1, v2)
+        # 0 strided
+        y = torch.randn(1, dtype=dtype, device=device).expand(10)
+        check(x, y)
 
-            # Test 0-strided
-            v3 = torch.randn(1, dtype=dtype, device=device).expand(numel)
-            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v3)
-            compare_out_variant(torch_fn, v1, v3)
+        # 2 strided
+        check(x[::2], y[::2])
 
-            compare_with_numpy_bin_op(torch_fn, np_fn, v3, v1)
-            compare_out_variant(torch_fn, v3, v1)
-
-            # Test stride greater than 1
-            v4 = torch.randn(numel, numel, dtype=dtype, device=device)[:, numel - 1]
-            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v4)
-            compare_out_variant(torch_fn, v1, v4)
-
-            compare_with_numpy_bin_op(torch_fn, np_fn, v4, v1)
-            compare_out_variant(torch_fn, v4, v1)
-
+    @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_dot_vs_numpy(self, device, dtype):
         self._test_dot_vdot_vs_numpy(device, dtype, torch.dot, np.dot)
 
+    @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_vdot_vs_numpy(self, device, dtype):
         self._test_dot_vdot_vs_numpy(device, dtype, torch.vdot, np.vdot)
 
     def _test_dot_vdot_invalid_args(self, device, torch_fn, complex_dtypes=False):
+        def check(x, y, regex):
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch_fn(x, y)
+
         if complex_dtypes:
             x = torch.randn(1, dtype=torch.cfloat, device=device)
             y = torch.randn(3, dtype=torch.cdouble, device=device)
@@ -1098,24 +1189,13 @@ class TestLinalg(TestCase):
             x = torch.randn(1, dtype=torch.float, device=device)
             y = torch.randn(3, dtype=torch.double, device=device)
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    'dot : expected both vectors to have same dtype'):
-            torch_fn(x, y)
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    '1D tensors expected'):
-            torch_fn(x.reshape(1, 1), y)
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    'inconsistent tensor size'):
-            torch_fn(x.expand(9), y.to(x.dtype))
+        check(x, y, 'dot : expected both vectors to have same dtype')
+        check(x.reshape(1, 1), y, '1D tensors expected')
+        check(x.expand(9), y.to(x.dtype), 'inconsistent tensor size')
 
         if self.device_type != 'cpu':
             x_cpu = x.expand(3).cpu()
-
-            with self.assertRaisesRegex(RuntimeError,
-                                        'expected all tensors to be on the same device'):
-                torch_fn(x_cpu, y.to(x.dtype))
+            check(x_cpu, y.to(x.dtype), 'expected all tensors to be on the same device')
 
     @onlyOnCPUAndCUDA
     def test_vdot_invalid_args(self, device):
