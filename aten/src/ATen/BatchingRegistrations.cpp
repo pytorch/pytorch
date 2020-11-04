@@ -608,18 +608,33 @@ Tensor pow_scalar_Tensor_batching_rule(Scalar other, const Tensor& self) {
 Tensor clone_batching_rule(const Tensor& self, optional<MemoryFormat> memory_format) {
   // Memory format support is a little tricky because vmap is allowed to move
   // around batch dimensions and some memory formats are rank-dependent.
-  // One ambiguity that we will need to resolve is:
-  // - does cloning with contiguous format mean that the non-batch dims become
-  //   contiguous, or that the tensor with the batch dims becomes contiguous? e.g.
-  //   vmap(lambda x: x.clone(torch.contiguous_format), in_dims=1)(torch.rand(3, B0, 5))
   // Another weird case is:
   // - a tensor with MemoryFormat::ChannelsLast MUST have 4 dimensions. Do we
   //   allow the user to clone a Tensor with 3 logical dimensions and 1 batch
   //   dim into a ChannelsLast Tensor? What about a Tensor with 3 logical dims
   //   and N>1 batch dims?
-  TORCH_CHECK(!memory_format.has_value() || memory_format == MemoryFormat::Preserve,
-      "NYI: Tensor.clone(memory_format) with memory_format not equal to "
-      "torch.preserve_format (got ", *memory_format, ")");
+  TORCH_CHECK(!memory_format.has_value() || memory_format == MemoryFormat::Preserve
+      || memory_format == MemoryFormat::Contiguous,
+      "NYI: Tensor.clone(memory_format) inside vmap is only supported with ",
+      "memory_format torch.preserve_format or torch.contiguous_format (got ",
+      *memory_format, ")");
+
+  if (memory_format == MemoryFormat::Contiguous) {
+    // There is an ambiguity here when the batch dims are not at the front of
+    // the tensor.
+    // >>> x = torch.randn(3, B0, 5)
+    // >>> y = vmap(lambda x: x.clone(torch.contiguous_format), in_dims=1, out_dims=0)(x)
+    // >>> y[0].is_contiguous()
+    // ???
+    // Should we make the whole tensor contiguous, or should we
+    // make the non-batch dims contiguous? We've chosen the latter because
+    // philosophically vmap hides the batch dims and operates on a per-sample level.
+    auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+    auto output_physical = at::clone(physical_view.tensor(), memory_format);
+    return physical_view.newLogicalFromPhysical(output_physical);
+  }
+
+  TORCH_INTERNAL_ASSERT(!memory_format.has_value() || memory_format == MemoryFormat::Preserve);
   auto* self_batched = unsafeGetBatchedImpl(self);
   auto output_physical = at::clone(self_batched->value(), memory_format);
   auto old_bdims = self_batched->bdims();

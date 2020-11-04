@@ -1001,13 +1001,30 @@ class TestVmapOperators(Namespace.TestVmapBase):
             self._test_unary(op, getter, 'cpu')
 
     def test_clone(self):
+        # Some basic tests
         self._test_unary(lambda x: x.clone(), TensorFactory.randn, 'cpu')
-        self._test_unary(lambda x: x.clone(memory_format=torch.preserve_format), TensorFactory.randn, 'cpu')
+        self._test_unary(lambda x: x.clone(memory_format=torch.preserve_format),
+                         TensorFactory.randn, 'cpu')
+        self._test_unary(lambda x: x.clone(memory_format=torch.contiguous_format),
+                         TensorFactory.randn, 'cpu')
 
-        B0 = 3
-        msg = r'NYI: Tensor.clone\(memory_format\) with memory_format not equal to'
-        with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(lambda x: x.clone(memory_format=torch.contiguous_format))(torch.randn(B0))
+        # Test that the per-examples are contiguous when using torch.contiguous_format
+        def clone_contiguous(x):
+            return x.clone(memory_format=torch.contiguous_format)
+
+        B0, B1 = 3, 5
+        x = torch.randn(2, B0, 7)
+        y = vmap(clone_contiguous, in_dims=1, out_dims=1)(x)
+        self.assertTrue(y.movedim(1, 0).is_contiguous())
+        self.assertTrue(y[:, 0, :].is_contiguous())
+
+        x = torch.randn(2, B0, 7, B1)
+        y = vmap(vmap(clone_contiguous, in_dims=2), in_dims=1)(x)
+        self.assertTrue(y.is_contiguous())
+        self.assertTrue(y[0][0].is_contiguous())
+
+
+        msg = r'only supported with memory_format torch.preserve_format or torch.contiguous_format'
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(lambda x: x.clone(memory_format=torch.channels_last))(torch.randn(B0))
         with self.assertRaisesRegex(RuntimeError, msg):
