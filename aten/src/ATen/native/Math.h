@@ -1091,6 +1091,16 @@ c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
+template <>
+c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+  return calc_igammac<float>(float(a), float(x));
+}
+
+template <>
+c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+  return calc_igammac<float>(float(a), float(x));
+}
+
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
 
 template <typename T>
