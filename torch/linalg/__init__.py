@@ -14,6 +14,39 @@ linalg.det(input) -> Tensor
 Alias of :func:`torch.det`.
 """)
 
+matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
+matrix_rank(input, tol=None, hermitian=False) -> Tensor
+
+Returns the numerical rank of a 2-D tensor. The method to compute the
+matrix rank is done using SVD by default. If :attr:`hermitian` is ``True``,
+then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+and the computation of the rank is done by obtaining the eigenvalues.
+
+:attr:`tol` is the threshold below which the singular values (or the eigenvalues
+when :attr:`hermitian` is ``True``) are considered to be 0. If :attr:`tol` is not
+specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
+singular values (or the eigenvalues when :attr:`hermitian` is ``True``), and ``eps``
+is the epsilon value for the datatype of :attr:`input`.
+
+Supports real-valued and complex-valued input.
+
+Args:
+    input (Tensor): the input 2-D tensor
+    tol (float, optional): the tolerance value. Default: ``None``
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian.
+                               Default: ``False``
+
+Example::
+
+    >>> a = torch.eye(10)
+    >>> torch.linalg.matrix_rank(a)
+    tensor(10)
+    >>> b = torch.eye(10)
+    >>> b[0, 0] = 0
+    >>> torch.linalg.matrix_rank(b)
+    tensor(9)
+""")
+
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
