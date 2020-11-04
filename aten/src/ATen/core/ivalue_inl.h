@@ -10,9 +10,11 @@
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
 #include <c10/core/Scalar.h>
+#include <c10/core/Stream.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/hash.h>
 
 namespace torch {
 namespace jit {
@@ -84,6 +86,14 @@ inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() const& {
   AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return toIntrusivePtr<c10::RRefInterface>();
 }
+inline c10::intrusive_ptr<ivalue::ComplexHolder> IValue::toComplexDouble() && {
+  AT_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
+  return moveToIntrusivePtr<ivalue::ComplexHolder>();
+}
+inline c10::intrusive_ptr<ivalue::ComplexHolder> IValue::toComplexDouble() const& {
+  AT_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
+  return toIntrusivePtr<ivalue::ComplexHolder>();
+}
 inline c10::intrusive_ptr<at::Quantizer> IValue::toQuantizer() && {
   AT_ASSERT(isQuantizer(), "Expected Quantizer but got ", tagKind());
   return moveToIntrusivePtr<at::Quantizer>();
@@ -138,7 +148,7 @@ inline at::Tensor IValue::toTensor() const& {
 inline c10::Stream IValue::toStream() && {
   return c10::Stream::unpack(payload.as_int);
 }
-inline c10::Stream IValue::toStream() const & {
+inline c10::Stream IValue::toStream() const& {
   return c10::Stream::unpack(payload.as_int);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
@@ -238,6 +248,10 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return std::move(elements_);
   }
   std::shared_ptr<TupleType> type() const;
+
+  static size_t hash(const Tuple& t) {
+    return c10::get_hash(t.elements());
+  }
 
   CAFFE2_API friend bool operator==(
       const ivalue::Tuple& lhs,
@@ -410,6 +424,13 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         std::move(callback)));
     return fut;
   }
+
+  // Since this file cannot import CUDA depedency, the type of the seocond arg
+  // in the callback is c10::Stream instead of at::cuda::CUDAStream, and
+  // CUDAStream is constructed on the fly. The default implementation
+  // is a no-op, since it does not deal with any CUDA streams.
+  virtual void setRecordStreamCallback(
+      std::function<void(const at::IValue&, const c10::Stream&)> record_stream_cb) {}
 
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessage() {
@@ -632,6 +653,11 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
   IValue value_;
 };
 
+struct ivalue::ComplexHolder : c10::intrusive_ptr_target {
+  public:
+    ComplexHolder(c10::complex<double> c) : val(c) {}
+    c10::complex<double> val;
+}
 #undef TORCH_FORALL_TAGS
 
 namespace detail {
@@ -669,7 +695,7 @@ DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(c10::Stream, toStream)
 DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)
-DEFINE_TO(c10::complex<double>, toComplexDouble)
+DEFINE_TO(c10::intrusive_ptr<ivalue::ComplexHolder>, toComplexDouble)
 DEFINE_TO(unsigned char, toInt)
 DEFINE_TO(signed char, toInt)
 DEFINE_TO(unsigned short, toInt)
@@ -686,7 +712,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
-DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
+DEFINE_TO(c10::List<ivalue::ComplexHolder>>, toComplexDoubleList)
 DEFINE_TO(c10::List<bool>, toBoolList)
 DEFINE_TO(c10::List<at::Tensor>, toTensorList)
 DEFINE_TO(c10::impl::GenericList, toList)
@@ -913,18 +939,6 @@ inline std::vector<double> IValue::toDoubleVector() const {
   return createVectorFromList<double>(
       static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
-inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() && {
-  AT_ASSERT(isDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
-  return c10::List<c10::complex<double>>(moveToIntrusivePtr<c10::detail::ListImpl>());
-}
-inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() const & {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
-  return c10::List<c10::complex<double>>(toIntrusivePtr<c10::detail::ListImpl>());
-}
-inline std::vector<c10::complex<double>> IValue::toComplexDoubleVector() const {
-  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
-  return createVectorFromList<c10::complex<double>>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
-}
 inline c10::List<bool> IValue::toBoolList() && {
   AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
   return c10::List<bool>(moveToIntrusivePtr<c10::detail::ListImpl>());
@@ -1116,6 +1130,11 @@ inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
   payload.as_intrusive_ptr = v.release();
 }
 
+inline IValue::IValue(c10::intrusive_ptr<ivalue::ComplexHolder> v)
+    : tag(Tag::ComplexDouble), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+
 inline const std::string& IValue::toStringRef() const {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
   return static_cast<const c10::ivalue::ConstantString*>(
@@ -1194,8 +1213,6 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
     return this->toInt() == rhs.toInt();
   } else if (this->isDouble() && rhs.isDouble()) {
     return this->toDouble() == rhs.toDouble();
-  } else if (this->isComplexDouble() && rhs.isComplexDouble()) {
-    return this->toComplexDouble() == rhs.toComplexDouble();
   } else if (this->isString() && rhs.isString()) {
     return this->toStringRef() == rhs.toStringRef();
   } else {

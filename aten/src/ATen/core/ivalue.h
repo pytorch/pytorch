@@ -17,6 +17,7 @@ struct Module;
 } // namespace jit
 } // namespace torch
 namespace c10 {
+
 template <class Key, class Value>
 class Dict;
 template <class T>
@@ -50,6 +51,7 @@ struct GenericDict;
 struct Object;
 struct PyObjectHolder;
 struct EnumHolder;
+struct ComplexHolder;
 } // namespace ivalue
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
@@ -207,6 +209,24 @@ struct CAFFE2_API IValue final {
    */
   bool is(const IValue& rhs) const;
 
+   /**
+   * Hashing for IValues. Returns an IValue-boxed int.
+   *
+   * Some notes:
+   * - Like eager, Tensors are hashed by looking at the pointer. This is not
+   *   strictly correct because two value-equal tensors with different tensor
+   *   pointers will hash differently, but we choose to reproduce the eager
+   *   semantics.
+   * - Hashing is not defined on all built-in IValue types (e.g. list and
+   *   dict), following Python. Calling `hash()` on these types will throw.
+   */
+  IValue hash() const {
+    return (int64_t)IValue::hash(*this);
+  }
+  // This is defined because `c10::hash` dispatches to a function of this
+  // signature. See the member function `hash()`.
+  static size_t hash(const IValue& iv);
+
   /**
    * @private [doxygen private]
    * [container equality]
@@ -363,17 +383,11 @@ struct CAFFE2_API IValue final {
     return payload.as_double;
   }
 
- // ComplexDouble
-  template<typename T>
-  IValue(c10::complex<T> c)
-  : tag(Tag::ComplexDouble), is_intrusive_ptr(false) {
-    payload.as_complexdouble = c;
-  }
+  // ComplexDouble
+  IValue(c10::intrusive_ptr<ivalue::ComplexHolder> c);
   bool isComplexDouble() const { return Tag::ComplexDouble == tag; }
-  c10::complex<double> toComplexDouble() const {
-    AT_ASSERT(isComplexDouble());
-    return payload.as_complexdouble;
-  }
+  c10::intrusive_ptr<ivalue::ComplexHolder> toComplexDouble() &&;
+  c10::intrusive_ptr<ivalue::ComplexHolder> toComplexDouble() const&;
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
@@ -459,12 +473,6 @@ struct CAFFE2_API IValue final {
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const&;
   std::vector<double> toDoubleVector() const;
-
-  // ComplexDoubleList
-  bool isComplexDoubleList() const;
-  c10::List<c10::complex<double>> toComplexDoubleList() &&;
-  c10::List<c10::complex<double>> toComplexDoubleList() const &;
-  std::vector<c10::complex<double>> toComplexDoubleVector() const;
 
   // BoolList
   bool isBoolList() const;
@@ -569,26 +577,26 @@ struct CAFFE2_API IValue final {
     return i;
   }
 
-  // Scalar, which gets encoded as either an Int or a Double
+  // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(at::Scalar s) : IValue() {
     if (s.isFloatingPoint()) {
       *this = s.toDouble();
     } else if (s.isComplex()) {
-      *this = s.toComplexDouble();
+      *this = ivalue::ComplexHolder(s.toComplexDouble());
     } else {
       *this = s.toLong();
     }
   }
   bool isScalar() const {
-    return isComplexDouble() || isDouble() || isInt();
+    return isDouble() || isInt() || isComplexDouble();
   }
   at::Scalar toScalar() const {
     if (isDouble())
       return toDouble();
-    else if(isComplexDouble())
-      return toComplexDouble();
     else if (isInt())
       return toInt();
+    else if (isComplexDouble())
+      return (*toComplexDouble()).val;
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -818,7 +826,6 @@ struct CAFFE2_API IValue final {
     int64_t as_int;
     double as_double;
     bool as_bool;
-    c10::complex<double> as_complexdouble = c10::complex<double>(0, 0);
     c10::intrusive_ptr_target* as_intrusive_ptr;
     struct {
       DeviceType type;

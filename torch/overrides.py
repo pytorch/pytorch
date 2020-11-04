@@ -156,8 +156,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_deterministic,
         torch.set_deterministic,
         torch.unify_type_list,
-        torch.valgrind_supported_platform,
-        torch.valgrind_toggle,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -211,7 +209,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.arccos: lambda input, out=None: -1,
         torch.acosh: lambda input, out=None: -1,
         torch.arccosh: lambda input, out=None: -1,
-        torch.add_relu: lambda input, other, out=None: -1,
         torch.add: lambda input, other, out=None: -1,
         torch.addbmm: lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
         torch.addcdiv: lambda input, tensor1, tensor2, value=1, out=None: -1,
@@ -282,6 +279,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.clip: lambda input, min=None, max=None, out=None: -1,
         torch.clamp_min: lambda input, min, out=None: -1,
         torch.clamp_max: lambda input, max, out=None: -1,
+        torch.column_stack: lambda tensors, out=None: -1,
         torch.clone: lambda input: -1,
         torch.combinations: lambda input, r=2, with_replacement=False: -1,
         torch.complex: lambda real, imag: -1,
@@ -391,6 +389,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hstack: lambda tensors, out=None: -1,
         torch.hypot: lambda input, other, out=None: -1,
         torch.ifft: lambda input, signal_ndim, normalized=False: -1,
+        torch.igamma: lambda input, other, out=None: -1,
         torch.imag: lambda input, out=None: -1,
         torch.index_add: lambda input, dim, index, source: -1,
         torch.index_copy: lambda input, dim, index, source: -1,
@@ -418,6 +417,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.istft: (lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True,
                       normalized=False, onesided=None, length=None, return_complex=False: -1),
         torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
+        torch.kron: lambda input, other: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
         torch.lcm: lambda input, other, out=None: -1,
@@ -696,6 +696,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.roll: lambda input, shifts, dims=None: -1,
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
+        torch.row_stack: lambda tensors, out=None: -1,  # alias for torch.vstack
         torch.rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1,
         torch.rsqrt: lambda input, out=None: -1,
@@ -740,7 +741,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.take: lambda input, index: -1,
         torch.tan: lambda input, out=None: -1,
         torch.tanh: lambda input, out=None: -1,
-        torch.tensordot: lambda a, b, dims=2: -1,
+        torch.linalg.tensorsolve: lambda a, b, dims=None: -1,
+        torch.tensordot: lambda a, b, dims=2, out=None: -1,
         torch.tensor_split: lambda input, indices_or_sections, dim=0: -1,
         torch.threshold: lambda input, threshold, value, inplace=False: -1,
         torch.topk: lambda input, k, dim=-1, descending=False, out=None: -1,
@@ -817,6 +819,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,
+        Tensor.is_vulkan.__get__: lambda self: -1,
         Tensor.layout.__get__: lambda self: -1,
         Tensor.name.__get__: lambda self: -1,
         Tensor.names.__get__: lambda self: -1,
@@ -842,7 +845,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.apply_: lambda self, callable: -1,
         Tensor.as_strided: lambda self, size, stride: -1,
         Tensor.as_strided_: lambda self, size, stride: -1,
-        Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False: -1,
+        Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False, inputs=None: -1,
         Tensor.bfloat16: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.bool: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.byte: lambda self, memory_format=torch.preserve_format: -1,
@@ -1073,7 +1076,7 @@ def handle_torch_function(
     func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
     raise TypeError("no implementation found for '{}' on types that implement "
                     '__torch_function__: {}'
-                    .format(func_name, list(map(type, overloaded_args))))
+                    .format(func_name, [type(arg) for arg in overloaded_args]))
 
 def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     """Check for __torch_function__ implementations in the elements of an iterable

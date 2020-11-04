@@ -30,6 +30,11 @@
 #endif
 
 #include <ATen/core/function_schema.h>
+#include <c10/core/Stream.h>
+#ifdef USE_C10D_NCCL
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
+#endif
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -113,6 +118,34 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // Future owns a reference to the py::function in its callback
     // vector, but Future does not acquire GIL on destruction.
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+
+#ifdef USE_C10D_NCCL
+    // This callback is only used by NCCL backend, so skip this code on other
+    // backends and avoid importing cuda dependency.
+    // By default, assume that the input value is or can be casted into a tensor
+    // vector that has exactly one tensor.
+    auto record_stream_cb = [](const at::IValue& value,
+                               const c10::Stream& stream) {
+      if (value.isTensorList() || value.isPyObject()) {
+        std::vector<at::Tensor> tensors;
+        if (value.isTensorList()) {
+          tensors = value.toTensorVector();
+        } else {
+          pybind11::gil_scoped_acquire gil;
+          py::object obj = torch::jit::toPyObject(value);
+          tensors = torch::jit::toIValue(
+                        obj, c10::ListType::create(c10::TensorType::get()))
+                        .toTensorVector();
+        }
+        TORCH_INTERNAL_ASSERT(tensors.size() == 1, "expected exactly 1 tensor");
+        at::cuda::CUDAStream cuda_stream(stream);
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensors[0].storage().data_ptr(), cuda_stream);
+      }
+    };
+    fut->setRecordStreamCallback(record_stream_cb);
+#endif
+
     return std::make_shared<jit::PythonFutureWrapper>(fut->then(
         // Capture a copy of the ivalue::Future instead of the `this` pointer
         // because the PythonFutureWrapper object could have been deleted

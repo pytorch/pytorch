@@ -14,6 +14,7 @@ using c10::CapsuleType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
+using c10::ComplexDoubleType;
 using c10::FutureType;
 using c10::GeneratorType;
 using c10::IntType;
@@ -53,6 +54,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
+      {"complex", ComplexDoubleType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},

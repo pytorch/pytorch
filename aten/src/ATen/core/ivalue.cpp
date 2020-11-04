@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/hash.h>
 #include <cmath>
 
 namespace c10 {
@@ -263,8 +264,6 @@ IValue IValue::equals(const IValue& rhs) const {
       return lhs.toTensor().eq(rhs.toTensor());
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
-    case Tag::ComplexDouble:
-      return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
     case Tag::Bool:
@@ -289,6 +288,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
+    case Tag::ComplexDouble:
       return ptrEqual(lhs, rhs);
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
@@ -296,6 +296,47 @@ IValue IValue::equals(const IValue& rhs) const {
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
+  }
+  // the above switch should be exhaustive
+  TORCH_INTERNAL_ASSERT(false, "we should never reach here")
+}
+
+size_t IValue::hash(const IValue& v) {
+  switch (v.tag) {
+    case Tag::None:
+      return 0;
+    case Tag::Bool:
+      return c10::get_hash(v.payload.as_bool);
+    case Tag::Double:
+      return c10::get_hash(v.payload.as_double);
+    case Tag::Tensor:
+      // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
+      // the tensor to emulate it
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Int:
+      return c10::get_hash(v.payload.as_int);
+    case Tag::String:
+      return c10::get_hash(v.toStringRef());
+    case Tag::Tuple:
+      return c10::get_hash(*v.toTuple());
+    case Tag::Device:
+      return c10::get_hash(v.toDevice());
+    case Tag::GenericDict:
+    case Tag::GenericList:
+    case Tag::Blob:
+    case Tag::Future:
+    case Tag::RRef:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Capsule:
+    case Tag::Generator:
+    case Tag::Quantizer:
+    case TaG::ComplexDouble:
+    case Tag::Enum:
+    case Tag::Stream:
+    case Tag::Uninitialized:
+      throw std::runtime_error(
+          "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")
@@ -618,11 +659,13 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << v.toDouble()
         << std::setprecision(orig_prec);
     } case IValue::Tag::ComplexDouble: {
-      c10::complex<double> d = v.toComplexDouble();
+      c10::complex<double> d = (*v).val.toComplexDouble();
       IValue real(d.real()), imag(d.imag());
       auto sign = "";
       if (d.imag() >= 0) {
         sign = "+";
+      } else {
+        sign = "-";
       }
       return out << real << sign << imag << "j";
     } case IValue::Tag::Int:

@@ -4,6 +4,7 @@ import linecache
 from typing import Type, Dict, List, Any, Union
 from .graph import Graph
 import copy
+import math
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -28,7 +29,7 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {}
+    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan}
     exec_with_source(src, gbls)
     return gbls['forward']
 

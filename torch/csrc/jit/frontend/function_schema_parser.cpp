@@ -247,6 +247,7 @@ struct SchemaParser {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexDoubleTyoe:
         return parseSingleConstant(arg_type->kind());
         break;
       case TypeKind::DeviceObjType: {

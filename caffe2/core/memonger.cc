@@ -6,6 +6,19 @@
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
+
+void run_schema_check(const NetDef& net) {
+  for (auto& op : net.op()) {
+    auto* schema = OpSchemaRegistry::Schema(op.type());
+    if (schema) {
+      CAFFE_ENFORCE(
+          schema->Verify(op),
+          "Operator def did not pass schema checking: ",
+          ProtoDebugString(op));
+    }
+  }
+}
+
 namespace memonger {
 
 NetDef optimize_inference_net(
@@ -16,6 +29,10 @@ NetDef optimize_inference_net(
     return net;
   }
 
+  // Memonger modifies the graph. Do an early schema check here to make sure
+  // the operators are valid
+  run_schema_check(net);
+
   std::vector<OperatorDef> ops;
   for (auto& op : net.op()) {
     if (op.type() == "RecurrentNetwork") {
@@ -23,25 +40,6 @@ NetDef optimize_inference_net(
       // to deal with the forward/backward links etc.
       LOG(INFO) << "Memonger does not support RecurrentNetwork yet";
       return net;
-    }
-
-    // Check for in-place ops
-    auto* schema = OpSchemaRegistry::Schema(op.type());
-    if (schema) {
-      // Memonger modifies the graph. Do an early schema check here to make sure
-      // the operators are valid
-      CAFFE_ENFORCE(
-          schema->Verify(op),
-          "Operator def did not pass schema checking: ",
-          ProtoDebugString(op));
-      for (int in_idx = 0; in_idx < op.input_size(); in_idx++) {
-        for (int out_idx = 0; out_idx < op.output_size(); out_idx++) {
-          if (schema->inplace_enforced(in_idx, out_idx)) {
-            LOG(INFO) << "Memonger does not support in-place ops yet";
-            return net;
-          }
-        }
-      }
     }
     ops.push_back(op);
   }
