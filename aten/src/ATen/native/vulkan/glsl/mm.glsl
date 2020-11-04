@@ -17,7 +17,7 @@ void main() {
   const int K = textureSize(uM1, 0).x;
 
   if (all(lessThan(pos, imageSize(uOutput)))) {
-    vec4 sum = vec4(0);
+    vec4 sum = vec4();
 
     for (int k = 0; k < K; ++k) {
       sum = fma(

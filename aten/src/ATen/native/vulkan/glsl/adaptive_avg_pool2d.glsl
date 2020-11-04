@@ -20,11 +20,11 @@ void main() {
   if (all(lessThan(pos.xy, size))) {
     const vec2 ipos = pos.xy * stride;
 
-    const ivec2 start = ivec2(floor(ipos));
+    const ivec2 start = ivec2(ipos);
     const ivec2 end = ivec2(ceil(ipos + stride));
     const ivec2 range = end - start;
 
-    vec4 sum = vec4(0);
+    vec4 sum = vec4();
 
     for (int y = start.y; y < end.y; ++y) {
       for (int x = start.x; x < end.x; ++x) {
