@@ -18034,7 +18034,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
                 b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
                 yield b1, b2
-        
+
         for (b1, b2), perm3 in product(generate_inputs(), permutations((0, 1, 2))):
             res1 = torch.bmm(b1, b2)
             res2 = torch.full((num_batches, M, O), math.nan, dtype=dtype, device=device) \
