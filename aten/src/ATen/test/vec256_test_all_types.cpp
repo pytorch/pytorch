@@ -1000,7 +1000,7 @@ namespace {
     // come from vec256_test.cpp, these tests are not consistent with the generic framework and can not be migrated
     // at the moment. We temporarily put these tests here and will migrate them into the generic framework in the
     // next phase.
-    using namespace at::vec256;
+    /*using namespace at::vec256;
     bool check_equal(const at::Tensor& a, const at::Tensor& b) {
       return (a.equal(b));
     }
@@ -1321,13 +1321,13 @@ namespace {
     //TranscedentalTester(Impl, frac)
     TranscedentalTester2(fmod)
 
-    /*TEST(Vec256TestFloat, frac) {
-      TranscedentalHelper_frac();
-    }*/
+    //TEST(Vec256TestFloat, frac) {
+      //TranscedentalHelper_frac();
+    }
 
     TEST(Vec256TestFloat, fmod) {
       TranscedentalHelper_fmod();
-    }
+    }*/
 
     // ********************************* vec256_test.cpp end*****************************************************
 
