@@ -796,13 +796,14 @@ class TestFX(JitTestCase):
             def forward(self, x):
                 return torch.relu(self.lin2(self.lin1(x)))
 
+        bs = 1
+        input = torch.rand(bs, 256)
         m = MyModel()
-        cost, profiling_model = estimate_cpu_cost(m, [torch.rand(50, 256)])
+        cost, profiling_model = estimate_cpu_cost(m, [input])
         self.assertTrue(cost.ops > 0)
         self.assertTrue(cost.bytes_read > 0)
         self.assertTrue(cost.bytes_written > 0)
 
-        input = torch.rand(1024, 256)
         for _ in range(5):
             profiled_output = profiling_model(input)
         self.assertEqual(profiled_output, m(input))
