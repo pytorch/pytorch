@@ -7449,6 +7449,54 @@
     CPU: foreach_tensor_frac_slow_
     CUDA: foreach_tensor_frac_cuda_
 
+- func: _foreach_reciprocal(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_reciprocal_slow
+    CUDA: foreach_tensor_reciprocal_cuda
+
+- func: _foreach_reciprocal_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_reciprocal_slow_
+    CUDA: foreach_tensor_reciprocal_cuda_
+
+- func: _foreach_sigmoid(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sigmoid_slow
+    CUDA: foreach_tensor_sigmoid_cuda
+
+- func: _foreach_sigmoid_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sigmoid_slow_
+    CUDA: foreach_tensor_sigmoid_cuda_
+
+- func: _foreach_trunc(Tensor[] tensors) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_trunc_slow
+    CUDA: foreach_tensor_trunc_cuda
+
+- func: _foreach_trunc_(Tensor(a!)[] self) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_trunc_slow_
+    CUDA: foreach_tensor_trunc_cuda_
+
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   use_c10_dispatcher: full
   device_guard: False

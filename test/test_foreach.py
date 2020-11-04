@@ -185,6 +185,9 @@ class TestForeach(TestCase):
             (torch._foreach_log1p, torch._foreach_log1p_, torch.log1p),
             (torch._foreach_round, torch._foreach_round_, torch.round),
             (torch._foreach_frac, torch._foreach_frac_, torch.frac),
+            (torch._foreach_reciprocal, torch._foreach_reciprocal_, torch.reciprocal),
+            (torch._foreach_sigmoid, torch._foreach_sigmoid_, torch.sigmoid),
+            (torch._foreach_trunc, torch._foreach_trunc_, torch.trunc),
         ]
 
         for fe_op, fe_op_, torch_op in ops:
