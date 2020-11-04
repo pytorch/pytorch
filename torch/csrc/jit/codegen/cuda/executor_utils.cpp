@@ -242,7 +242,7 @@ kir::ExpressionEvaluator bindKernelInputs(
   return expr_eval;
 }
 
-StatefulExpressionEvaluator bindFusionInputs(
+ExpressionEvaluator bindFusionInputs(
     const at::ArrayRef<IValue>& aten_inputs,
     Fusion* fusion) {
   FUSER_PERF_SCOPE("bindFusionInputs");
@@ -251,7 +251,7 @@ StatefulExpressionEvaluator bindFusionInputs(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs no longer match.");
 
-  StatefulExpressionEvaluator evaluator(fusion);
+  ExpressionEvaluator evaluator(fusion);
   auto inputs = fusion->inputs();
 
   // This should probably move to EvaluationContext as we may want to bind
@@ -271,14 +271,28 @@ StatefulExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        evaluator.safeBind(root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
+        const auto extent = root_dom[dim]->extent();
+        const auto value = aten_tensor.sizes()[dim];
+        const auto prev_value = evaluator.evaluate(extent);
+        if (prev_value.has_value()) {
+          TORCH_CHECK(
+              *prev_value == value,
+              "Attempting to bind ",
+              extent,
+              " to ",
+              value,
+              "but it's already set to ",
+              *prev_value);
+        } else {
+          evaluator.bind(extent, value);
+        }
       }
     } else if (
         inputs[i]->getValType().value() == ValType::Scalar &&
         inputs[i]->getDataType().value() == DataType::Int) {
       TORCH_INTERNAL_ASSERT(
           aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
-      evaluator.safeBind(inputs[i], aten_inputs[i].toInt());
+      evaluator.bind(inputs[i], aten_inputs[i].toInt());
     }
   }
   return evaluator;

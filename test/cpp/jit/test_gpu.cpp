@@ -66,11 +66,11 @@ TensorView* makeConcreteTensor(
 }
 
 void checkIntValue(
-    StatefulExpressionEvaluator& evaluator,
+    ExpressionEvaluator& evaluator,
     Val* val,
     Int::ScalarType expected_value) {
   TORCH_CHECK(val->isAnInt());
-  const auto actual_value = evaluator.inferValue(val);
+  const auto actual_value = evaluator.evaluate(val);
   TORCH_CHECK(actual_value.has_value());
   TORCH_CHECK(actual_value.value() == expected_value);
 }
@@ -164,7 +164,7 @@ TEST(NVFuserTest, FusionExprEvalConstants_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  StatefulExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator(&fusion);
 
   auto* a = new Int(7);
   auto* b = new Int(3);
@@ -181,7 +181,7 @@ TEST(NVFuserTest, FusionExprEvalBindings_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  StatefulExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator(&fusion);
 
   auto* a = new Int();
   auto* b = new Int();
@@ -190,17 +190,17 @@ TEST(NVFuserTest, FusionExprEvalBindings_CUDA) {
   auto* e = new Int(0);
 
   // trying to evaluate before binding should give empty results
-  TORCH_CHECK(!evaluator.inferValue(a).has_value());
-  TORCH_CHECK(!evaluator.inferValue(d).has_value());
+  TORCH_CHECK(!evaluator.evaluate(a).has_value());
+  TORCH_CHECK(!evaluator.evaluate(d).has_value());
 
-  evaluator.safeBind(a, 7);
-  evaluator.safeBind(b, 3);
+  evaluator.bind(a, 7);
+  evaluator.bind(b, 3);
 
   // can't bind to the results of expressions
-  ASSERT_ANY_THROW(evaluator.safeBind(c, 100));
+  ASSERT_ANY_THROW(evaluator.bind(c, 100));
 
   // can't bind to concrete values
-  ASSERT_ANY_THROW(evaluator.safeBind(e, 100));
+  ASSERT_ANY_THROW(evaluator.bind(e, 100));
 
   checkIntValue(evaluator, c, 10);
   checkIntValue(evaluator, sub(a, b), 4);
@@ -209,10 +209,10 @@ TEST(NVFuserTest, FusionExprEvalBindings_CUDA) {
   checkIntValue(evaluator, d, -4);
 
   // Reset evaluation context
-  evaluator = StatefulExpressionEvaluator(&fusion);
+  evaluator = ExpressionEvaluator(&fusion);
 
-  evaluator.safeBind(a, 2);
-  evaluator.safeBind(b, 5);
+  evaluator.bind(a, 2);
+  evaluator.bind(b, 5);
 
   checkIntValue(evaluator, c, 7);
   checkIntValue(evaluator, sub(a, b), -3);
@@ -250,7 +250,7 @@ TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
   // 1. Create an evaluator
-  StatefulExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
   //
@@ -260,10 +260,10 @@ TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
   //  (ex. `tv0->getRootDomain()[0]->extent()`
   //   instead of `tv0->axis(0)->extent()`)
   //
-  evaluator.safeBind(tv0->getRootDomain()[0]->extent(), 6);
-  evaluator.safeBind(tv0->getRootDomain()[1]->extent(), 128);
-  evaluator.safeBind(tv1->getRootDomain()[0]->extent(), 6);
-  evaluator.safeBind(tv1->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv0->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv0->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv1->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv1->getRootDomain()[1]->extent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);
@@ -301,11 +301,11 @@ TEST(NVFuserTest, FusionExprEvalComplex_CUDA) {
   tv5->merge(0);
 
   // 1. Create an evaluator
-  StatefulExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  evaluator.safeBind(tv0->getRootDomain()[0]->extent(), 129);
-  evaluator.safeBind(tv0->getRootDomain()[1]->extent(), 127);
+  evaluator.bind(tv0->getRootDomain()[0]->extent(), 129);
+  evaluator.bind(tv0->getRootDomain()[1]->extent(), 127);
 
   // Evaluate and check extent values
   TORCH_CHECK(tv0->domain()->nDims() == 2);
@@ -364,13 +364,13 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   GpuLower gpulw(&fusion);
 
   // 1. Create an evaluation context
-  StatefulExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  evaluator.safeBind(tv0->getRootDomain()[0]->extent(), 6);
-  evaluator.safeBind(tv0->getRootDomain()[1]->extent(), 128);
-  evaluator.safeBind(tv1->getRootDomain()[0]->extent(), 6);
-  evaluator.safeBind(tv1->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv0->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv0->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv1->getRootDomain()[0]->extent(), 6);
+  evaluator.bind(tv1->getRootDomain()[1]->extent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);

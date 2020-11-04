@@ -43,7 +43,7 @@ kir::ExpressionEvaluator bindKernelInputs(
     kir::Kernel* kernel);
 
 //! Bind fusion input values to runtime values
-StatefulExpressionEvaluator bindFusionInputs(
+ExpressionEvaluator bindFusionInputs(
     const at::ArrayRef<IValue>& aten_inputs,
     Fusion* fusion);
 

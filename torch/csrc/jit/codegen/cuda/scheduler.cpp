@@ -318,7 +318,7 @@ TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
   int64_t red_elements = 1;
 
   for (auto id : red_tv->getRootDomain()) {
-    auto inferred_val = evaluator.inferValue(id->rawExtent());
+    auto inferred_val = evaluator.evaluate(id->rawExtent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(), "Error inferring reduction size.");
     if (id->isReduction()) {

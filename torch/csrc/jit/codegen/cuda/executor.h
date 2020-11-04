@@ -128,11 +128,6 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
  private:
   Fusion fusion_;
 
-  // TODO(kir): caching the values here is no longer needed
-  bool has_block_reductions = false;
-  bool has_grid_reductions = false;
-  bool has_block_broadcasts = false;
-
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
   executor_utils::NvrtcFunction compiled_kernel_;
