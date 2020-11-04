@@ -1989,7 +1989,8 @@ struct CAFFE2_API ClassType : public NamedType {
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module = false);
+      bool is_module = false,
+      std::string doc_string = "");
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -2101,6 +2102,13 @@ struct CAFFE2_API ClassType : public NamedType {
   // valid again.
   void unsafeRemoveAttribute(const std::string& name);
 
+  // [Internal Only] Change the type of an attribute of the ClassType,
+  // The caller is responsible to make sure the modification is safe:
+  // it is unsafe to maintain uses of the old type of the attribute,
+  // and any code that works on the attribute is now invalid.
+  // Only newly created code is valid again.
+  void unsafeChangeAttributeType(const std::string& name, TypePtr new_ty);
+
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
   size_t addOrCheckAttribute(
@@ -2175,6 +2183,9 @@ struct CAFFE2_API ClassType : public NamedType {
     return constantNames_[slot];
   }
 
+  const std::string& doc_string() const {
+    return doc_string_;
+  }
 
   IValue getConstant(const std::string& name) const;
 
@@ -2271,7 +2282,8 @@ struct CAFFE2_API ClassType : public NamedType {
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module);
+      bool is_module,
+      std::string doc_string);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -2306,6 +2318,9 @@ struct CAFFE2_API ClassType : public NamedType {
   std::vector<Property> properties_;
 
   bool isModule_ = false;
+
+  // Doc string of class.
+  std::string doc_string_ = "";
 };
 
 struct InterfaceType;
