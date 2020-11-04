@@ -11,17 +11,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [ -n "${IN_CI}" ]; then
-  # TODO move this to docker
-  pip_install unittest-xml-reporting coverage pytest
+if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+  export PYTORCH_TEST_WITH_SLOW=1
+  export PYTORCH_TEST_SKIP_FAST=1
+fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
-    export PYTORCH_TEST_WITH_SLOW=1
-    export PYTORCH_TEST_SKIP_FAST=1
-  fi
-  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-    export PYTORCH_COLLECT_COVERAGE=1
-  fi
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  export PYTORCH_COLLECT_COVERAGE=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -401,10 +397,15 @@ else
   test_distributed
   test_benchmarks
   test_rpc
-  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-    pushd test
-    echo "Generating XML coverage report"
-    time python -mcoverage xml
-    popd
-  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  pushd test
+  echo "Generating XML coverage report"
+  time python -mcoverage xml
+  popd
+  pushd build
+  echo "Generating lcov coverage report for C++ sources"
+  time lcov --capture --directory . --output-file coverage.info
+  popd
 fi
