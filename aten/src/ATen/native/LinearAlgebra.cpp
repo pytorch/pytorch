@@ -108,36 +108,55 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
 }
 
-static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
+static inline Tensor _matrix_rank_helper(const Tensor& self, bool hermitian) {
   Tensor S;
-  if (!symmetric) {
+  if (!hermitian) {
     Tensor U, V;
+    // TODO: replace self.svd with linalg_svd
     std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
   } else {
     Tensor eigvecs;
+    // TODO: replace self.symeig with linalg_eigh
     std::tie(S, eigvecs) = self.symeig(/*eigenvectors=*/false);
     S = S.abs();
   }
   return S;
 }
 
-Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
               "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
               "of floating types");
 
-  Tensor S = _matrix_rank_helper(self, symmetric);
-  return (S > tol).sum();
+  Tensor S = _matrix_rank_helper(self, hermitian);
+
+  if (tol.has_value()) {
+    double tol_value = tol.value();
+    return (S > tol_value).sum();
+  }
+  else {
+    ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    double tol_value = _get_epsilon(real_dtype) * std::max(self.size(0), self.size(1));
+    return (S > S.max().mul_(tol_value)).sum();
+  }
 }
 
-Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
-              "of floating types");
+Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", self.scalar_type());
 
-  Tensor S = _matrix_rank_helper(self, symmetric);
-  double tol = _get_epsilon(self.scalar_type()) * std::max(self.size(0), self.size(1));
-  return (S > S.max().mul_(tol)).sum();
+  Tensor result_tmp = at::linalg_matrix_rank(self, tol, hermitian);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
+Tensor matrix_rank(const Tensor& self, double tol, bool hermitian) {
+  return at::linalg_matrix_rank(self, optional<double>(tol), hermitian);
+}
+
+Tensor matrix_rank(const Tensor& self, bool hermitian) {
+  return at::linalg_matrix_rank(self, c10::nullopt, hermitian);
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
