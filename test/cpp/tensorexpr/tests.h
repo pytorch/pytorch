@@ -506,6 +506,9 @@ namespace jit {
   _(LLVMEmptyStmt)                         \
   _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
+  _(LLVMCondNoFalseBlockTest)              \
+  _(LLVMCondTest)                          \
+  _(LLVMCondNestedTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
   _(LLVMRFactorReduction)
