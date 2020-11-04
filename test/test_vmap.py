@@ -1280,14 +1280,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
             test(op, [get([3, B0, 2])], in_dims=1)
             test(vmap(op, in_dims=1), [get([3, B1, B0, 2])], in_dims=2)
 
-            # Interesting case #2: Batch dim at end of tensor
+            # Interesting case #2: Batch dim at end of tensor, success cases
             # view_as_complex requires that the dim with size 2 have stride 1
             # in order for the view to function propertly
             test(op, [get([B0, 2]).transpose(0, 1)], in_dims=1)
             test(vmap(op, in_dims=1), [get([B0, B1, 2]).movedim(1, 2)])
             test(vmap(op, in_dims=2), [get([B0, 3, B1, 2]).movedim(2, 3)])
 
-            # Interesting case #2: Batch dim at end of tensor, failure cases
+            # Interesting case #3: Batch dim at end of tensor, failure cases
             msg = "Tensor must have a last dimension with stride 1"
             with self.assertRaisesRegex(RuntimeError, msg):
                 vmap(op, in_dims=1)(get([2, B0]))
