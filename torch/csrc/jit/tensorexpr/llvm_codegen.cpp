@@ -226,8 +226,9 @@ LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
     at::Device device,
+    const std::string& kernel_func_name,
     Dtype dtype)
-    : CodeGen(stmt, args, device),
+    : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
 static void* argToPtr(
@@ -1689,7 +1690,45 @@ void LLVMCodeGenImpl::visit(const Let* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Cond* v) {
-  throw unimplemented_lowering(v);
+  // Even if true_stmt and false_stmt are nullptr,
+  // in case condition is a function call with side effect,
+  // we still evaluate it.
+  v->condition()->accept(this);
+
+  if (!v->true_stmt() && !v->false_stmt()) {
+    return;
+  }
+  assert(v->true_stmt());
+
+  llvm::Value* condition = value_;
+  llvm::Value* c = irb_.CreateICmpNE(
+      condition, llvm::ConstantInt::get(condition->getType(), 0));
+  llvm::BasicBlock* then_block =
+      llvm::BasicBlock::Create(getContext(), "then", fn_);
+  llvm::BasicBlock* else_block = nullptr;
+  if (v->false_stmt()) {
+    else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);
+  }
+  llvm::BasicBlock* end_block =
+      llvm::BasicBlock::Create(getContext(), "end", fn_);
+
+  if (else_block) {
+    irb_.CreateCondBr(c, then_block, else_block);
+  } else {
+    irb_.CreateCondBr(c, then_block, end_block);
+  }
+
+  irb_.SetInsertPoint(then_block);
+  v->true_stmt()->accept(this);
+  irb_.CreateBr(end_block);
+
+  if (else_block) {
+    irb_.SetInsertPoint(else_block);
+    v->false_stmt()->accept(this);
+    irb_.CreateBr(end_block);
+  }
+
+  irb_.SetInsertPoint(end_block);
 }
 
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {

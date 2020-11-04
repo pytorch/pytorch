@@ -12,32 +12,34 @@ layout(set = 0, binding = 2)          uniform PRECISION restrict           Block
   ivec2 kernel;
   ivec2 stride;
   ivec2 padding;
-  ivec2 dilate;
 } uBlock;
-
-#define UP_DIV(x, y) (((x) + (y)-1) / (y))
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
+
+  const ivec2 isize = textureSize(uInput, 0).xy;
   const ivec2 size = imageSize(uOutput).xy;
+  const float range = uBlock.kernel.x * uBlock.kernel.y;
 
-  if (all(lessThan(pos, size))) {
-    ivec2 s0 = pos.xy * uBlock.stride - uBlock.padding;
-    ivec2 sfxy = max(ivec2(0), (UP_DIV(-s0, uBlock.dilate)));
-    ivec2 efxy = min(uBlock.kernel, UP_DIV(uBlock.inputSize.xy - s0, uBlock.dilate));
+  if (all(lessThan(pos.xy, size))) {
+    const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
 
-    vec4 r = vec4(1.0) / float(efxy.x - sfxy.x) / float(efxy.x - sfxy.x);
-    vec4 acc = vec4(0);
+    const ivec2 start = max(ivec2(0), ipos);
+    const ivec2 end = min(ipos + uBlock.kernel, isize);
 
-    for (int kyi = sfxy.y; kyi < efxy.y; ++kyi) {
-      for (int kxi = sfxy.x; kxi < efxy.x; ++kxi) {
-        ivec2 ixy = s0 + ivec2(kxi, kyi);
-        acc += texelFetch(uInput, ivec3(ixy.x, ixy.y, pos.z), 0);
+    vec4 sum = vec4(0);
+
+    for (int y = start.y; y < end.y; ++y) {
+      for (int x = start.x; x < end.x; ++x) {
+        sum += texelFetch(uInput, ivec3(x, y, pos.z), 0);
       }
     }
 
-    imageStore(uOutput, pos, r * acc);
+    imageStore(
+        uOutput,
+        pos,
+        sum / range);
   }
 }
