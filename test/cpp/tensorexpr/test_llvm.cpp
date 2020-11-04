@@ -278,6 +278,106 @@ void testLLVMIfThenElseTest() {
   ASSERT_EQ(b_buffer[0], 42);
 }
 
+// if (x < 10) x = x + 1
+void testLLVMCondNoFalseBlockTest() {
+  KernelScope kernel_scope;
+
+  Placeholder x(BufHandle("X", {1}, kInt));
+  auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
+  auto cond = Cond::make(cmp, x.store({0}, x.load(0) + 1), nullptr);
+
+  for (int32_t x_value : {0, 10, 20}) {
+    std::vector<int32_t> x_buffer = {x_value};
+    std::vector<void*> args({x_buffer.data()});
+    LLVMCodeGen cg(cond, {x});
+    ASSERT_EQ(cg.value<int>(args), 0);
+    if (x_value < 10) {
+      ASSERT_EQ(x_buffer[0], x_value + 1);
+    } else {
+      ASSERT_EQ(x_buffer[0], x_value);
+    }
+  }
+}
+
+// if (x < 10) {
+//   x = x + 1;
+// } else {
+//   x = x - 1;
+// }
+void testLLVMCondTest() {
+  KernelScope kernel_scope;
+
+  Placeholder x(BufHandle("X", {1}, kInt));
+  auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
+  auto cond =
+      Cond::make(cmp, x.store({0}, x.load(0) + 1), x.store({0}, x.load(0) - 1));
+  auto block = Block::make({
+      cond,
+      x.store({0}, x.load(0) * 2),
+  });
+
+  for (int32_t x_value : {0, 10, 20}) {
+    std::vector<int32_t> x_buffer = {x_value};
+    std::vector<void*> args({x_buffer.data()});
+    LLVMCodeGen cg(block, {x});
+    ASSERT_EQ(cg.value<int>(args), 0);
+    if (x_value < 10) {
+      ASSERT_EQ(x_buffer[0], (x_value + 1) * 2);
+    } else {
+      ASSERT_EQ(x_buffer[0], (x_value - 1) * 2);
+    }
+  }
+}
+
+// if (x < 10) {
+//   if (x > 5) {
+//     x = x + 1;
+//   } else {
+//     x = x - 1;
+//   }
+// } else {
+//   if (x <= 15) {
+//     x = x + 2;
+//   } else {
+//     x = x - 2;
+//   }
+// }
+void testLLVMCondNestedTest() {
+  KernelScope kernel_scope;
+
+  Placeholder x(BufHandle("X", {1}, kInt));
+  auto true_cmp =
+      CompareSelect::make(x.load(0), 5, CompareSelectOperation::kGT);
+  auto true_cond = Cond::make(
+      true_cmp, x.store({0}, x.load(0) + 1), x.store({0}, x.load(0) - 1));
+  auto false_cmp =
+      CompareSelect::make(x.load(0), 15, CompareSelectOperation::kLE);
+  auto false_cond = Cond::make(
+      false_cmp, x.store({0}, x.load(0) + 2), x.store({0}, x.load(0) - 2));
+  auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
+  auto cond = Cond::make(cmp, true_cond, false_cond);
+
+  for (int32_t x_value : {0, 8, 15, 20}) {
+    std::vector<int32_t> x_buffer = {x_value};
+    std::vector<void*> args({x_buffer.data()});
+    LLVMCodeGen cg(cond, {x});
+    ASSERT_EQ(cg.value<int>(args), 0);
+    if (x_value < 10) {
+      if (x_value > 5) {
+        ASSERT_EQ(x_buffer[0], x_value + 1);
+      } else {
+        ASSERT_EQ(x_buffer[0], x_value - 1);
+      }
+    } else {
+      if (x_value <= 15) {
+        ASSERT_EQ(x_buffer[0], x_value + 2);
+      } else {
+        ASSERT_EQ(x_buffer[0], x_value - 2);
+      }
+    }
+  }
+}
+
 void testLLVMVecLoadStoreTest() {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));

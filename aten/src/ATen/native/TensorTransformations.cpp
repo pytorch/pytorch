@@ -61,15 +61,30 @@ Tensor flip_cpu(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, in_tensor.scalar_type(), "flip_cpu", [&] {
-    flip_cpu_kernel<scalar_t>(
-      total_dims,
-      stride_contiguous_v,
-      flip_dims_b,
-      in_tensor,
-      out_tensor
-    );
-  });
+  if (in_tensor.is_quantized()) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(in_tensor.scalar_type(),
+                                        "flip_quantized_cpu", [&] {
+      flip_cpu_kernel<scalar_t>(
+        total_dims,
+        stride_contiguous_v,
+        flip_dims_b,
+        in_tensor,
+        out_tensor
+      );
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool,
+                                          in_tensor.scalar_type(),
+                                          "flip_cpu", [&] {
+      flip_cpu_kernel<scalar_t>(
+        total_dims,
+        stride_contiguous_v,
+        flip_dims_b,
+        in_tensor,
+        out_tensor
+      );
+    });
+  }
 
   return out_tensor;
 }
