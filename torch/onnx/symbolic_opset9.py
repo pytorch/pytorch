@@ -1195,6 +1195,7 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
+    # If track_running_stats is set to False batch statistics are instead used during evaluation time    
     if running_mean is None or sym_help._is_none(running_mean) or running_var is None or sym_help._is_none(running_var):
         assert len(input_sizes) > 1
         reshape_in = g.op("Reshape", input, 
