@@ -80,13 +80,32 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         ]
         index = g.op("Concat", *indices_list, axis_i=-1)
     else:
+        # Replace index_put node with masked_scatter or masked_fill
+        # when inputs to the index_put node contains boolean inputs
+        # 
+        # (index_put -> masked_fill):
+        # graph(%0 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu)):
+        # %mask.1 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu)
+        # %22 : Tensor?[] = prim::ListConstruct(%21)
+        # %23 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
+        # %24 : bool = prim::Constant[value=0]()
+        # %mask : Float(2:4, 2:2, 2:1) = aten::index_put_(%mask.1, %22, %23, %24)
+        # 
+        # after the change
+        # graph(%0 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu)):
+        # %46 : Float(requires_grad=0, device=cpu) = prim::Constant[value={5}]()
+        # %mask.1 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu) =
+        # %23 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
+        # %24 : bool = prim::Constant[value=0]()
+        # %49 : Tensor = aten::masked_fill(%mask.1, %21, %23)
         bool_inp = list(index.node().inputs())[0]
-        if bool_inp.type().scalarType() == 'Bool':
-            if values.node().kind() == 'onnx::Constant':
-                if len(values.node()['value'].size()) == 0:
-                    from torch.onnx.symbolic_opset9 import masked_fill
-                    return masked_fill(g, self, bool_inp, values)
-                return masked_scatter(g, self, bool_inp, values)
+        if bool_inp.type() is not None and bool_inp.type().scalarType() is not None:
+            if bool_inp.type().scalarType() == 'Bool':
+                if values.type() is not None:
+                    if len(values.type().dim()) == 0:
+                        from torch.onnx.symbolic_opset9 import masked_fill
+                        return masked_fill(g, self, bool_inp, values)
+                    return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = g.op("Unsqueeze", index, axes_i=[-1])
     sub_data_shape = sym_help._slice_helper(
