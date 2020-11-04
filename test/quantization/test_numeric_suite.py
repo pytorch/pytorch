@@ -12,6 +12,8 @@ from torch.quantization import (
 )
 from torch.quantization._numeric_suite import (
     Shadow,
+    ShadowLogger,
+    OutputLogger,
     compare_model_outputs,
     compare_model_stub,
     compare_weights,
@@ -142,7 +144,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             )
             self.assertEqual(len(weight_dict), 1)
             for k, v in weight_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [SingleLayerLinearDynamicModel(qengine)]
         for model in model_list:
@@ -165,7 +169,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             )
             self.assertEqual(len(weight_dict), 1)
             for k, v in weight_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
         for model in model_list:
@@ -186,7 +192,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             ob_dict = compare_model_stub(float_model, q_model, module_swap_list, data)
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
         module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
@@ -210,7 +218,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             ob_dict = compare_model_stub(float_model, q_model, module_swap_list, data)
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
         module_swap_list = [nn.Linear]
@@ -238,7 +248,8 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         self.assertTrue(isinstance(q_model.mod1, Shadow))
         self.assertFalse(isinstance(q_model.conv, Shadow))
         for k, v in ob_dict.items():
-            torch.testing.assert_allclose(v["float"], v["quantized"].dequantize())
+            for i, val in enumerate(v["quantized"]):
+                torch.testing.assert_allclose(v["float"][i], v["quantized"][i].dequantize())
 
     @override_qengines
     def test_compare_model_stub_functional_static(self):
@@ -264,7 +275,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         self.assertTrue(isinstance(q_model.my_scalar_add, Shadow))
         self.assertTrue(isinstance(q_model.my_scalar_mul, Shadow))
         for k, v in ob_dict.items():
-            self.assertTrue(v["float"].shape == v["quantized"].shape)
+            self.assertTrue(len(v["float"]) == len(v["quantized"]))
+            for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines
     def test_compare_model_stub_linear_dynamic(self):
@@ -277,7 +290,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             ob_dict = compare_model_stub(float_model, q_model, module_swap_list, data)
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
 
@@ -305,7 +320,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             )
             self.assertEqual(len(ob_dict), 1)
             for k, v in ob_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
@@ -357,7 +374,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
         model_list = [AnnotatedSingleLayerLinearModel(qengine)]
@@ -393,7 +412,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         }
         self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
         for k, v in act_compare_dict.items():
-            self.assertTrue(v["float"].shape == v["quantized"].shape)
+            self.assertTrue(len(v["float"]) == len(v["quantized"]))
+            for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines
     def test_compare_model_outputs_linear_dynamic(self):
@@ -408,7 +429,9 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
-                self.assertTrue(v["float"].shape == v["quantized"].shape)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v['quantized']):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         linear_data = self.calib_data[0][0]
 
@@ -435,7 +458,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                print(v["float"][0])
                 self.assertTrue(v["float"][0].shape == v["quantized"][0].shape)
+
 
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
@@ -447,3 +473,38 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 model.fuse_model()
             q_model = quantize_dynamic(model)
             compare_and_validate_results(model, q_model, lstm_input, lstm_hidden)
+
+    @override_qengines
+    def test_output_logger(self):
+        r"""Compare output from OutputLogger with the expected results
+        """
+        x = torch.rand(2, 2)
+        y = torch.rand(2, 1)
+
+        l = []
+        l.append(x)
+        l.append(y)
+
+        logger = OutputLogger()
+        logger.forward(x)
+        logger.forward(y)
+
+        self.assertEqual(l, logger.stats['tensor_val'])
+
+
+    @override_qengines
+    def test_shadow_logger(self):
+        r"""Compare output from ShawdowLogger with the expected results
+        """
+        a_float = torch.rand(2, 2)
+        a_quantized = torch.rand(2, 2)
+
+        b_float = torch.rand(3, 2, 2)
+        b_quantized = torch.rand(3, 2, 2)
+
+        logger = ShadowLogger()
+        logger.forward(a_float, a_quantized)
+        logger.forward(b_float, b_quantized)
+
+        self.assertEqual(len(logger.stats["float"]), 2)
+        self.assertEqual(len(logger.stats["quantized"]), 2)
