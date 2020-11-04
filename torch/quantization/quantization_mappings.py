@@ -48,7 +48,9 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
+    nniqat.ConvBn1d: nnq.Conv1d,
     nniqat.ConvBn2d: nnq.Conv2d,
+    nniqat.ConvBnReLU1d: nniq.ConvReLU1d,
     nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.LinearReLU: nniq.LinearReLU,
@@ -62,7 +64,9 @@ DEFAULT_QAT_MODULE_MAPPINGS = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Linear: nnqat.Linear,
     # Intrinsic modules:
+    nni.ConvBn1d: nniqat.ConvBn1d,
     nni.ConvBn2d: nniqat.ConvBn2d,
+    nni.ConvBnReLU1d: nniqat.ConvBnReLU1d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
     nni.ConvReLU2d: nniqat.ConvReLU2d,
     nni.LinearReLU: nniqat.LinearReLU
@@ -170,14 +174,14 @@ def get_quantized_operator(float_op):
         'Operator {} does not have corresponding quantized op'.format(str(float_op))
     return quantized_op
 
-def get_default_special_act_post_process(module_cls):
+def _get_special_act_post_process(module):
     r""" Get the special activation post process for `module`, this has
     higher priority than the activation post process in `qconfig`
     e.g.
     input: torch.nn.Sigmoid
     output: default_affine_fixed_qparam_fake_quant
     """
-    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(module_cls, None)
+    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(type(module), None)
 
-def has_special_act_post_process(module_cls):
-    return module_cls in DEFAULT_MODULE_TO_ACT_POST_PROCESS
+def _has_special_act_post_process(module):
+    return module.training and type(module) in DEFAULT_MODULE_TO_ACT_POST_PROCESS

@@ -843,6 +843,34 @@
   dispatch:
     CPU, CUDA: bitwise_not_out
 
+- func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: copysign
+
+- func: copysign_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: copysign_
+
+- func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: copysign_out
+
+- func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: copysign
+
+- func: copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: copysign_
+
 - func: logical_not(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

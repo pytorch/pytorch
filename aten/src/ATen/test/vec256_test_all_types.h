@@ -411,12 +411,19 @@ void filter_clamp(T& f, T& s, T& t) {
 }
 
 template <typename T>
+std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmod(T& a, T& b) {
+  // This is to make sure fmod won't cause overflow when doing the div
+  if (std::abs(b) < (T)1) {
+    b = b < (T)0 ? (T)-1 : T(1);
+  }
+}
+
+template <typename T>
 void filter_zero(T& val) {
     val = is_zero(val) ? (T)1 : val;
 }
 template <typename T>
-std::enable_if_t<is_complex<Complex<T>>::value, void> filter_zero(Complex<T>& val)
-{
+std::enable_if_t<is_complex<Complex<T>>::value, void> filter_zero(Complex<T>& val) {
     T rr = val.real();
     T ii = val.imag();
     rr = is_zero(rr) ? (T)1 : rr;

@@ -22,6 +22,8 @@ namespace {
     template <typename T>
     class SqrtAndReciprocalReal : public ::testing::Test {};
     template <typename T>
+    class FractionAndRemainderReal : public ::testing::Test {};
+    template <typename T>
     class Trigonometric : public ::testing::Test {};
     template <typename T>
     class ErrorFunctions : public ::testing::Test {};
@@ -57,7 +59,6 @@ namespace {
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
-    using SingleFloat = ::testing::Types<vfloat>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     TYPED_TEST_CASE(Memory, ALLTestedTypes);
     TYPED_TEST_CASE(Arithmetics, FloatIntTestedTypes);
@@ -69,6 +70,7 @@ namespace {
     TYPED_TEST_CASE(Rounding, RealFloatTestedTypes);
     TYPED_TEST_CASE(SqrtAndReciprocal, FloatTestedTypes);
     TYPED_TEST_CASE(SqrtAndReciprocalReal, RealFloatTestedTypes);
+    TYPED_TEST_CASE(FractionAndRemainderReal, RealFloatTestedTypes);
     TYPED_TEST_CASE(Trigonometric, RealFloatTestedTypes);
     TYPED_TEST_CASE(ErrorFunctions, RealFloatTestedTypes);
     TYPED_TEST_CASE(Exponents, RealFloatTestedTypes);
@@ -198,14 +200,6 @@ namespace {
             [](vec v) { return v.sqrt(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
-    TYPED_TEST(SqrtAndReciprocalReal, Frac) {
-        using vec = TypeParam;
-        test_unary<vec>(
-            NAME_INFO(frac),
-            RESOLVE_OVERLOAD(frac),
-            [](vec v) { return v.frac(); },
-            createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
-    }
     TYPED_TEST(SqrtAndReciprocalReal, RSqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -223,6 +217,23 @@ namespace {
             [](vec v) { return v.reciprocal(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
+    }
+    TYPED_TEST(FractionAndRemainderReal, Frac) {
+      using vec = TypeParam;
+      test_unary<vec>(
+          NAME_INFO(frac),
+          RESOLVE_OVERLOAD(frac),
+          [](vec v) { return v.frac(); },
+          createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
+    }
+    TYPED_TEST(FractionAndRemainderReal, Fmod) {
+      using vec = TypeParam;
+      test_binary<vec>(
+          NAME_INFO(fmod),
+          RESOLVE_OVERLOAD(std::fmod),
+          [](vec v0, vec v1) { return v0.fmod(v1); },
+          createDefaultBinaryTestCase<vec>(TestSeed()),
+          RESOLVE_OVERLOAD(filter_fmod));
     }
     TYPED_TEST(Trigonometric, Sin) {
         using vec = TypeParam;
@@ -1030,7 +1041,6 @@ namespace {
       ASSERT_TRUE(check_equal(arange_output_ref, arange_output_vectorized));
     }
 
-    /*
     // TODO:
     // CopyTest and Set are basically tests loadu and store, probably can be either merged into one, or just
     // delete them since the generic framework test loadu and store implicitly everywhere.
@@ -1051,6 +1061,7 @@ namespace {
         T* res_ptr,
         const int64_t num_els,
         const int64_t count) {
+      using namespace at::vec256;
       for(auto i = 0; i < num_els; ++i) {
         for (auto j = 0; j < Vec256<float>::size(); ++j) {
           auto index = i * Vec256<float>::size() + j;
@@ -1070,6 +1081,7 @@ namespace {
         T* res_ptr,
         const int64_t num_els,
         const int64_t count) {
+      using namespace at::vec256;
       for(auto i = 0; i < num_els; ++i) {
         auto a_elements = Vec256<float>::loadu(a_ptr);
         auto b_elements = Vec256<float>::loadu(b_ptr);
@@ -1083,6 +1095,7 @@ namespace {
 
     // Checks Set
     TEST(Vec256TestFloat, Set) {
+      using namespace at::vec256;
       at::Tensor a = at::rand({23, 23});
       at::Tensor b = at::rand({23, 23});
       at::Tensor ref_res = at::zeros({23, 23});
@@ -1119,6 +1132,7 @@ namespace {
 
     // Checks blend and blendv.
     TEST(Vec256TestFloat, Blend) {
+      using namespace at::vec256;
       at::Tensor a = at::rand({23, 23});
       at::Tensor b = at::rand({23, 23});
       at::Tensor ref_res = at::zeros({23, 23});
@@ -1195,6 +1209,7 @@ namespace {
     }
 
     TEST(Vec256TestFloat, check_convert) {
+      using namespace at::vec256;
       at::Tensor a = at::rand({23, 23});
       a = a * -10;
       a = a + 10;
@@ -1226,6 +1241,7 @@ namespace {
     }
 
     TEST(Vec256TestFloat, check_fmadd) {
+      using namespace at::vec256;
       at::Tensor a = at::rand({23, 23});
       a = a * -10;
       a = a + 10;
@@ -1259,76 +1275,6 @@ namespace {
       }
       ASSERT_TRUE(check_almost_equal(ref_res, vec_res, 1e-6));
     }
-
-    #define TranscedentalTester(opnamespace, name)                    \
-    void TranscedentalHelper_##name(const float tolerance = 1e-6) {   \
-      at::Tensor a = at::rand({23, 23});                              \
-      a = a * -10;                                                    \
-      a = a + 10;                                                     \
-      at::Tensor ref_res = at::zeros({23, 23});                       \
-      at::Tensor vec_res = at::zeros({23, 23});                       \
-      float* a_ptr = a.data_ptr<float>();                             \
-      float* ref_res_ptr = ref_res.data_ptr<float>();                 \
-      float* vec_res_ptr = vec_res.data_ptr<float>();                 \
-      size_t num_els =                                                \
-      (a.numel() / Vec256<float>::size()) * Vec256<float>::size();  \
-      for(auto i = 0; i < num_els; ++i) {                             \
-        ref_res_ptr[i] = opnamespace::name(a_ptr[i]);                 \
-      }                                                               \
-      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {   \
-        auto a_elements = Vec256<float>::loadu(a_ptr);                \
-        a_ptr += Vec256<float>::size();                               \
-        auto res = a_elements.name();                                 \
-        res.store(vec_res_ptr);                                       \
-        vec_res_ptr += Vec256<float>::size();                         \
-      }                                                               \
-      ASSERT_TRUE(check_almost_equal(ref_res, vec_res, tolerance));   \
-    }
-
-    #define TranscedentalTester2(name)                                \
-    void TranscedentalHelper_##name(const float tolerance = 1e-6) {   \
-      at::Tensor a = at::rand({23, 23});                              \
-      at::Tensor b = at::rand({23, 23});                              \
-      a = a * -10;                                                    \
-      a = a + 10;                                                     \
-      at::Tensor ref_res = at::zeros({23, 23});                       \
-      at::Tensor vec_res = at::zeros({23, 23});                       \
-      float* a_ptr = a.data_ptr<float>();                             \
-      float* b_ptr = a.data_ptr<float>();                             \
-      float* ref_res_ptr = ref_res.data_ptr<float>();                 \
-      float* vec_res_ptr = vec_res.data_ptr<float>();                 \
-      size_t num_els =                                                \
-      (a.numel() / Vec256<float>::size()) * Vec256<float>::size();  \
-      for(auto i = 0; i < num_els; ++i) {                             \
-        ref_res_ptr[i] = std::name(a_ptr[i], b_ptr[i]);               \
-      }                                                               \
-      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {   \
-        auto a_elements = Vec256<float>::loadu(a_ptr);                \
-        auto b_elements = Vec256<float>::loadu(b_ptr);                \
-        a_ptr += Vec256<float>::size();                               \
-        b_ptr += Vec256<float>::size();                               \
-        auto res = a_elements.name(b_elements);                       \
-        res.store(vec_res_ptr);                                       \
-        vec_res_ptr += Vec256<float>::size();                         \
-      }                                                               \
-      ASSERT_TRUE(check_almost_equal(ref_res, vec_res, tolerance));   \
-    }
-
-    namespace Impl {
-      float frac(const float a) {
-          return a - (static_cast<int32_t>(a));
-      }
-    }
-    //TranscedentalTester(Impl, frac)
-    TranscedentalTester2(fmod)
-
-    //TEST(Vec256TestFloat, frac) {
-      //TranscedentalHelper_frac();
-    }
-
-    TEST(Vec256TestFloat, fmod) {
-      TranscedentalHelper_fmod();
-    }*/
 
     // ********************************* vec256_test.cpp end*****************************************************
 
