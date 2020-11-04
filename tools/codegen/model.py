@@ -365,7 +365,6 @@ class FunctionSchema:
                 "Must return as many arguments as there are out arguments"
         if self.name.name.inplace:
             # TODO: fixme
-
             if str(self.name) not in [
                     '_amp_foreach_non_finite_check_and_unscale_',
                     '_foreach_add_.ScalarList',
