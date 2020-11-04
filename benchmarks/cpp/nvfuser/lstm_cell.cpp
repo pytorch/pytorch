@@ -6,6 +6,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include <cuda_runtime.h>
+
 using namespace torch::jit::fuser::cuda;
 
 static void setupFusion(Fusion* fusion) {
@@ -154,8 +156,11 @@ static void LstmCell_RunFusion(
   FusionExecutor executor;
   executor.compileFusion(&fusion);
 
+  cudaDeviceSynchronize();
+  
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+    cudaDeviceSynchronize();
   }
 }
 
