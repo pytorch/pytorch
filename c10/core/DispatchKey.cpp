@@ -53,6 +53,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::SparseHIP:
       return "SparseHIP";
 
+    case DispatchKey::NestedTensor:
+      return "NestedTensor";
+
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
     case DispatchKey::PrivateUse2:
@@ -71,6 +74,8 @@ const char* toString(DispatchKey t) {
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:
       return "AutogradXLA";
+    case DispatchKey::AutogradNestedTensor:
+      return "AutogradNestedTensor";
     case DispatchKey::AutogradPrivateUse1:
       return "AutogradPrivateUse1";
     case DispatchKey::AutogradPrivateUse2:
@@ -117,6 +122,13 @@ std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
 }
 
+// for a given backend key, return the associated autograd key.
+// for non-backend keys, return AutogradOther as a default.
+// Note: it's convenient and fast to return a default here rather than (say)
+// returning an optional<DispatchKey>, or throwing. But it makes callers
+// responsible for either a) enforcing the invariant that only backend keys
+// be passed as arguments, or b) interpreting our return value carefully.
+//
 DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
   switch (t) {
     case DispatchKey::CPU:
@@ -125,6 +137,8 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradCUDA;
     case DispatchKey::XLA:
       return DispatchKey::AutogradXLA;
+    case DispatchKey::NestedTensor:
+      return DispatchKey::AutogradNestedTensor;
     case DispatchKey::PrivateUse1:
       return DispatchKey::AutogradPrivateUse1;
     case DispatchKey::PrivateUse2:
