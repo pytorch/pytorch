@@ -602,13 +602,14 @@ class TensorExprFuser {
       return false;
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
-    ConstantPooling(subgraph);
     size_t num_modes = blockSize(subgraph->block());
     if (num_modes < min_group_size_) {
       GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
       SubgraphUtils::unmergeSubgraph(n);
       return true;
     }
+    // Cleanup the subgraph from duplicated constants while we're at it.
+    ConstantPooling(subgraph);
     return false;
   }
 
