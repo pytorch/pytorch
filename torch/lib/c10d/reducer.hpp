@@ -225,9 +225,12 @@ class Reducer {
     // participating variables after reduction has completed.
     std::vector<torch::autograd::Variable> variables;
 
-    // Per-variable offset/length into the flat bucket contents tensor.
+    // Per-variable offset/length into the flat bucket contents tensor and grad bucket.
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
+
+    // Per-variable sizes into the grad bucekt.
+    std::vector<c10::IntArrayRef> sizes_vec;
 
     // Number of tensors to be added before this bucket is complete.
     // This is reset to `variables.size()` every iteration.
