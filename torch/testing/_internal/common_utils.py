@@ -1440,10 +1440,10 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 
 # Used in test_autograd.py and test_torch.py
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
-                low=None, high=None, requires_grad: bool = False) -> torch.Tensor:
+                low=None, high=None, include_endpoints=None, requires_grad: bool = False) -> torch.Tensor:
     """Returns a tensor of the specified size on the given device and dtype.
        The tensor will be filled with random values depending on
-       its dtype:
+       its dtype. By default:
 
          Bool tensors will always have both True and False values (unless they only
            have zero or one elements).
@@ -1458,6 +1458,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
        same applies to high, mutatis mutandi. The inclusivity or exclusivity
        of the range will remain the same. For example, a low of -1 and a
        high of 1 with dtype torch.float32 will produce a range (-1, 1).
+
+       If include_endpoints is True then the range will be inclusive, and
+       if include_endpoints is False then the range will be exclusive.
     """
 
     # Helper function that takes the next value "after" the given Python
@@ -1508,14 +1511,23 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
     if dtype is torch.uint8:
         low = math.floor(0 if low is None else max(low, 0))
         high = math.ceil(9 if high is None else min(high, 9))
+        if include_endpoints is False:
+            low = nudge(low, dtype=dtype, direction="higher")
+            high = nudge(high, dtype=dtype, direction="lower")
         return torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         low = math.floor(-9 if low is None else max(low, -9))
         high = math.ceil(9 if high is None else min(high, 10))
+        if include_endpoints is False:
+            low = nudge(low, dtype=dtype, direction="higher")
+            high = nudge(high, dtype=dtype, direction="lower")
         return torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        low = nudge(-9 if low is None else max(low, -9), dtype=dtype, direction="higher")
-        high = nudge(9 if high is None else min(high, 9), dtype=dtype, direction="lower")
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 9)
+        if include_endpoints is None or include_endpoints is False:
+            low = nudge(low, dtype=dtype, direction="higher")
+            high = nudge(high, dtype=dtype, direction="lower")
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
@@ -1527,8 +1539,11 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
     else:
         assert dtype in complex_types()
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        low = nudge(-9 if low is None else max(low, -9), dtype=float_dtype, direction="higher")
-        high = nudge(9 if high is None else min(high, 9), dtype=float_dtype, direction="lower")
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 9)
+        if include_endpoints is None or include_endpoints is False:
+            low = nudge(low, dtype=float_dtype, direction="higher")
+            high = nudge(high, dtype=float_dtype, direction="lower")
         span = high - low
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
