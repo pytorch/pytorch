@@ -13,6 +13,8 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+    unset HIP_PLATFORM
     if which sccache > /dev/null; then
         # Save sccache logs to file
         sccache --stop-server || true

@@ -384,7 +384,11 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   }
 
   TORCH_CHECK(false, "Could not run '", name_, "' with arguments",
-          " from the '", toString(dispatchKey), "' backend. '",
+          " from the '", toString(dispatchKey), "' backend. This could be because "
+          "the operator doesn't exist for this backend, or was omitted during ",
+          "the selective/custom build process (if using custom build). If you are a ",
+          "Facebook employee using PyTorch on mobile, please visit ",
+          "https://fburl.com/ptmfixes for possible resolutions. '",
           name_, "' is only available for these backends: ",
           listAllDispatchKeys(), ".\n\n", dumpComputedTable());
 }
