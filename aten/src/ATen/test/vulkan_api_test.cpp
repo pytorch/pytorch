@@ -129,18 +129,6 @@ TEST(VulkanAPITest, clamp_) {
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
-/*
-TEST(VulkanAPITest, view) {
-  const auto a_cpu = at::rand({1,3,2,2}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto a_vulkan = a_cpu.vulkan();
-
-  const auto c_cpu = at::view(a_cpu, {2,3,1,2});
-  const auto c_vulkan = at::view(a_vulkan, {2,3,1,2});
-
-  ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
-}
-*/
-
 TEST(VulkanAPITest, reshape) {
   const auto a_cpu = at::rand({1,3,2,2}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
