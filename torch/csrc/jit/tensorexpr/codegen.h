@@ -23,8 +23,12 @@ class TORCH_API CodeGen {
   CodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      at::Device device = at::kCPU)
-      : stmt_(stmt), buffer_args_(buffer_args), device_(device) {}
+      at::Device device = at::kCPU,
+      const std::string& kernel_func_name = "func")
+      : stmt_(stmt),
+        buffer_args_(buffer_args),
+        device_(device),
+        kernel_func_name_(kernel_func_name) {}
 
   virtual ~CodeGen() {}
 
@@ -62,10 +66,15 @@ class TORCH_API CodeGen {
 
   virtual void call(const std::vector<CallArg>& args) = 0;
 
+  const std::string& kernel_func_name() const {
+    return kernel_func_name_;
+  }
+
  private:
   Stmt* stmt_;
   std::vector<BufferArg> buffer_args_;
   at::Device device_ = at::kCPU;
+  std::string kernel_func_name_ = "func";
 };
 
 class CodeGen::BufferArg {
@@ -147,7 +156,8 @@ class RegisterCodeGenList {
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>&,
-      at::Device device)>;
+      at::Device device,
+      const std::string& kernel_func_name)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
 
@@ -173,9 +183,10 @@ class RegisterCodeGen {
         name,
         [](Stmt* stmt,
            const std::vector<CodeGen::BufferArg>& params,
-           at::Device device) {
+           at::Device device,
+           const std::string& kernel_func_name) {
           std::unique_ptr<CodeGen> method(
-              new CodeGenType(stmt, params, device));
+              new CodeGenType(stmt, params, device, kernel_func_name));
           return method;
         });
   }
@@ -185,7 +196,8 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
-    at::Device device = at::kCPU);
+    at::Device device = at::kCPU,
+    const std::string& kernel_func_name = "func");
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:

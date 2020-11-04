@@ -2142,6 +2142,15 @@
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
 
+- func: kron(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    Math: kron
+
+- func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: kron_out
+
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
@@ -3806,6 +3815,11 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU, CUDA: tensordot_out
+
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   use_c10_dispatcher: full
@@ -3873,7 +3887,7 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: flip_cpu
+    CPU, QuantizedCPU: flip_cpu
     CUDA: flip_cuda
 
 - func: fliplr(Tensor self) -> Tensor
@@ -5650,7 +5664,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_trace
+    CPU: trace_cpu
     CUDA: trace_cuda
 
 - func: trace_backward(Tensor grad, int[] sizes) -> Tensor

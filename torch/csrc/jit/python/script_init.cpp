@@ -714,7 +714,8 @@ void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
+  py::class_<CustomClassHolder, c10::intrusive_ptr<CustomClassHolder>>(
+      m, "Capsule");
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")
