@@ -13754,6 +13754,8 @@ class TestTorchDeviceType(TestCase):
             ("hypot", True, True, 'cuda'),
             ("igamma", True, True, 'cpu'),
             ("igamma", True, True, 'cuda'),
+            ("igammac", True, True, 'cpu'),
+            ("igammac", True, True, 'cuda'),
             ("nextafter", True, True, 'cpu'),
             ("nextafter", True, True, 'cuda'),
             ("le", True, True, 'cpu'),
@@ -17538,7 +17540,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected)
 
-    def _helper_test_igamma(self, loglo, loghi, device, dtype):
+    def _helper_test_igamma(self, loglo, loghi, device, dtype, igamma=True):
+        torch_fcn = torch.igamma if igamma else torch.igammac
+        scipy_fcn = scipy.special.gammainc if igamma else scipy.special.gammaincc
         exp1 = 2.71828182846
         vec1 = torch.logspace(loglo, loghi, steps=500, base=exp1,
                               dtype=torch.float64, device=device).unsqueeze(-1)
@@ -17554,11 +17558,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         ]
         half_prec = dtype in [torch.bfloat16, torch.float16]
         for input0, input1 in inputs:
-            actual = torch.igamma(input0, input1)
+            actual = torch_fcn(input0, input1)
             if half_prec:
                 input0 = input0.to(torch.float)
                 input1 = input1.to(torch.float)
-            expected = scipy.special.gammainc(input0.cpu().numpy(), input1.cpu().numpy())
+            expected = scipy_fcn(input0.cpu().numpy(), input1.cpu().numpy())
             expected = torch.from_numpy(expected).to(dtype)
             self.assertEqual(actual, expected)
 
@@ -17569,6 +17573,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyOnCPUAndCUDA
     def test_igamma_common(self, device, dtype):
         # test igamma for reasonable range of values
+        loglo = -4  # approx 0.018
+        loghi = 4  # approx 54.6
+        self._helper_test_igamma(loglo, loghi, device, dtype)
+
+    @skipCUDAIfRocm
+    @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @onlyOnCPUAndCUDA
+    def test_igammac_common(self, device, dtype):
+        # test igammac for reasonable range of values
         loglo = -4  # approx 0.018
         loghi = 4  # approx 54.6
         self._helper_test_igamma(loglo, loghi, device, dtype)
@@ -17597,6 +17612,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for inputs, output in inpouts:
             input0, input1 = inputs
             calc = torch.igamma(input0, input1)
+            if torch.all(torch.isnan(output)):
+                self.assertTrue(torch.all(torch.isnan(calc)))
+            else:
+                self.assertEqual(calc, output)
+
+    @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @onlyOnCPUAndCUDA
+    def test_igammac_edge_cases(self, device, dtype):
+        tkwargs = {"dtype": dtype, "device": device}
+        infs = torch.zeros((3,), **tkwargs) + float("inf")
+        zeros = torch.zeros((3,), **tkwargs)
+        ones = torch.ones((3,), **tkwargs)
+        zero_to_large = torch.tensor([0., 1., 1e3], **tkwargs)
+        small_to_inf = torch.tensor([1e-3, 1., float("inf")], **tkwargs)
+        nans = torch.zeros((3,), **tkwargs) + float("nan")
+        inpouts = [
+            # (a    ,    x),       out
+            ((zeros, small_to_inf), zeros),
+            ((small_to_inf, zeros), ones),
+            ((infs, zero_to_large), ones),
+            ((zero_to_large, infs), zeros),
+            ((zeros, zeros), nans),
+            ((infs, infs), nans),
+            ((-small_to_inf, small_to_inf), nans),
+        ]
+        for inputs, output in inpouts:
+            input0, input1 = inputs
+            calc = torch.igammac(input0, input1)
             if torch.all(torch.isnan(output)):
                 self.assertTrue(torch.all(torch.isnan(calc)))
             else:

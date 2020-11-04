@@ -313,6 +313,7 @@ Pointwise Ops
     hypot
     i0
     igamma
+    igammac
     mul
     multiply
     mvlgamma

@@ -390,6 +390,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hypot: lambda input, other, out=None: -1,
         torch.ifft: lambda input, signal_ndim, normalized=False: -1,
         torch.igamma: lambda input, other, out=None: -1,
+        torch.igammac: lambda input, other, out=None: -1,
         torch.imag: lambda input, out=None: -1,
         torch.index_add: lambda input, dim, index, source: -1,
         torch.index_copy: lambda input, dim, index, source: -1,

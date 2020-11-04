@@ -351,6 +351,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: i0_
    .. automethod:: igamma
    .. automethod:: igamma_
+   .. automethod:: igammac
+   .. automethod:: igammac_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add

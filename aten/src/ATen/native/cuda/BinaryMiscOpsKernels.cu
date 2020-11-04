@@ -100,6 +100,14 @@ void igamma_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void igammac_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igammac_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return calc_igammac(a, b);
+    });
+  });
+}
+
 void nextafter_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "nextafter_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -125,6 +133,7 @@ REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
 REGISTER_DISPATCH(igamma_stub, &igamma_kernel_cuda);
+REGISTER_DISPATCH(igammac_stub, &igammac_kernel_cuda);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda);
 

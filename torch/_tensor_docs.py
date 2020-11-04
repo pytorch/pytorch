@@ -1556,6 +1556,20 @@ igamma_(other) -> Tensor
 In-place version of :meth:`~Tensor.igamma`
 """)
 
+add_docstr_all('igammac',
+               r"""
+igammac(other) -> Tensor
+
+See :func:`torch.igammac`
+""")
+
+add_docstr_all('igammac_',
+               r"""
+igammac_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.igammac`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
