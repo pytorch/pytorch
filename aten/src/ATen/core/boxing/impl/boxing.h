@@ -97,7 +97,13 @@ using can_unbox =
 //
 template <class FuncType, class Enable = void>
 struct BoxedKernelWrapper {
-  static_assert(sizeof(FuncType) == -1,
+  // The reason we're not just doing straight up static_assert(false, ...) here:
+  // Basically, the way to make sure a static_assert only fires if a template
+  // is actually instantiated (rather than every time the file is parsed) is to use
+  // template parameters in the expression, e.g. FuncType here. However, since
+  // `sizeof(FuncType) != sizeof(FuncType)` is always false, this has the same
+  // effect.
+  static_assert(sizeof(FuncType) != sizeof(FuncType),
     "Function signature contains one or more unsupported parameter and/or return types. "
     "Look for a nearby error like "
     "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "

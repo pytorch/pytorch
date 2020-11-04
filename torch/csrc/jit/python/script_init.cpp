@@ -714,7 +714,8 @@ void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
+  py::class_<CustomClassHolder, c10::intrusive_ptr<CustomClassHolder>>(
+      m, "Capsule");
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")
@@ -1187,9 +1188,13 @@ void initJitScriptBindings(PyObject* module) {
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
       .def_property_readonly(
-          "qualified_name", [](const StrongFunctionPtr& self) {
+          "qualified_name",
+          [](const StrongFunctionPtr& self) {
             return self.function_->qualname().qualifiedName();
-          });
+          })
+      .def_property_readonly("__doc__", [](const StrongFunctionPtr& self) {
+        return self.function_->doc_string();
+      });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(

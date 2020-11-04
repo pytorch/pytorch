@@ -109,7 +109,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
-  void init_to_execute(Node& graph_root, const edge_list& outputs);
+  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -272,6 +272,7 @@ struct TORCH_API Engine {
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
+      bool accumulate_grad,
       const edge_list& outputs = {});
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
@@ -284,7 +285,7 @@ struct TORCH_API Engine {
       std::shared_ptr<Node> graph_root);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
-    return nullptr;
+    return std::make_unique<AnomalyMetadata>();
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows
