@@ -36,35 +36,23 @@ static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_s
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void mean_kernel_impl(TensorIterator& iter) {
-  float factor = static_cast<float>(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
-}
-
-template <>
-void mean_kernel_impl<c10::complex<float>>(TensorIterator& iter) {
-  float factor = static_cast<float>(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<c10::complex<float>, c10::complex<float>>
-    (iter, MeanOps<c10::complex<float>, float> {factor});
-}
-
-template <>
-void mean_kernel_impl<c10::complex<double>>(TensorIterator& iter) {
-  double factor = static_cast<double>(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<c10::complex<double>, c10::complex<double>>
-    (iter, MeanOps<c10::complex<double>, double> {factor});
+  //  returns acc_t for all non-complex dtypes and returns T for c10::complex<T>
+  using factor_t = typename c10::scalar_value_type<acc_t>::type;
+  factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
+  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, factor_t> {factor});
 }
 
 static void mean_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == kHalf) {
-    return mean_kernel_impl<at::Half, float>(iter);
+    mean_kernel_impl<at::Half, float>(iter);
   } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
-    return mean_kernel_impl<at::Half, float, float>(iter);
+    mean_kernel_impl<at::Half, float, float>(iter);
   } else if(iter.dtype() == kBFloat16) {
-    return mean_kernel_impl<at::BFloat16, float>(iter);
+    mean_kernel_impl<at::BFloat16, float>(iter);
   } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
-    return mean_kernel_impl<at::BFloat16, float, float>(iter);
+    mean_kernel_impl<at::BFloat16, float, float>(iter);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cuda", [&]() {
       mean_kernel_impl<scalar_t>(iter);
