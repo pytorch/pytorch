@@ -175,7 +175,7 @@ class DynamicReduce2DBench(benchmark.DynamicShape, Reduce2DBench):
 
     @staticmethod
     def module():
-        return "dynamic_reduce2d"
+        return "dynamicreduce2d"
 
 
 class DynamicReduce2DInnerBench(DynamicReduce2DBench):
@@ -184,7 +184,7 @@ class DynamicReduce2DInnerBench(DynamicReduce2DBench):
 
     @staticmethod
     def module():
-        return "dynamic_reduce2d_inner"
+        return "reduce2d_dynamic_inner"
 
 
 class DynamicReduce2DOuterBench(DynamicReduce2DBench):
@@ -193,7 +193,7 @@ class DynamicReduce2DOuterBench(DynamicReduce2DBench):
 
     @staticmethod
     def module():
-        return "dynamic_reduce2d_outer"
+        return "reduce2d_dynamic_outer"
 
 benchmark.register_benchmark_class(DynamicReduce2DInnerBench)
 benchmark.register_benchmark_class(DynamicReduce2DOuterBench)
