@@ -27,6 +27,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+#include <c10/util/Exception.h>
 
 #define DEBUG_PRINT 0
 
@@ -124,6 +125,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::Type* dtypeToLLVMPtr(Dtype dtype);
   void emitWrapper(const std::vector<llvm::Type*>& params);
   void emitKernel(Stmt* stmt, const std::vector<llvm::Type*>& params);
+  llvm::Value * toVec(llvm::Value * v, int lanes);
 
  public:
   LLVMCodeGenImpl(
@@ -841,32 +843,27 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
     } else {
       throw unimplemented_lowering(v);
     }
-  } else if (srcType->isIntOrIntVectorTy()) {
-    if (dstType->isFPOrFPVectorTy()) {
-      if (destUnsigned) {
-        value_ = irb_.CreateUIToFP(value_, dstType);
-      } else {
-        value_ = irb_.CreateSIToFP(value_, dstType);
-      }
-
-    } else if (dstType->isIntOrIntVectorTy()) {
-      // Bool is represented as 8bits, we need to make sure
-      // we're appropriately setting the one bit that is used
-      if (v->dtype().scalar_type() == ScalarType::Bool) {
-        llvm::Constant* constant_zero = llvm::ConstantInt::get(srcType, 0);
-        if (v->src_value()->dtype().lanes() != 1) {
-          std::vector<llvm::Constant*> const_vector;
-          for (int i = 0; i < v->src_value()->dtype().lanes(); ++i) {
-            const_vector.push_back(constant_zero);
-          }
-          constant_zero = llvm::ConstantVector::get(const_vector);
-        }
-        value_ = irb_.CreateICmpNE(value_, constant_zero);
-      }
-      value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
+    return;
+  }
+  if (!srcType->isIntOrIntVectorTy()) {
+    throw unimplemented_lowering(v);
+  }
+  if (dstType->isFPOrFPVectorTy()) {
+    if (destUnsigned) {
+      value_ = irb_.CreateUIToFP(value_, dstType);
     } else {
-      throw unimplemented_lowering(v);
+      value_ = irb_.CreateSIToFP(value_, dstType);
     }
+  } else if (dstType->isIntOrIntVectorTy()) {
+    // Ensure bool true value is exactly one, since we convert to int
+    // from bool by zero extending the int8
+    if (v->dtype().scalar_type() == ScalarType::Bool) {
+      llvm::Value* zero = toVec(llvm::ConstantInt::get(srcType, 0), v->dtype().lanes());
+      value_ = irb_.CreateICmpNE(value_, zero);
+    }
+    value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
+  } else {
+    throw unimplemented_lowering(v);
   }
 }
 
@@ -1301,6 +1298,14 @@ struct FunctionCallee {
 
 } // namespace
 
+llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
+  if (lanes > 1) {
+    return irb_.CreateVectorSplat(lanes, v);
+  } else {
+    return v;
+  }
+}
+
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
@@ -1311,10 +1316,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       case kRsqrt: {
         v->params().front()->accept(this);
         value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
-        llvm::Value* constant = llvm::ConstantFP::get(FloatTy_, 1.0);
-        if (v->dtype().lanes() > 1) {
-          constant = irb_.CreateVectorSplat(v->dtype().lanes(), constant);
-        }
+        llvm::Value* constant = toVec(llvm::ConstantFP::get(FloatTy_, 1.0), v->dtype().lanes());
         value_ = irb_.CreateFDiv(constant, value_);
         return;
       } break;
