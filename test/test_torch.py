@@ -7015,39 +7015,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_matrix_rank(self, device):
-        a = torch.eye(10, device=device)
-        self.assertEqual(torch.matrix_rank(a).item(), 10)
-        self.assertEqual(torch.matrix_rank(a, True).item(), 10)
-
-        a[5, 5] = 0
-        self.assertEqual(torch.matrix_rank(a).item(), 9)
-        self.assertEqual(torch.matrix_rank(a, True).item(), 9)
-
-        a = torch.randn(24, 42, device=device)
-        self.assertEqual(torch.matrix_rank(a), torch.matrix_rank(a.t()))
-        aaT = torch.mm(a, a.t())
-        self.assertEqual(torch.matrix_rank(aaT), torch.matrix_rank(aaT, True))
-        aTa = torch.mm(a.t(), a)
-        self.assertEqual(torch.matrix_rank(aTa), torch.matrix_rank(aTa, True))
-
-        if TEST_NUMPY:
-            from numpy.linalg import matrix_rank
-            a = torch.randn(35, 75, device=device)
-            self.assertEqual(torch.matrix_rank(a).item(), matrix_rank(a.cpu().numpy()))
-            self.assertEqual(torch.matrix_rank(a, 0.01).item(), matrix_rank(a.cpu().numpy(), 0.01))
-
-            aaT = torch.mm(a, a.t())
-            self.assertEqual(torch.matrix_rank(aaT).item(), matrix_rank(aaT.cpu().numpy()))
-            self.assertEqual(torch.matrix_rank(aaT, 0.01).item(), matrix_rank(aaT.cpu().numpy(), 0.01))
-
-            if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
-                self.assertEqual(torch.matrix_rank(aaT, True).item(), matrix_rank(aaT.cpu().numpy(), True))
-                self.assertEqual(torch.matrix_rank(aaT, 0.01, True).item(),
-                                 matrix_rank(aaT.cpu().numpy(), 0.01, True))
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_matrix_power(self, device, dtype):
         def run_test(M, sign=1):
