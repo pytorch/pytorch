@@ -428,11 +428,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 7e-2}),),
                    skips=(
-                       # Investigate flaky behaviour
+                       # Reference: https://github.com/pytorch/pytorch/issues/47358
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.bfloat16, torch.cfloat, torch.cdouble]),
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.bfloat16]),
+                                dtypes=[torch.bfloat16]),
                        # RuntimeError: sqrt does not support automatic differentiation for outputs with complex dtype.
                        SkipInfo('TestGradients', 'test_fn_grad',
                                 dtypes=[torch.cdouble]),
