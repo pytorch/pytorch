@@ -7,6 +7,7 @@
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
+using namespace torch::test;
 
 #define ASSERT_VARIABLE_EQ(a,b) ASSERT_TRUE(torch::allclose((a),(b)))
 #define EXPECT_VARIABLE_EQ(a,b) EXPECT_TRUE(torch::allclose((a),(b)))
@@ -154,6 +155,39 @@ TEST(AutogradAPITests, RetainGrad) {
   ASSERT_VARIABLE_EQ(input * 18, input.grad());
 }
 
+TEST(AutogradAPITests, AnomalyMode) {
+  // Needs to have backtrace as warning and then throw an error
+  torch::autograd::DetectAnomalyGuard detect_anomaly;
+  {
+    WarningCapture warnings;
+    auto x = torch::tensor({5.0}, torch::requires_grad());
+    auto y = x * x;
+    auto z = y * y;
+    y += 1;
+    ASSERT_THROWS_WITH(z.backward(), "inplace");
+    ASSERT_TRUE(
+        warnings.str().find("Traceback of forward") != std::string::npos);
+  }
+  {
+    WarningCapture warnings;
+    // Double backward
+    auto x = torch::tensor({0.0}, torch::requires_grad());
+    auto y = x.pow(1.5);
+    auto gr =
+        grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x});, "returned nan");
+    auto msgs = warnings.messages();
+    ASSERT_EQ(msgs.size(), 2);
+    ASSERT_TRUE(
+        msgs[0].find("Traceback of forward call that caused the error") !=
+        std::string::npos);
+    ASSERT_TRUE(
+        msgs[1].find(
+            "Traceback of forward call that induced the previous calculation") !=
+        std::string::npos);
+  }
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {
@@ -211,7 +245,7 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   };
 
   auto x = torch::ones(1, torch::requires_grad());
-  
+
   MyFunction::apply(x).backward();
   ASSERT_FALSE(x.grad().defined());
 

@@ -44,6 +44,7 @@ from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
 from quantization.test_quantize import TestEagerModeOps  # noqa: F401
+from quantization.test_quantize import TestEagerModeQATOps  # noqa: F401
 
 # TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401
@@ -60,11 +61,17 @@ from quantization.test_quantize_jit import TestQuantizeDynamicJitPasses  # noqa:
 from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F401
 
 # 3. GraphModule based graph mode quantization
-from quantization.test_quantize_fx import TestQuantizeFx  # noqa: F401
-from quantization.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
-from quantization.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
+try:
+    from quantization.test_quantize_fx import TestFuseFx  # noqa: F401
+    from quantization.test_quantize_fx import TestQuantizeFx  # noqa: F401
+    from quantization.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
+    from quantization.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
+except ImportError:
+    # In FBCode we separate FX out into a separate target for the sake of dev
+    # velocity. These are covered by a separate test target `quantization_fx`
+    pass
 
-# Tooling: numric_suite
+# Tooling: numeric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
 
 # Backward Compatibility
