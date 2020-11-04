@@ -209,22 +209,13 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          if [[ ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
-            python test/print_test_stats.py caffe2_tests
-          else
-            python test/print_test_stats.py test
-          fi
+          python test/print_test_stats.py test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
 
           echo "Retrieving test reports"
-          if [[ ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
-            docker cp $id:/var/lib/jenkins/workspace/caffe2_tests/cpp ./test-reports || echo 'No test reports found!'
-            docker cp $id:/var/lib/jenkins/workspace/caffe2_tests/python ./test-reports || echo 'No test reports found!'
-          else
-            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
-          fi
+          docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
           if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
               echo "Retrieving Python coverage report"
               docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
