@@ -205,13 +205,13 @@ struct ProfilingRecord {
     return profiled_graph_;
   }
 
+  ProfileIValueOp* createProfileIValueNode(Value* in_val);
+
  private:
   ProfileOp* createProfileNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
-  ProfileOptionalOp* createProfileOptionalNode(
-      const std::function<void(Stack&)>& fp,
-      at::ArrayRef<Value*> inputs);
+
   void instrumentBlock(Block* block);
   void insertShapeProfile(Node* n, size_t offset);
   ProfilingRecord(std::shared_ptr<Graph> g);

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -489,6 +490,12 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
+    // TODO: order for now is important; we should make
+    // both InsertProfileNodesForSpecializeAutogradZero and
+    // InsertProfileNodesForCUDAFuser less sensitive to the presence
+    // of other profiling nodes
+    InsertProfileNodesForSpecializeAutogradZero(pr_.get());
+    torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through

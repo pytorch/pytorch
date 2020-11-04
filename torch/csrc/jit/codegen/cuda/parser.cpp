@@ -614,20 +614,22 @@ std::unordered_map<
 std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
 bool IrParser::init_registry_ = true;
 
-ProfileIValueOp* insertProfileIValueOp(Node* node, size_t offset) {
-  auto pn = new ProfileIValueOp(node->owningGraph(), nullptr);
+ProfileIValueOp* insertProfileIValueOp(
+    Node* node,
+    size_t offset,
+    ProfilingRecord* pr) {
   auto in_val = node->input(offset);
+  auto pn = pr->createProfileIValueNode(in_val);
   pn->insertBefore(node);
-  pn->addInput(in_val);
-  auto pno = pn->addOutput();
-  pno->setType(in_val->type());
-  in_val->replaceAllUsesAfterNodeWith(pn, pno);
-  pn->ty_(attr::profiled_type, in_val->type());
+  // TODO: I think this is better
+  node->replaceInput(offset, pn->output());
+  // TODO: why is this here?
+  // pn->ty_(attr::profiled_type, in_val->type());
   return pn;
 }
 
 void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
-  auto pn = insertProfileIValueOp(node, offset);
+  auto pn = insertProfileIValueOp(node, offset, pr);
 
   std::function<void(Stack&)> ivalue_profiler = [pr, pn] (Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
@@ -655,7 +657,7 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
 }
 
 void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
-  auto pn = insertProfileIValueOp(node, offset);
+  auto pn = insertProfileIValueOp(node, offset, pr);
 
   std::function<void(Stack&)> ivalue_profiler = [pr, pn] (Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
@@ -738,6 +740,24 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   // }
 
   return false;
+}
+
+void insertProfileNodesForCUDAFuser_(Block* block, ProfilingRecord* pr) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    auto n = *it;
+
+    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+      insertProfileIValue(pr, n, offset);
+    }
+
+    for (auto ib : n->blocks()) {
+      insertProfileNodesForCUDAFuser_(ib, pr);
+    }
+  }
+}
+
+void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
+  insertProfileNodesForCUDAFuser_(pr->profiled_graph_->block(), pr);
 }
 
 std::unique_ptr<Fusion> parseJitIR(const std::shared_ptr<Graph>& graph) {
