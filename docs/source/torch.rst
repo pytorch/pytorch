@@ -459,6 +459,7 @@ Other Operations
     flip
     fliplr
     flipud
+    kron
     rot90
     gcd
     histc
