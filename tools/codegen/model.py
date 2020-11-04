@@ -360,6 +360,16 @@ class FunctionSchema:
             assert arg.annotation == ret.annotation, \
                 "Out arguments must have matching return Tensor; furthermore, " \
                 "the ith-argument needs to correspond to the ith return"
+        # Invariant: we expect out arguments to appear as keyword arguments in the schema.
+        # This means that all mutable returns should be aliased to a keyword argument
+        # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
+        # See Note [is_out_fn]
+        out_and_self = list(self.out_arguments) + [arg for arg in self.arguments if arg.name == "self"]
+        mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
+        for ret in mutable_returns:
+            assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
+                "All mutable returns must be aliased either to a keyword argument, or to \"self\". " \
+                "Did you forget to mark an out argument as keyword-only?"
         if self.out_arguments:
             assert len(self.out_arguments) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"

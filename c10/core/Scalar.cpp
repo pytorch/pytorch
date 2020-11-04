@@ -13,4 +13,12 @@ Scalar Scalar::operator-() const {
   }
 }
 
+Scalar Scalar::conj() const {
+  if (isComplex()) {
+    return Scalar(std::conj(v.z));
+  } else {
+    return *this;
+  }
+}
+
 }  // namespace c10

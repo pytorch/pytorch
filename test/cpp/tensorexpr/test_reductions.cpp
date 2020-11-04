@@ -1337,8 +1337,8 @@ void testReduceInlineReduction() {
   }
 
   LoopNest l1({y});
-  ASSERT_THROWS_WITH(
-      l1.computeInline(x->buf()), "cannot inline a reduction computation");
+  // Cannot inline a reduction computation
+  ASSERT_FALSE(l1.computeInline(x->buf()));
 }
 
 void testReduceInlineConsumer() {
