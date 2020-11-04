@@ -14,8 +14,8 @@ from .quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
-    has_special_act_post_process,
-    get_default_special_act_post_process,
+    _has_special_act_post_process,
+    _get_special_act_post_process,
 )
 
 from .stubs import DeQuantStub, QuantWrapper
@@ -141,8 +141,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
-        elif has_special_act_post_process(type(child)):
-            special_act_post_process = get_default_special_act_post_process(type(child))
+        elif _has_special_act_post_process(child):
+            special_act_post_process = _get_special_act_post_process(child)
             insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
             insert_activation_post_process(child)

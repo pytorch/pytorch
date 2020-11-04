@@ -405,10 +405,7 @@ static void checkBasicAsStridedValidForSlice(
   auto max_as_strided_loc = maximum_indexable_location(sizes, strides, storage_offset);
   auto max_slice_loc = maximum_indexable_location(slice_sizes, slice_strides, base_offset);
 
-  if (!max_as_strided_loc.has_value() && !max_slice_loc.has_value()) {
-    return;
-  }
-  if (!max_as_strided_loc.has_value() && max_slice_loc.has_value()) {
+  if (!max_as_strided_loc.has_value()) {
     return;
   }
   if (max_as_strided_loc.has_value() && !max_slice_loc.has_value()) {
