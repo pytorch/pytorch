@@ -2,7 +2,7 @@ import json
 import argparse
 import os
 import textwrap
-from common import dict_to_features, categories, subcategories, get_features, CommitDataCache
+from common import dict_to_features, categories, topics, get_features, CommitDataCache
 from commitlist import CommitList
 
 class Categorizer:
@@ -10,7 +10,7 @@ class Categorizer:
         self.cache = CommitDataCache()
         self.commits = CommitList.from_existing(path)
 
-        # Special categories: 'Uncategorized', 'All'
+        # Special categories: 'Uncategorized'
         # All other categories must be real
         self.category = category
 
@@ -51,12 +51,14 @@ class Categorizer:
         else:
             potential_reverts = ""
 
-        all_categories = categories + subcategories
         features = self.features(commit)
 
-        bc_breaking_alarm = ""
+        breaking_alarm = ""
         if 'topic: bc-breaking' in features.labels:
-            bc_breaking_alarm = "!!!!!! BC BREAKING !!!!!!"
+            breaking_alarm += "!!!!!! BC BREAKING !!!!!!"
+
+        if 'module: deprecation' in features.labels:
+            breaking_alarm += "!!!!!! DEPRECATION !!!!!!"
 
         os.system('clear')
         view = textwrap.dedent(f'''\
@@ -70,36 +72,50 @@ Files changed: {features.files_changed}
 
 Labels: {features.labels}
 
-{potential_reverts} {bc_breaking_alarm}
+{potential_reverts} {breaking_alarm}
 
 Current category: {commit.category}
 
-Select from: {', '.join(all_categories)}
+Select from: {', '.join(categories)}
 
         ''')
         print(view)
-        choice = None
-        while choice is None:
+        cat_choice = None
+        while cat_choice is None:
             value = input('category> ').strip()
             if len(value) == 0:
-                choice = commit.category
+                cat_choice = commit.category
                 continue
-            if value.isnumeric():
-                return int(value) - 1
-            choices = [cat for cat in all_categories
+            choices = [cat for cat in categories
                        if cat.startswith(value)]
             if len(choices) != 1:
                 print(f'Possible matches: {choices}, try again')
                 continue
-            choice = choices[0]
-        print(f'\nSelected: {choice}')
-        self.assign_category(commit, choice)
+            cat_choice = choices[0]
+        print(f'\nSelected: {cat_choice}')
+        print(f'\nCurrent topic: {commit.topic}')
+        print(f'''Select from: {', '.join(topics)}''')
+        topic_choice = None
+        while topic_choice is None:
+            value = input('topic> ').strip()
+            if len(value) == 0:
+                topic_choice = commit.topic
+                continue
+            choices = [cat for cat in topics
+                       if cat.startswith(value)]
+            if len(choices) != 1:
+                print(f'Possible matches: {choices}, try again')
+                continue
+            topic_choice = choices[0]
+        print(f'\nSelected: {topic_choice}')
+        self.update_commit(commit, cat_choice, topic_choice)
         return None
 
-    def assign_category(self, commit, category):
-        if category == commit.category:
-            return
+    def update_commit(self, commit, category, topic):
+        assert category in categories
+        assert topic in topics
         commit.category = category
+        commit.topic = topic
         self.commits.write_to_disk()
 
 def main():

@@ -1,6 +1,6 @@
 import argparse
-from common import run
-from collections import namedtuple
+from common import run, topics
+from collections import namedtuple, defaultdict
 import os
 import csv
 import pprint
@@ -23,9 +23,10 @@ Update the existing commitlist to commit bfcb687b9c.
 """
 
 class Commit:
-    def __init__(self, commit_hash, category, title):
+    def __init__(self, commit_hash, category, topic, title):
         self.commit_hash = commit_hash
         self.category = category
+        self.topic = topic
         self.title = title
 
     def __eq__(self, other):
@@ -33,10 +34,11 @@ class Commit:
             return False
         return self.commit_hash == other.commit_hash and \
             self.category == other.category and \
+            self.topic == other.topic and \
             self.title == other.title
 
     def __repr__(self):
-        return f'Commit({self.commit_hash}, {self.category}, {self.title})'
+        return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
 
 class CommitList:
     # NB: Private ctor. Use `from_existing` or `create_new`.
@@ -61,8 +63,8 @@ class CommitList:
         with open(path) as csvfile:
             reader = csv.reader(csvfile)
             rows = list(row for row in reader)
-        assert all(len(row) >= 3 for row in rows)
-        return [Commit(*row[:3]) for row in rows]
+        assert all(len(row) >= 4 for row in rows)
+        return [Commit(*row[:4]) for row in rows]
 
     def write_to_disk(self):
         path = self.path
@@ -70,7 +72,7 @@ class CommitList:
         with open(path, 'w') as csvfile:
             writer = csv.writer(csvfile)
             for commit in rows:
-                writer.writerow([commit.commit_hash, commit.category, commit.title])
+                writer.writerow([commit.commit_hash, commit.category, commit.topic, commit.title])
 
     @staticmethod
     def get_commits_between(base_version, new_version):
@@ -86,12 +88,15 @@ class CommitList:
 
         log_lines = commits.split('\n')
         hashes, titles = zip(*[log_line.split(' ', 1) for log_line in log_lines])
-        return [Commit(commit_hash, 'Uncategorized', title) for commit_hash, title in zip(hashes, titles)]
+        return [Commit(commit_hash, 'Uncategorized', 'Untopiced', title) for commit_hash, title in zip(hashes, titles)]
 
-    def filter(self, category=None):
-        if category is None:
-            return self.commits
-        return [commit for commit in self.commits if commit.category == category]
+    def filter(self, *, category=None, topic=None):
+        commits = self.commits
+        if category is not None:
+            commits = [commit for commit in commits if commit.category == category]
+        if topic is not None:
+            commits = [commit for commit in commits if commit.topic == topic]
+        return commits
  
     def update_to(self, new_version):
         last_hash = self.commits[-1].commit_hash
@@ -99,12 +104,9 @@ class CommitList:
         self.commits += new_commits
 
     def stat(self):
-        counts = {}
+        counts = defaultdict(lambda: defaultdict(int))
         for commit in self.commits:
-            category = commit.category
-            if category not in counts:
-                counts[category] = 0
-            counts[category] += 1
+            counts[commit.category][commit.topic] += 1
         return counts
 
 
@@ -125,16 +127,18 @@ def to_markdown(commit_list, category):
         return match.group(1)
 
     cdc = CommitDataCache()
-    commits = commit_list.filter(category)
-    lines = [f'### {category}\n']
-    for commit in commits:
-        result = cleanup_title(commit)
-        maybe_pr_number = cdc.get(commit.commit_hash).pr_number
-        if maybe_pr_number is None:
-            result = f'- {result} ({commit.commit_hash})\n'
-        else:
-            result = f'- {result} ([#{maybe_pr_number}](https://github.com/pytorch/pytorch/pull/{maybe_pr_number}))\n'
-        lines.append(result)
+    lines = [f'\n## {category}\n']
+    for topic in topics:
+        lines.append(f'### {topic}\n')
+        commits = commit_list.filter(category=category, topic=topic)
+        for commit in commits:
+            result = cleanup_title(commit)
+            maybe_pr_number = cdc.get(commit.commit_hash).pr_number
+            if maybe_pr_number is None:
+                result = f'- {result} ({commit.commit_hash})\n'
+            else:
+                result = f'- {result} ([#{maybe_pr_number}](https://github.com/pytorch/pytorch/pull/{maybe_pr_number}))\n'
+            lines.append(result)
     return lines
 
 def main():
