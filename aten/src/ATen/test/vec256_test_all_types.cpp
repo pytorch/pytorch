@@ -1000,7 +1000,6 @@ namespace {
     // come from vec256_test.cpp, these tests are not consistent with the generic framework and can not be migrated
     // at the moment. We temporarily put these tests here and will migrate them into the generic framework in the
     // next phase.
-    /*using namespace at::vec256;
     bool check_equal(const at::Tensor& a, const at::Tensor& b) {
       return (a.equal(b));
     }
@@ -1016,6 +1015,7 @@ namespace {
     }
 
     TEST(Vec256TestFloat, arangeTest) {
+      using namespace at::vec256;
       at::Tensor arange_output_ref = at::zeros({8});
       at::Tensor arange_output_vectorized = at::zeros({8});
       float base = 7.f;
@@ -1030,6 +1030,7 @@ namespace {
       ASSERT_TRUE(check_equal(arange_output_ref, arange_output_vectorized));
     }
 
+    /*
     // TODO:
     // CopyTest and Set are basically tests loadu and store, probably can be either merged into one, or just
     // delete them since the generic framework test loadu and store implicitly everywhere.
