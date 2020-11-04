@@ -9,7 +9,7 @@ namespace at {
 namespace cuda {
 namespace philox {
 
- constexpr uint64_t max_kernel_threads =  (uint64_t(1) << 40);
+constexpr uint64_t max_kernel_threads =  (uint64_t(1) << 40);
 
 // We can't write a __device__ function in CUDAGeneratorImpl.h, because it's in ATen.
 // Also, whatever call unpacks PhiloxCudaState in consumer kernels must be inlineable.

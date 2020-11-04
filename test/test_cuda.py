@@ -3220,6 +3220,17 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
+    def test_state_on_device_get_set(self):
+        # Ensures we're actually flipping the C++ backend value, not just a Python attribute
+        self.assertFalse(torch.backends.cuda._stateful_ops.state_on_device)
+        self.assertFalse(torch._C._get_stateful_cuda_op_states_on_device())
+        torch.backends.cuda._stateful_ops.state_on_device = True
+        self.assertTrue(torch._C._get_stateful_cuda_op_states_on_device())
+        torch.backends.cuda._stateful_ops.state_on_device = False
+        self.assertFalse(torch.backends.cuda._stateful_ops.state_on_device)
+        self.assertFalse(torch._C._get_stateful_cuda_op_states_on_device())
+
+
     def test_state_on_device_rng_functional(self):
         size = 10000
         a = torch.randn((size,), device="cuda", dtype=torch.float)
