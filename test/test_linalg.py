@@ -351,7 +351,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3})
-    def test_cond(self, device, dtype):
+    def test_cond_xfailed(self, device, dtype):
         input_size = (3, 3)
         ord = 1
         torch.randn(*input_size, dtype=dtype, device=device)
