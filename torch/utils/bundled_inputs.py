@@ -137,7 +137,7 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
         # These can be represented compactly.
         for fmt in [torch.contiguous_format, torch.channels_last]:
             if arg.is_contiguous(memory_format=fmt) and (arg == arg.flatten()[0]).all().item():
-                return (torch.tensor([arg.flatten()[0]]).expand(*arg.size()),
+                return (arg.flatten()[0].expand(*arg.size()),
                         f"{ref}.contiguous(memory_format={fmt})")
         # Prevent big tensors from being bundled by default.
         # TODO: Provide more useful diagnostics.
