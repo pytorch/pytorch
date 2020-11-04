@@ -391,7 +391,7 @@ static optional<int64_t> maximum_indexable_location(
 // x.as_strided(sizes, strides, maybe_storage_offset)
 // are within the bounds of possible memory locations accessible by x.
 static void checkBasicAsStridedValidForSlice(
-    const auto& physical_tensor,
+    const Tensor& physical_tensor,
     int64_t num_batch_dims,
     IntArrayRef sizes,
     IntArrayRef strides,
