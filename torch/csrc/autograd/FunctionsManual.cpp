@@ -709,8 +709,13 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   // output/grad Size   (8,    3,    36,   15)
   // grad_size          [4, 2,    3, 9, 4, 3, 5]
   // sum_dims           [0,          3,    5]
-  grad = grad.reshape(grad_size);
-  grad = grad.sum(sum_dims);
+
+  // When repeat 1 time over all original dimensions, the empty sum_dims will reduce
+  // the whole grad tensor into a scalar rather than keeping original dimensions.
+  if (!sum_dims.empty()) {
+    grad = grad.reshape(grad_size);
+    grad = grad.sum(sum_dims);
+  }
   return grad;
 }
 
