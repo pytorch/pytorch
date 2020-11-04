@@ -116,11 +116,11 @@ class TestForeach(TestCase):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N - 1)])
 
                     tensors = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must be of the same length, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
                     tensors1 = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must be of the same length, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
@@ -160,7 +160,6 @@ class TestForeach(TestCase):
     #
     # Pointwise ops
     #
-    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_addcmul(self, device, dtype):
         if self.device_type == 'cpu':
@@ -262,6 +261,7 @@ class TestForeach(TestCase):
     #
     # Ops with scalar
     #
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalar(self, device, dtype):
         for N in N_values:
@@ -303,6 +303,7 @@ class TestForeach(TestCase):
     # We need to update codegen to correctly handle function overloads with float[] and int[].
     # As optimizers work with float tensors, the result will always be torch.float32 for now.
     # Current schema is using 'float[]' as scalar list type.
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalarlist(self, device, dtype):
         for N in N_values:
@@ -348,6 +349,7 @@ class TestForeach(TestCase):
                     foreach_bin_op_(tensors, scalars)
                     self.assertEqual(res, tensors)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalar(self, device, dtype):
         for N in N_values:
@@ -391,6 +393,7 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(tensors, expected)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalarlist(self, device, dtype):
         for N in N_values:
@@ -451,6 +454,7 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(tensors, expected)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalar(self, device, dtype):
         for N in N_values:
@@ -514,6 +518,7 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(TypeError, "argument 'scalars' must be tuple of floats"):
                     foreach_bin_op_(tensors, scalars)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalar(self, device, dtype):
         for N in N_values:
@@ -564,6 +569,7 @@ class TestForeach(TestCase):
                         foreach_bin_op_(tensors, scalar)
                         self.assertEqual(tensors, expected)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalarlist(self, device, dtype):
         for N in N_values:
@@ -709,9 +715,9 @@ class TestForeach(TestCase):
 
         # One empty list
         tensors1.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
+        with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
             torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
+        with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
             torch._foreach_add_(tensors1, tensors2)
 
         # Lists have different amount of tensors
