@@ -19,6 +19,7 @@ void main() {
 
   if (all(lessThan(pos.xy, size))) {
     const vec2 ipos = pos.xy * stride;
+
     const ivec2 start = ivec2(floor(ipos));
     const ivec2 end = ivec2(ceil(ipos + stride));
     const ivec2 range = end - start;
