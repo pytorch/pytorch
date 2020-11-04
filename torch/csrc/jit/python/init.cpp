@@ -39,12 +39,13 @@
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
-#include <torch/csrc/jit/passes/onnx/shape_type_dependent_peephole.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -476,11 +477,10 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def(
-          "_jit_pass_onnx_shape_type_dependent_preprocess",
-          ShapeTypeDependentPreprocess)
+          "_jit_pass_onnx_encapsulate_pattern_into_subblock",
+          EncapsulatePatternIntoSubblock)
       .def(
-          "_jit_pass_onnx_shape_type_dependent_peephole",
-          ShapeTypeDependentPeephole)
+          "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_fixup_onnx_loop_node_inputs", FixupONNXLoopNodeInputs)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)

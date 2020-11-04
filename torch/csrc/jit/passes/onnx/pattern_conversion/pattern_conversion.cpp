@@ -1,26 +1,20 @@
-#include <torch/csrc/jit/passes/onnx/shape_type_dependent_peephole.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 
 namespace torch {
 namespace jit {
 
 namespace {
 
-size_t CountNodesBeforeExcludingSubblock(const Node* n) {
+size_t CountNodesBefore(const Node* n) {
   auto graph = n->owningGraph();
   size_t i = 0;
   for (auto node : graph->nodes()) {
-    if (std::any_of(
-            n->blocks().begin(), n->blocks().end(), [&](const Block* b) {
-              return b == node->owningBlock();
-            })) {
-      i++;
-      continue;
-    }
     if (node == n) {
-      return i;
+      break;
     }
     i++;
   }
@@ -42,6 +36,11 @@ size_t CountNodesAfterExcludingSubblock(const Node* n) {
   }
   return i;
 }
+
+} // namespace
+
+// Converting inplace index_put to ONNX
+namespace {
 
 Value* CreateSizeOfDim(Value* input, int64_t dim, Node* insertBefore) {
   auto graph = input->owningGraph();
@@ -68,69 +67,17 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
   auto step = slice->inputs()[4];
   auto index =
       graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
-  printf("before slice\n");
-  auto sliced_index_n =
-      // graph->insert(aten::slice, {index, {0}, start, end, step});
-      graph->create(
-          aten::slice,
-          {index,
-           graph->insertConstant(
-               scalar_to_tensor(at::Scalar(0)), c10::nullopt, slice->scope()),
-           start,
-           end,
-           step});
+  auto sliced_index_n = graph->create(
+      aten::slice,
+      {index,
+       graph->insertConstant(
+           scalar_to_tensor(at::Scalar(0)), c10::nullopt, slice->scope()),
+       start,
+       end,
+       step});
 
-  printf("after slice\n");
   auto sliced_index = sliced_index_n->insertBefore(insertBefore)->output();
-  printf("after insert slice\n");
   return sliced_index;
-}
-
-Value* CreateCompleteIndexTensor(Value* size, Node* insertBefore) {
-  // Create index tensor of size.
-  // The result is torch.tensor([0, 1, 2, ..., size - 1])
-  auto graph = size->owningGraph();
-  WithInsertPoint guard(insertBefore);
-  auto index =
-      graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
-  return index;
-}
-
-bool IsSameSource(const Node* n, const Node* m) {
-  const auto& source_n = n->sourceRange().source();
-  const auto& source_m = m->sourceRange().source();
-  return (
-      (source_n->text() == source_m->text()) &&
-      (source_n->starting_line_no() == source_m->starting_line_no()));
-}
-
-// Trace back all the slice & select nodes associated with the index_put node.
-// E.g. The IR for x[1:3, 0] = update
-//    ...
-//    %8 : Float(2, 4) = aten::slice(%0, %4, %5, %6, %7)
-//    ...
-//    %11 : Float(2) = aten::select(%8, %9, %10)
-//    ...
-//    %13 : Tensor?[] = prim::ListConstruct()
-//    ...
-//    %16 : Float(2) = aten::index_put(%11, %13, %14, %15)
-//
-// We collect %11 and %8, to construct the index tensors.
-// The vector slice_and_select_node contains all the associated slice and
-// select node, in the reversed order.
-std::vector<Node*> FetchSliceAndSelect(const Node* index_put_node) {
-  std::vector<Node*> slice_and_select_node;
-  auto src_node = index_put_node->input(0)->node();
-  while (src_node) {
-    if ((src_node->kind() == aten::slice || src_node->kind() == aten::select) &&
-        IsSameSource(src_node, index_put_node)) {
-      slice_and_select_node.emplace_back(src_node);
-      src_node = src_node->input(0)->node();
-    } else {
-      src_node = nullptr;
-    }
-  }
-  return slice_and_select_node;
 }
 
 struct ConvertedIndex {
@@ -161,20 +108,8 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     // select does not keep dims,
     // this creates offset for latter slice and select nodes.
     // NOTE: Cannot rely on get(attr::dim), because op no longer match schema.
-    int dim = 0;
-    if (node->kind() == aten::slice) {
-      printf("get slice\n");
-      dim = node->inputs().at(1)->node()->t(attr::value).item().toInt();
-    } else if (node->kind() == aten::select) {
-      printf("get select\n");
-      dim = node->inputs().at(1)->node()->t(attr::value).item().toInt();
-    } else {
-      AT_ERROR(
-          "Unexpected node kind ",
-          node->kind().toDisplayString(),
-          " Expected aten::slice or aten::select.");
-    }
-    printf("get dim after\n");
+    int dim = node->inputs().at(1)->node()->t(attr::value).item().toInt();
+
     if (dim < 0) {
       auto input_type = env.at(orig_data)->type()->expect<TensorType>();
       if (input_type->dim().has_value()) {
@@ -222,7 +157,6 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
 
     AT_ASSERT(cur_dim == dim);
     if (node->kind() == aten::slice) {
-      printf("Create slice\n");
       auto size = CreateSizeOfDim(orig_data, dim, index_put_node);
       auto index_tensor = ConvertSliceToIndex(node, size, index_put_node);
       dim_index_map.emplace(
@@ -230,7 +164,6 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
           std::forward_as_tuple(dim),
           std::forward_as_tuple(index_tensor, aten::slice));
     } else if (node->kind() == aten::select) {
-      printf("Create select\n");
       auto index_tensor = ConvertSelectToIndex(node->input(2), index_put_node);
       dim_index_map.emplace(
           std::piecewise_construct,
@@ -333,76 +266,6 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   return indices;
 }
 
-void RemoveInplace(Node* index_put_node) {
-  auto graph = index_put_node->owningGraph();
-
-  // Find slice and select operators that are associated with this index
-  // operator. E.g. x[1:3, 0] = y will generate one slice operator(1:3) and one
-  // select operator(0).
-  std::vector<Node*> slice_and_select_nodes =
-      FetchSliceAndSelect(index_put_node);
-  Node* last_node = slice_and_select_nodes.size() > 0
-      ? slice_and_select_nodes.back()
-      : index_put_node;
-  Value* orig_data = last_node->input(0);
-
-  orig_data->replaceAllUsesAfterNodeWith(
-      index_put_node, index_put_node->output());
-
-  // Copy related nodes into subblock of a new special placeholder node.
-  // TODO: Either check the nodes are not used anywhere else,
-  //       and delete them here.
-  //       Or just do the copying and leave it to dce.
-  //       For now, leaving it to dce.
-  Node* placeholder_node =
-      graph->create(Symbol::fromQualString("onnx::Placeholder"));
-  placeholder_node->s_(attr::name, "index_put");
-
-  // Construct subblock
-  auto subblock = placeholder_node->addBlock();
-  std::unordered_map<Value*, Value*> env;
-
-  // slice_and_select_nodes are in reversed order.
-  for (auto it = slice_and_select_nodes.rbegin();
-       it != slice_and_select_nodes.rend();
-       ++it) {
-    auto n = *it;
-    auto cloned_n = subblock->appendNode(graph->createClone(
-        n, [&](Value* v) { return env.find(v) != env.end() ? env[v] : v; }));
-    for (auto i = 0; i < cloned_n->outputs().size(); ++i) {
-      env[n->outputs().at(i)] = cloned_n->outputs().at(i);
-    }
-  }
-
-  Node* new_index_put_node =
-      subblock->appendNode(graph->createClone(index_put_node, [&](Value* v) {
-        return env.find(v) != env.end() ? env[v] : v;
-      }));
-  for (auto o : new_index_put_node->outputs()) {
-    subblock->registerOutput(o);
-  }
-
-  placeholder_node->insertBefore(index_put_node);
-  index_put_node->replaceAllUsesWith(placeholder_node);
-
-  printf("graph after %s\n", graph->toString().c_str());
-}
-
-void PrepareInplaceIndexPutForONNX(Block* block) {
-  auto it = block->nodes().begin();
-  while (it != block->nodes().end()) {
-    auto node = *it;
-    ++it;
-    for (auto block : node->blocks()) {
-      PrepareInplaceIndexPutForONNX(block);
-    }
-
-    if (node->kind() == aten::index_put_) {
-      RemoveInplace(node);
-    }
-  }
-}
-
 // Trace back all the slice & select nodes associated with the index_put node,
 // and convert them to associated indices.
 // E.g. The IR for x[1:3, 0] = update
@@ -442,18 +305,11 @@ std::vector<Value*> ConvertIndexPutToONNX(
     return {};
   }
 
-  printf(
-      "ONNX graph to start with: %s\n",
-      new_block->owningGraph()->toString().c_str());
-
   TORCH_INTERNAL_ASSERT(old_node->blocks().size() == 1);
   auto new_graph = new_block->owningGraph();
   auto old_graph = old_node->owningGraph();
   auto subblock = old_node->blocks()[0];
   auto index_put_node = subblock->nodes().back()->prev();
-  printf(
-      "node kind of last node in block %s\n",
-      index_put_node->kind().toQualString());
 
   // Open up SquashSliceAndSelect
   // 1. get all slice and select nodes, as before.
@@ -468,8 +324,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
   // operator. E.g. x[1:3, 0] = y will generate one slice operator(1:3) and one
   // select operator(0).
   std::vector<Node*> slice_and_select_nodes =
-      FetchSliceAndSelect(index_put_node);
-  printf("fetch slice and select\n");
+      IndexPutPatternFinder::FetchSliceAndSelect(index_put_node);
   Node* last_node = slice_and_select_nodes.size() > 0
       ? slice_and_select_nodes.back()
       : index_put_node;
@@ -479,12 +334,10 @@ std::vector<Value*> ConvertIndexPutToONNX(
   std::unordered_map<int64_t, ConvertedIndex> dim_index_map =
       MergeSliceAndSelectToIndices(
           old_graph, index_put_node, slice_and_select_nodes, orig_data, env);
-  printf("merge slice and select\n");
 
   // 3.
   std::vector<Value*> indices =
       ReshapeToAdvancedIndexingFormat(old_graph, index_put_node, dim_index_map);
-  printf("reshape to adv index\n");
 
   // 4.
   const auto list_indices =
@@ -511,10 +364,6 @@ std::vector<Value*> ConvertIndexPutToONNX(
       subblock,
       true,
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
-  printf(
-      "finish Convert index put on aten side: %s\n",
-      old_graph->toString().c_str());
-  printf("onnx graph under construction: %s\n", new_graph->toString().c_str());
 
   // 5. Convert all these things to onnx.
   for (auto at_n : subblock->nodes()) {
@@ -524,8 +373,6 @@ std::vector<Value*> ConvertIndexPutToONNX(
 
     NodeToONNX(at_n, new_block, torch::onnx::OperatorExportTypes::ONNX, env);
   }
-
-  printf("After converting all to onnx: %s\n", new_graph->toString().c_str());
 
   // 6. figure out onnx outputs.
   std::vector<Value*> outs;
@@ -537,24 +384,13 @@ std::vector<Value*> ConvertIndexPutToONNX(
 
 } // namespace
 
-void ShapeTypeDependentPreprocess(const std::shared_ptr<Graph>& graph) {
-  PrepareInplaceIndexPutForONNX(graph->block());
-}
-
-std::vector<Value*> ShapeTypeDependentPeephole(
+std::vector<Value*> ConvertPatternFromSubblock(
     Block* new_block,
     Node* old_node,
     std::unordered_map<Value*, Value*>& env) {
-  // TODO: The goal here is to restrict(looks like impossible, too easy to get
-  // the graph by simply calling some_node->owningGraph()).
-  //       or validate if graph is changed after the passes.
-  //       Only subblock is allowed to change.
-  //       Compare number of nodes is one option, but is too simple. (compare
-  //       nodes in graph before placeholder node and after placeholder node).
-  //       Comparing all nodes except for the placeholder one is another, but
-  //       may be too extreme.
-
-  size_t n_count_before = CountNodesBeforeExcludingSubblock(old_node);
+  // Assert that the number of nodes in original torch graph is unchanged
+  // before and after converting patterns from subblock.
+  size_t n_count_before = CountNodesBefore(old_node);
   size_t n_count_after = CountNodesAfterExcludingSubblock(old_node);
 
   std::vector<Value*> res;
@@ -567,8 +403,7 @@ std::vector<Value*> ShapeTypeDependentPeephole(
     res = ConvertIndexPutToONNX(new_block, old_node, env);
   }
 
-  TORCH_INTERNAL_ASSERT(
-      n_count_before == CountNodesBeforeExcludingSubblock(old_node));
+  TORCH_INTERNAL_ASSERT(n_count_before == CountNodesBefore(old_node));
   TORCH_INTERNAL_ASSERT(
       n_count_after == CountNodesAfterExcludingSubblock(old_node));
 

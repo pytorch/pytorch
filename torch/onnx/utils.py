@@ -167,7 +167,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_preprocess(graph)
         # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
-        torch._C._jit_pass_onnx_shape_type_dependent_preprocess(graph)
+        torch._C._jit_pass_onnx_encapsulate_pattern_into_subblock(graph)
 
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)
@@ -897,7 +897,7 @@ def _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_t
     return sym_registry.get_registered_op(op_name, domain, opset_version)
 
 
-def _run_symbolic_function(g, b, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
+def _run_symbolic_function(g, new_block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
@@ -921,7 +921,7 @@ def _run_symbolic_function(g, b, n, inputs, env, operator_export_type=OperatorEx
         ns, op_name = ns_op_name.split("::")
         if ns == "onnx":
             if op_name == "Placeholder":
-                return torch._C._jit_pass_onnx_shape_type_dependent_peephole(b, n, env)
+                return torch._C._jit_onnx_convert_pattern_from_subblock(new_block, n, env)
             else:
                 # Use the original node directly
                 attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}

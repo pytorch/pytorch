@@ -5,9 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void ShapeTypeDependentPreprocess(
-    const std::shared_ptr<Graph>& graph);
-TORCH_API std::vector<Value*> ShapeTypeDependentPeephole(
+TORCH_API std::vector<Value*> ConvertPatternFromSubblock(
     Block* new_block,
     Node* old_node,
     std::unordered_map<Value*, Value*>& env);
