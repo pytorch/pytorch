@@ -8,6 +8,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
@@ -337,6 +338,7 @@ void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
         "might run on corrupted/incomplete data. To avoid this inconsistency, ",
         "we are taking the entire process down.");
     LOG(ERROR) << exceptionMsg;
+    C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleNCCLGuard");
     std::rethrow_exception(exception_);
   }
 }
@@ -426,35 +428,6 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
 }
 
-void ProcessGroupNCCL::parseNcclBlockingWait() {
-  char* blockingWait = getenv(NCCL_BLOCKING_WAIT);
-  if (blockingWait != nullptr) {
-    auto val = std::stoi(blockingWait);
-    if (val == 1) {
-      // Make wait() and synchronize() a blocking call.
-      blockingWait_ = true;
-    } else if (val != 0) {
-      throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(NCCL_BLOCKING_WAIT));
-    }
-  }
-}
-
-void ProcessGroupNCCL::parseNcclAsyncErrorHandling() {
-  char* errorHandle = getenv(NCCL_ASYNC_ERROR_HANDLING);
-  if (errorHandle != nullptr) {
-    auto val = std::stoi(errorHandle);
-    if (val == 1) {
-      asyncErrorHandling_ = true;
-    } else if (val != 0) {
-      throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(NCCL_ASYNC_ERROR_HANDLING));
-    }
-  }
-}
-
 bool ProcessGroupNCCL::WorkNCCL::timedOut() {
   auto currentTimepoint = std::chrono::steady_clock::now();
   return (
@@ -476,20 +449,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       isHighPriorityStream_(options.isHighPriorityStream) {
   TORCH_CHECK(at::cuda::getNumGPUs() != 0,
     "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
-  try {
-    parseNcclBlockingWait();
-  } catch (std::exception& e) {
-    throw std::runtime_error(
-        "Invalid value for environment variable: " +
-        std::string(NCCL_BLOCKING_WAIT));
-  }
-  try {
-    parseNcclAsyncErrorHandling();
-  } catch (std::exception& e) {
-    throw std::runtime_error(
-        "Invalid value for environment variable: " +
-        std::string(NCCL_ASYNC_ERROR_HANDLING));
-  }
+  blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
+  asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
@@ -530,6 +491,33 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   if (asyncErrorHandling_) {
     workMetaListCV_.notify_one();
     workCleanupThread_.join();
+  }
+}
+
+void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds) {
+  std::unique_lock<std::mutex> lock(workMetaListMutex_);
+  for (auto& work : workMetaList_) {
+    work.checkAndSetException();
+    // Aborting NCCL Communicators due to errors is already handled above.
+    if (work.exception()) {
+      continue;
+    }
+
+    // Check for Timeouts in the WorkNCCL Operations, and abort all
+    // communicators accordingly.
+    if (work.timedOut()) {
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] Watchdog caught collective operation timeout for work: "
+          << work;
+      std::exception_ptr exception_ptr = std::make_exception_ptr(
+          std::runtime_error("NCCL Operation Timed Out"));
+      work.setException(exception_ptr);
+      for (const auto& ncclComm : work.ncclComms_) {
+        ncclComm->ncclCommAbort();
+        abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+      }
+    }
   }
 }
 
@@ -597,30 +585,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
     }
 
     if (asyncErrorHandling_) {
-      std::unique_lock<std::mutex> lock(workMetaListMutex_);
-      for (auto& work : workMetaList_) {
-        work.checkAndSetException();
-        // Aborting NCCL Communicators due to errors is already handled above.
-        if (work.exception()) {
-          continue;
-        }
-
-        // Check for Timeouts in the WorkNCCL Operations, and abort all
-        // communicators accordingly.
-        if (work.timedOut()) {
-          LOG(INFO)
-              << "[Rank " << rank_
-              << "] Watchdog caught collective operation timeout for work: "
-              << work;
-          std::exception_ptr exception_ptr = std::make_exception_ptr(
-              std::runtime_error("NCCL Operation Timed Out"));
-          work.setException(exception_ptr);
-          for (const auto& ncclComm : work.ncclComms_) {
-            ncclComm->ncclCommAbort();
-            abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
-          }
-        }
-      }
+      abortTimedOutCollectives(abortedCommIds);
     }
 
     if (blockingWait_) {
@@ -1472,6 +1437,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+        // See [Sync Streams].
+        c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
         torch::cuda::nccl::all2all(
               input,
               output,
@@ -1501,6 +1469,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               inputSplitSizes, input, &send_lengths, &send_offsets);
           c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
+          // See [Sync Streams].
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
           return ncclAlltoallv(
               input.data_ptr(),
               send_lengths.data(),

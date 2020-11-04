@@ -189,6 +189,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addcmul_
    .. automethod:: addmm
    .. automethod:: addmm_
+   .. automethod:: sspaddmm
+      :noindex:
    .. automethod:: addmv
    .. automethod:: addmv_
    .. automethod:: addr
@@ -269,6 +271,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
+      :noindex:
    .. automethod:: detach
       :noindex:
    .. automethod:: detach_
@@ -346,6 +349,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hypot_
    .. automethod:: i0
    .. automethod:: i0_
+   .. automethod:: igamma
+   .. automethod:: igamma_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
@@ -357,6 +362,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_put
    .. automethod:: index_select
    .. automethod:: indices
+      :noindex:
    .. automethod:: int
    .. automethod:: int_repr
    .. automethod:: inverse
@@ -377,6 +383,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_shared
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
+      :noindex:
    .. automethod:: istft
    .. automethod:: isreal
    .. automethod:: item
@@ -440,6 +447,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: min
    .. automethod:: minimum
    .. automethod:: mm
+   .. automethod:: smm
+      :noindex:
    .. automethod:: mode
    .. automethod:: movedim
    .. automethod:: mul
@@ -552,7 +561,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sort
    .. automethod:: split
    .. automethod:: sparse_mask
+      :noindex:
    .. automethod:: sparse_dim
+      :noindex:
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: square
@@ -590,6 +601,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse
+      :noindex:
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_
@@ -612,6 +624,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values
+      :noindex:
    .. automethod:: var
    .. automethod:: vdot
    .. automethod:: view

@@ -56,6 +56,7 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+    torch.jit._state._script_classes.clear()
 
 def get_execution_plan(graph_executor_state):
     execution_plans = list(graph_executor_state.execution_plans.values())
@@ -181,13 +182,13 @@ class JitTestCase(TestCase):
             files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
             # unwrap all the code files into strings
             code_files_str = filter(lambda x: x.endswith('.py'), files)
-            code_files_stream = map(lambda f: archive.open(f), code_files_str)
-            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files_stream)
+            code_files_stream = (archive.open(f) for f in code_files_str)
+            code_files = ("".join([line.decode() for line in file]) for file in code_files_stream)
 
             # unpickled all the debug files
             debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files_stream = map(lambda f: archive.open(f), debug_files_str)
-            debug_files = map(lambda f: pickle.load(f), debug_files_stream)
+            debug_files_stream = (archive.open(f) for f in debug_files_str)
+            debug_files = (pickle.load(f) for f in debug_files_stream)
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook

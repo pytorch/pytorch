@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.h>
+#pragma once
 
 #include <ATen/Tensor.h>
 #include <torch/custom_class.h>
@@ -49,6 +49,13 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
         output_min(output_min),
         output_max(output_max) {}
 
+  void release_resources() override {
+    if (releaseCallback) {
+      releaseCallback(conv2dOp);
+      conv2dOp = nullptr;
+    }
+  }
+
   Tensor weight;
   c10::optional<Tensor> bias;
   std::vector<int64_t> stride;
@@ -57,34 +64,33 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   int64_t groups;
   c10::optional<Scalar> output_min;
   c10::optional<Scalar> output_max;
-  id extra = nil;
+  void* conv2dOp = nullptr; // reserved to hold MPSCNNConv2dOp objects
+  std::function<void(void*)> releaseCallback = nullptr;
 };
 
-c10::intrusive_ptr<Conv2dOpContext> unpack(
-    Tensor&& weight,
-    c10::optional<Tensor>&& bias,
-    std::vector<int64_t>&& stride,
-    std::vector<int64_t>&& padding,
-    std::vector<int64_t>&& dilation,
-    int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max);
-
-c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
-    Tensor&& weight,
-    c10::optional<Tensor>&& bias,
-    std::vector<int64_t>&& stride,
-    std::vector<int64_t>&& padding,
-    std::vector<int64_t>&& dilation,
-    int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max);
-
-Tensor conv2d_prepack_run(
-    const Tensor& input,
-    const c10::intrusive_ptr<Conv2dOpContext>& op_context);
-
-Tensor copy_to_host(const Tensor& input);
+// The MPSCNNConvolution class takes weights in the order
+// [outputChannels][kernelHeight][kernelWidth][inputChannels/groups].
+static std::vector<float> permuteWeights(
+    const float* src,
+    const std::vector<int64_t>& sizes) {
+  const int64_t M = sizes[0];
+  const int64_t Cf = sizes[1];
+  const int64_t kH = sizes[2];
+  const int64_t kW = sizes[3];
+  std::vector<float> packedWeights(M * kH * kW * Cf);
+  for (auto m = 0; m < M; ++m) {
+    for (auto c = 0; c < Cf; ++c) {
+      for (auto kh = 0; kh < kH; ++kh) {
+        for (auto kw = 0; kw < kW; ++kw) {
+          int64_t oc = m * kH * kW * Cf + kh * kW * Cf + kw * Cf + c;
+          int64_t ic = m * Cf * kH * kW + c * kH * kW + kh * kW + kw;
+          packedWeights[oc] = src[ic];
+        }
+      }
+    }
+  }
+  return packedWeights;
+}
 
 } // namespace metal
 } // namespace native
