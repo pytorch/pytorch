@@ -260,11 +260,13 @@ SugaredValuePtr ModuleValue::getitem(
       for (size_t i = 0; i < self_type->numAttributes(); ++i) {
         const auto& attr_type = self_type->getAttribute(i);
         if (attr_type->is_module()) {
-          if (!attr_type->isSubtypeOf(type_hint)) {
+          std::stringstream ss;
+          if (!attr_type->isSubtypeOfExt(type_hint, &ss)) {
             auto loc = self_->node()->sourceRange();
             throw ErrorReport(loc)
                 << "Attribute " << self_type->getAttributeName(i)
-                << " is not of annotated type " << type_hint->annotation_str();
+                << " is not of annotated type " << type_hint->annotation_str()
+                << ": " << ss.str();
           }
         }
       }
