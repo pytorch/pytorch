@@ -12638,6 +12638,11 @@ class TestTorchDeviceType(TestCase):
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=([1, 0], [0, 1])))
         self.assertEqual(c, cn)
+
+        cout = torch.zeros((5, 2))
+        torch.tensordot(a, b, dims=([1, 0], [0, 1]), out=cout).cpu()
+        self.assertEqual(c, cout)
+
         a = torch.randn(2, 3, 4, 5, device=device)
         b = torch.randn(4, 5, 6, 7, device=device)
         c = torch.tensordot(a, b, dims=2).cpu()
