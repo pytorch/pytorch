@@ -125,7 +125,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   return array.release();
 }
 
-at::Tensor tensor_from_numpy(PyObject* obj, bool copy_numpy) {
+at::Tensor tensor_from_numpy(PyObject* obj, bool copy_numpy/*=false*/) {
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
