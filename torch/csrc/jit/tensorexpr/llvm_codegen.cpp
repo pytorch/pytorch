@@ -226,8 +226,9 @@ LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
     at::Device device,
+    const std::string& kernel_func_name,
     Dtype dtype)
-    : CodeGen(stmt, args, device),
+    : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
 static void* argToPtr(
