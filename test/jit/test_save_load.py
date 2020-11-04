@@ -938,3 +938,12 @@ class TestSaveLoad(JitTestCase):
 
         x = torch.tensor([1., 2., 3., 4.])
         self.assertTrue(torch.equal(m(x), m2(x)))
+
+    def test_save_nonexit_file(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return 2 * x
+
+        script_module = torch.jit.script(Foo())
+        with self.assertRaises(RuntimeError):
+            script_module.save("NonExist/path/test.pt")

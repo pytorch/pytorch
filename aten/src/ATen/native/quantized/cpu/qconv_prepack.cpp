@@ -40,9 +40,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
       "Specify front/top/left padding only. "
       "end/bottom/right padding assumed to be equal to front/top/left");
   TORCH_CHECK(
-      !(transpose && kSpatialDim == 3),
-      "Currently no support for 3d conv_transpose in FBGEM. ");
-  TORCH_CHECK(
       !transpose || output_padding.size() == kSpatialDim,
       "quantized::conv_prepack: Specify top/left output padding "
       "only. bottom/right padding assumed to be equal to top/left");
@@ -104,26 +101,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   // for both conv and conv transpose
   // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
   // (or for ConvTranspose {in_c, out_c/groups, kH, kW})
-  const at::Tensor weight_nhwc = transpose
-      ?
-      // check transpose
-      // 2D conv transpose weight transform
-      // IC OC/G KH KW -> OC KH KW IC/G
-      // transpose does not support 3d yet.
-      [&]() {
-        auto ic_g_oc_g_hw_tensors = weight.chunk(groups);
-        auto fused_tensor =
-            at::cat(ic_g_oc_g_hw_tensors, 1).set_quantizer_(weight.quantizer());
-        return fused_tensor.permute({1, 2, 3, 0})
-            .contiguous(c10::MemoryFormat::Contiguous);
-      }()
-      : (kSpatialDim == 2
-             // 2d conv weight transform
-             ? weight.contiguous(c10::MemoryFormat::ChannelsLast)
-             // 3d conv weight transform
-             : at::native::fbgemm_utils::ConvertToChannelsLast3dTensor(weight));
+  const at::Tensor weight_nhwc =
+      at::native::fbgemm_utils::ConvertConvWeightsToChannelLastTensor<kSpatialDim>(weight, groups, transpose);
   const int8_t* weight_data_int8 =
-      reinterpret_cast<int8_t*>(weight_nhwc.data_ptr<c10::qint8>());
+          reinterpret_cast<int8_t*>(weight_nhwc.data_ptr<c10::qint8>());
   std::vector<int32_t> col_offsets(output_channels);
   // compute column offsets (Similar to
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
@@ -444,6 +425,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // ConvTranspose
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_deconv));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
@@ -452,6 +434,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   // ConvTranspose
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_deconv));
 }
 
 } // namespace

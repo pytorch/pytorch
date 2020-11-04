@@ -341,12 +341,8 @@ class NativeExpr:
 class NativeArgument:
     type: str
     name: str
-    # Native function arguments have defaults for some reasons (e.g.,
-    # the function prototypes in CPUType.h are defaulted).  There isn't
-    # really any good reason to do this, as these functions are only
-    # ever called from a context where all defaulted arguments are
-    # guaranteed to be given explicitly.
-    # TODO: Remove this
+    # Native function arguments have defaults to make it a little
+    # easier to call them directly to bypass dispatch.
     default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
 

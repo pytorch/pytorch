@@ -153,7 +153,7 @@ if((NOT BLAS_LIBRARIES)
   BLAS
   sgemm
   ""
-  "openblas;pthread")
+  "openblas;pthread;m")
   if(BLAS_LIBRARIES)
     set(BLAS_INFO "open")
   endif(BLAS_LIBRARIES)
