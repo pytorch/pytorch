@@ -1013,6 +1013,29 @@ class TestQuantizeFx(QuantizationTestCase):
         # quantize, should run with no errors
         quantized = convert_fx(prepared_copy)
 
+    def test_dequantize(self):
+        r""" Test to make sure dequantize node are placed before
+        non-quantizable node
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.act = torch.nn.GELU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.act(x)
+
+        data = torch.rand(5, 1, 3, 3, dtype=torch.float)
+        for quant_type in self.static_quant_types:
+            node_list = [
+                ns.call_module(nnq.Conv2d),
+                ns.call_method("dequantize"),
+                ns.call_module(nn.GELU),
+            ]
+            self.checkGraphModeFxOp(
+                M().eval(), (data,), quant_type, expected_node_list=node_list)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
