@@ -9,6 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -876,7 +877,7 @@ unique_consecutive = boolean_dispatch(
 unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
 
-def tensordot(a, b, dims=2):
+def tensordot(a, b, dims=2, out=None):
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -939,7 +940,10 @@ def tensordot(a, b, dims=2):
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-    return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    if out is None:
+        return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
+    else:
+        return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore
 
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
@@ -1429,6 +1433,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     .. note::
        ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
+    .. warning::
+        The LU factorization does have backward support,
+        but only for square inputs of full rank.
+
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
@@ -1444,7 +1452,12 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
             - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
-            - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
+            - **pivots** (*IntTensor*): the pivots of size :math:`(*, \text{min}(m, n))`.
+              ``pivots`` stores all the intermediate transpositions of rows.
+              The final permutation ``perm`` could be reconstructed by
+              applying ``swap(perm[i], perm[pivots[i] - 1])`` for ``i = 0, ..., pivots.size(-1) - 1``,
+              where ``perm`` is initially the identity permutation of :math:`m` elements
+              (essentially this is what :func:`torch.lu_unpack` is doing).
 
             - **infos** (*IntTensor*, *optional*): if :attr:`get_infos` is ``True``, this is a tensor of
               size :math:`(*)` where non-zero values indicate whether factorization for the matrix or
@@ -1470,9 +1483,25 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
+    if not torch._jit_internal.is_scripting():
+        if A.requires_grad:
+            if not (A.size(-2) == A.size(-1) and A.dtype.is_floating_point):
+                raise ValueError(
+                    'lu.backward works only with batches of squared full-rank matrices'
+                    ' of floating types.'
+                )
+
+            return _LU.apply(A, pivot, get_infos)
+    else:
+        if A.requires_grad:
+            raise RuntimeError(
+                'Script and require gradients is not supported at the moment.'
+                'If you just want to do the forward, use .detach()'
+                'on the input before calling the function.'
+            )
+
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
-
 
 if TYPE_CHECKING:
     _ListOrSeq = Sequence[Tensor]
