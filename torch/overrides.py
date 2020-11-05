@@ -178,6 +178,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
+        Tensor._reduce_ex_internal,
     }
 
 
@@ -283,6 +284,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.clone: lambda input: -1,
         torch.combinations: lambda input, r=2, with_replacement=False: -1,
         torch.complex: lambda real, imag: -1,
+        torch.copysign: lambda input, other, out=None: -1,
         torch.polar: lambda abs, ang: -1,
         torch.conj: lambda input, out=None: -1,
         torch.constant_pad_nd: lambda input, pad, value=0: -1,
@@ -417,6 +419,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.istft: (lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True,
                       normalized=False, onesided=None, length=None, return_complex=False: -1),
         torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
+        torch.kron: lambda input, other: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
         torch.lcm: lambda input, other, out=None: -1,
@@ -740,8 +743,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.take: lambda input, index: -1,
         torch.tan: lambda input, out=None: -1,
         torch.tanh: lambda input, out=None: -1,
-        torch.tensordot: lambda a, b, dims=2: -1,
         torch.linalg.tensorsolve: lambda a, b, dims=None: -1,
+        torch.tensordot: lambda a, b, dims=2, out=None: -1,
         torch.tensor_split: lambda input, indices_or_sections, dim=0: -1,
         torch.threshold: lambda input, threshold, value, inplace=False: -1,
         torch.topk: lambda input, k, dim=-1, descending=False, out=None: -1,
@@ -844,7 +847,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.apply_: lambda self, callable: -1,
         Tensor.as_strided: lambda self, size, stride: -1,
         Tensor.as_strided_: lambda self, size, stride: -1,
-        Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False: -1,
+        Tensor.backward: lambda self, gradient=None, retain_graph=None, create_graph=False, inputs=None: -1,
         Tensor.bfloat16: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.bool: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.byte: lambda self, memory_format=torch.preserve_format: -1,
@@ -931,6 +934,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
+        torch.linalg.norm: lambda self: -1
     }
 
     ret2 = {}
@@ -1111,7 +1115,9 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
         (torch.functional, torch.functional.__all__),
         (torch.nn.functional, dir(torch.nn.functional)),
-        (torch.Tensor, dir(torch.Tensor))
+        (torch.Tensor, dir(torch.Tensor)),
+        (torch.linalg, dir(torch.linalg)),
+        (torch.fft, dir(torch.fft)),
     ]
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
