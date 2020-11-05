@@ -8,63 +8,39 @@ namespace jit {
 namespace tensorexpr {
 
 // Walk the Statment looking for Half size loads/stores.
-class CudaHalfChecker : public IRVisitor {
+class CudaHalfChecker : public IRMutator {
  public:
   bool hasHalf() {
     return hasHalf_;
   }
 
-  void visit(const Load* v) override {
-    hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
-    IRVisitor::visit(v);
-  }
-
-  void visit(const Store* v) override {
-    hasHalf_ |= v->buf()->dtype().scalar_type() == ScalarType::Half;
-    IRVisitor::visit(v);
-  }
-
-  void visit(const HalfImm* v) override {
-    hasHalf_ = true;
-  }
-
-  void visit(const Cast* v) override {
-    hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
-    IRVisitor::visit(v);
-  }
-
- private:
-  bool hasHalf_{false};
-};
-
-class CudaHalfRewriter : public IRMutator {
   const Expr* mutate(const Load* v) override {
     const Expr* child = IRMutator::mutate(v);
     if (child->dtype().scalar_type() != ScalarType::Half) {
       return child;
     }
 
-    const Expr* ret =
-        new Cast(child->dtype().cloneWithScalarType(ScalarType::Float), child);
+    hasHalf_ = true;
 
-    inserted_half_casts_.insert(ret);
-    return ret;
+    // TODO discards lanes.
+    return new Cast(kFloat, child);
   }
 
   Stmt* mutate(const Store* v) override {
     const Expr* new_val = v->value()->accept_mutator(this);
 
-    Dtype newType = v->value()->dtype();
-    if (newType.scalar_type() == ScalarType::Half) {
-      new_val =
-          new Cast(newType.cloneWithScalarType(ScalarType::Half), new_val);
+    if (v->value()->dtype().scalar_type() == ScalarType::Half) {
+      // TODO discards lanes.
+      new_val = new Cast(kHalf, new_val);
       inserted_half_casts_.insert(new_val);
+      hasHalf_ = true;
     }
 
     return new Store(v->buf(), v->indices(), new_val, v->mask());
   }
 
   const Expr* mutate(const HalfImm* v) override {
+    hasHalf_ = true;
     return new Cast(kFloat, v);
   }
 
@@ -74,16 +50,8 @@ class CudaHalfRewriter : public IRMutator {
     // just don't allow half casts we didn't insert.
     if (v->dtype().scalar_type() == ScalarType::Half) {
       if (inserted_half_casts_.count(v) < 1) {
-        return child;
-      }
-    }
-
-    // Remove Half(Float()) and friends.
-    const Cast* cast_child = dynamic_cast<const Cast*>(child);
-    if (cast_child) {
-      if (v->dtype().is_floating_point() &&
-          cast_child->dtype().is_floating_point()) {
-        return new Cast(v->dtype(), cast_child->src_value());
+        // TODO: discards lanes.
+        return new Cast(kFloat, child);
       }
     }
 
@@ -93,12 +61,19 @@ class CudaHalfRewriter : public IRMutator {
 
     return new Cast(v->dtype(), child);
   }
+
+ private:
+  bool hasHalf_{false};
+  std::unordered_set<const Expr*> inserted_half_casts_;
+};
+
+class CudaHalfScalarRewriter : public IRMutator {
   Stmt* mutate(const Let* v) override {
     if (v->dtype().scalar_type() == ScalarType::Half) {
+      // TODO: discards lanes.
       const Var* load_new_var = new Var(v->var()->name_hint(), kFloat);
-      const Expr* new_value = new Cast(
-          v->dtype().cloneWithScalarType(ScalarType::Float),
-          v->value()->accept_mutator(this));
+      const Expr* new_value =
+          new Cast(kFloat, v->value()->accept_mutator(this));
       var_map[v->var()] = load_new_var;
 
       return new Let(load_new_var, new_value);
@@ -117,7 +92,6 @@ class CudaHalfRewriter : public IRMutator {
   }
 
  private:
-  std::unordered_set<const Expr*> inserted_half_casts_;
   std::unordered_map<const Var*, const Var*> var_map;
 };
 
