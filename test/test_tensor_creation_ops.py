@@ -1066,8 +1066,8 @@ class TestTensorCreation(TestCase):
             self._test_logspace_base2(device, dtype, steps=steps)
 
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
-    @dtypesIfCUDA(*((torch.testing.get_all_int_dtypes() + [torch.float32, torch.float16, torch.bfloat16]) 
-                    if TEST_WITH_ROCM 
+    @dtypesIfCUDA(*((torch.testing.get_all_int_dtypes() + [torch.float32, torch.float16, torch.bfloat16])
+                    if TEST_WITH_ROCM
                     else torch.testing.get_all_dtypes(include_bool=False, include_half=True, include_complex=False)))
     def test_logspace(self, device, dtype):
         _from = random.random()
@@ -1273,6 +1273,20 @@ class TestRandomTensorCreation(TestCase):
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(non_contiguous_tensor, res)
 
+    # Test exceptions when device and generator types are incompatible
+    @onlyCUDA
+    def test_randperm_device_compatibility(self, device):
+        cuda_gen = torch.Generator(device='cuda')
+        cpu_gen = torch.Generator(device='cpu')
+        for n in (0, 3, 100, 30000):
+            regex = 'Expected a .* generator device but found .*'
+            cuda_t = torch.tensor(n, device='cuda')
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))
+            cpu_t = torch.tensor(n, device='cpu')
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
