@@ -42,7 +42,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -7960,7 +7960,6 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @tf32_on_and_off(0.01)
     def test_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import \
             (random_symmetric_pd_matrix,
@@ -7978,17 +7977,20 @@ class TestTorchDeviceType(TestCase):
 
         # default Case
         C = torch.cholesky(A)
-        B = torch.mm(C, C.t().conj())
+        C_ = C.cpu().numpy()
+        B = np.matmul(C_, C_.T.conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0)
 
         # test Upper Triangular
         U = torch.cholesky(A, True)
-        B = torch.mm(U.t().conj(), U)
+        U_ = U.cpu().numpy()
+        B = np.matmul(U_.T.conj(), U_)
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
         L = torch.cholesky(A, False)
-        B = torch.mm(L, L.t().conj())
+        L_ = L.cpu().numpy()
+        B = np.matmul(L_, L_.T.conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
     def test_view(self, device):
