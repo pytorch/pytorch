@@ -7197,9 +7197,6 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
-    # Although tf32 is always disabled on matrix_exp, this test uses matmul,
-    # which has tf32 on by default
-    @with_tf32_off
     def test_matrix_exp_analytic(self, device, dtype):
         # check zero matrix
         x = torch.zeros(20, 20, dtype=dtype, device=device)
@@ -7243,18 +7240,21 @@ class TestTorchDeviceType(TestCase):
 
             # generate input
             q = gen_good_cond_number_matrices(*n)
+            q_ = q.cpu().numpy()
             qinv = torch.inverse(q)
+            qinv_ = qinv.cpu().numpy()
             d = torch.randn(n[:-1], dtype=dtype, device=device)
-            x = torch.matmul(q, torch.matmul(torch.diag_embed(d), qinv))
+            x = torch.from_numpy(
+                np.matmul(q_, np.matmul(torch.diag_embed(d).cpu().numpy(), qinv_))).to(device)
             x_norm, _ = x.abs().sum(-2).max(-1)
 
             # test simple analytic whatever norm generated
             mexp = x.matrix_exp()
-            mexp_analytic = torch.matmul(
-                q,
-                torch.matmul(
-                    torch.diag_embed(d.exp()),
-                    qinv
+            mexp_analytic = np.matmul(
+                q_,
+                np.matmul(
+                    torch.diag_embed(d.exp()).cpu().numpy(),
+                    qinv_
                 )
             )
             self.assertEqual(mexp, mexp_analytic, atol=1e-3, rtol=0.0)
@@ -7270,11 +7270,11 @@ class TestTorchDeviceType(TestCase):
                 x_normalized = normalize_to_1_operator_norm(x, sample_norm)
 
                 mexp = x_normalized.matrix_exp()
-                mexp_analytic = torch.matmul(
-                    q,
-                    torch.matmul(
-                        torch.diag_embed((d / x_norm.unsqueeze(-1) * sample_norm).exp()),
-                        qinv
+                mexp_analytic = np.matmul(
+                    q_,
+                    np.matmul(
+                        torch.diag_embed((d / x_norm.unsqueeze(-1) * sample_norm).exp()).cpu().numpy(),
+                        qinv_
                     )
                 )
                 self.assertEqual(mexp, mexp_analytic, atol=1e-3, rtol=0.0)
