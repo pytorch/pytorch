@@ -45,7 +45,7 @@ def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
 def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
-    and matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
+    and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
     :math:`(n \times p)` tensor. :attr:`mat1` need to have `sparse_dim = 2`.
     This function also supports backward for both matrices. Note that the gradients of
@@ -62,6 +62,11 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
         - sparse x dense -> dense
 =======
 >>>>>>> changes based on initial feedback
+
+    Shape:
+        The format of the output tensor of this function follows: 
+        - sparse x sparse -> sparse
+        - sparse x dense -> dense
 
     Example::
 

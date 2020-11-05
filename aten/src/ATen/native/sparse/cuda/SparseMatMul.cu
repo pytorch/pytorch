@@ -7,6 +7,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <cuda_runtime.h>
 #include <cusparse_v2.h>
+#include <type_traits>
 
 #include <thrust/device_ptr.h>
 #include <thrust/for_each.h>
@@ -101,10 +102,16 @@ struct csrMatrixRef {
   int nnz_{0};
   std::vector<int> size_{};
 
-  cusparseMatDescr_t description_{0};
+  #if IS_CUSPARSE11_AVAILABLE()
+    cusparseSpMatDescr_t description_{0};
+  #else 
+    cusparseMatDescr_t description_{0};
+  #endif
 
   csrMatrixRef() {
-    create_general_description_(description_);
+    #if !IS_CUSPARSE11_AVAILABLE()
+      create_general_description_(description_);
+    #endif
   }
 
   csrMatrixRef(
@@ -116,13 +123,40 @@ struct csrMatrixRef {
       : csr_indices_{csr_indices},
         csr_pointers_{csr_pointers},
         csr_values_{csr_values},
+        nnz_{nnz},
         size_{size} {
-    nnz_ = nnz;
-    create_general_description_(description_);
+    #if IS_CUSPARSE11_AVAILABLE()
+      cudaDataType cuda_data_type;
+      if constexpr ( std::is_same<float, scalar_t>::::value ) {
+        cuda_data_type = CUDA_R_32F;
+      } else if constexpr ( std::is_same<double, scalar_t>::::value) {
+        cuda_data_type = CUDA_R_64F;
+      } else {
+        TORCH_CHECK(false, "Tensor types must be either float32 or float64");
+      }
+      TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
+        &description_,
+        this->size(0),
+        this->size(1),
+        this->nnz_,
+        this->csr_pointers_,
+        this->csr_indices_,
+        this->csr_values_,
+        CUSPARSE_INDEX_32I,
+        CUSPARSE_INDEX_32I,
+        CUSPARSE_INDEX_BASE_ZERO,
+        cuda_data_type));
+    #else 
+      create_general_description_(description_);
+    #endif  
   }
 
   ~csrMatrixRef() {
-    TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(description_));
+    #if IS_CUSPARSE11_AVAILABLE()
+      TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(description_));
+    #else
+      TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(description_));
+    #endif
   }
  
   int size(int index) const {
@@ -188,53 +222,24 @@ csrOutput cuSparse_matrix_multiply(
   scalar_t beta = 0.0f;
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
-  cudaDataType computeType = cuda_data_type;
+  
+  csrMatrixRef<scalar_t> C(
+    nullptr,
+    nullptr,
+    nullptr,
+    /*nnz*/0,
+    {A_num_rows, B_num_cols}
+  );
 
   //--------------------------------------------------------------------------
   // CUSPARSE APIs
-  cusparseHandle_t handle = NULL;
-  cusparseSpMatDescr_t matA, matB, matC;
+  cusparseHandle_t handle = at::cuda::getCurrentCUDASparseHandle();
   void *dBuffer1 = NULL, *dBuffer2 = NULL;
   size_t bufferSize1 = 0, bufferSize2 = 0;
-  TORCH_CUDASPARSE_CHECK(cusparseCreate(&handle));
-
-  // Create sparse matrix A in CSR format
-  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
-      &matA,
-      A_num_rows,
-      A_num_cols,
-      A_num_nnz,
-      dA_csrOffsets,
-      dA_columns,
-      dA_values,
-      CUSPARSE_INDEX_32I,
-      CUSPARSE_INDEX_32I,
-      CUSPARSE_INDEX_BASE_ZERO,
-      cuda_data_type));
-  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
-      &matB,
-      B_num_rows,
-      B_num_cols,
-      B_num_nnz,
-      dB_csrOffsets,
-      dB_columns,
-      dB_values,
-      CUSPARSE_INDEX_32I,
-      CUSPARSE_INDEX_32I,
-      CUSPARSE_INDEX_BASE_ZERO,
-      cuda_data_type));
-  TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
-      &matC,
-      A_num_rows,
-      B_num_cols,
-      0,
-      NULL,
-      NULL,
-      NULL,
-      CUSPARSE_INDEX_32I,
-      CUSPARSE_INDEX_32I,
-      CUSPARSE_INDEX_BASE_ZERO,
-      cuda_data_type));
+ 
+  cusparseSpMatDescr_t matA = A.description_;
+  cusparseSpMatDescr_t matB = B.description_;
+  cusparseSpMatDescr_t matC = C.description_;
   //--------------------------------------------------------------------------
   // SpGEMM Computation
   cusparseSpGEMMDescr_t spgemmDesc;
@@ -344,11 +349,6 @@ csrOutput cuSparse_matrix_multiply(
 
   // destroy matrix/vector descriptors
   TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_destroyDescr(spgemmDesc));
-  TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(matA));
-  TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(matB));
-  TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(matC));
-  TORCH_CUDASPARSE_CHECK(cusparseDestroy(handle));
-
   return out;
 }
 
@@ -374,11 +374,10 @@ csrOutput Sgemm2(
     const float* beta,
     Tensor &output_values, 
     IntTensor &output_indices) {
-  cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
   void* buffer_{nullptr};
 
-  TORCH_CUDASPARSE_CHECK(cusparseCreate(&cusparseHandle_));
+  cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
   TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
 
@@ -474,7 +473,6 @@ csrOutput Sgemm2(
       gemm2Info_,
       buffer_));
 
-  TORCH_CUDASPARSE_CHECK(cusparseDestroy(cusparseHandle_));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyCsrgemm2Info(gemm2Info_));
   return out;
 }
@@ -488,11 +486,10 @@ csrOutput Dgemm2(
     const double* beta,
     Tensor &output_values, 
     IntTensor &output_indices) {
-  cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
   void* buffer_{nullptr};
 
-  TORCH_CUDASPARSE_CHECK(cusparseCreate(&cusparseHandle_));
+  cusparseHandle_t cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
   TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
 
@@ -587,7 +584,6 @@ csrOutput Dgemm2(
       gemm2Info_,
       buffer_));
 
-  TORCH_CUDASPARSE_CHECK(cusparseDestroy(cusparseHandle_));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyCsrgemm2Info(gemm2Info_));
   return out;
 }
@@ -813,7 +809,6 @@ void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor&
       output = C_grad @ x^T 
   */
   Tensor grad_updated = fill_with(grad, /*fill_value = */ scalar_t(1.0));
-  Tensor grad_filled = at::ones(grad.sizes(), grad.options().layout(kStrided));
   if (grad_order == 1) {
     sparse_sparse_matmul_cuda_kernel<scalar_t>(output, x.transpose(0, 1).coalesce(), grad_updated.coalesce());
   } else if (grad_order == 0) {

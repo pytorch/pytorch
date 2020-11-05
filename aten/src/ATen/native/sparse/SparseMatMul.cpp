@@ -10,8 +10,6 @@ namespace at { namespace native {
 
 using namespace at::sparse;
 
-namespace {
-
 /*
     This is an implementation of the SMMP algorithm:
      "Sparse Matrix Multiplication Package (SMMP)"
@@ -19,7 +17,7 @@ namespace {
       Randolph E. Bank and Craig C. Douglas
       https://doi.org/10.1007/BF02070824
 */
-
+namespace {
 void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
   /* 
     Expands a compressed row pointer into a row indices array
@@ -165,21 +163,26 @@ void sparse_matmul_kernel(
     Computes  the sparse-sparse matrix multiplication between `mat1` and `mat2`, which are sparse tensors in COO format. 
   */
 
+  auto M = mat1.size(0);
+  auto K = mat1.size(1);
+  auto N = mat2.size(1);
+
   auto mat1_indices_ = mat1._indices().contiguous();
   auto mat1_values = mat1._values().contiguous();
-  Tensor mat1_indptr = coo_to_csr(mat1_indices_.data_ptr<int64_t>(), mat1.size(0), mat1._nnz());
-  auto mat1_col_indices = mat1_indices_[1];
+  LongTensor mat1_row_indices = mat1_indices_.select(0, 0);
+  LongTensor mat1_col_indices = mat1_indices_.select(0, 1);
+
+  Tensor mat1_indptr = coo_to_csr(mat1_row_indices.data_ptr<int64_t>(), M, mat1._nnz());
 
   auto mat2_indices_ = mat2._indices().contiguous();
   auto mat2_values = mat2._values().contiguous();
-  Tensor mat2_indptr = coo_to_csr(mat2_indices_.data_ptr<int64_t>(), mat2.size(0), mat2._nnz());
-  auto mat2_indices = mat2_indices_[1];
-  
-  auto M = mat1.size(0);
-  auto N = mat2.size(1);
+  LongTensor mat2_row_indices = mat2_indices_.select(0, 0);
+  LongTensor mat2_col_indices = mat2_indices_.select(0, 1);
+
+  Tensor mat2_indptr = coo_to_csr(mat2_row_indices.data_ptr<int64_t>(), K, mat2._nnz()); 
 
   auto nnz = _csr_matmult_maxnnz(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(), 
-      mat2_indptr.data_ptr<int64_t>(), mat2_indices.data_ptr<int64_t>());
+      mat2_indptr.data_ptr<int64_t>(), mat2_col_indices.data_ptr<int64_t>());
 
   auto output_indices = output._indices();
   auto output_values = output._values();
@@ -193,59 +196,82 @@ void sparse_matmul_kernel(
   LongTensor output_col_indices = output_indices.select(0, 1);
 
   _csr_matmult(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(), mat1_values.data_ptr<scalar_t>(), 
-  mat2_indptr.data_ptr<int64_t>(), mat2_indices.data_ptr<int64_t>(), mat2_values.data_ptr<scalar_t>(), 
+  mat2_indptr.data_ptr<int64_t>(), mat2_col_indices.data_ptr<int64_t>(), mat2_values.data_ptr<scalar_t>(), 
   output_indptr.data_ptr<int64_t>(), output_col_indices.data_ptr<int64_t>(), output_values.data_ptr<scalar_t>());
   
   csr_to_coo(M, output_indptr.data_ptr<int64_t>(), output_row_indices.data_ptr<int64_t>());
 }
 
-template <typename scalar_t>
-Tensor fill_with(const Tensor& input, scalar_t fill_value){
-  auto input_indices = input._indices();
-  auto input_values = input._values();
+template <typename scalar_t, short fill_with_ones_order>
+void sparse_matmul_with_ones_kernel(Tensor& result, const Tensor& x) {
+  auto x_indices = x._indices().contiguous();
+  auto x_values = x._values().contiguous();
 
-  if (input.size(0) * input.size(1)  ==  input_values.numel()) {
-    return input;
+  auto nnz_a = x_values.size(0);
+
+  auto indices_accessor = x_indices.accessor<int64_t, 2>();
+  auto rows = indices_accessor[0];
+  auto cols = indices_accessor[1];
+  auto values_accessor = x_values.accessor<scalar_t, 1>();
+
+  auto result_indices = result._indices();
+  auto result_values = result._values();
+
+  auto n = result.size(0);
+  auto m = result.size(1);
+  auto size = fill_with_ones_order ? n : m;
+  auto inner_size = fill_with_ones_order ? m : n;
+
+  auto indices = (fill_with_ones_order ? rows : cols);
+
+  std::vector<scalar_t> scalar_values(size, static_cast<scalar_t>(0));
+  for (int64_t i = 0; i < nnz_a; i++) {
+    for (int64_t index = 0; index < size; index++) {
+      if (indices[i] == index) {
+        scalar_values[index] += values_accessor[i];
+      }
+    }
   }
-  Tensor output = at::empty_like(input);
 
-  auto output_indices = output._indices();
-  auto output_values = output._values();
-  auto n_rows = input.size(0);
-  auto n_cols = input.size(1);
-  auto matrix_size = n_rows * n_cols;
-  
-  auto new_nnz = input.size(0) * input.size(1) + input_values.numel(); 
-  
-  output_indices.resize_({2, new_nnz});
-  output_values.resize_(new_nnz);
+  int64_t index = 0;
+  std::map<std::pair<int64_t, int64_t>, scalar_t> d;
 
-  auto input_indices_accessor = input_indices.accessor<int64_t, 2>();
-  auto input_values_accessor = input_values.accessor<scalar_t, 1>();
-
-  auto output_indices_accessor = output_indices.accessor<int64_t, 2>();
-  auto output_values_accessor = output_values.accessor<scalar_t, 1>();
-
-  at::parallel_for(0, matrix_size, 0, [&](int64_t start, int64_t end) {
-    for (auto index = start; index < end; index++) {
-      output_indices_accessor[0][index] = index / n_cols;
-      output_indices_accessor[1][index] = index % n_cols;
-      output_values_accessor[index] = fill_value;
+  for (int64_t curr_index = 0; curr_index < scalar_values.size();
+       curr_index++) {
+    if (scalar_values[curr_index] != static_cast<scalar_t>(0)) {
+      for (int64_t mat2_index = 0; mat2_index < inner_size; mat2_index++) {
+        std::pair<int64_t, int64_t> current_index;
+        if (fill_with_ones_order) {
+          current_index = std::make_pair(curr_index, mat2_index);
+        } else {
+          current_index = std::make_pair(mat2_index, curr_index);
+        }
+        d[current_index] += scalar_values[curr_index];
+        index++;
+      }
     }
-  });
-  at::parallel_for(matrix_size, new_nnz, 0, [&](int64_t start, int64_t end) {
-    for (auto index = start; index < end; index++) {
-      int64_t j = index - matrix_size;
-      output_indices_accessor[0][index] = input_indices_accessor[0][j];
-      output_indices_accessor[1][index] = input_indices_accessor[1][j];
-      output_values_accessor[index] = input_values_accessor[j] - fill_value;
-    }
-  });
-  return output;
+  }
+  int64_t nnz_result = d.size();
+
+  std::vector<int64_t> values_size = {nnz_result};
+  result_indices.resize_({2, nnz_result});
+  result_values.resize_(values_size);
+
+  auto result_indices_accessor = result_indices.accessor<int64_t, 2>();
+  auto result_values_accessor = result_values.accessor<scalar_t, 1>();
+
+  index = 0;
+  for (auto kv : d) {
+    auto idx = kv.first;
+    result_indices_accessor[0][index] = idx.first;
+    result_indices_accessor[1][index] = idx.second;
+    result_values[index] = kv.second;
+    index++;
+  } 
 }
 
 template <typename scalar_t, short grad_order>
-void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor& x) {
+void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad_, const Tensor& x) {
   /* 
     Computes  the backward output  for matrix C = A@B.
 
@@ -254,17 +280,44 @@ void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor&
     A_grad = C_grad @ B^T
     B_grad = A^T @ C_grad
 
-    if grad_order == 1:
-      output = x^T @ C_grad 
+    A matrix multiplication of two sparse tensors A and B with fill values a and b,
+    respectively, then the matmul operation can be expanded as follows:
+    matmul(A, B) = matmul(A - a + a, B - b + b)
+                 = matmul(A - a, B - b) + a * matmul(ones_like(A), B) + b * matmul(A, ones_like(B))
+
+    if grad_order == 0:
+      A_grad = C_grad @ x^T, where x is B 
+  
+      A_grad = matmul(C_grad - 1, x^T) + matmul(C_grad, ones_like(x^T)) 
+
     else:
-      output = C_grad @ x^T 
+      B_grad = x^T @ C_grad, where x is A 
+
+      B_grad = matmul(x^T, C_grad - 1) + matmul(ones_like(x^T), C_grad) 
   */
-  Tensor grad_updated = fill_with(grad, /*fill_value = */ scalar_t(1.0));
+
+  auto grad = grad_.coalesce();
+  auto xt = x.transpose(0, 1).coalesce();
+
+  Tensor output_ones = at::native::empty_sparse(output.sizes(), output.options());
+  sparse_matmul_with_ones_kernel<scalar_t, grad_order>(output_ones, xt);
+
+  auto grad_values = grad._values().contiguous().clone();
+  auto grad_values_accessor = grad_values.accessor<scalar_t, 1>();
+  at::parallel_for(0, grad_values.size(0), 0, [&](int64_t start, int64_t end) {
+    for (auto index = start; index < end; index++) {
+      grad_values_accessor[index] -= static_cast<scalar_t>(1);
+    }
+  });
+  Tensor grad_updated = at::native::empty_like(grad);
+  alias_into_sparse(grad_updated, grad._indices(), grad_values);
+
   if (grad_order == 1) {
-    sparse_matmul_kernel<scalar_t>(output, x.transpose(0, 1).coalesce(), grad_updated.coalesce());
+    sparse_matmul_kernel<scalar_t>(output, xt, grad_updated);
   } else if (grad_order == 0) {
-    sparse_matmul_kernel<scalar_t>(output, grad_updated.coalesce(), x.transpose(0, 1).coalesce());
+    sparse_matmul_kernel<scalar_t>(output, grad_updated, xt);
   }
+  native::add_sparse_(output, output_ones);
 }
 
 } // end anonymous namespace
@@ -303,7 +356,7 @@ Tensor sparse_sparse_matmul_backward_cpu(
     at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
     
     AT_DISPATCH_FLOATING_TYPES(
-        output.scalar_type(), "sparse_matmul_kernel_grad_order", [&] {
+        output.scalar_type(), "sparse_matmul_kernel_grad", [&] {
           sparse_matmul_kernel_grad<scalar_t, 1>(output,  grad, var);
         });
   } else if (grad_order == 1) {
@@ -311,7 +364,7 @@ Tensor sparse_sparse_matmul_backward_cpu(
     at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
 
     AT_DISPATCH_FLOATING_TYPES(
-        output.scalar_type(), "sparse_matmul_kernel_grad_by_col", [&] {
+        output.scalar_type(), "sparse_matmul_kernel_grad", [&] {
           sparse_matmul_kernel_grad<scalar_t, 0>(output, grad, var);
         });
   }

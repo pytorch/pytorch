@@ -3082,21 +3082,23 @@ class TestSparse(TestCase):
                 return torch.sparse_coo_tensor(torch.tensor([i3, j3]), torch.tensor(values), (n, m))
 
         def test_sparse_matmul_grad(sparse_dims, nnz, shape_a, shape_b):
-            a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
-            b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
+            a, _, _ = self._gen_sparse(sparse_dims, nnz, shape_a)
+            b, _, _ = self._gen_sparse(sparse_dims, nnz, shape_b)
             a.requires_grad = True
             b.requires_grad = True
+            
             a_dense = a.to_dense().detach()
             b_dense = b.to_dense().detach()
             a_dense.requires_grad = True
             b_dense.requires_grad = True
             r1 = a_dense.matmul(b_dense)
-            r2 = torch.sparse.mm(a, b)
             f1 = torch.sum(r1)
             f1.backward()
 
+            r2 = torch.sparse.mm(a, b)
             f2 = torch.sparse.sum(r2)
             f2.backward()
+            
             self.assertEqual(a.grad.to_dense(), a_dense.grad)
             self.assertEqual(b.grad.to_dense(), b_dense.grad)
 
