@@ -8,10 +8,6 @@ namespace c10 {
 struct FunctionSchema;
 };
 
-namespace at {
-CAFFE2_API void launch(std::function<void()> func);
-}
-
 namespace torch {
 namespace jit {
 
@@ -21,7 +17,6 @@ struct GraphExecutor;
 using Stack = std::vector<at::IValue>;
 using Kwargs = std::unordered_map<std::string, at::IValue>;
 struct RecursiveMethodCallError : public std::exception {};
-using TaskLauncher = std::function<void(std::function<void()>)>;
 
 TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
 
@@ -41,9 +36,7 @@ struct TORCH_API Function {
 
   virtual void run(Stack&& stack) = 0;
 
-  virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
-      Stack& stack,
-      TaskLauncher taskLauncher = at::launch) = 0;
+  virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) = 0;
 
   virtual at::IValue operator()(
       std::vector<at::IValue> stack,

@@ -923,7 +923,7 @@ void CudaCodeGen::Initialize() {
   // half_support_literal.
   Stmt* stmt_v = stmt();
   CudaHalfChecker halfChecker;
-  stmt_v->accept(&halfChecker);
+  stmt_v = stmt_v->accept_mutator(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
@@ -987,13 +987,12 @@ void CudaCodeGen::Initialize() {
 
   stmt_v = registerize(stmt_v);
 
-  PrioritizeLoad prioritize_load;
-  stmt_v = stmt_v->accept_mutator(&prioritize_load);
-
   // The registerizer might insert half-type scalars, we don't want this.
-  CudaHalfRewriter hsFix;
+  CudaHalfScalarRewriter hsFix;
   stmt_v = stmt_v->accept_mutator(&hsFix);
 
+  PrioritizeLoad prioritize_load;
+  stmt_v = stmt_v->accept_mutator(&prioritize_load);
   stmt_v = IRSimplifier::simplify(stmt_v);
   set_stmt(stmt_v);
 

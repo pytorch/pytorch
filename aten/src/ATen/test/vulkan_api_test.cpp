@@ -234,9 +234,9 @@ TEST(VulkanAPITest, conv2d_depthwise) {
   }
 
   constexpr int64_t groups = 7;
-  constexpr std::array<int64_t, 2u> stride{2, 3};
-  constexpr std::array<int64_t, 2u> padding{3, 1};
-  constexpr std::array<int64_t, 2u> dilation{1, 1};
+  constexpr std::array<int64_t, 2u> stride{1, 3};
+  constexpr std::array<int64_t, 2u> padding{2, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 2};
 
   constexpr struct {
     uint32_t batches;

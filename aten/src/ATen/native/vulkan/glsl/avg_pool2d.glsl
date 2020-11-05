@@ -20,15 +20,15 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   /* Dynamically Uniform */
-  const ivec2 size = imageSize(uOutput).xy;
-  const ivec2 isize = textureSize(uInput, 0).xy;
+  const ivec3 size = imageSize(uOutput);
+  const ivec3 isize = textureSize(uInput, 0);
   const float range = uBlock.kernel.x * uBlock.kernel.y;
 
-  if (all(lessThan(pos.xy, size))) {
+  if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
 
     const ivec2 start = max(ivec2(0), ipos);
-    const ivec2 end = min(ipos + uBlock.kernel, isize);
+    const ivec2 end = min(ipos + uBlock.kernel, isize.xy);
 
     vec4 sum = vec4(0);
 

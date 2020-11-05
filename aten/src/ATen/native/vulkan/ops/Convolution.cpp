@@ -153,6 +153,23 @@ vTensor pack_biases(
   return v_bias;
 }
 
+std::array<int64_t, 2> pack_kernel(
+    const Tensor& weight,
+    const IntArrayRef dilation) {
+  const auto effective = [](const int64_t k, const int64_t d) {
+    return k + (k - 1) * (d - 1);
+  };
+
+  return {
+    effective(
+        weight.size(Layout::Filter::height),
+        dilation[Layout::Parameter::height]),
+    effective(
+        weight.size(Layout::Filter::width),
+        dilation[Layout::Parameter::width]),
+  };
+}
+
 std::array<int64_t, 2> pack_params(const std::vector<int64_t>& vector) {
   TORCH_INTERNAL_ASSERT(2u == vector.size(), "Invalid usage!");
 
@@ -177,10 +194,7 @@ Context::Context(
   : packed_{
       pack_weights(pool, weight, groups),
       pack_biases(pool, bias, weight),
-      {
-        weight.size(Layout::Filter::height),
-        weight.size(Layout::Filter::width),
-      },
+      pack_kernel(weight, expand_param_if_needed(dilation, "dilation", 2)),
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
       pack_params(expand_param_if_needed(dilation, "dilation", 2)),

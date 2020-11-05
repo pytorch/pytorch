@@ -27,18 +27,20 @@ void main() {
 
   /* Dynamically Uniform */
   const ivec3 size = imageSize(uOutput);
-  const ivec2 isize = textureSize(uInput, 0).xy;
+  const ivec3 isize = textureSize(uInput, 0);
 
   if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
 
+    // TODO: Fix dilation
     const ivec2 start = max(ivec2(0), ipos);
-    const ivec2 end = min(ipos + uBlock.kernel, isize);
+    const ivec2 end = min(ipos + uBlock.kernel, isize.xy);
+    const ivec2 kstart = start - ipos;
 
     vec4 sum = uBias.data[pos.z];
 
-    for (int y = start.y, ky = 0; y < end.y; y += uBlock.dilate.y, ++ky) {
-      for (int x = start.x, kx = 0; x < end.x; x += uBlock.dilate.x, ++kx) {
+    for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
+      for (int x = start.x, kx = kstart.x; x < end.x; x += uBlock.dilate.x, ++kx) {
         sum = fma(
             texelFetch(uInput, ivec3(x, y, pos.z), 0),
             texelFetch(uKernel, ivec3(kx, ky, pos.z), 0),
