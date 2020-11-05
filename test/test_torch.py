@@ -7014,23 +7014,24 @@ class TestTorchDeviceType(TestCase):
         test_inverse_many_batches_helper(3, 512)
         test_inverse_many_batches_helper(64, 64)
 
-    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
+    @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
-    @tf32_on_and_off(5e-2)
     def test_pinverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
         def run_test(M):
             # Testing against definition for pseudo-inverses
             MPI = torch.pinverse(M)
+            MPI_ = MPI.cpu().numpy()
+            M_ = M.cpu().numpy()
             if M.numel() > 0:
-                self.assertEqual(M, M.matmul(MPI).matmul(M))
-                self.assertEqual(MPI, MPI.matmul(M).matmul(MPI))
-                self.assertEqual(M.matmul(MPI), (M.matmul(MPI)).transpose(-2, -1).conj())
-                self.assertEqual(MPI.matmul(M), (MPI.matmul(M)).transpose(-2, -1).conj())
+                self.assertEqual(M_, np.matmul(np.matmul(M_, MPI_), M_))
+                self.assertEqual(MPI_, np.matmul(np.matmul(MPI_, M_), MPI_))
+                self.assertEqual(np.matmul(M_, MPI_), np.matmul(M_, MPI_).swapaxes(-2, -1).conj())
+                self.assertEqual(np.matmul(MPI_, M_), np.matmul(MPI_, M_).swapaxes(-2, -1).conj())
             else:
                 self.assertEqual(M.shape, MPI.shape[:-2] + (MPI.shape[-1], MPI.shape[-2]))
         for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
