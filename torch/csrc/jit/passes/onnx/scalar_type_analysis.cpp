@@ -114,10 +114,10 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           // Mimic PyTorch scalar type promotion logic
           // from https://github.com/pytorch/pytorch/issues/9515
           // Quoting:
-          //    A Tensor is a considered a "wrapped number" if it is auto-wrapped
-          //    from a C++ or Python number type. Integer types are wrapped as
-          //    0-dim int64 tensors and floating-point types are wrapped as 0-dim
-          //    double tensors.
+          //    A Tensor is a considered a "wrapped number" if it is
+          //    auto-wrapped from a C++ or Python number type. Integer types are
+          //    wrapped as 0-dim int64 tensors and floating-point types are
+          //    wrapped as 0-dim double tensors.
           if (rank == 0) {
             auto default_scalar_type =
                 at::typeMetaToScalarType(at::get_default_dtype());
