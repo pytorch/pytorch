@@ -2947,6 +2947,14 @@ class TestAutograd(TestCase):
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 
+    def test_igammac(self):
+        # 1e-3 offset to avoid zeros in s
+        # NOTE: derivative for s is not implemented
+        s = (torch.rand(100, dtype=torch.double) + 1e-3)
+        x = (torch.rand(100, dtype=torch.double)).requires_grad_()
+        gradcheck(torch.igamma, (s, x))
+        gradgradcheck(torch.igamma, (s, x))
+
     @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?

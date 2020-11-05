@@ -6563,6 +6563,21 @@
   dispatch:
     CPU, CUDA: igamma_
 
+- func: igammac.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: igammac_out
+
+- func: igammac(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU, CUDA: igammac
+
+- func: igammac_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: igammac_
+
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nextafter_out
