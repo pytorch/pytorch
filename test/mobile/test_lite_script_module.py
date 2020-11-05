@@ -63,7 +63,7 @@ class TestLiteScriptModule(unittest.TestCase):
         assert(b"top(B).A0(A).forward" in bytes)
         assert(b"top(B).A1(A).forward" in bytes)
 
-    def test_save_mobile_module_with_debug_info_with_script_case1(self):
+    def test_save_mobile_module_with_debug_info_with_script_duplicate_class(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
@@ -90,7 +90,7 @@ class TestLiteScriptModule(unittest.TestCase):
         assert(b"top(B).A0(A).forward" in bytes)
         assert(b"top(B).A1(A).forward" in bytes)
 
-    def test_save_mobile_module_with_debug_info_with_script_case2(self):
+    def test_save_mobile_module_with_debug_info_with_script_nest_call(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
