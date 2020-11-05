@@ -6208,6 +6208,7 @@
     CPU: _svd_helper_cpu
     CUDA: _svd_helper_cuda
 
+# swapaxes, alias for transpose
 - func: swapaxes(Tensor(a) self, int axis1, int axis2) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
@@ -6217,6 +6218,7 @@
   variants: method
   device_guard: False
 
+# swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim1, int dim2) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
