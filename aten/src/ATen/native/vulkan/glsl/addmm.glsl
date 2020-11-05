@@ -19,12 +19,13 @@ layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
-  const int K = textureSize(uM1, 0).x;
+  const ivec3 size = imageSize(uOutput);
+  const int dim = textureSize(uM1, 0).x;
 
-  if (all(lessThan(pos, imageSize(uOutput)))) {
+  if (all(lessThan(pos, size))) {
     vec4 sum = vec4(0);
 
-    for (int k = 0; k < K; ++k) {
+    for (int k = 0; k < dim; ++k) {
       sum = fma(
           texelFetch(uM1, ivec3(k, pos.y, pos.z), 0),
           texelFetch(uM2, ivec3(pos.x, k, pos.z), 0),
