@@ -124,7 +124,7 @@ class CalculateCPUCost:
         node.cpu_cost = cpu_cost
 
     def torch_flatten(self, node : torch.fx.Node):
-        cpu_cost = CPUNodeCost('__add__')
+        cpu_cost = CPUNodeCost('torch.flatten')
 
         # Assuming this is only a viewing operation. TODO: handle contiguous if
         # we see it.
