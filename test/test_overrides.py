@@ -4,6 +4,7 @@ import unittest
 import inspect
 import functools
 import pprint
+import pickle
 
 from torch.testing._internal.common_utils import TestCase
 from torch.overrides import (
@@ -589,6 +590,16 @@ def generate_tensor_like_override_tests(cls):
                     raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
         else:
             args = inspect.getfullargspec(override)
+            try:
+                func_args = inspect.getfullargspec(func)
+                # Remove annotations from argspec
+                func_args = type(func_args)(**{**func_args, 'annotations': None})
+                if func_args != args:
+                    raise RuntimeError(f"Override for {func} doesn't match its argspec.\n"
+                                       + f"Original: {inspect.signature(func)}\n"
+                                       + f"Override: {inspect.signature(override)}")
+            except TypeError:
+                pass
             nargs = len(args.args)
             if args.defaults is not None:
                 nargs -= len(args.defaults)
@@ -811,6 +822,14 @@ class TestGradCheckOverride(TestCase):
             torch.add,
         })
 
+class TestPickle(TestCase):
+    "Regression test for gh-47051"
+    def test_pickle(self):
+        t = torch.tensor([1]).as_subclass(SubTensor2)
+        t.abcd = "e"
+        t2 = pickle.loads(pickle.dumps(t))
+        self.assertIs(type(t2), SubTensor2)
+        self.assertEqual(t2.abcd, "e")
 
 if __name__ == '__main__':
     unittest.main()

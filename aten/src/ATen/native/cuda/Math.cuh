@@ -54,12 +54,12 @@ static inline __host__ __device__ scalar_t zeta(scalar_t _x, scalar_t _q) {
   a = q;
   i = 0;
   b = 0.0;
-  while((i < 9) || (a <= 9.0)){
+  while ((i < 9) || (a <= 9.0)) {
     i += 1;
     a += 1.0;
     b = ::pow( a, -x );
     s += b;
-    if((-MACHEP < (b / s)) && ((b / s) < MACHEP)) {
+    if ((-MACHEP < (b / s)) && ((b / s) < MACHEP)) {
       return static_cast<scalar_t>(s);
     }
   };
@@ -68,16 +68,16 @@ static inline __host__ __device__ scalar_t zeta(scalar_t _x, scalar_t _q) {
   s -= 0.5 * b;
   a = 1.0;
   k = 0.0;
-  for(int i=0; i < 12; i++) {
+  for (int i=0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
     s = s + t;
     t = t / s;
-    if(t < 0){
+    if (t < 0){
       t = -t;
     }
-    if((-MACHEP <t) && (t < MACHEP)){
+    if ((-MACHEP <t) && (t < MACHEP)){
       return static_cast<scalar_t>(s);
     }
     k += 1.0;
@@ -173,7 +173,6 @@ static inline __host__ __device__ scalar_t calc_polygamma(int n, scalar_t x) {
   // already blocked if n <= 1
   return ((n % 2) ? 1.0 : -1.0) * ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) * zeta(static_cast<scalar_t>(n + 1), x);
 }
-
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {

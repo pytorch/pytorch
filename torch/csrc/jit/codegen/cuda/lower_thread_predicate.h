@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 //! Maps TensorViews to std::pair<ir_utils::ParallelTypeBitmap, SourceMapType>>
 //!
@@ -60,6 +61,7 @@ class TORCH_CUDA_API ThreadPredicateMap {
   MapType thread_predicates_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

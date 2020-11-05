@@ -23,11 +23,10 @@ from torch.quantization import (
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_dynamic_qconfig,
-    register_observed_custom_module_mapping,
-    register_quantized_custom_module_mapping,
     PerChannelMinMaxObserver,
     QConfigDynamic,
-    default_dynamic_quant_observer
+    default_dynamic_quant_observer,
+    FixedQParamsFakeQuantize,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -627,9 +626,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
                 return quantized
 
-        register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
-        register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -670,14 +666,28 @@ class TestPostTrainingStatic(QuantizationTestCase):
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
 
         original_m.qconfig = default_qconfig
-        m = prepare(original_m)
-        self.checkObservers(m)
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                CustomModule: ObservedCustomModule
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                ObservedCustomModule: QuantizedCustomModule
+            }
+        }
+        m = prepare(
+            original_m,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.checkObservers(m, None, prepare_custom_config_dict)
         # calibration
         m(data)
         # all activation observers are inserted in the top level module
 
         # check converted/quantized model
-        m = convert(m)
+        m = convert(
+            m,
+            convert_custom_config_dict=convert_custom_config_dict)
         # check if the module is properly quantized
         self.assertEqual(type(m.quant), nnq.Quantize)
         self.assertEqual(type(m.conv), nnq.Conv2d)
@@ -1237,6 +1247,79 @@ class TestEagerModeOps(QuantizationTestCase):
 
     def test_leaky_relu(self):
         self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
+
+
+class TestEagerModeQATOps(QuantizationTestCase):
+    def _test_activation_impl(self, Act, data):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = Act()
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.act(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().train()
+        m.qconfig = default_qat_qconfig
+        m = prepare_qat(m)
+        before_convert = m(data)
+        m = convert(m)
+        after_convert = m(data)
+        self.assertEqual(before_convert, after_convert)
+
+    def test_fixed_qparam_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.tanh = torch.nn.Tanh()
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.sigmoid(x)
+                x = self.hardsigmoid(x)
+                x = self.tanh(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().train()
+        m.qconfig = default_qat_qconfig
+        m = prepare_qat(m)
+        for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
+            self.assertEqual(type(getattr(m, attr).activation_post_process), FixedQParamsFakeQuantize)
+        data = torch.randn(1, 3, 2, 4)
+        before_convert = m(data)
+        m = convert(m)
+        after_convert = m(data)
+        self.assertEqual(before_convert, after_convert)
+        # make sure activation post process is removed
+        for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
+            # verify fake quant module is removd
+            self.assertFalse(hasattr(getattr(m, attr), 'activation_post_process'))
+            # verify that hooks are removed
+            self.assertTrue(len(getattr(m, attr)._forward_hooks.items()) == 0)
+
+        # make sure no fake quantize module is inserted for eval mode
+
+        def checkNoFQModule(m):
+            for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
+                self.assertFalse(hasattr(getattr(m, attr), "activation_post_process"))
+                self.assertTrue(len(getattr(m, attr)._forward_hooks.items()) == 0)
+
+        m = M().eval()
+        m.qconfig = default_qconfig
+        m = prepare(m)
+        checkNoFQModule(m)
+        m = convert(m)
+        checkNoFQModule(m)
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out

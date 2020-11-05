@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -410,11 +411,12 @@ static TensorView* newForReduction(
       (*(axes_set.rbegin())) < orig_domain.size(),
       "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
 
+  auto axis_iter = axes_set.begin();
   for (size_t dim = 0; dim < orig_domain.size(); dim++) {
     bool isReduction = false;
-    if (*axes_set.begin() == dim) {
+    if (axis_iter != axes_set.end() && *axis_iter == dim) {
       isReduction = true;
-      axes_set.erase(axes_set.begin());
+      axis_iter++;
     }
 
     const IterDomain* id = orig_domain[dim];
@@ -730,6 +732,7 @@ TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
   return clamp(in->as<Val>(), min_val, max_val)->as<TensorView>();
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
