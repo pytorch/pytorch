@@ -277,7 +277,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         for k, v in ob_dict.items():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v['quantized']):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines
     def test_compare_model_stub_linear_dynamic(self):
@@ -414,7 +414,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         for k, v in act_compare_dict.items():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v['quantized']):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
     @override_qengines
     def test_compare_model_outputs_linear_dynamic(self):
@@ -459,9 +459,6 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
-                print(v["float"][0])
-                self.assertTrue(v["float"][0].shape == v["quantized"][0].shape)
-
 
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
