@@ -46,12 +46,12 @@ Value* createConditionalConstant(Node* profile_ivalue) {
   auto graph = profile_ivalue->owningGraph();
 
   IValue val; // default to None
-  if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(ListType::ofInts()))) {
+  if (profile_ivalue->hasAttribute(Symbol::attr("profiled_int_list"))) {
     // int[]
-    val = IValue(profile_ivalue->is(attr::a));
-  } else if (profile_ivalue->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(BoolType::get()))) {
+    val = IValue(profile_ivalue->is(Symbol::attr("profiled_int_list")));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_bool"))) {
     // bool
-    val = IValue(static_cast<bool>(profile_ivalue->i(attr::a)));
+    val = IValue(static_cast<bool>(profile_ivalue->i(Symbol::attr("profiled_bool"))));
   } else {
     TORCH_INTERNAL_ASSERT(false, __func__, " gets unidentified type: ", profile_ivalue->ty(attr::profiled_type));
   }

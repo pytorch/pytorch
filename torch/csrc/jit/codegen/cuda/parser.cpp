@@ -27,6 +27,11 @@ constexpr auto kNumLerpOps = 2;
 
 namespace {
 
+
+static auto intListAttr =Symbol::attr("profiled_int_list");
+static auto boolAttr =Symbol::attr("profiled_bool_list");
+
+
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
@@ -641,11 +646,11 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(value.isIntList(), "profiling seeing the wrong data type");
     // TODO: get a real attribute
-    if (!pn->hasAttribute(attr::a)) {
+    if (!pn->hasAttribute(intListAttr)) {
       //pn->is_(attr::a, value.toIntList().vec());
-      pn->is_(attr::a, value.toIntVector());
+      pn->is_(intListAttr, value.toIntVector());
     } else {
-      auto profiled_ints = pn->is(attr::a);
+      auto profiled_ints = pn->is(intListAttr);
       auto input_ints = value.toIntList();
       TORCH_INTERNAL_ASSERT(profiled_ints.size() == input_ints.size() &&
           std::equal(profiled_ints.begin(), profiled_ints.end(), input_ints.begin()), "profiling ivalue doesn't support merge");
@@ -669,10 +674,10 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(value.isBool(), "profiling seeing the wrong data type");
     // TODO: get a real attribute
-    if (!pn->hasAttribute(attr::a)) {
-      pn->i_(attr::a, value.toBool());
+    if (!pn->hasAttribute(boolAttr)) {
+      pn->i_(boolAttr, value.toBool());
     } else {
-      auto profiled_bool = pn->i(attr::a);
+      auto profiled_bool = pn->i(boolAttr);
       auto input_bool = value.toBool();
       TORCH_INTERNAL_ASSERT(input_bool == profiled_bool, "profiling ivalue doesn't support merge");
     }
