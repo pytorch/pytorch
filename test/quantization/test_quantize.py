@@ -1276,7 +1276,24 @@ class TestEagerModeQATOps(QuantizationTestCase):
         m = convert(m)
         # make sure activation post process is removed
         for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
+            # verify fake quant module is removd
             self.assertFalse(hasattr(getattr(m, attr), 'activation_post_process'))
+            # verify that hooks are removed
+            self.assertTrue(len(getattr(m, attr)._forward_hooks.items()) == 0)
+
+        # make sure no fake quantize module is inserted for eval mode
+
+        def checkNoFQModule(m):
+            for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
+                self.assertFalse(hasattr(getattr(m, attr), "activation_post_process"))
+                self.assertTrue(len(getattr(m, attr)._forward_hooks.items()) == 0)
+
+        m = M().eval()
+        m.qconfig = default_qconfig
+        m = prepare(m)
+        checkNoFQModule(m)
+        m = convert(m)
+        checkNoFQModule(m)
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
