@@ -15,7 +15,7 @@ from torch.testing import FileCheck
 torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
-from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
@@ -56,9 +56,8 @@ class TestTEFuser(JitTestCase):
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
 
         torch._C._jit_override_can_fuse_on_cpu(True)
-        # TODO: internal LLVM enablement
-        if not IS_SANDCASTLE:
-            torch._C._jit_set_te_must_use_llvm_cpu(True)
+        # TODO: force LLVM. need to add it to asan, mac, windows builds + sandcastle
+        # torch._C._jit_set_te_must_use_llvm_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
