@@ -57,7 +57,7 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-retry git clone -q https://github.com/pytorch/builder.git "$PYTORCH_ROOT"
+retry git clone -q https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
 echo "Using builder from "
 retry git submodule update --init --recursive
