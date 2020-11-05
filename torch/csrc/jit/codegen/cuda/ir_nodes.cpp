@@ -631,7 +631,8 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       no_bcast_domain_(ir_cloner->clone(src->no_bcast_domain_)),
       no_reduction_domain_(ir_cloner->clone(src->no_reduction_domain_)),
       rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
-      contiguity_(src->contiguity()) {}
+      contiguity_(src->contiguity()),
+      has_reduction_(src->has_reduction_) {}
 
 bool TensorDomain::operator==(const TensorDomain& other) const {
   // Checks equality of each class field. Should not be necessary to
@@ -679,7 +680,7 @@ bool TensorDomain::sameAs(
 }
 
 bool TensorDomain::hasReduction() const {
-  return no_reduction_domain_.size() != domain_.size();
+  return has_reduction_;
 }
 
 bool TensorDomain::hasBlockReduction() const {
@@ -956,10 +957,20 @@ bool TensorDomain::hasBroadcast(const std::vector<IterDomain*>& td) {
       return true;
   return false;
 }
+
 bool TensorDomain::hasReduction(const std::vector<IterDomain*>& td) {
   for (auto id : td)
     if (id->isReduction())
       return true;
+  return false;
+}
+
+bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
+  for (auto id : td) {
+    if (id->isReduction() && !id->isTrivialReduction()) {
+      return true;
+    }
+  }
   return false;
 }
 

@@ -178,20 +178,33 @@ void LoopNestGenerator::initReduction(
     kir::Expr* alloc_expr) {
   const auto gpu_lower = GpuLower::current();
 
+  // This is a workaround to handle size-1 reduction, i.e. squeeze ops,
+  // and will be removed once we structurally refactor the way we handle
+  // such reductions, i.e. convert them to SET etc.
+  if (!tv->hasReduction()) {
+    // Create the initialization assignment
+    const auto kir_tv = gpu_lower->lowerValue(tv);
+    const auto init_stmt = ir_builder_.create<kir::UnaryOp>(
+        UnaryOpType::Set, kir_tv, gpu_lower->lowerValue(init_val));
+    pushBack(init_stmt);
+    return;
+  }
+
   const auto alloc_point = loop_utils::getAllocPoint(tv, for_loops_);
   const auto alloc_loop = alloc_point.first;
   const auto alloc_pos = alloc_point.second;
 
-  // Grab the IDs that will be involved in the initialization, ignore reduction
-  // dimensions. Everything else will be iterated over to cover the entire
-  // buffer. Index compute will ignore [block, grid]Dims depending on buffer
-  // memory location
+  // Grab the IDs that will be involved in the initialization, ignore local
+  // reduction dimensions. Everything else will be iterated over to cover the
+  // entire buffer. Index compute will ignore [block, grid]Dims depending on
+  // buffer memory location
   std::vector<kir::IterDomain*> ids;
   for (size_t i = alloc_pos; i < tv->nDims(); i++) {
-    IterDomain* dim = tv->getComputeAtAxis(i).first;
-    if (dim->isReduction())
+    IterDomain* ca_dim = tv->getComputeAtAxis(i).first;
+    IterDomain* local_dim = tv->axis(i);
+    if (local_dim->isReduction())
       continue;
-    ids.push_back(gpu_lower->lowerValue(dim)->as<kir::IterDomain>());
+    ids.push_back(gpu_lower->lowerValue(ca_dim)->as<kir::IterDomain>());
   }
 
   // Init a pointer that will become the entirety of the initialization
@@ -418,7 +431,7 @@ void LoopNestGenerator::handle(const Expr* expr) {
   //  If this is a reduction, initialize the output (open for loops to inner
   //  most, predicate, initialize, place next after allocation if exists, close
   //  to computeAt)
-  if (out->hasReduction()) {
+  if (out->hasAnyReduction()) {
     initReduction(out, expr->as<ReductionOp>()->init(), alloc_expr);
   }
 

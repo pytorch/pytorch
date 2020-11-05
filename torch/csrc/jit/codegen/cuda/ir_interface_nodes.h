@@ -191,6 +191,12 @@ class TORCH_CUDA_API TensorView : public Val {
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
+  //! This is the previous hasReduction logic,
+  //! kept here exclusively for lower loop pass will
+  //! deprecate when Fusion IR pass can convert
+  //! trivial reductions
+  bool hasAnyReduction() const;
+
   c10::optional<unsigned int> getReductionAxis() const;
 
   const std::vector<IterDomain*>& getRootDomain() const;

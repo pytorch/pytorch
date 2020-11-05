@@ -8120,6 +8120,239 @@ TEST(NVFuserTest, FusionReductionHalf_CUDA) {
       aten_output.sub(outputs[0]).abs().max());
 }
 
+TEST(NVFuserTest, FusionReduceSingle_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeConcreteTensor({100, 1});
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  fusion.addOutput(tv1);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({100, 1}, options);
+
+  // Grab only tensor views, though there shouldn't be any other type
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  // no broadcasting needed, omitting the last optional argument;
+  auto outputs = fe.runFusion({input});
+
+  auto aten_output = input.sum({1});
+
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-04, 1e-04),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+TEST(NVFuserTest, FusionReduceImplicitBroadcast_CUDA) {
+  constexpr int bid_x = 80;
+  constexpr int tid_x = 4096;
+  constexpr int red_dim = 1;
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeConcreteTensor({bid_x, tid_x, 1});
+  fusion.addInput(tv0);
+
+  TensorView* tv1 =
+      reductionOp(BinaryOpType::Add, {red_dim, 2}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({bid_x, tid_x, 1}, options);
+
+  // Apply reduction heuristic
+  auto reduction_params = getReductionHeuristics(&fusion, {input}, tv1);
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+  scheduleReduction(&fusion, reduction_params.value(), tv1, {});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  // no broadcasting needed, omitting the last optional argument;
+  auto outputs = fe.runFusion({input}, reduction_params.value().lparams);
+  auto aten_output = input.sum({red_dim, 2});
+
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-04, 1e-04),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+TEST(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
+  constexpr int bid_x = 80;
+  constexpr int tid_x = 4096;
+  constexpr int red_dim = 1;
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeConcreteTensor({bid_x, tid_x, 1});
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {2}, new Float(0), tv0);
+
+  TensorView* tv2 =
+      reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv1);
+  fusion.addOutput(tv2);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({bid_x, tid_x, 1}, options);
+
+  // Apply reduction heuristic
+  auto reduction_params = getReductionHeuristics(&fusion, {input}, tv2);
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+  scheduleReduction(&fusion, reduction_params.value(), tv2, {});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  // no broadcasting needed, omitting the last optional argument;
+  auto outputs = fe.runFusion({input}, reduction_params.value().lparams);
+  auto aten_output = input.sum({red_dim, 2});
+
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-04, 1e-04),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+TEST(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
+  constexpr int bid_x = 80;
+  constexpr int tid_x = 4096;
+  constexpr int red_dim = 1;
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeConcreteTensor({bid_x, tid_x, 1});
+  fusion.addInput(tv0);
+
+  TensorView* tv1 =
+      reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
+
+  TensorView* tv2 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv1);
+  fusion.addOutput(tv2);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({bid_x, tid_x, 1}, options);
+
+  // Apply reduction heuristic
+  auto reduction_params = getReductionHeuristics(&fusion, {input}, tv1);
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+  scheduleReduction(&fusion, reduction_params.value(), tv1, {tv2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  // no broadcasting needed, omitting the last optional argument;
+  auto outputs = fe.runFusion({input}, reduction_params.value().lparams);
+  auto aten_output = input.sum({red_dim, 2});
+
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-04, 1e-04),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+TEST(NVFuserTest, FusionTrivialReduction_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeConcreteTensor({10, 20, 1});
+  fusion.addInput(tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {2}, new Float(0), tv0);
+  fusion.addOutput(tv1);
+
+  TORCH_CHECK(!fusion.hasReduction(), "Trivial reduction picked up by fusion");
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({10, 20, 1}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({input});
+  auto aten_output = input.sum({2});
+
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-04, 1e-04),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+TEST(NVFuserTest, FusionTrivialReduction2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int w = 1, x = 1, y = 7, z = 8;
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeConcreteTensor({w, x, y, z});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = sum(tv1, {0});
+  auto tv3 = sum(tv2, {0});
+  auto tv4 = add(tv3, tv0);
+
+  fusion.addOutput(tv4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y, z}, options);
+  at::Tensor t1 = at::randn({w, x, y, z}, options);
+
+  scheduleFusion(&fusion, {t0, t1});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
+
+  auto t2 = t1.sum({0}).sum({0}).add(t0);
+
+  TORCH_CHECK(t2.allclose(outputs[0]));
+}
+
+TEST(NVFuserTest, FusionTrivialReduction3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int v = 1, w = 1, x = 1, y = 7, z = 8;
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeConcreteTensor({v, w, x, y, z});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = sum(tv1, {0, 1, 2});
+  auto tv3 = add(tv2, tv0);
+
+  fusion.addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y, z}, options);
+  at::Tensor t1 = at::randn({v, w, x, y, z}, options);
+
+  scheduleFusion(&fusion, {t0, t1});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
+
+  auto t2 = t1.sum({0, 1, 2}).add(t0);
+
+  TORCH_CHECK(t2.allclose(outputs[0]));
+}
+
 TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({16, 8, 8}, options);

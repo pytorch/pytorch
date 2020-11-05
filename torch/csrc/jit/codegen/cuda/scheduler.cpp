@@ -96,9 +96,9 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
     auto out = out_val->as<TensorView>();
 
     // Merge all dimensions because we're only supporting pointwise
-    while (out->nDims() > 1) {
-      out->merge(-2, -1);
-    }
+    // Real reductions aren't supposed to reach here
+    // This is a workaround to handle trivial reductions, i.e. size-1 reductions
+    mergeNonReduction(out);
   }
 
   // Run through outputs, grab all inputs of outputs
