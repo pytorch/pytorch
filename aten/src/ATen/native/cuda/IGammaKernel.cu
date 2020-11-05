@@ -365,7 +365,7 @@ __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar
 }
 
 template <typename scalar_t>
-__host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) {
+__noinline__ __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) {
   /* the calculation of the regularized upper incomplete gamma function
    * is done differently based on the values of a and x:
    * - if x and/or a is at the boundary of defined region, then assign the
