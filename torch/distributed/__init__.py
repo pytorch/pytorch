@@ -25,6 +25,7 @@ if is_available():
         FileStore,
         ProcessGroup,
         Reducer,
+        BuiltinCommHookType,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _GradBucket,
         _register_comm_hook,
