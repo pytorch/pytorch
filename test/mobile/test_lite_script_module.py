@@ -63,7 +63,7 @@ class TestLiteScriptModule(unittest.TestCase):
         assert(b"top(B).A0(A).forward" in bytes)
         assert(b"top(B).A1(A).forward" in bytes)
 
-    def test_save_mobile_module_with_debug_info_with_script(self):
+    def test_save_mobile_module_with_debug_info_with_script_case1(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
@@ -84,6 +84,40 @@ class TestLiteScriptModule(unittest.TestCase):
         trace_module = torch.jit.script(B(), input)
         bytes = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
 
+        assert(b"mobile_debug.pkl" in bytes)
+        assert(b"module_debug_info" in bytes)
+        assert(b"top(B).forward" in bytes)
+        assert(b"top(B).A0(A).forward" in bytes)
+        assert(b"top(B).A1(A).forward" in bytes)
+
+    def test_save_mobile_module_with_debug_info_with_script_case2(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            def forward(self, x):
+                return x + 2
+
+        class C(torch.nn.Module):
+            def __init__(self):
+                super(C, self).__init__()
+                self.A0 = A()
+                self.B0 = B()
+
+            def forward(self, x):
+                return self.A0(self.B0(x)) + 1
+
+        input = torch.tensor([5])
+        trace_module = torch.jit.script(B(), input)
+        bytes = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
+        print("byptes: ", bytes)
         assert(b"mobile_debug.pkl" in bytes)
         assert(b"module_debug_info" in bytes)
         assert(b"top(B).forward" in bytes)

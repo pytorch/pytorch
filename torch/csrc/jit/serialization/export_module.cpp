@@ -64,17 +64,15 @@ std::string getModulePath(Node* node, const std::string& root_scope_string) {
     for (size_t i = 0; i < vec.size(); ++i) {
       const auto& tup = vec[i];
       const auto opt_module_instance_info = std::get<2>(tup);
-      if (opt_module_instance_info) {
+      if (opt_module_instance_info.has_value()) {
         const auto& module_instance_info = opt_module_instance_info.value();
         if (module_instance_info.class_type()) {
           const auto& class_type = module_instance_info.class_type();
           const auto& instance_name = module_instance_info.instance_name();
           auto type_name = class_type->name()->qualifiedName();
           type_name = type_name.substr(type_name.find_last_of(".") + 1);
-          module_info += "." + instance_name + "(" + type_name + ")";
-          if (i == vec.size() - 1) {
-            module_info += "." + std::get<0>(tup)->name();
-          }
+          module_info += "." + instance_name + "(" + type_name + ")" + "." +
+              std::get<0>(tup)->name();
         } else {
           module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
         }

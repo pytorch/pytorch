@@ -1926,6 +1926,9 @@ std::vector<Value*> inlineCallTo(
 
     if (!new_callstack_entries.count(raw_callstack_ptr)) {
       if (new_node_cs) {
+//        new_callstack_entries[raw_callstack_ptr] =
+//            c10::make_intrusive<InlinedCallStack>(
+//                *new_node_cs, callee, to_replace->sourceRange());
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
                 *new_node_cs,
@@ -1933,6 +1936,9 @@ std::vector<Value*> inlineCallTo(
                 to_replace->sourceRange(),
                 module_instance_info);
       } else {
+//        new_callstack_entries[raw_callstack_ptr] =
+//            c10::make_intrusive<InlinedCallStack>(
+//                callee, to_replace->sourceRange());
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
                 callee, to_replace->sourceRange(), module_instance_info);

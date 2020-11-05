@@ -505,7 +505,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   }
 
   std::unordered_set<std::string> expected_result(
-      {"top(C).A0(A).forward", "top(C).A0(A).B0(B).forward"});
+      {"top(C).A0(A).forward", "top(C).A0(A).forward.B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -551,7 +551,9 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // "top(C).B0(B).forward": for the add operator in B0.
   // "top(C).B0(B).A0(A).forward": for the add operator in A0.
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward", "top(C).B0(B).forward", "top(C).B0(B).A0(A).forward"});
+      {"top(C).forward",
+       "top(C).B0(B).forward",
+       "top(C).B0(B).forward.A0(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -587,11 +589,102 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
     }
   }
 
-  // The current approach is not able to distinguish between A0 and A1,
-  // which have the same class type. Hence, it only records module
-  // information for A1.
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 1
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+  //     self.A0 = A()
+  //     self.A1 = A()
+
+  //   def forward(self, x):
+  //     return self.A0(x) + self.A1(x)
+
+  // There are 3 module information strings here.
+  // "top(B).forward": for the add operator in top.
+  // "top(B).A0(B).forward": for the add operator in A0.
+  // "top(B).A1(A).forward": for the add operator in A1.
+
   std::unordered_set<std::string> expected_result(
       {"top(B).forward", "top(B).A0(A).forward", "top(B).A1(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+TEST(LiteInterpreterTest, NestedClassTypeModuleInfoCase) {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(self.B0.forward(x)) + 1
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 1
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 2
+
+  // class C(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+  //     self.A0 = A()
+  //     self.B0 = B()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(self.B0.forward(x)) + 1
+
+  // There are 3 module information strings here.
+  // "top(C).forward": for the add operator in top.
+  // "top(C).A0(A).forward": for the add operator in A0 (second top).
+  // "top(C).A0(A).forward.B0(B).forward": for the add operator in B0 (third
+  // top).
+
+  std::unordered_set<std::string> expected_result(
+      {"top(C).forward",
+       "top(C).A0(A).forward",
+       "top(C).A0(A).forward.B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
