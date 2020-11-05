@@ -10489,9 +10489,9 @@ class TestTorchDeviceType(TestCase):
         torch.lstsq(b, a, out=(tb, ta))
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, atol=1e-8, rtol=0)
 
+    @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @tf32_on_and_off(0.05)
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_qr(self, device, dtype):
         def run_test(tensor_dims, some):
@@ -10505,28 +10505,27 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(R.size(-1), n)
             self.assertEqual(Q.size(-1), n_columns)
 
-            # TODO: bmm is not supported on CUDA yet. Fix this when
-            # bmm is supported
-            if A.is_complex() and self.device_type == 'cuda' and A.dim() > 2:
-                self.assertRaisesRegex(
-                    RuntimeError, '_th_bmm_out not supported on CUDAType for Complex', lambda: torch.matmul(Q, R))
-                return
+            A_ = A.cpu().numpy()
+            Q_ = Q.cpu().numpy()
+            R_ = R.cpu().numpy()
 
             # Check1: A = QR
-            self.assertEqual(A, torch.matmul(Q, R))
+            self.assertEqual(A_, np.matmul(Q_, R_))
 
             # Check2: A = QR (with out)
             Q_out, R_out = torch.full_like(Q, math.nan), torch.full_like(R, math.nan)
             torch.qr(A, some=some, out=(Q_out, R_out))
-            self.assertEqual(A, torch.matmul(Q_out, R_out))
+            Q_out_ = Q_out.cpu().numpy()
+            R_out_ = R_out.cpu().numpy()
+            self.assertEqual(A_, np.matmul(Q_out_, R_out_))
 
             # Check3: Q == Q_out, R == R_out
-            self.assertEqual(Q, Q_out)
-            self.assertEqual(R, R_out)
+            self.assertEqual(Q_, Q_out_)
+            self.assertEqual(R_, R_out_)
 
             # Check4: Q^{T}Q = I, triu(R) = R
-            self.assertEqual(torch.matmul(Q.transpose(-2, -1).conj(), Q),
-                             torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)))
+            eye = torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)).cpu().numpy()
+            self.assertEqual(np.matmul(Q_.swapaxes(-1, -2).conj(), Q_), eye)
             self.assertEqual(R.triu(), R)
 
         tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
