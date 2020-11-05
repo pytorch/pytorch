@@ -108,7 +108,7 @@ void ReconstructScopesPass::constructRelativeNamesForModules(
 void ReconstructScopesPass::appendSourceRangeInfo(
     std::string& scopeString,
     const InlinedCallStackEntry& frame) const {
-  SourceRange r = frame.second;
+  SourceRange r = std::get<1>(frame);
   if (r.source()) {
     if (auto orig = r.source()->findSourceRangeThatGenerated(r)) {
       r = *orig;
@@ -125,7 +125,7 @@ void ReconstructScopesPass::appendSourceRangeInfo(
 
 std::string ReconstructScopesPass::getScopeString(
     const InlinedCallStackEntry& frame) const {
-  Function* f = frame.first;
+  Function* f = std::get<0>(frame);
   if (!func_to_module_.count(f)) {
     return "<null (no func in the map)>";
   }
@@ -137,7 +137,7 @@ std::string ReconstructScopesPass::getScopeString(
 
   // When class types are not unique, the module information may be
   // incomplele. In this case, we add source range information,
-  // which can be helpful for deugging purposes.
+  // which can be helpful for debugging purposes.
   if (class_types_are_not_unique_) {
     appendSourceRangeInfo(scopeString, frame);
   }

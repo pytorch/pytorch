@@ -2,6 +2,7 @@
 
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -409,6 +410,16 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   }
 
   return scalars_.at(v->unique());
+}
+
+ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  if (!c10::isIntegralType(scalarType)) {
+    return e;
+  }
+  auto defaultType = static_cast<tensorexpr::ScalarType>(
+      c10::typeMetaToScalarType(c10::get_default_dtype()));
+  return Cast::make(Dtype(defaultType, e.dtype().lanes()), e);
 }
 
 void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
@@ -925,13 +936,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log: {
-      return computeOneOperand(
-          "aten_log", v, [](const ExprHandle& a) { return log(a); });
+      return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
+        return log(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log10: {
-      return computeOneOperand(
-          "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
+      return computeOneOperand("aten_log10", v, [](const ExprHandle& a) {
+        return log10(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log1p: {
@@ -940,8 +953,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log2: {
-      return computeOneOperand(
-          "aten_log2", v, [](const ExprHandle& a) { return log2(a); });
+      return computeOneOperand("aten_log2", v, [](const ExprHandle& a) {
+        return log2(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::exp: {
@@ -965,18 +979,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::cos: {
-      return computeOneOperand(
-          "aten_cos", v, [](const ExprHandle& a) { return cos(a); });
+      return computeOneOperand("aten_cos", v, [](const ExprHandle& a) {
+        return cos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sin: {
-      return computeOneOperand(
-          "aten_sin", v, [](const ExprHandle& a) { return sin(a); });
+      return computeOneOperand("aten_sin", v, [](const ExprHandle& a) {
+        return sin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::tan: {
-      return computeOneOperand(
-          "aten_tan", v, [](const ExprHandle& a) { return tan(a); });
+      return computeOneOperand("aten_tan", v, [](const ExprHandle& a) {
+        return tan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::type_as: {
@@ -1075,8 +1092,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::acos: {
-      return computeOneOperand(
-          "aten_acos", v, [](const ExprHandle& a) { return acos(a); });
+      return computeOneOperand("aten_acos", v, [](const ExprHandle& a) {
+        return acos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::asin: {
@@ -1095,8 +1113,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::atan: {
-      return computeOneOperand(
-          "aten_atan", v, [](const ExprHandle& a) { return atan(a); });
+      return computeOneOperand("aten_atan", v, [](const ExprHandle& a) {
+        return atan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::atan2: {
@@ -1107,8 +1126,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::tanh: {
-      return computeOneOperand(
-          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
+      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
+        return tanh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sqrt: {
@@ -1342,74 +1362,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 }
 
-void TensorExprKernel::flattenTensors(BackendType backendType) {
-  if (backendType != BackendType::kCudaCodeGen &&
-      backendType != BackendType::kBlockCodeGen) {
-    // We only need to flatten for GPU, for other backends just use the same
-    // tensors.
-    flatTensorOutputs_ = tensorOutputs_;
-    return;
-  }
-
-  flatTensorOutputs_.resize(tensorOutputs_.size());
-  for (size_t tensorIdx = 0; tensorIdx < tensorOutputs_.size(); tensorIdx++) {
-    Tensor* tensor = tensorOutputs_[tensorIdx];
-    ExprHandle totalCount = ExprHandle(tensor->dim(0));
-    for (int i = 1; i < tensor->ndim(); i++) {
-      const IntImm* totalCountImm = totalCount.AsNode<IntImm>();
-      const IntImm* tensorDimImm = dynamic_cast<const IntImm*>(tensor->dim(i));
-      if (totalCountImm && tensorDimImm) {
-        // TODO: switch to real constant folding when it is available.
-        totalCount = ExprHandle(totalCountImm->value() * tensorDimImm->value());
-      } else {
-        totalCount = totalCount * ExprHandle(tensor->dim(i));
-      }
-    }
-    // Flatten the index for GPU kernels.
-    // TODO: move this to fusing axis when it is ready.
-    Tensor* newOut = Compute(
-        tensor->buf()->name_hint() + "_flat",
-        {totalCount},
-        [tensor](const VarHandle& index) -> ExprHandle {
-          std::vector<ExprHandle> dims;
-          ExprHandle value = index;
-          for (int i = tensor->ndim() - 1; i >= 0; i--) {
-            ExprHandle idx = value;
-            if (i > 0) {
-              idx = Mod::make(value, ExprHandle(tensor->dim(i)));
-            }
-            dims.push_back(idx);
-            value = value / ExprHandle(tensor->dim(i));
-          }
-          std::reverse(dims.begin(), dims.end());
-          return tensor->call(dims);
-        });
-    flatTensorOutputs_[tensorIdx] = newOut;
-  }
-}
-
 Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
-  flattenTensors(backendType);
-
-  torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // Compute non-output tensors_ inline
-  for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second) || hasReduction) {
-      continue;
-    }
-    l.computeInline(p.second->buf());
-  }
-  if (backendType == kCudaCodeGen) {
-    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
-      Tensor* tensor = flatTensorOutputs_[i];
+  l.inlineIntermediateBufs();
 
-      // For every output tensor we've created a flattened 1D tensor - let's
-      // mark the original output tensor with computeInline
-      l.computeInline(tensorOutputs_[i]->buf());
+  if (backendType == kCudaCodeGen) {
+    for (auto tensor : tensorOutputs_) {
+      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      For* flattened = nullptr;
+      LoopNest::flatten(loops, &flattened);
+      assert(flattened);
 
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
@@ -1424,8 +1391,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
         }
-        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.splitWithMask(loops[0], blockSize, &outer, &inner);
+        l.splitWithMask(flattened, blockSize, &outer, &inner);
         l.setGPUBlockIndex(outer, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
@@ -1438,8 +1404,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         const int kDefaultBlockSize = 256;
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
-        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.splitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
+        l.splitWithMask(flattened, blockCount * blockSize, &outer, &inner);
         l.splitWithMask(inner, blockSize, &inner1, &inner2);
         l.setGPUBlockIndex(inner1, 0);
         l.setGPUThreadIndex(inner2, 0);
@@ -1452,12 +1417,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   if (backendType == kBlockCodeGen) {
     auto block_analysis = std::make_unique<CreateBufferMap>();
-    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
+    for (auto tensor : tensorOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
       // We only handle looplevels == 2 for now
-      Tensor* tensor = flatTensorOutputs_[i];
       // Run Block analysis to get multi dim buffer info
       auto root_stmt = l.root_stmt();
       root_stmt->accept(block_analysis.get());
@@ -1465,12 +1429,16 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
       if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
-      For* outer;
-      For* inner;
+
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-      TORCH_INTERNAL_ASSERT(loops.size() > 0, "loops should not be empty");
-      l.splitWithMask(loops[0], blockSize, &outer, &inner);
+      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      For* flattened = nullptr;
+      LoopNest::flatten(loops, &flattened);
+      assert(flattened);
+
+      For* outer = nullptr;
+      For* inner = nullptr;
+      l.splitWithMask(flattened, blockSize, &outer, &inner);
       l.setGPUBlockIndex(outer, 0);
       l.setGPUThreadIndex(inner, 0);
       l.setBufferMap(outer, block_analysis->getBufferMap());
@@ -1518,7 +1486,7 @@ std::vector<CodeGen::BufferArg> TensorExprKernel::prepareBufferArgs() {
       params.emplace_back(stride.var);
     }
   }
-  for (auto& o : flatTensorOutputs_) {
+  for (auto& o : tensorOutputs_) {
     params.emplace_back(o);
   }
   return params;
@@ -1875,7 +1843,12 @@ void TensorExprKernel::compile() {
   std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
 
   // Generate code.
-  codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
+  codegen_ = CreateCodeGen(
+      getCodeGenName(backendType),
+      stmt,
+      params,
+      device_,
+      SubgraphUtils::generateNameForGraph(graph_));
 }
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)

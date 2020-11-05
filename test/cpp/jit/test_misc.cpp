@@ -65,6 +65,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -1118,6 +1119,33 @@ TEST(RecordFunctionTest, Basic) {
   clearCallbacks();
 }
 
+TEST(RecordFunctionTest, OperatorNameOverload) {
+  std::set<std::string> operator_names;
+
+  at::addGlobalCallback(at::RecordFunctionCallback(
+                            [&operator_names](const at::RecordFunction& fn) {
+                              c10::optional<c10::OperatorName> op_name =
+                                  fn.operator_name();
+                              if (op_name.has_value()) {
+                                operator_names.insert(c10::toString(*op_name));
+                              } else {
+                                operator_names.insert("No Operator Name");
+                              }
+                            })
+                            .scopes({at::RecordScope::FUNCTION}));
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(false);
+  auto t2 = t.pow(2);
+
+  at::clearCallbacks();
+  EXPECT_TRUE(operator_names.count("No Operator Name") == 0)
+      << "Expected that all traced operators had an associated OperatorName object";
+  EXPECT_TRUE(operator_names.count("aten::randn") == 1)
+      << "Expected aten::randn to have been called and recorded, but it was not";
+  EXPECT_TRUE(operator_names.count("aten::pow.Tensor_Scalar") == 1)
+      << "Expected aten::pow.Tensor_Scalar to have been called and recorded, but it was not";
+}
+
 class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
  public:
   int getModelId() const {
@@ -1811,7 +1839,7 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 1);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("bar"));
           break;
         }
         case 7: {
@@ -1821,8 +1849,8 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 2);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
-          ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("baz"));
+          ASSERT_EQ(std::get<0>(callstack_vector[1]), &cu->get_function("ham"));
           break;
         }
         case 11: {
@@ -1851,7 +1879,7 @@ def foo(x):
       ASSERT_TRUE(n->callstack());
       auto callstack_vector = (*n->callstack())->vec();
       ASSERT_EQ(callstack_vector.size(), 1);
-      ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
+      ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("ham"));
     }
   }
 }
