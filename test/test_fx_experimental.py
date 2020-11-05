@@ -6,8 +6,8 @@ from torch.fx.experimental.Partitioner import Partitioner, Device, PartitionerCo
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.fx.experimental.partitioner_utils import get_latency_of_one_partition, \
-    NodeLatency
+from torch.fx.experimental.partitioner_utils import NodeLatency, \
+    get_partition_to_latency_mapping, get_latency_of_partitioned_graph
 from typing import Union, Callable
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
@@ -212,10 +212,19 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         self.assertEqual(traced(a), module_with_submodules(a))
         partitions = partitioner.partitions
-        partition_latency_0 = get_latency_of_one_partition(partitions[0], node_to_latency_mapping)
-        assert (128., 80., 160.) == partition_latency_0
-        partition_latency_1 = get_latency_of_one_partition(partitions[1], node_to_latency_mapping)
-        assert (16., 32., 32) == partition_latency_1
+        partition_to_latency_mapping = get_partition_to_latency_mapping(partitions, node_to_latency_mapping)
+        for p in partition_to_latency_mapping:
+            if p.partition_id == 0:
+                assert partition_to_latency_mapping[p] == (128., 80., 160.)
+            else:
+                assert partition_to_latency_mapping[p] == (16., 32., 32.)
+        transfer_rate_bytes_per_sec = 0.5
+        critical_path_latency_sec = get_latency_of_partitioned_graph(
+            partitions,
+            partition_to_latency_mapping,
+            transfer_rate_bytes_per_sec
+        )
+        assert critical_path_latency_sec == 208.
 
     def test_call_to_assert_no_msg(self):
 

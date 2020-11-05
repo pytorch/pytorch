@@ -11,6 +11,7 @@ from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExec
 
 from torch.testing._internal.jit_utils import JitTestCase
 
+
 class BaseTestClass(JitTestCase):
     def setUp(self):
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
@@ -37,10 +38,12 @@ class BaseTestClass(JitTestCase):
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
 
+
 def warmup_and_run_forward(f, *args):
     for _ in range(torch._C._jit_get_num_profiled_runs() + 1):
         results = f(*args)
     return results
+
 
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
@@ -167,7 +170,6 @@ class TestTensorExprFuser(BaseTestClass):
                     torch.rand(*c_shape, device="cuda"),
                 ),
             )
-
 
             a = torch.rand(*a_shape, device="cuda")
             b = torch.rand(*b_shape, device="cuda")
@@ -564,7 +566,8 @@ class TestTensorExprFuser(BaseTestClass):
 
         traced = torch.jit.trace(test, (torch.zeros(16, 16)))
         a = 8.0 * torch.rand(16, 16)
-        np.testing.assert_allclose(warmup_and_run_forward(traced, a), np.amin(a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
+        np.testing.assert_allclose(warmup_and_run_forward(traced, a), np.amin(
+            a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
         self.assertLastGraphAllFused()
 
     @unittest.skip("temporarily disable")
@@ -894,7 +897,6 @@ class TestTensorExprFuser(BaseTestClass):
             test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
-
 
         for torch_fn in fns:
             for dev in device_options:
@@ -1262,13 +1264,51 @@ class TestTensorExprFuser(BaseTestClass):
             x = bias + y
             return x * 0.5 * (1.0 + torch.erf(x / 1.41421))
 
-
         for device in devices:
             a = torch.rand(1024, dtype=torch.half, device=device)
             b = torch.rand(1024, dtype=torch.half, device=device)
             traced = torch.jit.trace(bias_gelu, (a, b))
             x = warmup_and_run_forward(traced, a, b)
             self.assertLastGraphAllFused()
+
+    def test_half_module_backward(self):
+        devices = ["cuda"] if torch.cuda.is_available() else []
+        dtype = torch.float16
+
+        for device in devices:
+            class HalfModule(nn.Module):
+                def __init__(self, inplanes, planes):
+                    super().__init__()
+
+                    self.fixup_bias2a = nn.Parameter(torch.zeros(1))
+                    self.fixup_scale = nn.Parameter(torch.ones(1))
+                    self.fixup_bias2b = nn.Parameter(torch.zeros(1))
+
+                def forward(self, x):
+                    identity = x
+                    out = x
+
+                    out = out + self.fixup_bias2a
+                    out = out * self.fixup_scale + self.fixup_bias2b
+
+                    return out * out + identity
+
+            net_ref = HalfModule(64, 64).to(dtype=dtype, device=device)
+            net = torch.jit.script(HalfModule(64, 64)).to(dtype=dtype, device=device)
+            inp = torch.randn(16, 64, 16, 16, dtype=dtype, device=device)
+
+            for i in range(10):
+                for param in net.parameters():
+                    param.grad = None
+                for param in net_ref.parameters():
+                    param.grad = None
+
+                net(inp).mean().backward()
+                net_ref(inp).mean().backward()
+
+            # check grad, allow a little tolerance due to parallelism.
+            for (p1, p2) in zip(net.parameters(), net_ref.parameters()):
+                np.testing.assert_allclose(p1.grad.cpu(), p2.grad.cpu(), rtol=0.02)
 
     def test_transpose(self):
         @torch.jit.script
