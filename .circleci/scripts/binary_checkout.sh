@@ -34,10 +34,10 @@ else
 fi
 
 # Clone the Pytorch branch
-retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
-pushd "$PYTORCH_ROOT"
-export CIRCLE_SHA1="a4e04a1cd64b104095ed5c4af25bd76cf10e967f"
-export CIRCLE_BRANCH="mszhanyi:zhanyi/addcu11bintest"
+retry git clone https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+pushd "$BUILDER_ROOT"
+export CIRCLE_SHA1="a6ed1c8a7090a88fa22291b5acd992393e12051e"
+export CIRCLE_BRANCH="mszhanyi:zhanyi/cnnrnnsmoke"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
   git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
