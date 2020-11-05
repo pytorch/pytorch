@@ -39,9 +39,9 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
         "3.9m"
     ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
-    libtorch=[
-        "3.7m",
-    ],
+    # libtorch=[
+    #     "3.7m",
+    # ],
 )
 
 # TODO: There's an issue with current Python 3.9 builds that only occurs during
@@ -56,9 +56,9 @@ CONFIG_TREE_DATA = OrderedDict(
     macos=([None], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
-        libtorch=[
-            "3.7",
-        ],
+        # libtorch=[
+        #     "3.7",
+        # ],
     )),
     # # Skip CUDA-9.2 builds on Windows
     # windows=(
