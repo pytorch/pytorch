@@ -97,6 +97,7 @@ static void FuseWithListUnpack(Block* b) {
       case aten::unbind:
       case aten::unsafe_chunk:
       case aten::where:
+      case aten::nonzero_numpy:
         FuseWithListUnpack(*it);
         break;
       default:

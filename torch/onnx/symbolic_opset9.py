@@ -2127,6 +2127,11 @@ def nonzero(g, input):
     return t(g, g.op('NonZero', input))
 
 
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
+
+
 @parse_args('v')
 def isnan(g, input):
     output = g.op('IsNaN', input)
