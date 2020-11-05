@@ -7,12 +7,10 @@ import atexit
 import os
 import re
 import shutil
-import tempfile
 import textwrap
 import threading
-import timeit
 from types import ModuleType
-from typing import cast, Any, Callable, Dict, List, Optional, Union
+from typing import cast, List, Optional, Union
 import uuid
 
 import torch

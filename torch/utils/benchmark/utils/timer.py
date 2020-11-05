@@ -2,8 +2,7 @@
 
 import timeit
 import textwrap
-from types import ModuleType
-from typing import cast, Any, Callable, Dict, List, NoReturn, Optional, Type, Union
+from typing import cast, Any, Callable, Dict, List, NoReturn, Optional, Type
 
 import numpy as np
 import torch
