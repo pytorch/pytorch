@@ -1031,8 +1031,7 @@ struct CodeImpl {
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
-      : taskLauncher_(std::move(taskLauncher)) {
+  InterpreterStateImpl(const Code& code) {
     enterFrame(code, 0);
   }
 
@@ -1058,7 +1057,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // including any inputs to this function
   int64_t stack_start_ = -1;
   c10::intrusive_ptr<Future> future_;
-  TaskLauncher taskLauncher_;
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -1337,14 +1335,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 Callback(
                     c10::intrusive_ptr<InterpreterStateImpl> state,
                     Stack stack)
-                    : stateImpl_(std::move(state)),
-                      state_(stateImpl_),
-                      stack_(std::move(stack)) {
+                    : state_(std::move(state)), stack_(std::move(stack)) {
                   dist_autograd_context_id_ = getDistAutogradContextId();
-                  state_ = InterpreterState(stateImpl_);
                 }
                 void operator()() {
-                  stateImpl_->taskLauncher_(InterpreterContinuation(
+                  at::launch(InterpreterContinuation(
                       state_,
                       std::move(stack_),
                       dist_autograd_context_id_,
@@ -1352,7 +1347,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 }
 
                private:
-                c10::intrusive_ptr<InterpreterStateImpl> stateImpl_;
                 InterpreterState state_;
                 Stack stack_;
                 int64_t dist_autograd_context_id_;
@@ -1517,15 +1511,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterState forked_interpreter(
                 forked_fn->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code,
-                taskLauncher_);
+                    .code);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
                 getDistAutogradContextId());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
-            taskLauncher_(std::move(continuation));
+            at::launch(std::move(continuation));
             ++frame.pc;
           } break;
           case WARN: {
@@ -1747,10 +1740,8 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
-InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
-    : pImpl(c10::make_intrusive<InterpreterStateImpl>(
-          code,
-          std::move(taskLauncher))) {}
+InterpreterState::InterpreterState(const Code& code)
+    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {

@@ -35,9 +35,7 @@ struct BuiltinOpFunction : public Function {
     callable_(stack);
   }
 
-  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
-      Stack& stack,
-      TaskLauncher /* not used */) override {
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) override {
     run(stack);
     auto res = c10::make_intrusive<c10::ivalue::Future>(stack.front().type());
     res->markCompleted(std::move(stack.front()));
