@@ -1301,7 +1301,6 @@ class DistributedTest:
             else:
                 self.assertEqual([], events)
 
-
         # ALL REDUCE
         def _test_all_reduce_helper(
             self,
