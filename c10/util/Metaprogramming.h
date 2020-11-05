@@ -203,23 +203,6 @@ auto tuple_take(Tuple t) {
   return TupleTake<Tuple, N>::call(t);
 }
 
-// template <class Tuple, int N>
-// constexpr auto tuple_take(Tuple t) {
-//   return guts::if_constexpr<N >= 0>(
-//     [&] {
-//       constexpr size_t size = std::tuple_size<Tuple>();
-//       static_assert(N <= size, "tuple_take: N >= size");
-//       return tuple_elements(t, std::make_index_sequence<N>{});
-//     },
-//     [&] {
-//       static_assert(N < 0, "tuple_take: N < 0");
-//       constexpr size_t size = std::tuple_size<Tuple>();
-//       static_assert(-N <= size, "tuple_take: -N >= size");
-//       return tuple_elements(t, make_offset_index_sequence<size + N, -N>{});
-//     }
-//   );
-// }
-
 /**
  * Use tuple_slice to extract a contiguous subtuple from the argument.
  *
