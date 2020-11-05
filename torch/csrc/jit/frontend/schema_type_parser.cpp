@@ -24,6 +24,7 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
@@ -48,6 +49,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
                         // parser, it should use the custom class mechanism
                         // instead. @jerryzh
       {"Device", DeviceObjType::get()},
+      {"Stream", StreamObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},

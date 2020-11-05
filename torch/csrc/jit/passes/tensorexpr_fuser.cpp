@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
@@ -86,10 +87,11 @@ bool isSupported(Node* node) {
       "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
       "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+      "aten::lgamma(Tensor self) -> Tensor",
       "aten::log10(Tensor self) -> Tensor",
       "aten::log(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
-      // TODO: log1p
+      "aten::log1p(Tensor self) -> Tensor",
       "aten::exp(Tensor self) -> Tensor",
       "aten::erf(Tensor self) -> Tensor",
       "aten::erfc(Tensor self) -> Tensor",
@@ -150,6 +152,7 @@ bool isSupported(Node* node) {
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+      "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
   };
   // clang-format on
 
@@ -605,6 +608,8 @@ class TensorExprFuser {
       SubgraphUtils::unmergeSubgraph(n);
       return true;
     }
+    // Cleanup the subgraph from duplicated constants while we're at it.
+    ConstantPooling(subgraph);
     return false;
   }
 

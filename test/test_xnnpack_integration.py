@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.testing import FileCheck
 import torch.testing._internal.hypothesis_utils as hu
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, slowTest
 from hypothesis import given, assume
 from hypothesis import strategies as st
 import io
@@ -1022,6 +1022,8 @@ class TestXNNPACKConv1dTransformPass(TestCase):
                                                                                pattern_count_optimized_map,
                                                                                data_shape)
 
+    # See https://github.com/pytorch/pytorch/issues/46066
+    @slowTest
     def test_conv1d_with_relu_fc(self):
         batch_size_list = range(1, 3)
         input_channels_per_group_list = range(10, 12)

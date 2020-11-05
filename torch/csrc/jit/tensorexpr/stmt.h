@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <list>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -161,6 +162,13 @@ class TORCH_API Block : public StmtNode<Block> {
 
   std::list<Stmt*> stmts() const {
     return stmts_;
+  }
+
+  void clear() {
+    for (auto* s : stmts_) {
+      set_parent(s, nullptr);
+    }
+    stmts_.clear();
   }
 
   explicit Block(const std::vector<Stmt*>& stmts) {

@@ -155,7 +155,7 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
 }
 
 void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
@@ -170,7 +170,7 @@ void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value)
 }
 
 void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
       // Propagate nan, which doesn't propagate automatically for ROCm
@@ -184,7 +184,7 @@ void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
 }
 
 void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
       // Propagate nan, which doesn't propagate automatically for ROCm
@@ -223,13 +223,16 @@ void nan_to_num_kernel_cuda(
   });
 }
 
-void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta){
+void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta_){
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "kaiser_window_cuda", [&] {
-      const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_i0(static_cast<scalar_t>(beta) * ::sqrt(1 - ::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
-      });
+    using T_ACC = acc_type<scalar_t, true>;
+    const T_ACC inv_alpha = static_cast<T_ACC>(2.0 / (window_length - 1));
+    const T_ACC beta = static_cast<T_ACC>(beta_);
+    const T_ACC inv_i0_beta = 1.0 / calc_i0(beta);
+    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      T_ACC x = static_cast<T_ACC>(a) * inv_alpha - 1;
+      T_ACC y = std::max<T_ACC>(0, 1 - x * x);
+      return calc_i0(beta * ::sqrt(y)) * inv_i0_beta;
     });
   });
 }

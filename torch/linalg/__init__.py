@@ -68,8 +68,7 @@ Keyword args:
         :attr:`dtype` before performing the operation, and the returned tensor's type
         will be :attr:`dtype`. If this argument is used in conjunction with the
         :attr:`out` argument, the output tensor's type must match this argument or a
-        RuntimeError will be raised. This argument is not currently supported for
-        :attr:`ord='nuc'` or :attr:`ord='fro'`. Default: ``None``
+        RuntimeError will be raised. Default: ``None``
 
 Examples::
 
@@ -139,4 +138,49 @@ Using the :attr:`dim` argument to compute matrix norms::
     tensor([ 3.7417, 11.2250])
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
+""")
+
+tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
+linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
+
+Computes a tensor ``x`` such that ``tensordot(input, x, dims=x.ndim) = other``.
+The resulting tensor ``x`` has the same shape as ``input[other.ndim:]``.
+
+Supports real-valued and, only on the CPU, complex-valued inputs.
+
+.. note:: If :attr:`input` does not satisfy the requirement
+          ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``
+          after (optionally) moving the dimensions using :attr:`dims`, then a RuntimeError will be thrown.
+
+Args:
+    input (Tensor): "left-hand-side" tensor, it must satisfy the requirement
+                    ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
+    other (Tensor): "right-hand-side" tensor of shape ``input.shape[other.ndim]``.
+    dims (Tuple[int]): dimensions of :attr:`input` to be moved before the computation.
+                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim, 0))``.
+                       If None (default), no dimensions are moved.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
+    >>> b = torch.randn(2 * 3, 4)
+    >>> x = torch.linalg.tensorsolve(a, b)
+    >>> x.shape
+    torch.Size([2, 3, 4])
+    >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b)
+    True
+
+    >>> a = torch.randn(6, 4, 4, 3, 2)
+    >>> b = torch.randn(4, 3, 2)
+    >>> x = torch.linalg.tensorsolve(a, b, dims=(0, 2))
+    >>> x.shape
+    torch.Size([6, 4])
+    >>> a = a.permute(1, 3, 4, 0, 2)
+    >>> a.shape[b.ndim:]
+    torch.Size([6, 4])
+    >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b, atol=1e-6)
+    True
 """)

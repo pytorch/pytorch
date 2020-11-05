@@ -54,6 +54,30 @@ inline void assertSameType(
   }
 }
 
+inline bool parseEnvVarFlag(const char* envVarName) {
+  char* stringValue = std::getenv(envVarName);
+  if (stringValue != nullptr) {
+    int val;
+    try {
+      val = std::stoi(stringValue);
+    } catch (std::exception& e) {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(envVarName));
+    }
+    if (val == 1) {
+      return true;
+    } else if (val == 0) {
+      return false;
+    } else {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(envVarName));
+    }
+  }
+  return false;
+}
+
 inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {

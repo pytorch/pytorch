@@ -146,7 +146,8 @@ def type_to_python(typename, size=None):
         'Dimname': 'Union[str, ellipsis, None]',
         'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
-        'ArrayRef<double>' : 'Sequence[float]'
+        'ArrayRef<double>' : 'Sequence[float]',
+        'Stream': 'Stream',
     }[typename]
 
     return typename
@@ -576,6 +577,7 @@ def gen_pyi(declarations_path, out):
         'is_quantized': ['is_quantized: _bool'],
         'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
+        'is_vulkan': ['is_vulkan: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '

@@ -141,6 +141,34 @@ def _broadcast_to_followers(sequence_id, objects_map):
     states.gathered_objects = objects_map
     states.proceed_signal.set()
 
+_thread_local_var = threading.local()
+
+@contextlib.contextmanager
+def _wait_all():
+    r"""
+    A context manager that collects all futures returned by ``rpc_async`` and
+    waits them on the context manager's exit; relieving the user of needing
+    to explicitly call wait.
+
+
+    Example::
+        >>> # On worker 0:
+        >>> import torch
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> with rpc._wait_all():
+        >>>    fut_1 = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
+        >>>    fut_2 = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
+        >>> #fut_1 and fut_2 are waited on
+    """
+    _thread_local_var.future_list = []
+    try:
+        yield
+    finally:
+        try:
+            torch.futures.wait_all(_thread_local_var.future_list)
+        finally:
+            del _thread_local_var.future_list
 
 @_require_initialized
 def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
@@ -324,13 +352,13 @@ def get_worker_info(worker_name=None):
         return _get_current_rpc_agent().get_worker_info()
 
 
-def _to_worker_info(name_or_info):
-    if isinstance(name_or_info, WorkerInfo):
-        return name_or_info
-    elif isinstance(name_or_info, str):
-        return get_worker_info(name_or_info)
+def _to_worker_info(to):
+    if isinstance(to, WorkerInfo):
+        return to
+    elif isinstance(to, str) or isinstance(to, int):
+        return get_worker_info(to)
     else:
-        raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
+        raise ValueError("Cannot get WorkerInfo from name {}".format(to))
 
 
 def _rref_typeof_on_owner(rref):
@@ -417,7 +445,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     are no living references to it.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -672,7 +700,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     method is thread-safe.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -751,7 +779,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     :class:`~torch.futures.Future` that can be awaited on.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -830,4 +858,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs, timeout)
+    fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs, timeout)
+    if hasattr(_thread_local_var, "future_list"):
+        _thread_local_var.future_list.append(fut)
+    return fut

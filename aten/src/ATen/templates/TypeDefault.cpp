@@ -68,4 +68,7 @@ TORCH_LIBRARY_IMPL(aten, Math, m) {
   ${math_function_registrations};
 }
 
+TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
+  ${default_backend_function_registrations};
+}
 }  // namespace at

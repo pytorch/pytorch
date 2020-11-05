@@ -9,9 +9,34 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple, _reverse_repeat_tuple
+from torch._torch_docs import reproducibility_notes
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
 from typing import Optional, List, Tuple
+
+convolution_notes = \
+    {"groups_note": """* :attr:`groups` controls the connections between inputs and outputs.
+      :attr:`in_channels` and :attr:`out_channels` must both be divisible by
+      :attr:`groups`. For example,
+
+        * At groups=1, all inputs are convolved to all outputs.
+        * At groups=2, the operation becomes equivalent to having two conv
+          layers side by side, each seeing half the input channels
+          and producing half the output channels, and both subsequently
+          concatenated.
+        * At groups= :attr:`in_channels`, each input channel is convolved with
+          its own set of filters (of size
+          :math:`\\frac{\\text{out\_channels}}{\\text{in\_channels}}`).""",  # noqa: W605
+
+        "depthwise_separable_note": """When `groups == in_channels` and `out_channels == K * in_channels`,
+        where `K` is a positive integer, this operation is also known as a "depthwise convolution".
+
+        In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
+        a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
+        :math:`(C_\\text{in}=C_\\text{in}, C_\\text{out}=C_\\text{in} \\times \\text{K}, ..., \\text{groups}=C_\\text{in})`."""}  # noqa: W605
+
+
+
 
 
 class _ConvNd(Module):
@@ -44,7 +69,7 @@ class _ConvNd(Module):
                  transposed: bool,
                  output_padding: _size_1_t,
                  groups: int,
-                 bias: Optional[Tensor],
+                 bias: bool,
                  padding_mode: str) -> None:
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
@@ -113,7 +138,7 @@ class _ConvNd(Module):
 
 
 class Conv1d(_ConvNd):
-    r"""Applies a 1D convolution over an input signal composed of several input
+    __doc__ = r"""Applies a 1D convolution over an input signal composed of several input
     planes.
 
     In the simplest case, the output value of the layer with input size
@@ -128,58 +153,26 @@ class Conv1d(_ConvNd):
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`L` is a length of signal sequence.
+    """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both sides
+    * :attr:`padding` controls the amount of implicit padding on both sides
       for :attr:`padding` number of points.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
-    * :attr:`groups` controls the connections between inputs and outputs.
-      :attr:`in_channels` and :attr:`out_channels` must both be divisible by
-      :attr:`groups`. For example,
-
-        * At groups=1, all inputs are convolved to all outputs.
-        * At groups=2, the operation becomes equivalent to having two conv
-          layers side by side, each seeing half the input channels,
-          and producing half the output channels, and both subsequently
-          concatenated.
-        * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters,
-          of size
-          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
+    {groups_note}
 
     Note:
-
-        Depending of the size of your kernel, several (of the last)
-        columns of the input might be lost, because it is a valid
-        `cross-correlation`_, and not a full `cross-correlation`_.
-        It is up to the user to add proper padding.
-
+        {depthwise_separable_note}
     Note:
-
-        When `groups == in_channels` and `out_channels == K * in_channels`,
-        where `K` is a positive integer, this operation is also termed in
-        literature as depthwise convolution.
-
-        In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
-        a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
-        :math:`(C_\text{in}=C_{in}, C_\text{out}=C_{in} \times K, ..., \text{groups}=C_{in})`.
-
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+        {cudnn_reproducibility_note}
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -196,6 +189,8 @@ class Conv1d(_ConvNd):
             channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
+
+    """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -250,17 +245,20 @@ class Conv1d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
-    def forward(self, input: Tensor) -> Tensor:
+    def _conv_forward(self, input, weight):
         if self.padding_mode != 'zeros':
             return F.conv1d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
-                            self.weight, self.bias, self.stride,
+                            weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
-        return F.conv1d(input, self.weight, self.bias, self.stride,
+        return F.conv1d(input, weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return self._conv_forward(input, self.weight)
 
 
 class Conv2d(_ConvNd):
-    r"""Applies a 2D convolution over an input signal composed of several input
+    __doc__ = r"""Applies a 2D convolution over an input signal composed of several input
     planes.
 
     In the simplest case, the output value of the layer with input size
@@ -276,31 +274,21 @@ class Conv2d(_ConvNd):
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`H` is a height of input planes in pixels, and :math:`W` is
     width in pixels.
+    """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both
+    * :attr:`padding` controls the amount of implicit padding on both
       sides for :attr:`padding` number of points for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
-    * :attr:`groups` controls the connections between inputs and outputs.
-      :attr:`in_channels` and :attr:`out_channels` must both be divisible by
-      :attr:`groups`. For example,
-
-        * At groups=1, all inputs are convolved to all outputs.
-        * At groups=2, the operation becomes equivalent to having two conv
-          layers side by side, each seeing half the input channels,
-          and producing half the output channels, and both subsequently
-          concatenated.
-        * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters, of size:
-          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
+    {groups_note}
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -309,30 +297,10 @@ class Conv2d(_ConvNd):
           and the second `int` for the width dimension
 
     Note:
-
-         Depending of the size of your kernel, several (of the last)
-         columns of the input might be lost, because it is a valid `cross-correlation`_,
-         and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
+        {depthwise_separable_note}
 
     Note:
-
-        When `groups == in_channels` and `out_channels == K * in_channels`,
-        where `K` is a positive integer, this operation is also termed in
-        literature as depthwise convolution.
-
-        In other words, for an input of size :math:`(N, C_{in}, H_{in}, W_{in})`,
-        a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
-        :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
-
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+        {cudnn_reproducibility_note}
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -348,6 +316,7 @@ class Conv2d(_ConvNd):
             channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
+    """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -391,6 +360,7 @@ class Conv2d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(
         self,
         in_channels: int,
@@ -423,7 +393,7 @@ class Conv2d(_ConvNd):
         return self._conv_forward(input, self.weight)
 
 class Conv3d(_ConvNd):
-    r"""Applies a 3D convolution over an input signal composed of several input
+    __doc__ = r"""Applies a 3D convolution over an input signal composed of several input
     planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C_{in}, D, H, W)`
@@ -434,29 +404,19 @@ class Conv3d(_ConvNd):
                                 \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
 
     where :math:`\star` is the valid 3D `cross-correlation`_ operator
+    """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both
+    * :attr:`padding` controls the amount of implicit padding on both
       sides for :attr:`padding` number of points for each dimension.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
-    * :attr:`groups` controls the connections between inputs and outputs.
-      :attr:`in_channels` and :attr:`out_channels` must both be divisible by
-      :attr:`groups`. For example,
-
-        * At groups=1, all inputs are convolved to all outputs.
-        * At groups=2, the operation becomes equivalent to having two conv
-          layers side by side, each seeing half the input channels,
-          and producing half the output channels, and both subsequently
-          concatenated.
-        * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters, of size
-          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
+    {groups_note}
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -465,30 +425,10 @@ class Conv3d(_ConvNd):
           the second `int` for the height dimension and the third `int` for the width dimension
 
     Note:
-
-         Depending of the size of your kernel, several (of the last)
-         columns of the input might be lost, because it is a valid `cross-correlation`_,
-         and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
+        {depthwise_separable_note}
 
     Note:
-
-        When `groups == in_channels` and `out_channels == K * in_channels`,
-        where `K` is a positive integer, this operation is also termed in
-        literature as depthwise convolution.
-
-        In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`,
-        a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
-        :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
-
-    Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+        {cudnn_reproducibility_note}
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -500,6 +440,7 @@ class Conv3d(_ConvNd):
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+    """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
@@ -544,6 +485,7 @@ class Conv3d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(
         self,
         in_channels: int,
@@ -628,7 +570,7 @@ class _ConvTransposeNd(_ConvNd):
 
 
 class ConvTranspose1d(_ConvTransposeNd):
-    r"""Applies a 1D transposed convolution operator over an input image
+    __doc__ = r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.
@@ -639,7 +581,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both
+    * :attr:`padding` controls the amount of implicit zero padding on both
       sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
       below for details.
 
@@ -649,25 +591,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
-    * :attr:`groups` controls the connections between inputs and outputs.
-      :attr:`in_channels` and :attr:`out_channels` must both be divisible by
-      :attr:`groups`. For example,
-
-        * At groups=1, all inputs are convolved to all outputs.
-        * At groups=2, the operation becomes equivalent to having two conv
-          layers side by side, each seeing half the input channels,
-          and producing half the output channels, and both subsequently
-          concatenated.
-        * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size
-          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
-
-    Note:
-
-         Depending of the size of your kernel, several (of the last)
-         columns of the input might be lost, because it is a valid `cross-correlation`_,
-         and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
+    {groups_note}
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
@@ -702,6 +626,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+    """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -764,7 +689,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
 
 class ConvTranspose2d(_ConvTransposeNd):
-    r"""Applies a 2D transposed convolution operator over an input image
+    __doc__ = r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
 
     This module can be seen as the gradient of Conv2d with respect to its input.
@@ -775,7 +700,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both
+    * :attr:`padding` controls the amount of implicit zero padding on both
       sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
       below for details.
 
@@ -785,18 +710,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
-    * :attr:`groups` controls the connections between inputs and outputs.
-      :attr:`in_channels` and :attr:`out_channels` must both be divisible by
-      :attr:`groups`. For example,
-
-        * At groups=1, all inputs are convolved to all outputs.
-        * At groups=2, the operation becomes equivalent to having two conv
-          layers side by side, each seeing half the input channels,
-          and producing half the output channels, and both subsequently
-          concatenated.
-        * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size
-          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
+    {groups_note}
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
@@ -804,13 +718,6 @@ class ConvTranspose2d(_ConvTransposeNd):
         - a single ``int`` -- in which case the same value is used for the height and width dimensions
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
-
-    .. note::
-
-         Depending of the size of your kernel, several (of the last)
-         columns of the input might be lost, because it is a valid `cross-correlation`_,
-         and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
@@ -825,13 +732,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         not actually add zero-padding to output.
 
     Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+        {cudnn_reproducibility_note}
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -845,6 +746,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+    """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -930,7 +832,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
 
 class ConvTranspose3d(_ConvTransposeNd):
-    r"""Applies a 3D transposed convolution operator over an input image composed of several input
+    __doc__ = r"""Applies a 3D transposed convolution operator over an input image composed of several input
     planes.
     The transposed convolution operator multiplies each input value element-wise by a learnable kernel,
     and sums over the outputs from all input feature planes.
@@ -943,7 +845,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both
+    * :attr:`padding` controls the amount of implicit zero padding on both
       sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
       below for details.
 
@@ -953,18 +855,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
-    * :attr:`groups` controls the connections between inputs and outputs.
-      :attr:`in_channels` and :attr:`out_channels` must both be divisible by
-      :attr:`groups`. For example,
-
-        * At groups=1, all inputs are convolved to all outputs.
-        * At groups=2, the operation becomes equivalent to having two conv
-          layers side by side, each seeing half the input channels,
-          and producing half the output channels, and both subsequently
-          concatenated.
-        * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size
-          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
+    {groups_note}
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
@@ -972,13 +863,6 @@ class ConvTranspose3d(_ConvTransposeNd):
         - a single ``int`` -- in which case the same value is used for the depth, height and width dimensions
         - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
           the second `int` for the height dimension and the third `int` for the width dimension
-
-    Note:
-
-         Depending of the size of your kernel, several (of the last)
-         columns of the input might be lost, because it is a valid `cross-correlation`_,
-         and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
 
     Note:
         The :attr:`padding` argument effectively adds ``dilation * (kernel_size - 1) - padding``
@@ -993,13 +877,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         not actually add zero-padding to output.
 
     Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
-
+        {cudnn_reproducibility_note}
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -1013,6 +891,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+    """.format(**reproducibility_notes, **convolution_notes) + r"""
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`

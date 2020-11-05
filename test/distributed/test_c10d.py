@@ -33,7 +33,7 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     create_device
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
+    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN, slowTest
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -286,6 +286,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(fs.num_keys(), 5)
         fs.delete_key("key")
         self.assertEqual(fs.num_keys(), 4)
+        fs.set_timeout(timedelta(seconds=2))
         with self.assertRaises(RuntimeError):
             fs.get("key")
         fs.delete_key("key0")
@@ -296,6 +297,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"value1", fs.get("key1"))
         self.assertEqual(b"value2", fs.get("key4"))
 
+    # https://github.com/pytorch/pytorch/issues/46064 <- takes 5+ min to finish
+    @slowTest
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
@@ -1619,6 +1622,10 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
             c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
 
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -2395,6 +2402,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_rocm
     def test_arbitrary_forward_return_value_grad_is_view(self):
         self._test_arbitrary_forward_return_value(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_ddp_with_lazy_parameters(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        with self.assertRaisesRegex(RuntimeError, 'Modules with uninitialized parameters'):
+            DistributedDataParallel(torch.nn.LazyLinear(10), process_group=process_group)
 
     def _test_find_unused_parameters_kwarg(self, gradient_as_bucket_view=False):
         """
@@ -3382,6 +3398,21 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         return gpu_model
 
+    def _gpu_model_with_builtin_ddp_comm_hook(self, process_group, hook=None, gradient_as_bucket_view=False):
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            ModuleForDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            gradient_as_bucket_view=gradient_as_bucket_view,
+        )
+
+        # Register a built-in DDP communication hook if defined
+        if hook is not None:
+            gpu_model._register_builtin_comm_hook(hook)
+
+        return gpu_model
+
     def _run_and_verify_hook(self, model, input, expected_grad):
         # Run forward
         output = model(input, self.rank)
@@ -3458,6 +3489,22 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # check whether the grads are equal to what DDP without hook would return.
         self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
+    def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether built-in DDP communication hooks ALLREDUCE and FP16_COMPRESS
+        can give the same result result with the case of no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        for comm_hook_type in [dist.BuiltinCommHookType.ALLREDUCE, dist.BuiltinCommHookType.FP16_COMPRESS]:
+            # Get GPU model with the built-in allreduce communication hook.
+            gpu_model = self._gpu_model_with_builtin_ddp_comm_hook(
+                process_group, comm_hook_type, gradient_as_bucket_view)
+
+            # check whether the grads are equal to what DDP without hook would return.
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
@@ -3467,8 +3514,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
+    def test_builtin_ddp_comm_hooks_nccl(self):
+        self._test_builtin_ddp_comm_hooks_nccl()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_builtin_ddp_comm_hooks_nccl_grad_is_view(self):
+        self._test_builtin_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -3587,7 +3646,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model._register_comm_hook(None, dummy_hook)
 
         with self.assertRaisesRegex(
-            RuntimeError, "register_comm_hook can only be called once."
+            RuntimeError, "register_comm_hook or register_builtin_comm_hook can only be called once."
         ):
             model._register_comm_hook(None, dummy_hook)
 
@@ -3828,7 +3887,6 @@ class ComputeBucketAssignmentTest(TestCase):
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
 
-@skip_if_rocm
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
@@ -3993,7 +4051,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     return
                 else:
                     raise e
-            time.sleep(0.1)
+            time.sleep(1)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)

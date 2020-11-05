@@ -19,7 +19,7 @@ from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
+                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ROCM, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
@@ -1530,8 +1530,10 @@ except RuntimeError as e:
                 pin_memory_thread.join(JOIN_TIMEOUT)
                 self.assertFalse(pin_memory_thread.is_alive())
 
+    # Takes 2.5min to finish, see https://github.com/pytorch/pytorch/issues/46065
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @slowTest
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')
@@ -1562,7 +1564,7 @@ except RuntimeError as e:
             # In all cases, all processes should end properly.
             if use_workers:
                 exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
-                persistent_workers = self.persistent_workers 
+                persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
                 persistent_workers = False
@@ -1837,6 +1839,12 @@ except RuntimeError as e:
             self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
         finally:
             _utils.worker._worker_info = old
+
+    def test_excessive_thread_creation_warning(self):
+        with self.assertWarnsRegex(
+            UserWarning,
+                r"excessive worker creation might get DataLoader running slow or even freeze"):
+            dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
 class StringDataset(Dataset):

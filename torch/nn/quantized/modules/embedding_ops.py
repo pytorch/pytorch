@@ -195,7 +195,7 @@ class EmbeddingBag(Embedding):
         super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, _weight=_weight, dtype=dtype)
 
         self.mode = mode
-        self.sparse = sparse
+        self.pruned_weights = False
         self.include_last_offset = include_last_offset
         self.dtype = dtype
 
@@ -203,11 +203,11 @@ class EmbeddingBag(Embedding):
                 compressed_indices_mapping: Optional[Tensor] = None) -> Tensor:
         if self.dtype == torch.quint4x2:
             return torch.ops.quantized.embedding_bag_4bit(self._packed_params._packed_weight, indices, offsets, False, 0,
-                                                          self.sparse, per_sample_weights, compressed_indices_mapping,
+                                                          self.pruned_weights, per_sample_weights, compressed_indices_mapping,
                                                           self.include_last_offset)
         else:
             return torch.ops.quantized.embedding_bag_byte(self._packed_params._packed_weight, indices, offsets, False, 0,
-                                                          self.sparse, per_sample_weights, compressed_indices_mapping,
+                                                          self.pruned_weights, per_sample_weights, compressed_indices_mapping,
                                                           self.include_last_offset)
 
     def _get_name(self):

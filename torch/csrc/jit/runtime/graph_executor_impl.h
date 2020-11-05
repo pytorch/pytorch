@@ -38,6 +38,9 @@ void runNondiffOptimization(
 void debugSetAutodiffSubgraphInlining(bool state);
 bool getAutodiffSubgraphInlining();
 
+void debugSetFusionGroupInlining(bool state);
+bool getFusionGroupInlining();
+
 // Tunable parameters for deciding when to create/keep subgraphs of
 // differentiable code
 const size_t autodiffSubgraphNodeThreshold = 2;
@@ -66,7 +69,9 @@ struct GraphExecutorImplBase {
 
   // entry point where execution begins
   void run(Stack& stack);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  c10::intrusive_ptr<Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch);
 
   virtual ExecutionPlan getPlanFor(
       Stack& stack,

@@ -108,11 +108,32 @@ allow_list = [
     ("aten::_foreach_sub_", datetime.date(2020, 10, 1)),
     ("aten::_foreach_div", datetime.date(2020, 10, 1)),
     ("aten::_foreach_sub", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_mul_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_mul_scalar_list_", datetime.date(2020, 11, 10)),
     ("aten::_amp_non_finite_check_and_unscale_", datetime.date(9999, 1, 1)),
     ("aten::choose_qparams_optimized", datetime.date(2020, 10, 5)),
     ("aten::smooth_l1_loss_backward", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_byte", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_4bit", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_byte", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_byte_rowwise_offsets", datetime.date(2020, 11, 15)),
+    ("quantized::embedding_bag_4bit_rowwise_offsets", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_sub_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_add_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_add_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_sub_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_div_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_div_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_addcmul_", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcdiv_", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcdiv", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcmul", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_zero_", datetime.date(2020, 11, 5)),
+    ("aten::conj", datetime.date(2020, 11, 10)),
+    ("aten::add_relu", datetime.date(2020, 10, 28)),
+    ("aten::add_relu_", datetime.date(2020, 10, 28)),
+    ("aten::hash", datetime.date(2020, 11, 15)),
 ]
-
 
 def allow_listed(schema, allow_list):
     for item in allow_list:

@@ -84,6 +84,7 @@ def build_message(test_case):
             "build_sha1": os.environ.get("CIRCLE_SHA1"),
             "build_branch": os.environ.get("CIRCLE_BRANCH"),
             "build_job": os.environ.get("CIRCLE_JOB"),
+            "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
             "test_suite_name": test_case.class_name,
             "test_case_name": test_case.name,
         },
@@ -122,13 +123,18 @@ def send_report(reports):
             ),
         },
     )
-    print("Scribe report status: {}".format(r.text))
     r.raise_for_status()
 
 def positive_integer(value):
     parsed = int(value)
     if parsed < 1:
         raise argparse.ArgumentTypeError(f"{value} is not a natural number")
+    return parsed
+
+def positive_float(value):
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"{value} is not a positive rational number")
     return parsed
 
 if __name__ == '__main__':
@@ -144,6 +150,13 @@ if __name__ == '__main__':
         default=3,
         metavar="N",
         help="how many longest tests to show for each class",
+    )
+    parser.add_argument(
+        "--class-print-threshold",
+        type=positive_float,
+        default=1.0,
+        metavar="N",
+        help="Minimal total time to warrant class report",
     )
     parser.add_argument(
         "--longest-of-run",
@@ -169,7 +182,8 @@ if __name__ == '__main__':
     total_time = 0
     for name in sorted(reports.keys()):
         test_suite = reports[name]
-        test_suite.print_report(args.longest_of_class)
+        if test_suite.total_time >= args.class_print_threshold:
+            test_suite.print_report(args.longest_of_class)
         total_time += test_suite.total_time
         longest_tests.extend(test_suite.test_cases)
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
