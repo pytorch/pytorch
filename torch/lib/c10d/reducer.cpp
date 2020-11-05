@@ -1,7 +1,8 @@
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <c10d/reducer.hpp>
 
 #include <functional>
 
+#include <c10d/comm.hpp>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
@@ -12,7 +13,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
-#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -208,7 +208,8 @@ Reducer::Reducer(
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
 // registered from Python API using `register_comm_hook`. `PythonCommHook`
 // enables registering a Python hook and is a subclass of `CommHookInterface`.
-// `CommHookInterface` can be used to implement CPP hooks in the future.
+// Additionally, there are also some built-in C++ hook implementations that can
+// be specified by calling `register_builtin_comm_hook` from Python API.
 
 Reducer::~Reducer() noexcept(false) {
   // Remove all hooks on variables registered by this Reducer. This is necessary
@@ -711,7 +712,13 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     if (comm_hook_ == nullptr) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
-      GradBucket grad_bucket(tensors);
+      GradBucket grad_bucket(
+          tensors,
+          // Since currently we do not support single-process multiple-device
+          // mode, we can assume only one replica in the bucket.
+          bucket.replicas[0].offsets,
+          bucket.replicas[0].lengths,
+          bucket.replicas[0].sizes_vec);
       bucket.future_work = comm_hook_->runHook(grad_bucket);
     }
   }
@@ -782,7 +789,16 @@ void Reducer::initialize_buckets(
         replica.variables = {variable};
       } else {
         at::TensorOptions options;
+        // The start index of the variable in the flattened tensor.
         size_t offset = 0;
+
+        // Reserve enough space for the per-variable fields stored in bucket
+        // replica for efficiency.
+        const size_t num_variables = bucket_indices[bucket_index].size();
+        replica.variables.reserve(num_variables);
+        replica.offsets.reserve(num_variables);
+        replica.lengths.reserve(num_variables);
+        replica.sizes_vec.reserve(num_variables);
 
         // Iterate over bucket variables.
         for (const auto variable_index : bucket_indices[bucket_index]) {
@@ -809,6 +825,7 @@ void Reducer::initialize_buckets(
           replica.variables.push_back(variable);
           replica.offsets.push_back(offset);
           replica.lengths.push_back(length);
+          replica.sizes_vec.push_back(variable.sizes());
           offset += length;
         }
 
@@ -1369,7 +1386,8 @@ bool Reducer::rebuild_buckets() {
 // See Note [DDP Communication Hook]
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
-      comm_hook_ == nullptr, "register_comm_hook can only be called once.");
+      comm_hook_ == nullptr,
+      "register_comm_hook or register_builtin_comm_hook can only be called once.");
   // TODO(@sinannasir): Single-process multiple-device mode support for DDP
   // communication hook. Related to GH Issue #42542.
   TORCH_CHECK(
@@ -1377,6 +1395,33 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
       "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
+}
+
+// See Note [DDP Communication Hook]
+void Reducer::register_builtin_comm_hook(
+    c10d::BuiltinCommHookType comm_hook_type) {
+  TORCH_CHECK(
+      comm_hook_ == nullptr,
+      "register_builtin_comm_hook or register_comm_hook can only be called once.");
+  TORCH_CHECK(
+      replicas_.size() == 1,
+      "Communication hook does not support single-process multiple-device mode.");
+
+  switch (comm_hook_type) {
+    case c10d::BuiltinCommHookType::ALLREDUCE:
+      comm_hook_ =
+          std::make_unique<c10d::AllReduceCommHook>(process_group_.get());
+      LOG(INFO) << "Built-in communication hook ALLREDUCE is registered.";
+      break;
+    case c10d::BuiltinCommHookType::FP16_COMPRESS:
+      comm_hook_ =
+          std::make_unique<c10d::FP16CompressCommHook>(process_group_.get());
+      LOG(INFO) << "Built-in communication hook FP16_COMPRESS is registered.";
+      break;
+    default:
+      TORCH_WARN_ONCE(
+          "Unknown built-in DDP comm hook type is provided. No comm hook will be used.");
+  }
 }
 
 void Reducer::ensure_prior_reduction_finished() {
