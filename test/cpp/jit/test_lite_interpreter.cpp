@@ -634,7 +634,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-TEST(LiteInterpreterTest, NestedClassTypeModuleInfoCase) {
+TEST(LiteInterpreterTest, NestedCallModuleInfoCase) {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):

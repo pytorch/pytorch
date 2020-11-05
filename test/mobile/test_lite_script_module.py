@@ -83,14 +83,13 @@ class TestLiteScriptModule(unittest.TestCase):
         input = torch.tensor([5])
         trace_module = torch.jit.script(B(), input)
         bytes = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
-
         assert(b"mobile_debug.pkl" in bytes)
         assert(b"module_debug_info" in bytes)
         assert(b"top(B).forward" in bytes)
         assert(b"top(B).A0(A).forward" in bytes)
         assert(b"top(B).A1(A).forward" in bytes)
 
-    def test_save_mobile_module_with_debug_info_with_script_nest_call(self):
+    def test_save_mobile_module_with_debug_info_with_script_nested_call(self):
         class A(torch.nn.Module):
             def __init__(self):
                 super(A, self).__init__()
@@ -115,14 +114,13 @@ class TestLiteScriptModule(unittest.TestCase):
                 return self.A0(self.B0(x)) + 1
 
         input = torch.tensor([5])
-        trace_module = torch.jit.script(B(), input)
+        trace_module = torch.jit.script(C(), input)
         bytes = trace_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
-        print("byptes: ", bytes)
         assert(b"mobile_debug.pkl" in bytes)
         assert(b"module_debug_info" in bytes)
-        assert(b"top(B).forward" in bytes)
-        assert(b"top(B).A0(A).forward" in bytes)
-        assert(b"top(B).A1(A).forward" in bytes)
+        assert(b"top(C).forward" in bytes)
+        assert(b"top(C).A0(A).forward" in bytes)
+        assert(b"top(C).A0(A).forward.B0(B).forward" in bytes)
 
     def test_load_mobile_module_with_debug_info(self):
         class MyTestModule(torch.nn.Module):

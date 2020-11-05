@@ -61,18 +61,23 @@ std::string getModulePath(Node* node, const std::string& root_scope_string) {
     auto callstack_ptr = *(node->callstack());
     const auto& vec = callstack_ptr->vec();
 
-    for (size_t i = 0; i < vec.size(); ++i) {
-      const auto& tup = vec[i];
-      const auto opt_module_instance_info = std::get<2>(tup);
+    for (const auto& element : vec) {
+      const auto& tup = element;
+      const auto& opt_module_instance_info = std::get<2>(tup);
       if (opt_module_instance_info.has_value()) {
         const auto& module_instance_info = opt_module_instance_info.value();
         if (module_instance_info.class_type()) {
           const auto& class_type = module_instance_info.class_type();
           const auto& instance_name = module_instance_info.instance_name();
           auto type_name = class_type->name()->qualifiedName();
-          type_name = type_name.substr(type_name.find_last_of(".") + 1);
-          module_info += "." + instance_name + "(" + type_name + ")" + "." +
-              std::get<0>(tup)->name();
+          type_name = type_name.substr(type_name.find_last_of('.') + 1);
+          module_info.append(".")
+              .append(instance_name)
+              .append("(")
+              .append(type_name)
+              .append(")")
+              .append(".")
+              .append(std::get<0>(tup)->name());
         } else {
           module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
         }
