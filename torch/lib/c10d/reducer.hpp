@@ -7,11 +7,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10d/comm.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
-#include <torch/csrc/distributed/c10d/comm.h>
 
 namespace c10d {
 
@@ -58,7 +59,13 @@ class Reducer {
   // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
+ // Cannot combine with the call of `register_builtin_comm_hook`.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
+
+  // Registers a built-in C++ comm hook to the reducer. This function can only
+  // be called once before calling backward.
+  // Cannot combine with the call of `register_comm_hook`.
+  void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
   // Returns a vector of tensors in each bucket in sequential order.
   std::vector<std::vector<at::Tensor>> get_bucket_tensors() const;
@@ -218,9 +225,12 @@ class Reducer {
     // participating variables after reduction has completed.
     std::vector<torch::autograd::Variable> variables;
 
-    // Per-variable offset/length into the flat bucket contents tensor.
+    // Per-variable offset/length into the flat bucket contents tensor and grad bucket.
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
+
+    // Per-variable sizes into the grad bucekt.
+    std::vector<c10::IntArrayRef> sizes_vec;
 
     // Number of tensors to be added before this bucket is complete.
     // This is reset to `variables.size()` every iteration.

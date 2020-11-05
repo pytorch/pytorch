@@ -68,7 +68,6 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore
     def dump(cls, in_stream, out_stream):
         value = cls(in_stream).load()
         pprint.pprint(value, stream=out_stream)
-        return value
 
 
 def main(argv, output_stream=None):

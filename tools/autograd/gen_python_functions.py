@@ -681,9 +681,20 @@ def group_overloads(
         else:
             bases[sig] = overload
 
-    for sig in outplaces.keys():
+    for sig, out in outplaces.items():
         if sig not in bases:
-            raise RuntimeError(f'missing base function for outplace: {sig}')
+            candidates: List[str] = []
+            for overload in overloads:
+                if str(overload.function.func.name.name) == str(out.function.func.name.name) \
+                        and not overload.function.func.is_out_fn() \
+                        and not overload.signature.deprecated:
+                    candidates.append(overload.signature.signature_str(skip_outputs=True))
+            out_sig = out.signature.signature_str()
+            raise RuntimeError(
+                f"While identifying overloads, we found an out schema {out_sig} without a corresponding non-out variant. "
+                f"We expected the non-out variant to have schema: \n- {sig}\nPlease check that you spelled the schema "
+                "correctly in native_functions.yaml. We discovered the following candidate(s): \n"
+                + "\n".join(f"- {candidate}" for candidate in candidates))
 
     grouped: List[PythonSignatureGroup] = []
     for sig, base in bases.items():
