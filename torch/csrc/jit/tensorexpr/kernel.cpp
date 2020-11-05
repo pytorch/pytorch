@@ -2,6 +2,7 @@
 
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -935,13 +936,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log: {
-      return computeOneOperand(
-          "aten_log", v, [](const ExprHandle& a) { return log(a); });
+      return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
+        return log(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log10: {
-      return computeOneOperand(
-          "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
+      return computeOneOperand("aten_log10", v, [](const ExprHandle& a) {
+        return log10(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log1p: {
@@ -950,8 +953,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log2: {
-      return computeOneOperand(
-          "aten_log2", v, [](const ExprHandle& a) { return log2(a); });
+      return computeOneOperand("aten_log2", v, [](const ExprHandle& a) {
+        return log2(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::exp: {
@@ -1088,8 +1092,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::acos: {
-      return computeOneOperand(
-          "aten_acos", v, [](const ExprHandle& a) { return acos(a); });
+      return computeOneOperand("aten_acos", v, [](const ExprHandle& a) {
+        return acos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::asin: {
@@ -1108,8 +1113,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::atan: {
-      return computeOneOperand(
-          "aten_atan", v, [](const ExprHandle& a) { return atan(a); });
+      return computeOneOperand("aten_atan", v, [](const ExprHandle& a) {
+        return atan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::atan2: {
@@ -1120,8 +1126,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::tanh: {
-      return computeOneOperand(
-          "aten_tanh", v, [](const ExprHandle& a) { return tanh(a); });
+      return computeOneOperand("aten_tanh", v, [](const ExprHandle& a) {
+        return tanh(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sqrt: {
@@ -1361,13 +1368,8 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // Compute non-output tensors_ inline
-  for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second) || hasReduction) {
-      continue;
-    }
-    l.computeInline(p.second->buf());
-  }
+  l.inlineIntermediateBufs();
+
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
@@ -1841,7 +1843,12 @@ void TensorExprKernel::compile() {
   std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
 
   // Generate code.
-  codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
+  codegen_ = CreateCodeGen(
+      getCodeGenName(backendType),
+      stmt,
+      params,
+      device_,
+      SubgraphUtils::generateNameForGraph(graph_));
 }
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)

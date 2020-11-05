@@ -98,13 +98,15 @@ class NativeFunction:
     # registrations don't participate in codegen-based selective build!
     manual_kernel_registration: bool
 
-    # Distinguish between a missing dispatch dict (historically, this
-    # means to register a catch-all kernel) and a present but empty
-    # dispatch dict (this means register nothing; arguably, this should
-    # subsume manual_kernel_registration).
+    # A mapping of dispatch keys to names of functions implementing
+    # them.  In native_functions.yaml, the dispatch entry is optional; in that
+    # case, that is equivalent to having written:
+    #
+    #   dispatch:
+    #       Math: $operator_name
     #
     # TODO: str key could be replaced with more explicit enum
-    dispatch: Optional[Dict[str, str]]
+    dispatch: Dict[str, str]
 
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
@@ -162,9 +164,8 @@ class NativeFunction:
 
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Optional[Dict[str, str]] = None
+        dispatch: Dict[str, str] = {}
         if raw_dispatch is not None:
-            dispatch = {}
             for ks, v in raw_dispatch.items():
                 if ks == '__line__':
                     continue  # not worth tracking line numbers for dispatch entries
@@ -172,9 +173,14 @@ class NativeFunction:
                 assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
+        else:
+            from tools.codegen.api import cpp
+            dispatch['Math'] = cpp.name(func)
 
-        # Throws if both DefaultBackend and Math are provided
-        assert not (dispatch is not None and 'DefaultBackend' in dispatch and 'Math' in dispatch)
+        assert not ('DefaultBackend' in dispatch and 'Math' in dispatch), \
+            "cannot specify both DefaultBackend and Math on a single kernel; each " \
+            "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
+            "implementation, specify DefaultBackend; otherwise specify Math only"
 
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
@@ -354,6 +360,16 @@ class FunctionSchema:
             assert arg.annotation == ret.annotation, \
                 "Out arguments must have matching return Tensor; furthermore, " \
                 "the ith-argument needs to correspond to the ith return"
+        # Invariant: we expect out arguments to appear as keyword arguments in the schema.
+        # This means that all mutable returns should be aliased to a keyword argument
+        # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
+        # See Note [is_out_fn]
+        out_and_self = list(self.out_arguments) + [arg for arg in self.arguments if arg.name == "self"]
+        mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
+        for ret in mutable_returns:
+            assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
+                "All mutable returns must be aliased either to a keyword argument, or to \"self\". " \
+                "Did you forget to mark an out argument as keyword-only?"
         if self.out_arguments:
             assert len(self.out_arguments) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"

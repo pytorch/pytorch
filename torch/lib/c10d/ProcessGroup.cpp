@@ -57,14 +57,11 @@ bool isP2POp(OpType opType) {
 ProcessGroup::Work::Work(int rank, OpType opType, const char* profilingTitle)
     : rank_(rank), opType_(opType) {
   if (profilingTitle != nullptr) {
-    profilingFuture_ = c10::make_intrusive<c10::ivalue::Future>(
-        c10::TensorType::get());
     auto recordingFunction = std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     if (recordingFunction->active) {
         recordingFunction->before(profilingTitle, {});
         std::function<void()> end_handler = [this, recordingFunction]() {
           recordingFunction->end();
-          profilingFuture_->markCompleted();
         };
         recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
     }
@@ -132,12 +129,6 @@ void ProcessGroup::Work::abort() {
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
   TORCH_CHECK(false, "ProcessGroup::Work::getFuture not implemented.")
-}
-
-
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getProfilingFuture() const {
-  TORCH_INTERNAL_ASSERT(profilingFuture_, "Profiling future has not been set!");
-  return profilingFuture_;
 }
 
 void ProcessGroup::Work::finish(std::exception_ptr exception) {
