@@ -336,8 +336,7 @@ NvrtcFunction nvrtcCompile(
   }
 
   // --include-path
-  const std::string include_path =
-      "--include-path=" + torchLibPath() + "/nvfuser";
+  const std::string include_path = "--include-path=" + torchLibPath();
   args.push_back(include_path.c_str());
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
