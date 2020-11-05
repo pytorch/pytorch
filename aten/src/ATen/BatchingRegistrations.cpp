@@ -49,6 +49,14 @@ namespace at {
 // do some refactoring.
 
 Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
+  // PyTorch has a special case where sum(scalar_tensor, dim=0) does not fail
+  // and instead returns a new scalar tensor. If the following happens:
+  // >>> x = torch.randn(B0)  # the per-examples are all scalars
+  // >>> vmap(partial(torch.sum, dim=0), x)
+  // then we replicate the behavior of sum(scalar_tensor, dim=0).
+  if (/*logical*/self.dim() == 0 && dims.size() == 1 && dims[0] == 0) {
+    return self.clone();
+  }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dims_physical = self_physical.getPhysicalDims(dims);
   auto result = at::sum(self_physical.tensor(), dims_physical, keepdim, dtype);
@@ -368,6 +376,27 @@ Tensor pow_scalar_Tensor_batching_rule(Scalar other, const Tensor& self) {
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
+Tensor clone_batching_rule(const Tensor& self, optional<MemoryFormat> memory_format) {
+  // Memory format support is a little tricky because vmap is allowed to move
+  // around batch dimensions and some memory formats are rank-dependent.
+  // One ambiguity that we will need to resolve is:
+  // - does cloning with contiguous format mean that the non-batch dims become
+  //   contiguous, or that the tensor with the batch dims becomes contiguous? e.g.
+  //   vmap(lambda x: x.clone(torch.contiguous_format), in_dims=1)(torch.rand(3, B0, 5))
+  // Another weird case is:
+  // - a tensor with MemoryFormat::ChannelsLast MUST have 4 dimensions. Do we
+  //   allow the user to clone a Tensor with 3 logical dimensions and 1 batch
+  //   dim into a ChannelsLast Tensor? What about a Tensor with 3 logical dims
+  //   and N>1 batch dims?
+  TORCH_CHECK(!memory_format.has_value() || memory_format == MemoryFormat::Preserve,
+      "NYI: Tensor.clone(memory_format) with memory_format not equal to "
+      "torch.preserve_format (got ", *memory_format, ")");
+  auto* self_batched = unsafeGetBatchedImpl(self);
+  auto output_physical = at::clone(self_batched->value(), memory_format);
+  auto old_bdims = self_batched->bdims();
+  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+}
+
 // Note [Batching rules for matmul-like operators]
 // at::matmul doesn't "de-expand" arguments to get better performance (maybe
 // it should). In the batching rules for matmul-like operators (dot, mv, mm),
@@ -653,6 +682,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
   m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
 #undef TO_BATCHING_RULE
+  m.impl("clone", clone_batching_rule);
 
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
