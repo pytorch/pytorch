@@ -2193,8 +2193,6 @@ def log2(g, self):
 def prim_shape(g, self):
     return g.op('Shape', self)
 
-def prim_data(g, self):
-    return self
 
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):

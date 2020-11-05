@@ -18,14 +18,14 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   /* Dynamically Uniform */
-  const ivec2 size = imageSize(uOutput).xy;
-  const ivec2 isize = textureSize(uInput, 0).xy;
+  const ivec3 size = imageSize(uOutput);
+  const ivec3 isize = textureSize(uInput, 0);
 
-  if (all(lessThan(pos.xy, size))) {
+  if (all(lessThan(pos, size))) {
     const ivec2 ipos = clamp(
         ivec2(pos.xy * uBlock.scale),
         ivec2(0),
-        isize - 1);
+        isize.xy - 1);
 
     imageStore(
         uOutput,

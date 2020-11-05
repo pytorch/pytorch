@@ -15,12 +15,12 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   /* Dynamically Uniform */
-  const ivec2 size = imageSize(uOutput).xy;
-  const vec2 isize = textureSize(uInput, 0).xy;
-  const vec2 stride = isize / size;
-  const vec2 kernel = isize - (size - 1) * stride;
+  const ivec3 size = imageSize(uOutput);
+  const vec3 isize = textureSize(uInput, 0);
+  const vec2 stride = isize.xy / size.xy;
+  const vec2 kernel = isize.xy - (size.xy - 1) * stride;
 
-  if (all(lessThan(pos.xy, size))) {
+  if (all(lessThan(pos, size))) {
     const vec2 ipos = pos.xy * stride;
 
     const ivec2 start = ivec2(ipos);

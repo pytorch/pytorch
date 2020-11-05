@@ -29,14 +29,6 @@ def _wrap_type_error_to_not_implemented(f):
             return NotImplemented
     return wrapped
 
-def _rebuild_from_type(func, type, args, dict):
-    if type is Tensor:
-        return func(*args)
-
-    ret = func(*args).as_subclass(type)
-    ret.__dict__ = dict
-    return ret
-
 
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
@@ -93,10 +85,6 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
-        func, args = self._reduce_ex_internal(proto)
-        return (_rebuild_from_type, (func, type(self), args, self.__dict__))
-
-    def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
