@@ -774,24 +774,24 @@ elseif(USE_CUDA)
   endif()
 
   # Copy NVFUSER runtime sources
-  file (GLOB nvfuser_runtime "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/*.cuh")
+  file (GLOB nvfuser_runtime "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/*.cu")
   foreach(src ${nvfuser_runtime})
     get_filename_component(filename ${src} NAME)
-    set(dst "${CMAKE_BINARY_DIR}/lib/nvfuser/${filename}")
+    set(dst "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime/${filename}")
     add_custom_command(
       COMMENT "Copying NVFUSER runtime header: ${filename}"
       OUTPUT ${dst}
       DEPENDS ${src}
       COMMAND ${CMAKE_COMMAND} -E copy ${src} ${dst}
     )
-    add_custom_target(nvfuser_${filename} DEPENDS ${dst})
-    add_dependencies(torch_cuda nvfuser_${filename})
+    add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
+    add_dependencies(torch_cuda nvfuser_rt_${filename})
   endforeach()
 
   # Install NVFUSER runtime sources
-  install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/nvfuser"
+  install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime"
     DESTINATION ${TORCH_INSTALL_LIB_DIR}
-    FILES_MATCHING PATTERN "*.cuh")
+    FILES_MATCHING PATTERN "*.cu")
 endif()
 
 
