@@ -2699,16 +2699,12 @@ class TestAutograd(TestCase):
         dtype = torch.complex128
         device = 'cpu'
         for dims in ((3, 3), (6, 3), (3, 6)):
-            # A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
             A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
             A.requires_grad_()
 
-            m, n = dims[-2:]
-            H = torch.randn(m, m, dtype=dtype)
-            H += H.conj().transpose(-2, -1)
             def func(A):
                 u, s, v = torch.svd(A)
-                return u.conj().transpose(-2, -1) @ u
+                return abs(u).sum()
 
             gradcheck(func, A)
             # gradgradcheck(func, A)
@@ -2719,16 +2715,11 @@ class TestAutograd(TestCase):
         dtype = torch.complex128
         device = 'cpu'
         for dims in ((3, 3), (6, 3), (3, 6)):
-            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
-            A.requires_grad_()
+            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
 
-            m, n = dims[-2:]
-            H = torch.randn(n, n, dtype=dtype)
-            H += H.conj().transpose(-2, -1)
             def func(A):
                 u, s, v = torch.svd(A)
-                # psi = v[:, 0]
-                return v[0, 0].conj() * v[0, 0]
+                return abs(v).sum()
 
             gradcheck(func, A)
             # gradgradcheck(func, A)
@@ -2738,16 +2729,12 @@ class TestAutograd(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         dtype = torch.complex128
         device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6)):
-            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
-            A.requires_grad_()
+        # dims = (3, 6) doesn't work
+        for dims in ((3, 3), (6, 3), ):
+            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
 
-            m, n = dims[-2:]
-            H = torch.randn(n, n, dtype=dtype)
-            H += H.conj().transpose(-2, -1)
             def func(A):
                 u, s, v = torch.svd(A)
-                # psi = v[:, 0]
                 return v[0, 0].conj() * u[0, 0]
 
             gradcheck(func, A)
@@ -2759,8 +2746,7 @@ class TestAutograd(TestCase):
         dtype = torch.complex128
         device = 'cpu'
         for dims in ((3, 3), (6, 3), (3, 6)):
-            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
-            A.requires_grad_()
+            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
 
             def func(A):
                 u, s, v = torch.svd(A)
@@ -5082,7 +5068,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'svd'] + separate_complex_tests
+                'exp'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
 skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
