@@ -69,9 +69,6 @@ NNAPI_FUNCTIONS = [
     ("void", "ANeuralNetworksEvent_free", "ANeuralNetworksEvent* event"),
     ("int", "ANeuralNetworksExecution_getOutputOperandRank", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* rank"),
     ("int", "ANeuralNetworksExecution_getOutputOperandDimensions", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions"),
-    ("int", "ANeuralNetworksBurst_create", "ANeuralNetworksCompilation* compilation, ANeuralNetworksBurst** burst"),
-    ("void", "ANeuralNetworksBurst_free", "ANeuralNetworksBurst* burst"),
-    ("int", "ANeuralNetworksExecution_burstCompute", "ANeuralNetworksExecution* execution, ANeuralNetworksBurst* burst"),
 ]
 
 
@@ -88,7 +85,7 @@ def main(argv):
         load_functions.append(f'    *(void**)&nnapi_.{short_name} = dlsym(handle, "{name}");')
         load_functions.append(f'    check_nnapi_.{short_name} = check_{short_name};')
 
-        call_args = "".join(re.findall("\w+(?:,|$)", args))
+        call_args = "".join(re.findall(r"\w+(?:,|$)", args))
         if ret == "void":
             define_checks.append(textwrap.dedent(f"""\
                 {ret} check_{short_name}({args}) {{
@@ -132,8 +129,8 @@ def main(argv):
             #ifndef _WIN32
             #include <dlfcn.h>
             #endif
-            #include "nnapi_wrapper.h"
-            #include "c10/util/Logging.h"
+            #include <ATen/nnapi/nnapi_wrapper.h>
+            #include <c10/util/Logging.h>
             static int loaded = 0;
             static struct nnapi_wrapper nnapi_;
             static struct nnapi_wrapper check_nnapi_;
