@@ -336,8 +336,17 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor view_as_complex_batching_rule(const Tensor& self) {
+  // guard against the user passing in a batch of scalar tensors with batch
+  // size equal to 2.
+  TORCH_CHECK(self.sizes().size() != 0, "Input tensor must have one or more dimensions");
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto result = at::view_as_complex(self_physical.tensor());
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 template <typename F, F Func, typename... ExtraArgs>
-Tensor unary_pointwise_batching_rule(const Tensor& input, ExtraArgs... args) {
+Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
   auto* input_batched = unsafeGetBatchedImpl(input);
   auto output_physical = Func(input_batched->value(), args...);
   auto old_bdims = input_batched->bdims();
@@ -345,7 +354,7 @@ Tensor unary_pointwise_batching_rule(const Tensor& input, ExtraArgs... args) {
 }
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor unary_pointwise_method_batching_rule(const Tensor& input, ExtraArgs... extra_args) {
+Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   auto* input_batched = unsafeGetBatchedImpl(input);
   auto output_physical = (input_batched->value().*Func)(extra_args...);
   auto old_bdims = input_batched->bdims();
@@ -504,7 +513,7 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
 // I am quite sad that we need to register operators with exploded TensorOptions,
 // even though the native:: implementations can use TensorOptions&.
 // This also makes it hard to metaprogram: i.e., we can't use
-// unary_pointwise_batching_rule<..., at::to> because at::to takes TensorOptions& (!!)
+// unwrap_and_call<..., at::to> because at::to takes TensorOptions& (!!)
 Tensor to_dtype_layout_batching_rule(
     const Tensor& self,
     optional<ScalarType> dtype,
@@ -600,7 +609,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   // unary pointwise, out-of-place, no additional arguments.
 #define UNARY_POINTWISE(op) m.impl(#op, \
-    unary_pointwise_batching_rule<Tensor (*)(const Tensor&), at::op>);
+    unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
   UNARY_POINTWISE(abs);
   UNARY_POINTWISE(acos);
   UNARY_POINTWISE(asin);
@@ -636,7 +645,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 #define TO_BATCHING_RULE(name, ...) \
   { \
     using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \
-    m.impl(name, unary_pointwise_method_batching_rule< \
+    m.impl(name, unwrap_and_call_method< \
         to_type, &Tensor::to, __VA_ARGS__>);\
   }
   TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, optional<MemoryFormat>)
@@ -650,13 +659,13 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
 #define BINARY_POINTWISE(op) \
   m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
-  m.impl(#op".Scalar", unary_pointwise_batching_rule<TensorScalarType, at::op, Scalar>);
+  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
 #define BINARY_POINTWISE_VA(op, ...) \
   { \
     using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
     using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
     m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
-    m.impl(#op".Scalar", unary_pointwise_batching_rule<Unop, at::op, Scalar, __VA_ARGS__>); \
+    m.impl(#op".Scalar", unwrap_and_call<Unop, at::op, Scalar, __VA_ARGS__>); \
   }
 
   BINARY_POINTWISE_VA(add, Scalar);
@@ -667,7 +676,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   // at::pow has three out-of-place overloads
   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
-  m.impl("pow.Tensor_Scalar", unary_pointwise_batching_rule<TensorScalarType, at::pow, Scalar>);
+  m.impl("pow.Tensor_Scalar", unwrap_and_call<TensorScalarType, at::pow, Scalar>);
   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
 
   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
@@ -682,6 +691,16 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
 #undef BINARY_POINTWISE_VA
 #undef BINARY_POINTWISE
+
+
+#define TRIVIAL_OP(op) m.impl(#op, \
+    unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
+  // complex number view operators
+  TRIVIAL_OP(imag)
+  TRIVIAL_OP(real);
+  TRIVIAL_OP(view_as_real);
+  m.impl("view_as_complex", view_as_complex_batching_rule);
+#undef TRIVIAL
 
   // matmul-like operators
   m.impl("mv", mv_batching_rule);
