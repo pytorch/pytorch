@@ -130,7 +130,7 @@ WORKFLOW_DATA = [
         ["wheel", "3.7", "cu110"],
         None,
         "binary_windows_wheel_3_7_cu110_build",
-        is_master_only=True,
+        is_master_only=False,
     ),    
 
     SmoketestJob(
@@ -165,7 +165,7 @@ WORKFLOW_DATA = [
         ["wheel", "3.7", "cu110"],
         None,
         "binary_windows_wheel_3_7_cu110_test",
-        is_master_only=True,
+        is_master_only=False,
         requires=["binary_windows_wheel_3_7_cu110_build"],
         extra_props={
             "executor": "windows-with-nvidia-gpu",
