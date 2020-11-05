@@ -5925,10 +5925,13 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
 
-    @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bool)
     def test_diag(self, device, dtype):
-        x = torch.rand(100, 100, dtype=dtype, device=device)
+        if dtype is torch.bool:
+            x = torch.rand(100, 100, device=device) >= 0.5
+        else:
+            x = torch.rand(100, 100, dtype=dtype, device=device)
+
         res1 = torch.diag(x)
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.diag(x, out=res2)
