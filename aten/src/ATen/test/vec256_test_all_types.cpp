@@ -720,17 +720,16 @@ namespace {
             ASSERT_EQ(expected, actual) << "Failure Details:\n"
                 << std::hex << "Expected:\n#\t" << expected
                 << "\nActual:\n#\t" << actual;
-        } //
+        }
     }
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask < 0 || mask> 255), void>
-        test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
+    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
     {
     }
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
-        test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
-    {
+    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
         //generate expected_val
         int64_t m = mask;
         for (int64_t i = 0; i < vec::size(); i++) {
@@ -750,6 +749,52 @@ namespace {
         auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
         if (AssertVec256<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
         test_blend<vec, VT, mask - 1>(expected_val, a, b);
+    }
+    template<typename vec, typename VT, int64_t idx, int64_t N>
+    std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
+    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
+        //generate expected_val
+        for (int64_t i = 0; i < vec::size(); i++) {
+            int64_t hex_mask = 0;
+            std::memcpy(&hex_mask, &mask[i], sizeof(VT));
+            if (hex_mask & 0x01) {
+                expected_val[i] = b[i];
+            }
+            else {
+                expected_val[i] = a[i];
+            }
+        }
+        //test with blendv
+        auto vec_a = vec::loadu(a);
+        auto vec_b = vec::loadu(b);
+        auto vec_m = vec::loadu(mask);
+        auto expected = vec::loadu(expected_val);
+        auto actual = vec::blendv(vec_a, vec_b, vec_m);
+        auto mask_str = std::string("\nblendv mask: ");
+        for (int64_t i = 0; i < vec::size(); i++) {
+            mask_str += std::to_string(mask[i]) + " ";
+        }
+        if (AssertVec256<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
+            return false;
+        }
+        return true;
+    }
+    template<typename vec, typename VT, int64_t idx, int64_t N>
+    std::enable_if_t<(!is_complex<VT>::value && idx != N), bool>
+    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
+        // shuffle mask and do blendv test
+        VT m = mask[idx];
+        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
+        if (m != (VT)0) {
+          mask[idx] = (VT)0;
+        }
+        else {
+          int64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
+          std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
+        }
+        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
+        mask[idx] = m;
+        return true;
     }
     template<typename T, int N>
     void blend_init(T(&a)[N], T(&b)[N]) {
@@ -777,6 +822,16 @@ namespace {
         b[0] = Complex<double>(3.0, 1000.0);
         a[1] = a[0] + add;
         b[1] = b[0] + add;
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Blendv) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        CACHE_ALIGN VT a[vec::size()];
+        CACHE_ALIGN VT b[vec::size()];
+        CACHE_ALIGN VT mask[vec::size()] = {0};
+        CACHE_ALIGN VT expected_val[vec::size()];
+        blend_init(a, b);
+        test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
     }
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
