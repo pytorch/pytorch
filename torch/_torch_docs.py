@@ -1937,6 +1937,53 @@ Example::
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args))
 
+add_docstr(torch.copysign,
+           r"""
+copysign(input, other, *, out=None) -> Tensor
+
+Create a new floating-point tensor with the magnitude of :attr:`input` and the sign of :attr:`other`, elementwise.
+
+.. math::
+    \text{out}_{i} = \begin{cases}
+        -|\text{input}_{i}| & \text{if} \text{other}_{i} \leq -0.0 \\
+        |\text{input}_{i}| & \text{if} \text{other}_{i} \geq 0.0 \\
+    \end{cases}
+""" + r"""
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+and integer and float inputs.
+
+Args:
+    input (Tensor): magnitudes.
+    other (Tensor or Number): contains value(s) whose signbit(s) are
+        applied to the magnitudes in :attr:`input`.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(5)
+    >>> a
+    tensor([-1.2557, -0.0026, -0.5387,  0.4740, -0.9244])
+    >>> torch.copysign(a, 1)
+    tensor([1.2557, 0.0026, 0.5387, 0.4740, 0.9244])
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.7079,  0.2778, -1.0249,  0.5719],
+            [-0.0059, -0.2600, -0.4475, -1.3948],
+            [ 0.3667, -0.9567, -2.5757, -0.1751],
+            [ 0.2046, -0.0742,  0.2998, -0.1054]])
+    >>> b = torch.randn(4)
+    tensor([ 0.2373,  0.3120,  0.3190, -1.1128])
+    >>> torch.copysign(a, b)
+    tensor([[ 0.7079,  0.2778,  1.0249, -0.5719],
+            [ 0.0059,  0.2600,  0.4475, -1.3948],
+            [ 0.3667,  0.9567,  2.5757, -0.1751],
+            [ 0.2046,  0.0742,  0.2998, -0.1054]])
+
+""".format(**common_args))
+
 add_docstr(torch.cos,
            r"""
 cos(input, *, out=None) -> Tensor
@@ -2563,11 +2610,21 @@ Alias for :func:`torch.div`.
 
 add_docstr(torch.dot,
            r"""
-dot(input, tensor) -> Tensor
+dot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors.
+Computes the dot product of two 1D tensors.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note::
+
+    Unlike NumPy's dot, torch.dot intentionally only supports computing the dot product
+    of two 1D tensors with the same number of elements.
+
+Args:
+    input (Tensor): first tensor in the dot product, must be 1D.
+    other (Tensor): second tensor in the dot product, must be 1D.
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -2579,15 +2636,18 @@ add_docstr(torch.vdot,
            r"""
 vdot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors. The vdot(a, b) function
-handles complex numbers differently than dot(a, b). If the first argument is complex,
-the complex conjugate of the first argument is used for the calculation of the dot product.
+Computes the dot product of two 1D tensors. The vdot(a, b) function handles complex numbers
+differently than dot(a, b). If the first argument is complex, the complex conjugate of the
+first argument is used for the calculation of the dot product.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note:: 
+
+    Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
+    of two 1D tensors with the same number of elements.
 
 Args:
-    input (Tensor): first tensor in the dot product. Its conjugate is used if it's complex.
-    other (Tensor): second tensor in the dot product.
+    input (Tensor): first tensor in the dot product, must be 1D. Its conjugate is used if it's complex.
+    other (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -6519,7 +6579,8 @@ Keyword args:
 
 add_docstr(torch.randperm,
            r"""
-randperm(n, *, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
+randperm(n, \*, generator=None, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False,
+    pin_memory=False) -> LongTensor
 
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
@@ -6527,12 +6588,14 @@ Args:
     n (int): the upper bound (exclusive)
 
 Keyword args:
+    {generator}
     {out}
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: ``torch.int64``.
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
