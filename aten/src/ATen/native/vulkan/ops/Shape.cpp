@@ -95,11 +95,18 @@ Tensor cat(const TensorList tensors, int64_t dim) {
   return convert(v_output);
 }
 
+Tensor unsqueeze(const Tensor& self, int64_t dim) {
+  auto sizes = self.sizes().vec();
+  sizes.insert(sizes.begin() + dim, 1);
+  return reshape_copy(self, sizes);
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("view", TORCH_FN(reshape_copy));
   m.impl("cat", TORCH_FN(cat));
+  m.impl("unsqueeze", TORCH_FN(unsqueeze));
 }
 
 #endif /* USE_VULKAN_API */
