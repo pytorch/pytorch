@@ -1,5 +1,5 @@
-#include <ATen/native/UpSample.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/UpSample.h>
 #include <torch/library.h>
 
 namespace at {
