@@ -103,14 +103,15 @@ class TestFuseFx(QuantizationTestCase):
         # train mode fuse_fx is called in prepare_qat_fx
         m = prepare_qat_fx(m, {})
         expected_nodes = [
+            ns.call_module(nni.ConvBn1d),
             ns.call_module(nni.ConvBn2d),
             ns.call_module(nni.ConvBn3d),
+            ns.call_module(nni.ConvBnReLU1d),
             ns.call_module(nni.ConvBnReLU2d),
             ns.call_module(nni.ConvBnReLU3d),
         ]
-        # ConvBnRelu1d is not fused
         expected_occurrence = {
-            ns.call_module(nn.ReLU): 1
+            ns.call_module(nn.ReLU): 0
         }
         self.checkGraphModuleNodes(
             m,
@@ -123,14 +124,16 @@ class TestFuseFx(QuantizationTestCase):
         # fuse_fx is a top level api and only supports eval mode
         m = fuse_fx(m)
         expected_nodes = [
+            ns.call_module(nn.Conv1d),
             ns.call_module(nn.Conv2d),
             ns.call_module(nn.Conv3d),
+            ns.call_module(nni.ConvReLU1d),
             ns.call_module(nni.ConvReLU2d),
             ns.call_module(nni.ConvReLU3d),
         ]
         # ConvBnRelu1d is not fused
         expected_occurrence = {
-            ns.call_module(nn.ReLU): 1
+            ns.call_module(nn.ReLU): 0
         }
         self.checkGraphModuleNodes(
             m,
@@ -300,6 +303,55 @@ class TestQuantizeFx(QuantizationTestCase):
         weight_obs(quantized.weight)
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
+
+    def test_conv_bn_relu(self):
+        convs = {
+            1: nn.Conv1d,
+            2: nn.Conv2d,
+            3: nn.Conv3d,
+        }
+        bns = {
+            1: nn.BatchNorm1d,
+            2: nn.BatchNorm2d,
+            3: nn.BatchNorm3d,
+        }
+        quantized_convs = {
+            1: nnq.Conv1d,
+            2: nnq.Conv2d,
+            3: nnq.Conv3d,
+        }
+        quantized_conv_relus = {
+            1: nniq.ConvReLU1d,
+            2: nniq.ConvReLU2d,
+            3: nniq.ConvReLU3d,
+        }
+
+        class M(torch.nn.Module):
+            def __init__(self, dim, has_relu):
+                super().__init__()
+                self.conv = convs[dim](3, 3, 3)
+                self.bn = bns[dim](3)
+                self.relu = nn.ReLU()
+                self.has_relu = has_relu
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                if self.has_relu:
+                    x = self.relu(x)
+                return x
+
+        options = itertools.product([1, 2], [True, False], self.static_quant_types)
+        for dim, has_relu, quant_type in options:
+            expected_node = ns.call_module(
+                quantized_conv_relus[dim] if has_relu
+                else quantized_convs[dim])
+            self.checkGraphModeFxOp(
+                M(dim, has_relu),
+                self.img_data_dict[dim],
+                quant_type,
+                expected_node=expected_node,
+            )
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):
@@ -636,7 +688,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
         self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
 
-
     def test_remove_qconfig(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -656,6 +707,29 @@ class TestQuantizeFx(QuantizationTestCase):
         for name, module in m.named_modules():
             self.assertFalse(hasattr(module, 'qconfig'),
                              'qconfig is not removed for ' + name)
+
+    def test_default_quant_after_none_qconfig(self):
+        """ Make sure default quant is inserted properly"""
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = x.transpose(1, 2)
+                x = self.conv2(x)
+
+        m = M().eval()
+        qconfig_dict = {
+            "": default_qconfig,
+            "module_name": [
+                ("conv1", None)
+            ]
+        }
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
 
     @skipIfNoFBGEMM
     def test_qat_and_script(self):
@@ -961,6 +1035,51 @@ class TestQuantizeFx(QuantizationTestCase):
         # quantize, should run with no errors
         quantized = convert_fx(prepared_copy)
 
+    def test_dequantize(self):
+        r""" Test to make sure dequantize node are placed before
+        non-quantizable node
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.act = torch.nn.GELU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.act(x)
+
+        data = torch.rand(5, 1, 3, 3, dtype=torch.float)
+        for quant_type in self.static_quant_types:
+            node_list = [
+                ns.call_module(nnq.Conv2d),
+                ns.call_method("dequantize"),
+                ns.call_module(nn.GELU),
+            ]
+            self.checkGraphModeFxOp(
+                M().eval(), (data,), quant_type, expected_node_list=node_list)
+
+    def test_sequential(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.convs = torch.nn.Sequential(
+                    torch.nn.Conv2d(1, 1, 1),
+                    torch.nn.Conv2d(1, 1, 1)
+                )
+
+            def forward(self, x):
+                x = self.convs(x)
+                return x
+
+        data = torch.rand(5, 1, 3, 3, dtype=torch.float)
+        for quant_type in self.static_quant_types:
+            node_list = [
+                ns.call_module(nnq.Conv2d),
+                ns.call_module(nnq.Conv2d),
+            ]
+            self.checkGraphModeFxOp(
+                M().eval(), (data,), quant_type, expected_node_list=node_list)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
