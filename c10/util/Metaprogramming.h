@@ -183,7 +183,7 @@ template <class Tuple, int N>
 struct TupleTake<Tuple, N, std::enable_if_t<N >= 0, void>> {
   static auto call(Tuple t) {
     constexpr size_t size = std::tuple_size<Tuple>();
-    static_assert(N <= size, "tuple_take: N >= size");
+    static_assert(N <= size, "tuple_take: N > size");
     return tuple_elements(t, std::make_index_sequence<N>{});
   }
 };
@@ -193,7 +193,7 @@ struct TupleTake<Tuple, N, std::enable_if_t<N < 0, void>> {
   static auto call(Tuple t) {
     static_assert(N < 0, "tuple_take: N < 0");
     constexpr size_t size = std::tuple_size<Tuple>();
-    static_assert(-N <= size, "tuple_take: -N >= size");
+    static_assert(-N <= size, "tuple_take: -N > size");
     return tuple_elements(t, make_offset_index_sequence<size + N, -N>{});
   }
 };
@@ -213,7 +213,7 @@ auto tuple_take(Tuple t) {
 template <class Tuple, size_t Start, size_t N>
 constexpr auto tuple_slice(Tuple t) {
   constexpr size_t size = std::tuple_size<Tuple>();
-  static_assert(Start + N <= size, "tuple_slice: Start + N >= size");
+  static_assert(Start + N <= size, "tuple_slice: Start + N > size");
   return tuple_elements(t, make_offset_index_sequence<Start, N>{});
 }
 
