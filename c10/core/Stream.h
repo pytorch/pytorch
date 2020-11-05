@@ -124,11 +124,11 @@ public:
   }
 
   static Stream unpack(uint64_t bits) {
-    auto stream_id = static_cast<StreamId>(bits) & 0xFFFFFFFFull;
+    const auto stream_id = static_cast<StreamId>(bits & 0xFFFFFFFFull);
     bits >>= 32;
-    auto device_index = static_cast<DeviceIndex>(bits) & 0xFFFFull;
+    const auto device_index = static_cast<DeviceIndex>(bits & 0xFFFFull);
     bits >>= 16;
-    auto device_type = static_cast<DeviceType>(bits);
+    const auto device_type = static_cast<DeviceType>(bits);
     TORCH_CHECK(isValidDeviceType(device_type));
     // Unfortunately, we can't check if the StreamId is valid here; it
     // will be checked upon first use.
