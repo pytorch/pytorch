@@ -40,7 +40,7 @@ export CIRCLE_SHA1="a6ed1c8a7090a88fa22291b5acd992393e12051e"
 export CIRCLE_BRANCH="mszhanyi:zhanyi/cnnrnnsmoke"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
-  git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
+  git fetch --force origin "pull/564/head:remotes/origin/pull/564"
   git reset --hard "$CIRCLE_SHA1"
   git checkout -q -B "$CIRCLE_BRANCH"
   git reset --hard "$CIRCLE_SHA1"
