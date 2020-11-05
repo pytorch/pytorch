@@ -2,11 +2,13 @@
 
 import timeit
 import textwrap
-from typing import Any, Callable, Dict, List, NoReturn, Optional
+from types import ModuleType
+from typing import cast, Any, Callable, Dict, List, NoReturn, Optional, Type, Union
 
 import numpy as np
 import torch
 from torch.utils.benchmark.utils import common
+from torch.utils.benchmark.utils.valgrind_wrapper import cpp_jit
 from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
 
 
@@ -19,6 +21,57 @@ if torch.has_cuda and torch.cuda.is_available():
         return timeit.default_timer()
 else:
     timer = timeit.default_timer
+
+
+PYTHON = "Python"
+CPP = "C++"
+
+
+class CPPTimer:
+    def __init__(
+        self,
+        stmt: str,
+        setup: str,
+        timer: Callable[[], float],
+        globals: Dict[str, Any],
+    ) -> None:
+        if timer is not timeit.default_timer:
+            # FIXME: We should be able to automatically detect GPU operations.
+            raise ValueError(
+                "When timing C++, timer must be `timeit.default_timer`. If you "
+                "did not specify `timer=...`, this means that a timer with "
+                "CUDA syncronization was chosen, and you should pass "
+                "`timer=timeit.default_timer` to the Timer's constructor to "
+                "declare that CUDA syncronization is not needed."
+            )
+
+        if len(globals) > 1 or "torch" not in globals:
+            # Timer will add `torch` as a convenience.
+            raise ValueError("C++ timing does not support globals.")
+
+        if globals.get("torch", torch) is not torch:
+            # cpp_extension is going to link against `libtorch.so` that comes
+            # from `import torch`, so changing `torch` in globals would be
+            # silently ignored.
+            raise ValueError(
+                "Swapping out `torch` is not allowed for C++ snippets."
+            )
+
+        self._stmt: str = textwrap.dedent(stmt)
+        self._setup: str = textwrap.dedent(setup)
+        self._timeit_module: Optional[cpp_jit.TimeitModuleType] = None
+
+    def timeit(self, number: int) -> float:
+        if self._timeit_module is None:
+            self._timeit_module = cast(
+                cpp_jit.TimeitModuleType,
+                cpp_jit.compile_template(
+                    self._stmt,
+                    self._setup,
+                    template=cpp_jit.CXX_TIMEIT_TEMPLATE,
+                    is_standalone=False
+                ))
+        return self._timeit_module.timeit(number)
 
 
 class Timer(object):
@@ -112,6 +165,8 @@ class Timer(object):
             and a good indicator of intrinsic algorithmic efficiency, so the
             default is set to one. This is in contrast to the default PyTorch
             threadpool size which tries to utilize all cores.
+
+        language: Specify if stmt and setup are Python (default) or C++ strings.
     """
 
     _timer_cls = timeit.Timer
@@ -127,9 +182,24 @@ class Timer(object):
         description: Optional[str] = None,
         env: Optional[str] = None,
         num_threads: int = 1,
+        language: str = PYTHON,
     ):
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
+
+        self._language = language
+        if language not in (PYTHON, CPP):
+            raise ValueError(f"Invalid language `{language}`. (Choices: {PYTHON}, {CPP})")
+
+        if language == CPP:
+            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
+            self._timer_cls = cast(
+                # CPPTimer does not inherit from timeit.Timer, however it implements
+                # `timeit` which is sufficient for our purposes.
+                Type[timeit.Timer],
+                CPPTimer
+            )
+            setup = ("// pass" if setup == "pass" else setup)
 
         # We copy `globals` to prevent mutations from leaking, (for instance,
         # `eval` adds the `__builtins__` key) and include `torch` if not
@@ -364,8 +434,12 @@ class Timer(object):
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
         self._timer.timeit(1)
+
+        is_python = self._language == PYTHON
         return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
-            globals=self._globals,
+            globals=self._globals if is_python else {},
             number=number,
-            collect_baseline=collect_baseline)
+            collect_baseline=collect_baseline and is_python,
+            is_python=is_python,
+        )

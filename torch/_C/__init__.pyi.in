@@ -376,6 +376,7 @@ def _crash_if_csrc_asan() -> _int: ...  # THPModule_crashIfCsrcASAN
 def _crash_if_csrc_ubsan() -> _int: ...  # THPModule_crashIfCsrcUBSAN
 def _crash_if_aten_asan() -> _int: ...  # THPModule_crashIfATenASAN
 def _show_config() -> str: ...  # THPModule_showConfig
+def _cxx_flags() -> str: ...  # THPModule_cxxFlags
 def _parallel_info() -> str: ...  # THPModule_parallelInfo
 def _set_backcompat_broadcast_warn(arg: _bool) -> None: ...  # THPModule_setBackcompatBroadcastWarn
 def _get_backcompat_broadcast_warn() -> _bool: ...  # THPModule_getBackcompatBroadcastWarn

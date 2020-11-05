@@ -305,6 +305,7 @@ def build_deps():
                             'asmjit', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'onnx', 'third_party',
                             'benchmark', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, "valgrind-headers", "callgrind.h"))
 
     check_pydep('yaml', 'pyyaml')
     check_pydep('typing', 'typing')
@@ -324,8 +325,16 @@ def build_deps():
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
-    sym_files = ['tools/shared/_utils_internal.py']
-    orig_files = ['torch/_utils_internal.py']
+    sym_files = [
+        'tools/shared/_utils_internal.py',
+        'torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h',
+        'torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h',
+    ]
+    orig_files = [
+        'torch/_utils_internal.py',
+        'third_party/valgrind-headers/callgrind.h',
+        'third_party/valgrind-headers/valgrind.h',
+    ]
     for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if os.path.exists(sym_file):
