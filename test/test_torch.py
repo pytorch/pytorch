@@ -7341,9 +7341,6 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
-    # Although tf32 is always disabled on matrix_exp, this test uses matmul,
-    # which has tf32 on by default
-    @with_tf32_off
     def test_matrix_exp_compare_with_taylor(self, device, dtype):
 
         def normalize_to_1_operator_norm(sample, desired_norm):
@@ -7363,12 +7360,13 @@ class TestTorchDeviceType(TestCase):
             return x
 
         def get_taylor_approximation(a, deg):
+            a_ = a.cpu().numpy()
             identity = torch.eye(a.size(-2), a.size(-1), dtype=dtype, device=device).expand_as(a)
-            res = identity
-            taylor_term = identity
+            res = identity.cpu().numpy()
+            taylor_term = identity.cpu().numpy()
 
             for i in range(1, deg + 1):
-                taylor_term = torch.matmul(a, taylor_term) / i
+                taylor_term = np.matmul(a_, taylor_term) / i
                 res = res + taylor_term
 
             return res
@@ -7381,8 +7379,8 @@ class TestTorchDeviceType(TestCase):
                 b = a / (2 ** s)
                 b = get_taylor_approximation(b, 18)
                 for _ in range(s):
-                    b = torch.matmul(b, b)
-                return b
+                    b = np.matmul(b, b)
+                return torch.from_numpy(b).to(a.device)
 
         def run_test(*n):
             degs = [1, 2, 4, 8, 12, 18]
