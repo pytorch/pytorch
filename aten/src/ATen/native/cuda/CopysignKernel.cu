@@ -1,7 +1,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 

@@ -1,19 +1,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-
-#if defined(__CUDACC__)
-#include <cuda.h>
-#include <cuda_fp16.h>
-#include <c10/cuda/CUDAMathCompat.h>
-#elif defined(__HIPCC__)
-#include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
-#include <c10/hip/HIPMathCompat.h>
-#endif
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
