@@ -90,7 +90,7 @@ Tensor _sparse_gcs_addmm(
 }
 
 
-SparseTensor _sparse_gcs_mm_out(
+SparseTensor& _sparse_gcs_mm_out(
   SparseTensor& result,
   const SparseTensor& sparse,
   const Tensor& dense
