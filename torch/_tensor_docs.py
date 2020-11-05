@@ -939,6 +939,19 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('copysign',
+               r"""
+copysign(other) -> Tensor
+
+See :func:`torch.copysign`
+""")
+
+add_docstr_all('copysign_', r"""
+copysign_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.copysign`
+""")
+
 add_docstr_all('cos',
                r"""
 cos() -> Tensor
