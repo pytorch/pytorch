@@ -3591,7 +3591,7 @@ new_module_tests = [
         input_size=(2, 3, 4),
         desc='relu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.1,
     ),
     dict(
         module_name='TransformerEncoderLayer',
