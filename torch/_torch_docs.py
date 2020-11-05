@@ -5617,6 +5617,8 @@ Examples::
 add_docstr(torch.swapdims, r"""
 swapdims(input, dim1, dim2) -> Tensor
 
+Alias for :func:`torch.transpose`.
+
 Swaps the dimension of :attr:`input` at the position in :attr:`dim1`
 to the position in :attr:`dim2`.
 
@@ -5634,13 +5636,49 @@ Examples::
 
             [[4, 5],
             [6, 7]]])
-    >>> torch.swapdim(x, 0, 1)
+    >>> torch.swapdims(x, 0, 1)
     tensor([[[0, 1],
             [4, 5]],
 
             [[2, 3],
             [6, 7]]])
-    >>> torch.swapdim(x, 0, 2)
+    >>> torch.swapdims(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
+add_docstr(torch.swapaxes, r"""
+swapaxes(input, axis1, axis2) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+Swaps the dimension of :attr:`input` at the position in :attr:`axis1`
+to the position in :attr:`axis2`.
+
+Args:
+    {input}
+    axis1 (int): Original position of the dim to move
+    axis2 (int): Destination position
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 2)
     tensor([[[0, 4],
             [2, 6]],
 

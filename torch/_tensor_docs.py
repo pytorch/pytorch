@@ -3520,6 +3520,12 @@ swapdims(dim1, dim2) -> Tensor
 See :func:`torch.swapdims`
 """)
 
+add_docstr_all('swapaxes', r"""
+swapaxes(axis1, axis2) -> Tensor
+
+See :func:`torch.swapaxes`
+""")
+
 add_docstr_all('t',
                r"""
 t() -> Tensor
