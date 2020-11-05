@@ -783,6 +783,11 @@ elseif(USE_CUDA)
     add_custom_target(nvfuser_${filename} DEPENDS ${dst})
     add_dependencies(torch_cuda nvfuser_${filename})
   endforeach()
+
+  # Install NVFUSER runtime sources
+  install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/nvfuser"
+    DESTINATION ${TORCH_INSTALL_LIB_DIR}
+    FILES_MATCHING PATTERN "*.cuh")
 endif()
 
 
