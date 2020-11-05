@@ -38,7 +38,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
     nn.LeakyReLU: nnq.LeakyReLU,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
-    nn.ReLU: nnq.ReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
