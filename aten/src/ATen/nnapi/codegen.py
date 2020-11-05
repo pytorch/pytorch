@@ -35,40 +35,40 @@ PREFIX = """\
 
 
 NNAPI_FUNCTIONS = [
-    ("int", "ANeuralNetworks_getDeviceCount", "uint32_t* numDevices"),
-    ("int", "ANeuralNetworks_getDevice", "uint32_t devIndex, ANeuralNetworksDevice** device"),
-    ("int", "ANeuralNetworksDevice_getName", "const ANeuralNetworksDevice* device, const char** name"),
-    ("int", "ANeuralNetworksDevice_getVersion", "const ANeuralNetworksDevice* device, const char** version"),
-    ("int", "ANeuralNetworksDevice_getFeatureLevel", "const ANeuralNetworksDevice* device, int64_t* featureLevel"),
-    ("int", "ANeuralNetworksModel_getSupportedOperationsForDevices", " const ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, bool* supportedOps"),
-    ("int", "ANeuralNetworksCompilation_createForDevices", "ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, ANeuralNetworksCompilation** compilation"),
-    ("int", "ANeuralNetworksExecution_compute", "ANeuralNetworksExecution* execution"),
-    ("int", "ANeuralNetworksMemory_createFromFd", "size_t size, int protect, int fd, size_t offset, ANeuralNetworksMemory** memory"),
-    ("void", "ANeuralNetworksMemory_free", "ANeuralNetworksMemory* memory"),
-    ("int", "ANeuralNetworksModel_create", "ANeuralNetworksModel** model"),
-    ("void", "ANeuralNetworksModel_free", "ANeuralNetworksModel* model"),
-    ("int", "ANeuralNetworksModel_finish", "ANeuralNetworksModel* model"),
-    ("int", "ANeuralNetworksModel_addOperand", "ANeuralNetworksModel* model, const ANeuralNetworksOperandType* type"),
-    ("int", "ANeuralNetworksModel_setOperandValue", "ANeuralNetworksModel* model, int32_t index, const void* buffer, size_t length"),
-    ("int", "ANeuralNetworksModel_setOperandValueFromMemory", "ANeuralNetworksModel* model, int32_t index, const ANeuralNetworksMemory* memory, size_t offset, size_t length"),
-    ("int", "ANeuralNetworksModel_addOperation", "ANeuralNetworksModel* model, ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs"),
-    ("int", "ANeuralNetworksModel_identifyInputsAndOutputs", "ANeuralNetworksModel* model, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs"),
-    ("int", "ANeuralNetworksModel_relaxComputationFloat32toFloat16", "ANeuralNetworksModel* model, bool allow"),
-    ("int", "ANeuralNetworksCompilation_create", "ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation"),
-    ("void", "ANeuralNetworksCompilation_free", "ANeuralNetworksCompilation* compilation"),
-    ("int", "ANeuralNetworksCompilation_setPreference", "ANeuralNetworksCompilation* compilation, int32_t preference"),
-    ("int", "ANeuralNetworksCompilation_finish", "ANeuralNetworksCompilation* compilation"),
-    ("int", "ANeuralNetworksExecution_create", "ANeuralNetworksCompilation* compilation, ANeuralNetworksExecution** execution"),
-    ("void", "ANeuralNetworksExecution_free", "ANeuralNetworksExecution* execution"),
-    ("int", "ANeuralNetworksExecution_setInput", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const void* buffer, size_t length"),
-    ("int", "ANeuralNetworksExecution_setInputFromMemory", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length"),
-    ("int", "ANeuralNetworksExecution_setOutput", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, void* buffer, size_t length"),
-    ("int", "ANeuralNetworksExecution_setOutputFromMemory", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length"),
-    ("int", "ANeuralNetworksExecution_startCompute", "ANeuralNetworksExecution* execution, ANeuralNetworksEvent** event"),
-    ("int", "ANeuralNetworksEvent_wait", "ANeuralNetworksEvent* event"),
-    ("void", "ANeuralNetworksEvent_free", "ANeuralNetworksEvent* event"),
-    ("int", "ANeuralNetworksExecution_getOutputOperandRank", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* rank"),
-    ("int", "ANeuralNetworksExecution_getOutputOperandDimensions", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions"),
+    ("int", "ANeuralNetworks_getDeviceCount", "uint32_t* numDevices"),  # noqa: B950
+    ("int", "ANeuralNetworks_getDevice", "uint32_t devIndex, ANeuralNetworksDevice** device"),  # noqa: B950
+    ("int", "ANeuralNetworksDevice_getName", "const ANeuralNetworksDevice* device, const char** name"),  # noqa: B950
+    ("int", "ANeuralNetworksDevice_getVersion", "const ANeuralNetworksDevice* device, const char** version"),  # noqa: B950
+    ("int", "ANeuralNetworksDevice_getFeatureLevel", "const ANeuralNetworksDevice* device, int64_t* featureLevel"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_getSupportedOperationsForDevices", " const ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, bool* supportedOps"),  # noqa: B950
+    ("int", "ANeuralNetworksCompilation_createForDevices", "ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, ANeuralNetworksCompilation** compilation"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_compute", "ANeuralNetworksExecution* execution"),  # noqa: B950
+    ("int", "ANeuralNetworksMemory_createFromFd", "size_t size, int protect, int fd, size_t offset, ANeuralNetworksMemory** memory"),  # noqa: B950
+    ("void", "ANeuralNetworksMemory_free", "ANeuralNetworksMemory* memory"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_create", "ANeuralNetworksModel** model"),  # noqa: B950
+    ("void", "ANeuralNetworksModel_free", "ANeuralNetworksModel* model"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_finish", "ANeuralNetworksModel* model"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_addOperand", "ANeuralNetworksModel* model, const ANeuralNetworksOperandType* type"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_setOperandValue", "ANeuralNetworksModel* model, int32_t index, const void* buffer, size_t length"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_setOperandValueFromMemory", "ANeuralNetworksModel* model, int32_t index, const ANeuralNetworksMemory* memory, size_t offset, size_t length"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_addOperation", "ANeuralNetworksModel* model, ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_identifyInputsAndOutputs", "ANeuralNetworksModel* model, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs"),  # noqa: B950
+    ("int", "ANeuralNetworksModel_relaxComputationFloat32toFloat16", "ANeuralNetworksModel* model, bool allow"),  # noqa: B950
+    ("int", "ANeuralNetworksCompilation_create", "ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation"),  # noqa: B950
+    ("void", "ANeuralNetworksCompilation_free", "ANeuralNetworksCompilation* compilation"),  # noqa: B950
+    ("int", "ANeuralNetworksCompilation_setPreference", "ANeuralNetworksCompilation* compilation, int32_t preference"),  # noqa: B950
+    ("int", "ANeuralNetworksCompilation_finish", "ANeuralNetworksCompilation* compilation"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_create", "ANeuralNetworksCompilation* compilation, ANeuralNetworksExecution** execution"),  # noqa: B950
+    ("void", "ANeuralNetworksExecution_free", "ANeuralNetworksExecution* execution"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_setInput", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const void* buffer, size_t length"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_setInputFromMemory", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_setOutput", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, void* buffer, size_t length"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_setOutputFromMemory", "ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_startCompute", "ANeuralNetworksExecution* execution, ANeuralNetworksEvent** event"),  # noqa: B950
+    ("int", "ANeuralNetworksEvent_wait", "ANeuralNetworksEvent* event"),  # noqa: B950
+    ("void", "ANeuralNetworksEvent_free", "ANeuralNetworksEvent* event"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_getOutputOperandRank", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* rank"),  # noqa: B950
+    ("int", "ANeuralNetworksExecution_getOutputOperandDimensions", "ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions"),  # noqa: B950
 ]
 
 
@@ -111,7 +111,7 @@ def main(argv):
             #define NNAPI_WRAPPER_H_
             #include <stddef.h>
             #include <stdint.h>
-            #include "NeuralNetworks.h"
+            #include <ATen/nnapi/NeuralNetworks.h>
             struct nnapi_wrapper {
             __STRUCT_MEMBERS__
             };

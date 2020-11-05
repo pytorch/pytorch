@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#include "NeuralNetworks.h"
-#include "nnapi_wrapper.h"
+#include <ATen/nnapi/NeuralNetworks.h>
+#include <ATen/nnapi/nnapi_wrapper.h>
 
 namespace caffe2 {
 namespace nnapi {
