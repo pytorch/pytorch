@@ -6,7 +6,7 @@
 #include <memory>
 #include <mutex>
 
-#include <nccl.h>
+#include <torch/csrc/cuda/nccl.h>
 
 namespace {
   // Provides additional detail into NCCL error codes based on when these are
