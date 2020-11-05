@@ -6566,7 +6566,8 @@ Keyword args:
 
 add_docstr(torch.randperm,
            r"""
-randperm(n, *, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
+randperm(n, \*, generator=None, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False,
+    pin_memory=False) -> LongTensor
 
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
@@ -6574,12 +6575,14 @@ Args:
     n (int): the upper bound (exclusive)
 
 Keyword args:
+    {generator}
     {out}
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: ``torch.int64``.
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
