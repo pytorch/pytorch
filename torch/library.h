@@ -724,7 +724,7 @@ public:
 /// This can happen if TORCH_LIBRARY_IMPL is called multiple times with the same namespace
 /// and dispatch key in the same translation unit.
 #define _TORCH_LIBRARY_IMPL(ns, k, m, uid) \
-  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, uid) (torch::Library&); \
+  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
   static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k, uid) ( \
     torch::Library::IMPL, \
     c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
