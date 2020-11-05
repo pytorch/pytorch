@@ -21,6 +21,21 @@ from .quantization_mappings import (
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
 
+_SWAPPABLE_MODULES = (
+    nni.ConvBn1d,
+    nni.ConvBn2d,
+    nni.ConvBnReLU1d,
+    nni.ConvBnReLU2d,
+    nni.LinearReLU,
+    nni.BNReLU2d,
+    nni.BNReLU3d,
+    nni.ConvReLU1d,
+    nni.ConvReLU2d,
+    nni.ConvReLU3d,
+    nniqat.ConvBn2d,
+    nniqat.ConvBnReLU2d
+)
+
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
             isinstance(module, torch.quantization.FakeQuantize) or
@@ -138,7 +153,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             m._forward_hooks.move_to_end(handle.id, last=False)
 
     for name, child in module.named_children():
-        if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
+        if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional or \
+           (type(child) in _SWAPPABLE_MODULES):
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif _has_special_act_post_process(child):
@@ -490,23 +506,11 @@ def _convert(
     # TODO(jerryzh): remove after deciding on the impl of intrinsic modules
     # This is required because intrinsic modules right now are implemented as
     # nn.Sequential and we don't want to swap their constituents
-    SWAPPABLE_MODULES = (nni.ConvBn2d,
-                         nni.ConvBnReLU2d,
-                         nni.LinearReLU,
-                         nni.BNReLU2d,
-                         nni.BNReLU3d,
-                         nni.ConvBn1d,
-                         nni.ConvReLU1d,
-                         nni.ConvBnReLU1d,
-                         nni.ConvReLU2d,
-                         nni.ConvReLU3d,
-                         nniqat.ConvBn2d,
-                         nniqat.ConvBnReLU2d)
 
     for name, mod in module.named_children():
         # both swappable modules and observed custom modules are
         # swapped as one unit
-        if type(mod) not in SWAPPABLE_MODULES and \
+        if type(mod) not in _SWAPPABLE_MODULES and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
                      custom_module_class_mapping)
