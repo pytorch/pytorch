@@ -35,7 +35,11 @@ struct Command final {
     void barrier(const Pipeline::Barrier& barrier);
     void bind(const Pipeline::Object& pipeline);
     void bind(const Descriptor::Set& set);
-    void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
+    void copy(
+        Resource::Buffer::Object source,
+        Resource::Buffer::Object destination,
+        VkDeviceSize srcOffset = 0,
+        VkDeviceSize dstOffset = 0);
     void dispatch(const Shader::WorkGroup& global_work_group);
     void submit(VkQueue queue, Resource::Fence fence = {});
 

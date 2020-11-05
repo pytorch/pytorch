@@ -227,7 +227,9 @@ void Command::Buffer::bind(
 
 void Command::Buffer::copy(
     const Resource::Buffer::Object source,
-    const Resource::Buffer::Object destination) {
+    const Resource::Buffer::Object destination,
+    VkDeviceSize srcOffset,
+    VkDeviceSize dstOffset) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
@@ -242,8 +244,8 @@ void Command::Buffer::copy(
       "Invalid Vulkan destination buffer!");
 
   const VkBufferCopy buffer_copy{
-    0u,
-    0u,
+    srcOffset,
+    dstOffset,
     std::min(source.range, destination.range),
   };
 

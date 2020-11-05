@@ -270,21 +270,23 @@ TEST(VulkanAPITest, avg_pool2d) {
 }
 
 TEST(VulkanAPITest, reshape) {
-  const auto a_cpu = at::rand({1,3,2,2}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_cpu =
+      at::rand({1, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
-  const auto c_cpu = at::reshape(a_cpu, {2,3,1,2});
-  const auto c_vulkan = at::reshape(a_vulkan, {2,3,1,2});
+  auto c_cpu = at::reshape(a_cpu, {2, 3, 1, 2});
+  auto c_vulkan = at::reshape(a_vulkan, {2, 3, 1, 2});
 
   ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
 }
 
 TEST(VulkanAPITest, reshape_) {
-  const auto a_cpu = at::rand({1,3,2,2}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_cpu =
+      at::rand({1, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
-  a_cpu.reshape({2,3,1,2});
-  a_vulkan.reshape({2,3,1,2});
+  a_cpu.reshape({2, 3, 1, 2});
+  a_vulkan.reshape({2, 3, 1, 2});
 
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
@@ -298,6 +300,26 @@ TEST(VulkanAPITest, copy) {
 TEST(VulkanAPITest, empty) {
   ASSERT_NO_THROW(
       at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
+}
+
+TEST(VulkanAPITest, cat) {
+  auto t_in0 =
+      at::rand({1, 1, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in1 =
+      at::rand({1, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in2 =
+      at::rand({1, 5, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
+  auto t_out_expected = at::cat({t_in0, t_in1, t_in2}, 1);
+  auto tv_out = at::cat({t_in0.vulkan(), t_in1.vulkan(), t_in2.vulkan()}, 1);
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 } // namespace
