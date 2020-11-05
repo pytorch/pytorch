@@ -16,12 +16,14 @@ layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
-
   const ivec2 size = imageSize(uOutput).xy;
   const ivec2 isize = textureSize(uInput, 0).xy;
 
   if (all(lessThan(pos.xy, size))) {
-    const ivec2 ipos = clamp(ivec2(pos.xy * uBlock.scale), ivec2(0), isize - 1);
+    const ivec2 ipos = clamp(
+        ivec2(pos.xy * uBlock.scale),
+        ivec2(0),
+        isize - 1);
 
     imageStore(
         uOutput,

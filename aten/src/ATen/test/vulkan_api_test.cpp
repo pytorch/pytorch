@@ -34,7 +34,7 @@ TEST(VulkanAPITest, adaptive_avg_pool2d) {
     return;
   }
 
-  const auto in_cpu = at::rand({5, 7, 43, 31}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({5, 7, 47, 31}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::adaptive_avg_pool2d(in_cpu, {3, 3});
   const auto out_vulkan = at::adaptive_avg_pool2d(in_cpu.vulkan(), {3, 3});
 
