@@ -1664,7 +1664,7 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         sources = [s if not _is_cuda_file(s) else
                    os.path.abspath(os.path.join(
-                       path, get_hip_file_path(os.path.relpath(s, path))))
+                       path, get_hip_file_path(os.path.relpath(s, path), is_pytorch_extension=True)))
                    for s in sources]
     elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
