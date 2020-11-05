@@ -58,6 +58,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::SparseHIP:
       return "SparseHIP";
 
+    case DispatchKey::NestedTensor:
+      return "NestedTensor";
+
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
     case DispatchKey::PrivateUse2:
@@ -76,6 +79,8 @@ const char* toString(DispatchKey t) {
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:
       return "AutogradXLA";
+    case DispatchKey::AutogradNestedTensor:
+      return "AutogradNestedTensor";
     case DispatchKey::AutogradPrivateUse1:
       return "AutogradPrivateUse1";
     case DispatchKey::AutogradPrivateUse2:
@@ -137,6 +142,8 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradCUDA;
     case DispatchKey::XLA:
       return DispatchKey::AutogradXLA;
+    case DispatchKey::NestedTensor:
+      return DispatchKey::AutogradNestedTensor;
     case DispatchKey::PrivateUse1:
       return DispatchKey::AutogradPrivateUse1;
     case DispatchKey::PrivateUse2:
