@@ -23,6 +23,7 @@ struct PythonEngine : public Engine {
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
+      bool accumulate_grad,
       const edge_list& outputs = {}) override;
 
   std::shared_ptr<at::ivalue::Future> execute_with_graph_task(

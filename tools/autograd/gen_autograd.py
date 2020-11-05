@@ -302,7 +302,8 @@ def main():
     parser.add_argument('autograd', metavar='AUTOGRAD',
                         help='path to autograd directory')
     args = parser.parse_args()
-    gen_autograd(args.declarations, args.out, args.autograd)
+    gen_autograd(args.declarations, args.out, args.autograd,
+                 SelectiveBuilder.get_nop_selector())
 
 
 if __name__ == '__main__':
