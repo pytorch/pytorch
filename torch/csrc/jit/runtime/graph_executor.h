@@ -69,7 +69,9 @@ struct TORCH_API GraphExecutor {
   // profiled information whenever a bailout check is failed/triggered, a new
   // `GraphExecutor` will be created. This new `GraphExecutor`'s
   // remaining_bailout_depth will be reduced by 1.
-  ExecutionPlan getPlanFor(Stack& inputs, size_t remaining_bailout_depth);
+  const ExecutionPlan& getPlanFor(
+      Stack& inputs,
+      size_t remaining_bailout_depth);
   explicit operator bool() const {
     return pImpl != nullptr;
   }

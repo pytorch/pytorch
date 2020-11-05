@@ -71,7 +71,7 @@ struct GraphExecutorImplBase {
   void run(Stack& stack);
   c10::intrusive_ptr<Future> runAsync(Stack& stack);
 
-  virtual ExecutionPlan getPlanFor(
+  virtual const ExecutionPlan& getPlanFor(
       Stack& stack,
       size_t remaining_bailout_depth) = 0;
   virtual GraphExecutorState getDebugState() = 0;
