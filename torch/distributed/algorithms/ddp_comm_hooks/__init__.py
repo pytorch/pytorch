@@ -1,9 +1,9 @@
 from enum import Enum
 from functools import partial
 
-import default_hooks as default
-import quantization_hooks as quantization
 import torch.distributed as dist
+from . import default_hooks as default
+from . import quantization_hooks as quantization
 from torch.nn.parallel import DistributedDataParallel
 
 
