@@ -7632,9 +7632,11 @@ This function returns a namedtuple ``(U, S, V)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
-If :attr:`some` is ``True`` (default), the method returns the reduced singular value decomposition
-i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the returned
-`U` and `V` matrices will contain only :math:`min(n, m)` orthonormal columns.
+If :attr:`some` is ``True`` (default), the method returns the reduced
+singular value decomposition i.e., if the last two dimensions of
+:attr:`input` are ``m`` and ``n``, then the returned `U` matrix will
+contain only :math:`min(n, m)` orthonormal columns and the size of `V`
+will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
