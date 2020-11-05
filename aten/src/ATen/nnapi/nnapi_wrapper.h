@@ -19,7 +19,7 @@
 #define NNAPI_WRAPPER_H_
 #include <stddef.h>
 #include <stdint.h>
-#include "NeuralNetworks.h"
+#include <ATen/nnapi/NeuralNetworks.h>
 struct nnapi_wrapper {
   int(*_getDeviceCount)(uint32_t* numDevices);
   int(*_getDevice)(uint32_t devIndex, ANeuralNetworksDevice** device);

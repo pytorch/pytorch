@@ -227,12 +227,15 @@ def broadcast_shapes(shape1, shape2):
     assert len(shape2) > 0
     s1 = list(shape1)
     s2 = list(shape2)
+    # TODO: Support non-equal-rank broadcast where semantics match.
+    # This can be tricky for NHWC tensors because dimension orders
+    # don't match between PT and NNAPI, even though semantics match.
     if len(s1) > len(s2):
-        #s2 = [1] * (len(s1) - len(s2)) + s2
-        raise Exception("Non-equal-rank broadcast is too dangerous because XXX.")
+        # s2 = [1] * (len(s1) - len(s2)) + s2
+        raise Exception("Non-equal-rank broadcast is not supported yet.")
     if len(s2) > len(s1):
-        #s3 = [1] * (len(s2) - len(s1)) + s1
-        raise Exception("Non-equal-rank broadcast is too dangerous because XXX.")
+        # s3 = [1] * (len(s2) - len(s1)) + s1
+        raise Exception("Non-equal-rank broadcast is not supported yet.")
     ret = []
     for d1, d2 in zip(s1, s2):
         if d1 == 1:
@@ -580,56 +583,56 @@ class _NnapiSerializer(object):
         return struct.pack("i" * len(ints), *ints)
 
     ADDER_MAP = {
-            "prim::GetAttr": lambda self, node:
-                self.add_getattr(node),
-            "prim::Constant": lambda self, node:
-                self.add_constant_node(node),
-            "prim::ListConstruct": lambda self, node:
-                self.add_list_construct(node),
-            "prim::TupleConstruct": lambda self, node:
-                self.add_tuple_construct(node),
-            "aten::reshape": lambda self, node:
-                self.add_reshape(node),
-            "aten::quantize_per_tensor": lambda self, node:
-                self.add_quantize(node),
-            "aten::dequantize": lambda self, node:
-                self.add_dequantize(node),
-            "aten::add": lambda self, node:
-                self.add_add_sub_op(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
-            "aten::sub": lambda self, node:
-                self.add_add_sub_op(node, NNAPI_OperationCode.SUB, NNAPI_FuseCode.FUSED_NONE),
-            "aten::mul": lambda self, node:
-                self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.MUL),
-            "aten::relu": lambda self, node:
-                self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.RELU),
-            "aten::sigmoid": lambda self, node:
-                self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.LOGISTIC),
-            "aten::hardtanh": lambda self, node:
-                self.add_hardtanh(node),
-            "aten::max_pool2d": lambda self, node:
-                self.add_pool2d_node(node, NNAPI_OperationCode.MAX_POOL_2D),
-            "aten::adaptive_avg_pool2d": lambda self, node:
-                self.add_adaptive_avg_pool2d(node),
-            "aten::upsample_nearest2d": lambda self, node:
-                self.add_upsample_nearest2d(node),
-            "aten::prelu": lambda self, node:
-                self.add_prelu_op(node),
-            "aten::addmm": lambda self, node:
-                self.add_addmm(node),
-            "aten::_convolution": lambda self, node:
-                self.add_conv_underscore(node),
-            "aten::conv2d": lambda self, node:
-                self.add_conv2d(node),
-            "quantized::linear": lambda self, node:
-                self.add_qlinear(node),
-            "quantized::conv2d": lambda self, node:
-                self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE),
-            "quantized::conv2d_relu": lambda self, node:
-                self.add_qconv2d(node, NNAPI_FuseCode.FUSED_RELU),
-            "quantized::add": lambda self, node:
-                self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
-            "quantized::add_relu": lambda self, node:
-                self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_RELU),
+        "prim::GetAttr": lambda self, node:
+            self.add_getattr(node),
+        "prim::Constant": lambda self, node:
+            self.add_constant_node(node),
+        "prim::ListConstruct": lambda self, node:
+            self.add_list_construct(node),
+        "prim::TupleConstruct": lambda self, node:
+            self.add_tuple_construct(node),
+        "aten::reshape": lambda self, node:
+            self.add_reshape(node),
+        "aten::quantize_per_tensor": lambda self, node:
+            self.add_quantize(node),
+        "aten::dequantize": lambda self, node:
+            self.add_dequantize(node),
+        "aten::add": lambda self, node:
+            self.add_add_sub_op(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
+        "aten::sub": lambda self, node:
+            self.add_add_sub_op(node, NNAPI_OperationCode.SUB, NNAPI_FuseCode.FUSED_NONE),
+        "aten::mul": lambda self, node:
+            self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.MUL),
+        "aten::relu": lambda self, node:
+            self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.RELU),
+        "aten::sigmoid": lambda self, node:
+            self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.LOGISTIC),
+        "aten::hardtanh": lambda self, node:
+            self.add_hardtanh(node),
+        "aten::max_pool2d": lambda self, node:
+            self.add_pool2d_node(node, NNAPI_OperationCode.MAX_POOL_2D),
+        "aten::adaptive_avg_pool2d": lambda self, node:
+            self.add_adaptive_avg_pool2d(node),
+        "aten::upsample_nearest2d": lambda self, node:
+            self.add_upsample_nearest2d(node),
+        "aten::prelu": lambda self, node:
+            self.add_prelu_op(node),
+        "aten::addmm": lambda self, node:
+            self.add_addmm(node),
+        "aten::_convolution": lambda self, node:
+            self.add_conv_underscore(node),
+        "aten::conv2d": lambda self, node:
+            self.add_conv2d(node),
+        "quantized::linear": lambda self, node:
+            self.add_qlinear(node),
+        "quantized::conv2d": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_NONE),
+        "quantized::conv2d_relu": lambda self, node:
+            self.add_qconv2d(node, NNAPI_FuseCode.FUSED_RELU),
+        "quantized::add": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_NONE),
+        "quantized::add_relu": lambda self, node:
+            self.add_qadd(node, NNAPI_OperationCode.ADD, NNAPI_FuseCode.FUSED_RELU),
     }
 
     def add_node(self, node):
@@ -670,7 +673,6 @@ class _NnapiSerializer(object):
     def add_tuple_construct(self, node):
         assert node.outputsSize() == 1
         output = node.outputsAt(0)
-        #ctype = output.type()
         values = []
         for inp in node.inputs():
             values.append(inp)
