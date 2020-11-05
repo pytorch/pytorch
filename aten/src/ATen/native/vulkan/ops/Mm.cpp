@@ -29,16 +29,19 @@ Tensor addmm(
   const auto mat2_sizes = mat2.sizes();
 
   TORCH_CHECK(
-      (mat1_sizes[1] == mat2_sizes[0]) &&
-      (self_sizes[0] == mat1_sizes[0]) &&
-      (self_sizes[1] == mat2_sizes[1]),
+      (mat1_sizes[Layout::Parameter::width] ==
+          mat2_sizes[Layout::Parameter::height]) &&
+      (self_sizes[Layout::Parameter::height] ==
+          mat1_sizes[Layout::Parameter::height]) &&
+      (self_sizes[Layout::Parameter::width] ==
+          mat2_sizes[Layout::Parameter::width]),
       "Incompatible matrix dimensions!");
 
   vTensor v_output{
     context,
     {
-      mat1_sizes[0],
-      mat2_sizes[1],
+      mat1_sizes[Layout::Parameter::height],
+      mat2_sizes[Layout::Parameter::width],
     },
     self.options(),
   };
@@ -101,14 +104,15 @@ Tensor mm(const Tensor& self_arg, const Tensor& mat2_arg) {
   const auto mat2_sizes = mat2.sizes();
 
   TORCH_CHECK(
-      mat1_sizes[1] == mat2_sizes[0],
+      mat1_sizes[Layout::Parameter::width] ==
+          mat2_sizes[Layout::Parameter::height],
       "Incompatible matrix dimensions!");
 
   vTensor v_output{
     context,
     {
-      mat1_sizes[0],
-      mat2_sizes[1],
+      mat1_sizes[Layout::Parameter::height],
+      mat2_sizes[Layout::Parameter::width],
     },
     mat1.options(),
   };

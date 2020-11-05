@@ -17,12 +17,12 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   /* Dynamically Uniform */
-  const ivec2 size = textureSize(uImage, 0).xy;
+  const ivec3 size = textureSize(uImage, 0);
   const int plane = size.x * size.y;
   const int block = 4 * plane;
   const ivec4 offset = plane * ivec4(0, 1, 2, 3);
 
-  if (all(lessThan(pos.xy, size))) {
+  if (all(lessThan(pos, size))) {
     const vec4 texel = texelFetch(uImage, pos, 0);
 
     const int base = pos.x + size.x * pos.y + block * pos.z;
