@@ -1061,7 +1061,7 @@ class DistributedDataParallel(Module):
         dist._register_comm_hook(self.reducer, state, hook)
 
     def _register_builtin_comm_hook(
-        self, comm_hook_type: dist.BuiltinCommHookType
+        self, comm_hook_type
     ):
         r"""
         Registers a built-in communication hook that specifies how DDP
