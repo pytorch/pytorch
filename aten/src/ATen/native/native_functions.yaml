@@ -731,7 +731,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: sparse_mm_mkl(Tensor(a!) res, Tensor sparse_, Tensor dense, Tensor t, Scalar alpha, Scalar beta) -> Tensor(a!)
+- func: sparse_mm_mkl(Tensor(a!) self, Tensor sparse_, Tensor dense, Tensor t, Scalar alpha, Scalar beta) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
 
@@ -2762,7 +2762,7 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseGCS_CPU: _sparse_gcs_mm_out
 
-- func: sparse_gcs_mm(Tensor(a!) res, Tensor sparse_, Tensor t, Tensor dense, Scalar alpha, Scalar beta) -> Tensor(a!)
+- func: sparse_gcs_mm(Tensor(a!) self, Tensor sparse_, Tensor t, Tensor dense, Scalar alpha, Scalar beta) -> Tensor(a!)
   dispatch:
     SparseGCS_CPU: sparse_gcs_mm_cpu
 
