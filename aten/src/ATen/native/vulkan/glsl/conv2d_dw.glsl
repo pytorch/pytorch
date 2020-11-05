@@ -24,7 +24,6 @@ layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
-
   const ivec3 size = imageSize(uOutput);
   const ivec2 isize = textureSize(uInput, 0).xy;
 

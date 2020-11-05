@@ -264,8 +264,8 @@ Context Context::create(
     const c10::optional<Scalar> output_min,
     const c10::optional<Scalar> output_max) {
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
-  const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
   const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
+  const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
   const auto output_padding = output_padding_arg; // TODO: Deconvolutions
 
   TORCH_CHECK(
@@ -458,8 +458,8 @@ Tensor convolution(
       stride,
       padding,
       dilation,
-      /* transposed = */ false,
-      /* output_padding = */ {},
+      transposed,
+      output_padding,
       groups
   ).run(input);
 }
