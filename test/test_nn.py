@@ -10279,6 +10279,7 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, 10, device=device)
             mod(inp)
 
+    @onlyOnCPUAndCUDA
     def test_Bilinear_empty(self, device):
         mod = torch.nn.Bilinear(20, 30, 40)
         inp1 = torch.randn(0, 10, 20)
