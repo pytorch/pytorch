@@ -147,7 +147,7 @@ class TestList(JitTestCase):
             return list(list("abc"))
 
         self.checkScript(foo3, ())
-        FileCheck.check_count("aten::list", 2, exactly=True)
+        FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
 
     def test_min_bool_list(self):
         def jit_min_list(a, b):

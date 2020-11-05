@@ -2899,7 +2899,12 @@ struct to_ir {
       case prim::list: {
         if (apply.inputs().size() == 0) {
           TypePtr type = type_hint ? type_hint : ListType::ofTensors();
-          return std::make_shared<SimpleValue>(graph->insertNode(graph->createList(type, {}))->output());
+          if (!type->cast<ListType>()) {
+            throw ErrorReport(apply.range())
+            << "Expected list type annotation for list(), found "
+            << type_hint->repr_str();
+          }
+          return std::make_shared<SimpleValue>(graph->insertNode(graph->createList(type->expect<ListType>()->getElementType(), {}))->output());
         }
         // list(iter) desugars to [_elem for _elem in iter]
         checkApplyNumInputs(apply, 1);
