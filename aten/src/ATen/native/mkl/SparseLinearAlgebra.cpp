@@ -94,7 +94,7 @@ namespace at { namespace native {
                          static_cast<int>(dense_size[1]));
     }
 
-  Tensor& sparse_mm_mkl(Tensor& res, const SparseTensor& sparse_, const Tensor& dense,
+  Tensor sparse_mm_mkl(Tensor& res, const SparseTensor& sparse_, const Tensor& dense,
                         const Tensor& t, Scalar alpha, Scalar beta) {
     AT_DISPATCH_FLOATING_TYPES(
       dense.scalar_type(), "addmm_sparse_gcs_dense", [&] {
