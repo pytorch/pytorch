@@ -9831,7 +9831,6 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
-    @tf32_on_and_off()
     def test_symeig(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
@@ -9849,7 +9848,8 @@ class TestTorchDeviceType(TestCase):
             torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
 
             if eigenvectors:
-                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
+                outv_ = outv.cpu().numpy()
+                x_recon = np.matmul(np.matmul(outv_, torch.diag_embed(oute.to(dtype)).cpu().numpy()), outv_.swapaxes(-2, -1).conj())
                 self.assertEqual(x, x_recon, atol=reconstruct_tol, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
