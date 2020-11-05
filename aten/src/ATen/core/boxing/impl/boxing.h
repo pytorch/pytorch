@@ -83,47 +83,8 @@ static torch::jit::Stack boxArgs(Args... args) {
 }
 
 //
-// BoxedKernelWrapper
-//
-// For a given function type FT, BoxedKernelWrapper<FT> implements
-// a `call` method that
-// - takes a boxed kernel and unboxed arguments as specified by FT,
-// - calls `boxArgs` to box the arguments
-// - calls the boxed kernel
-// - unboxes and returns the result
-//
-// The partial specializations below handle various cases: in
-// particular, not all types appearing in op signatures are supported,
-// and ops returning references have nonstandard wrapper implementations.
-//
-
-// 1. The base specialization of BoxedKernelWrapper should never be instantiated.
-// A "no call method defined on BoxedKernelWrapper" compile error means that
-// an op signature has failed to trigger any of the partial specializations
-// that follow this one.
-//
-template <class FuncType, class Enable = void>
-struct BoxedKernelWrapper {
-  // The reason we're not just doing straight up static_assert(false, ...) here:
-  // Basically, the way to make sure a static_assert only fires if a template
-  // is actually instantiated (rather than every time the file is parsed) is to use
-  // template parameters in the expression, e.g. FuncType here. However, since
-  // `sizeof(FuncType) != sizeof(FuncType)` is always false, this has the same
-  // effect.
-  static_assert(sizeof(FuncType) != sizeof(FuncType),
-    "Function signature contains one or more unsupported parameter and/or return types. "
-    "Look for a nearby error like "
-    "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
-    "- (your function type) is the unsupported signature.");
-};
-
-//
-// 2. Supported signatures, other than those involving non-const Tensor refs.
-//
-
-// PopResult is a helper class whose specializations handle single and
-// multiple return values, respectively. The specialization of BoxedKernelWrapper
-// follows.
+// PopResult is a helper class whose specializations handle popping single and
+// multiple return values, respectively.
 //
 template <class Result>
 struct PopResult final {
@@ -159,6 +120,46 @@ private:
     return std::make_tuple((std::move(stack[indices]).to<Types>())...);
   }
 };
+
+//
+// BoxedKernelWrapper
+//
+// For a given function type FT, BoxedKernelWrapper<FT> implements
+// a `call` method that
+// - takes a boxed kernel and unboxed arguments as specified by FT,
+// - calls `boxArgs` to box the arguments
+// - calls the boxed kernel
+// - unboxes and returns the result
+//
+// The partial specializations below handle various cases: in
+// particular, not all types appearing in op signatures are supported,
+// and ops returning references have nonstandard wrapper implementations.
+//
+
+// 1. The base specialization of BoxedKernelWrapper should never be instantiated.
+// A "no call method defined on BoxedKernelWrapper" compile error means that
+// an op signature has failed to trigger any of the partial specializations
+// that follow this one.
+//
+template <class FuncType, class Enable = void>
+struct BoxedKernelWrapper {
+  // The reason we're not just doing straight up static_assert(false, ...) here:
+  // Basically, the way to make sure a static_assert only fires if a template
+  // is actually instantiated (rather than every time the file is parsed) is to use
+  // template parameters in the expression, e.g. FuncType here. However, since
+  // `sizeof(FuncType) != sizeof(FuncType)` is always false, this has the same
+  // effect.
+  static_assert(sizeof(FuncType) != sizeof(FuncType),
+    "Function signature contains one or more unsupported parameter and/or return types. "
+    "Look for a nearby error like "
+    "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
+    "- (your function type) is the unsupported signature.");
+};
+
+//
+// 2. Supported signatures, other than those involving non-const Tensor refs -
+// i.e., "functional" ops.
+//
 
 template <class Result, class... Args>
 struct BoxedKernelWrapper<
@@ -200,8 +201,7 @@ struct BoxedKernelWrapper<
 //
 // Note: all signatures matching this pattern are are assumed to be for such ops.
 // Because of this, the generated BoxedKernelWrapper specializations simply
-// return the in-place argument, to avoid overhead associated with needlessly
-// popping it off the IValue stack.
+// return the in-place argument.
 //
 // TODO update comment when legacy out-of-place signatures no longer need
 // to be supported, due to hacky_wrapper reordering
@@ -237,8 +237,7 @@ struct BoxedKernelWrapper<
 //
 // Note: all signatures matching this pattern are are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
-// return the out argument, avoiding overhead associated with needlessly popping
-// them it the IValue stack.
+// return out arguments.
 //
 template <class FirstArg, class... RestArgs>
 struct BoxedKernelWrapper<
@@ -271,14 +270,13 @@ struct BoxedKernelWrapper<
 };
 
 //
-// 4. an out of place op takes one or more non-const Tensor ref arguments at the
+// 5. an out of place op takes one or more non-const Tensor ref arguments at the
 // end of the arg list, and also returns it/them. This specialization supports
 // those that take and return multiple out arguments.
 //
 // Note: all signatures matching this pattern are are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
-// return the out arguments, avoiding overhead associated with needlessly popping
-// them off the IValue stack.
+// return the out arguments.
 //
 template <class Result, class... Args>
 struct BoxedKernelWrapper<
@@ -331,7 +329,7 @@ struct BoxedKernelWrapper<
 };
 
 //
-// 4a. legacy trap for old-school multi-return out functions with mutable args
+// 6. legacy trap for old-school multi-return out functions with mutable args
 // at start rather than end of arg list.
 // TODO remove when hacky_wrapper reorders legacy kernel out args
 //
