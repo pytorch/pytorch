@@ -458,7 +458,6 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       // graph is essentially in a torch.no_grad context.
       UpdateDifferentiableGraphRequiresGrad(gradient.f, false);
       GRAPH_DEBUG("After UpdateDifferentiableGraphRequiresGrad ", *gradient.f);
-      runDiffGraphPasses(gradient.f);
       // replaces fallback graphs inserted by TE Fuser
       replaceFallbackGraphWithFallbackFunction(gradient.f->block());
       packGradient(gradient, dnode);
