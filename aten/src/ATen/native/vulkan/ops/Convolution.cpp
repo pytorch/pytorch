@@ -13,6 +13,7 @@ namespace {
 class Context final : public torch::jit::CustomClassHolder {
  public:
   static Context create(
+      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
@@ -39,6 +40,7 @@ class Context final : public torch::jit::CustomClassHolder {
 
  private:
   Context(
+      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias,
       IntArrayRef stride,
@@ -54,9 +56,10 @@ class Context final : public torch::jit::CustomClassHolder {
   struct {
     vTensor v_weight;
     vTensor v_bias;
-    std::array<int32_t, 2> stride;
-    std::array<int32_t, 2> padding;
-    std::array<int32_t, 2> dilation;
+    std::array<int64_t, 2> kernel;
+    std::array<int64_t, 2> stride;
+    std::array<int64_t, 2> padding;
+    std::array<int64_t, 2> dilation;
     int32_t groups;
     float output_min;
     float output_max;
@@ -75,19 +78,20 @@ class Context final : public torch::jit::CustomClassHolder {
 };
 
 vTensor pack_weights(
+    api::Resource::Pool& pool,
     const Tensor& weight,
     const int64_t groups) {
   // Depthwise
   if ((weight.size(Layout::Filter::input) == groups) &&
       (weight.size(Layout::Filter::output) == groups)) {
     if (weight.is_vulkan()) {
-      // Assume the weights are already in the right layout.
+      // Assume the weights are already in the anticipated layout.
       return convert(weight);
     }
 
     vTensor v_weight{
       api::context(),
-      &persistent()->pool,
+      &pool,
       weight.sizes(),
       weight.options(),
     };
@@ -110,6 +114,7 @@ vTensor pack_weights(
 }
 
 vTensor pack_biases(
+    api::Resource::Pool& pool,
     const c10::optional<Tensor>& bias,
     const Tensor& weight) {
   if (bias && bias->is_vulkan()) {
@@ -122,7 +127,7 @@ vTensor pack_biases(
 
   vTensor v_bias{
     api::context(),
-    &persistent()->pool,
+    &pool,
     {
       // 1D
       weight.size(Layout::Filter::output),
@@ -144,7 +149,9 @@ vTensor pack_biases(
       else {
         memset(
             v_bias_payload.get(),
-            0,  // Integer and IEEE-754 FP32 have identical 0 bit pattern.
+            // 2's complement integers and IEEE-754 floating point numbers both
+            // have identical bit representations for 0, so can use memset.
+            0,
             v_bias.nbytes());
       }
     }
@@ -152,16 +159,17 @@ vTensor pack_biases(
   return v_bias;
 }
 
-std::array<int32_t, 2> pack_params(const std::vector<int64_t>& vector) {
+std::array<int64_t, 2> pack_params(const std::vector<int64_t>& vector) {
   TORCH_INTERNAL_ASSERT(2u == vector.size(), "Invalid usage!");
 
-  return std::array<int32_t, 2>{
-    api::utils::safe_downcast<int32_t>(vector[0]),
-    api::utils::safe_downcast<int32_t>(vector[1]),
+  return std::array<int64_t, 2>{
+    vector[0],
+    vector[1],
   };
 }
 
 Context::Context(
+    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride,
@@ -173,8 +181,12 @@ Context::Context(
     const c10::optional<Scalar> output_min,
     const c10::optional<Scalar> output_max)
   : packed_{
-      pack_weights(weight, groups),
-      pack_biases(bias, weight),
+      pack_weights(pool, weight, groups),
+      pack_biases(pool, bias, weight),
+      {
+        weight.size(Layout::Filter::height),
+        weight.size(Layout::Filter::width),
+      },
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
       pack_params(expand_param_if_needed(dilation, "dilation", 2)),
@@ -210,11 +222,13 @@ bool available(
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
          (weight.size(Layout::Filter::width) > 0) &&
-         (c10::DeviceType::Vulkan == weight.device().type()) &&
+         ((c10::DeviceType::CPU == weight.device().type()) ||
+          (c10::DeviceType::Vulkan == weight.device().type())) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       (c10::DeviceType::Vulkan == bias->device().type()) &&
+                                       ((c10::DeviceType::CPU == bias->device().type()) ||
+                                        (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (transposed ? false /* to be addded in the future */
                                                    : (weight.size(Layout::Filter::output) == bias->size(Layout::Filter::output))))
@@ -244,6 +258,7 @@ bool available(
 }
 
 Context Context::create(
+    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
@@ -257,7 +272,7 @@ Context Context::create(
   const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
   const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
   const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
-  const auto output_padding = expand_param_if_needed(output_padding_arg, "output_padding", 2);
+  const auto output_padding = output_padding_arg; // TODO: Deconvolutions
 
   TORCH_CHECK(
       available(
@@ -278,6 +293,7 @@ Context Context::create(
 
   // Pass in the originals
   return Context{
+    pool,
     weight,
     bias,
     stride_arg,
@@ -315,36 +331,41 @@ Tensor Context::run(const Tensor& input_arg) const {
       "Vulkan Convolution not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by Vulkan impl.");
 
-  const IntArrayRef input_sizes = ;
-  const IntArrayRef weight_sizes = ;
-
   vTensor v_output{
     context,
     conv_output_size(
         v_input.sizes(),
         packed_.v_weight.sizes(),
-        {
-          packed_.padding[0],
-          packed_.padding[1],
-        },
-        {
-          packed_.stride[0],
-          packed_.stride[1],
-        },
-        {
-          packed_.dilation[0],
-          packed_.dilation[1],
-        }),
+        packed_.padding,
+        packed_.stride,
+        packed_.dilation),
     input.options(),
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
+    using namespace api::utils;
+
     if (v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image()) {
-      // const struct {
-      // } block {
-      // };
+      const struct {
+        int32_t kernel_x, kernel_y;
+        int32_t stride_x, stride_y;
+        int32_t padding_x, padding_y;
+        int32_t dilate_x, dilate_y;
+        float clamp_x, clamp_y;
+      } block {
+        safe_downcast<int32_t>(packed_.kernel[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_.kernel[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::height]),
+        packed_.output_min,
+        packed_.output_max,
+      };
 
       context->dispatch(
           command_buffer,
@@ -355,7 +376,7 @@ Tensor Context::run(const Tensor& input_arg) const {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(conv2d_dw_clamp),
+          VK_KERNEL(conv2d_dw),
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
@@ -407,14 +428,15 @@ c10::intrusive_ptr<Context> conv2_clamp_prepack(
     const c10::optional<Scalar> output_max) {
   return c10::make_intrusive<Context>(
       Context::create(
+          persistent()->pool,
           std::move(weight),
           std::move(bias),
           std::move(stride),
           std::move(padding),
           std::move(dilation),
-          groups,
           /* transposed = */ false,
           /* output_padding = */ {},
+          groups,
           output_min,
           output_min));
 }
@@ -436,14 +458,15 @@ Tensor convolution(
     const IntArrayRef output_padding,
     const int64_t groups) {
   return Context::create(
+      api::context()->resource().pool,
       weight,
       bias,
       stride,
       padding,
       dilation,
-      groups,
       /* transposed = */ false,
-      /* output_padding = */ {}
+      /* output_padding = */ {},
+      groups
   ).run(input);
 }
 

@@ -17,7 +17,7 @@ layout(set = 0, binding = 4)          uniform PRECISION restrict           Block
   ivec2 stride;
   ivec2 padding;
   ivec2 dilate;
-  ivec2 clamp;
+  vec2 clamp;
 } uBlock;
 
 #define UP_DIV(x, y) (((x) + (y)-1) / (y))

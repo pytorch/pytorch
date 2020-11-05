@@ -168,7 +168,16 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
-      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          py::init<
+              const std::vector<Tensor>&,
+              const std::vector<size_t>&,
+              const std::vector<size_t>&,
+              const std::vector<c10::IntArrayRef>&>(),
+          py::arg("tensors"),
+          py::arg("offsets"),
+          py::arg("lengths"),
+          py::arg("sizes_list"))
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
@@ -179,7 +188,19 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
             replicas only in the case of single process multiple device mode. In
             the single process single device mode, this list would consist of only
             a single tensor.
-           )");
+           )")
+      .def(
+          "get_offsets",
+          &::c10d::GradBucket::getOffsets,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_lengths",
+          &::c10d::GradBucket::getLengths,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_sizes_list",
+          &::c10d::GradBucket::getSizesVec,
+          py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
 An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
