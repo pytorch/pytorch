@@ -19744,6 +19744,14 @@ else:
         self.assertEqual(x / s, x / y)
         self.assertEqual(s / x, y / x)
 
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_sqrt_complex_edge_values(self, device, dtype):
+        x = torch.tensor(0. - 1.0000e+20j, dtype=dtype, device=device)
+        self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+
+        x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
+        self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
     exact_dtype = True
