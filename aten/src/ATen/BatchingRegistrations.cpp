@@ -408,7 +408,7 @@ static void checkBasicAsStridedValidForSlice(
   if (!max_as_strided_loc.has_value()) {
     return;
   }
-  if (max_as_strided_loc.has_value() && !max_slice_loc.has_value()) {
+  if (!max_slice_loc.has_value()) {
     TORCH_CHECK(false,
         "result = tensor.as_strided(", sizes, ",",  strides, ",", storage_offset, ")",
         "can access memory outside of `tensor`. `tensor` has no storage but the ",
