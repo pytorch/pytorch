@@ -2969,7 +2969,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             embedding_dim, num_offsets,
             use_32bit_indices, use_32bit_offsets,
             enable_per_sample_weights,
-            include_last_offset, prune_weights, sparsity, atol, rtol):
+            include_last_offset, sparsity, atol, rtol):
         pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
         pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
         if bit_rate == 4:
@@ -3026,7 +3026,8 @@ class TestQuantizedEmbeddingOps(TestCase):
 
         mapping_table = np.zeros(num_embeddings, dtype=np.int32)
         pruned_weights = weights
-        if prune_weights and bit_rate == 4:
+        prune_weights = sparsity > 0
+        if prune_weights:
             # Prune and generate mapping table
             num_compressed_rows = 0
             unpruned_ids = []
@@ -3041,22 +3042,15 @@ class TestQuantizedEmbeddingOps(TestCase):
                     unpruned_ids.append(i)
             q_weights = q_weights[unpruned_ids]
             pruned_weights = weights[unpruned_ids]
-            result = pt_op(q_weights,
-                           indices.int() if use_32bit_indices else indices,
-                           offsets.int() if use_32bit_offsets else offsets,
-                           mode=0,
-                           pruned_weights=prune_weights,
-                           per_sample_weights=per_sample_weights,
-                           compressed_indices_mapping=torch.tensor(mapping_table),
-                           include_last_offset=include_last_offset)
-        else:
-            result = pt_op(q_weights,
-                           indices.int() if use_32bit_indices else indices,
-                           offsets.int() if use_32bit_offsets else offsets,
-                           mode=0,
-                           pruned_weights=prune_weights,
-                           per_sample_weights=per_sample_weights,
-                           include_last_offset=include_last_offset)
+
+        result = pt_op(q_weights,
+                       indices.int() if use_32bit_indices else indices,
+                       offsets.int() if use_32bit_offsets else offsets,
+                       mode=0,
+                       pruned_weights=prune_weights,
+                       per_sample_weights=per_sample_weights,
+                       compressed_indices_mapping=torch.tensor(mapping_table),
+                       include_last_offset=include_last_offset)
 
         reference_result = get_reference_result(
             num_embeddings, embedding_dim, include_last_offset, weights,
@@ -3098,18 +3092,20 @@ class TestQuantizedEmbeddingOps(TestCase):
            use_32bit_indices=st.booleans(),
            use_32bit_offsets=st.booleans(),
            enable_per_sample_weights=st.booleans(),
-           include_last_offset=st.booleans())
+           include_last_offset=st.booleans(),
+           sparsity=st.sampled_from([0.0, 0.5, 0.7]))
     def test_embedding_bag_byte(self, num_embeddings,
                                 embedding_dim, num_offsets,
                                 use_32bit_indices,
                                 use_32bit_offsets,
                                 enable_per_sample_weights,
-                                include_last_offset):
+                                include_last_offset,
+                                sparsity):
         self.embedding_bag_rowwise_offsets_run(
             8, num_embeddings, embedding_dim, num_offsets,
             use_32bit_indices, use_32bit_offsets,
-            enable_per_sample_weights, include_last_offset, prune_weights=False,
-            sparsity=0, atol=0.005, rtol=1e-3)
+            enable_per_sample_weights, include_last_offset,
+            sparsity=sparsity, atol=0.005, rtol=1e-3)
 
     """ Tests the correctness of the embedding_bag_4bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
@@ -3130,7 +3126,7 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                embedding_dim, num_offsets,
                                                use_32bit_indices, use_32bit_offsets,
                                                enable_per_sample_weights,
-                                               include_last_offset, True, sparsity=sparsity,
+                                               include_last_offset, sparsity=sparsity,
                                                atol=0.1, rtol=1e-2)
 
     """ Tests the correctness of the quantized embedding lookup operator """
