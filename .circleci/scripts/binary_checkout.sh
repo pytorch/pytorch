@@ -36,6 +36,8 @@ fi
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
+export CIRCLE_SHA1="a4e04a1cd64b104095ed5c4af25bd76cf10e967f"
+export CIRCLE_BRANCH="mszhanyi:zhanyi/addcu11bintest"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
   git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
