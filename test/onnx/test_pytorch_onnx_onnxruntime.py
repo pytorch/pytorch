@@ -2998,7 +2998,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x):
                 return x.nonzero(), x.nonzero(as_tuple=True)
 
-        x = torch.randn(3*4*5).index_fill_(0, torch.randint(0, 3*4*5, (20,)), 0).view(3, 4, 5)
+        x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
         self.run_test(NonzeroModel(), (x,))
 
     def test_unbind(self):
