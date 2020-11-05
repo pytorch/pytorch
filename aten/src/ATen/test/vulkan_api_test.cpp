@@ -233,7 +233,10 @@ TEST(VulkanAPITest, conv2d_depthwise) {
     return;
   }
 
-  constexpr int64_t groups = 1u;
+  constexpr int64_t groups = 7;
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{3, 1};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
 
   constexpr struct {
     uint32_t batches;
@@ -249,12 +252,7 @@ TEST(VulkanAPITest, conv2d_depthwise) {
         height,
       };
     }
-  } input {
-    1u,
-    groups,
-    4u,
-    4u,
-  };
+  } input {1, groups, 137, 199};
 
   constexpr struct {
     uint32_t output_channels;
@@ -270,20 +268,11 @@ TEST(VulkanAPITest, conv2d_depthwise) {
         height,
       };
     }
-  } weights {
-    groups,
-    groups,
-    3u,
-    3u,
-  };
+  } weights {groups, 1, 17, 7};
 
   const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
   const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
-
-  constexpr std::array<int64_t, 2u> stride{1, 1};
-  constexpr std::array<int64_t, 2u> padding{0, 0};
-  constexpr std::array<int64_t, 2u> dilation{1, 1};
+  const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,

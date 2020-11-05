@@ -82,10 +82,8 @@ vTensor pack_weights(
     const Tensor& weight,
     const int64_t groups) {
   // Depthwise
-  if ((weight.size(Layout::Filter::input) == groups) &&
-      (weight.size(Layout::Filter::output) == groups)) {
+  if ((weight.size(Layout::Filter::output) == groups)) {
     if (weight.is_vulkan()) {
-      // Assume the weights are already in the anticipated layout.
       return convert(weight);
     }
 
@@ -118,10 +116,6 @@ vTensor pack_biases(
     const c10::optional<Tensor>& bias,
     const Tensor& weight) {
   if (bias && bias->is_vulkan()) {
-    TORCH_CHECK(
-      weight.size(Layout::Filter::output) == bias->size(Layout::Filter::output),
-      "Unexpected bias shape!");
-
     return convert(*bias);
   }
 

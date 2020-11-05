@@ -20,39 +20,34 @@ layout(set = 0, binding = 4)          uniform PRECISION restrict           Block
   vec2 clamp;
 } uBlock;
 
-#define UP_DIV(x, y) (((x) + (y)-1) / (y))
-
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-  ivec4 outputSize = uConstBlock.outputSize;
-  if (all(lessThan(ivec3(gl_GlobalInvocationID), outputSize.xyz))) {
-    int KW = uConstBlock.kernelSize.x;
-    int KH = uConstBlock.kernelSize.y;
-    ivec4 inputSize = uConstBlock.inputSize;
-    ivec2 dilate = uConstBlock.dilate;
-    ivec2 padding = uConstBlock.padding;
-    ivec2 stride = uConstBlock.stride;
+  const ivec3 size = imageSize(uOutput);
+  const ivec2 isize = textureSize(uInput, 0).xy;
 
-    ivec2 s0 = pos.xy * stride - padding;
-    ivec2 sfxy = max(ivec2(0), (UP_DIV(-s0, dilate)));
-    ivec2 efxy = min(uConstBlock.kernelSize, UP_DIV(inputSize.xy - s0, dilate));
+  if (all(lessThan(pos, size))) {
+    const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
 
-    vec4 acc = uBias.data[pos.z];
-    int sx, kxi, kyi;
-    for (kyi = sfxy.y; kyi < efxy.y; ++kyi) {
-      int sy = kyi * dilate.y + s0.y;
-      for (kxi = 0; kxi < KW; ++kxi) {
-        sx = kxi * dilate.x + s0.x;
-        vec4 iv = texelFetch(uInput, ivec3(sx, sy, pos.z), 0);
-        vec4 kv = texelFetch(uKernel, ivec3(kxi, kyi, pos.z), 0);
-        acc += kv * iv;
+    const ivec2 start = max(ivec2(0), ipos);
+    const ivec2 end = min(ipos + uBlock.kernel, isize);
+
+    vec4 sum = uBias.data[pos.z];
+
+    for (int y = start.y, ky = 0; y < end.y; y += uBlock.dilate.y, ++ky) {
+      for (int x = start.x, kx = 0; x < end.x; x += uBlock.dilate.x, ++kx) {
+        sum = fma(
+            texelFetch(uInput, ivec3(x, y, pos.z), 0),
+            texelFetch(uKernel, ivec3(kx, ky, pos.z), 0),
+            sum);
       }
     }
-    vec4 outputMin = vec4(uConstBlock.outputMin);
-    vec4 outputMax = vec4(uConstBlock.outputMax);
-    imageStore(uOutput, pos, clamp(acc, outputMin, outputMax));
+
+    imageStore(
+        uOutput,
+        pos,
+        clamp(sum, uBlock.clamp.x, uBlock.clamp.y));
   }
 }
