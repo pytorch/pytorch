@@ -29,8 +29,7 @@ namespace {
 
 
 static auto intListAttr =Symbol::attr("profiled_int_list");
-static auto boolAttr =Symbol::attr("profiled_bool_list");
-
+static auto boolAttr = Symbol::attr("profiled_bool");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;

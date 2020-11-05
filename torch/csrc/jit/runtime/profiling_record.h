@@ -84,9 +84,6 @@ using Dimension = int64_t;
 
 struct ProfilingRecord;
 
-TORCH_API void RegisterProfilingNode(const std::function<bool(const Node*)>&);
-TORCH_API void RegisterProfilingValue(const std::function<bool(ProfilingRecord*, Node*, size_t offset)>&);
-
 // `SetPartitioningHelper` is used to maintain the following invariant:
 // For **every** profiling run, *the same `ShapeSymbol` is always associated
 // with the same `Dimension`*.
@@ -205,7 +202,7 @@ struct ProfilingRecord {
     return profiled_graph_;
   }
 
-  ProfileIValueOp* createProfileIValueNode(Value* in_val);
+  TORCH_API ProfileIValueOp* createProfileIValueNode(Value* in_val);
 
  private:
   ProfileOp* createProfileNode(

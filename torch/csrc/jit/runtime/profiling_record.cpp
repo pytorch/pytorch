@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include "jit/ir/ir.h"
+#include "torch/csrc/jit/codegen/cuda/interface.h"
 
 namespace torch {
 namespace jit {
@@ -159,8 +160,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 }
 
 bool needsProfiledInputs(Node* n) {
-  // Add CUDAFuser checks
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) || fuser::cuda::canFuseNode(n)) {
     return true;
   }
 
@@ -191,7 +191,7 @@ bool needsProfiledInputs(Node* n) {
 }
 
 bool needsProfiledOutput(Node* n) {
-  if (tensorexpr::isSupported(n)) {
+  if (tensorexpr::isSupported(n) || fuser::cuda::canFuseNode(n)) {
     return true;
   }
 

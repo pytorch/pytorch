@@ -40,9 +40,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 
 Value* createConditionalConstant(Node* profile_ivalue) {
   TORCH_INTERNAL_ASSERT(profile_ivalue->kind() == prim::profile_ivalue);
-  TORCH_INTERNAL_ASSERT(profile_ivalue->hasAttribute(attr::profiled_type) && profile_ivalue->hasAttribute(attr::a));
 
-  auto type = profile_ivalue->ty(attr::profiled_type);
   auto graph = profile_ivalue->owningGraph();
 
   IValue val; // default to None
@@ -53,6 +51,7 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // bool
     val = IValue(static_cast<bool>(profile_ivalue->i(Symbol::attr("profiled_bool"))));
   } else {
+    GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
     TORCH_INTERNAL_ASSERT(false, __func__, " gets unidentified type: ", profile_ivalue->ty(attr::profiled_type));
   }
 
@@ -1161,7 +1160,8 @@ void guardFusionGroup(Node* fusion) {
       //         ->insertBefore(versioning_if);
       // eq_node->output()->setType(BoolType::get());
       Value* ivalue_check = nullptr;
-      if (fusion->input(offset)->node()->ty(attr::profiled_type)->isSubtypeOf(static_cast<c10::TypePtr>(BoolType::get()))) {
+      if (fusion->input(offset)->node()->hasAttribute(
+              Symbol::attr("profiled_bool"))) {
         auto xor_n =
              fusion->owningGraph()
                  ->create(aten::__xor__, {profiled_ival, const_o}, 1)
