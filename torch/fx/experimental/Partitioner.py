@@ -74,6 +74,21 @@ class Partition:
                 self.nodes.add(n)
         self.nodes.add(node)
 
+    def remove_node(self, node):
+        # Remove a node only if the node is in the partition
+        if node in self.nodes:
+            self.nodes.remove(node)
+            # Collect the node's input nodes
+            input_nodes: Dict[Node, None] = {}
+            map_arg(node.args, lambda n: input_nodes.setdefault(n))
+            map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+            # Check if an input node is a placeholder or get_attr,
+            # and this input node is not used by some other nodes in this partition,
+            # the remove this input node
+            for input_node in input_nodes:
+                if all([n not in self.nodes for n in input_node.users]):
+                    self.nodes.remove(input_node)
+
 
 class PartitionResult(NamedTuple):
     """NameTuple used for returning DAG and a new graph module
