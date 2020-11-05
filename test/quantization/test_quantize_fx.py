@@ -1059,6 +1059,28 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 M().eval(), (data,), quant_type, expected_node_list=node_list)
 
+    def test_sequential(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.convs = torch.nn.Sequential(
+                    torch.nn.Conv2d(1, 1, 1),
+                    torch.nn.Conv2d(1, 1, 1)
+                )
+
+            def forward(self, x):
+                x = self.convs(x)
+                return x
+
+        data = torch.rand(5, 1, 3, 3, dtype=torch.float)
+        for quant_type in self.static_quant_types:
+            node_list = [
+                ns.call_module(nnq.Conv2d),
+                ns.call_module(nnq.Conv2d),
+            ]
+            self.checkGraphModeFxOp(
+                M().eval(), (data,), quant_type, expected_node_list=node_list)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
