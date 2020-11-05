@@ -71,15 +71,22 @@ using can_unbox =
   >;
 
 //
+// boxArgs - utility for pushing unboxed args onto IValue stack
+//
+template <class... Args>
+static torch::jit::Stack boxArgs(Args... args) {
+  // TODO Reuse stack vector instead of allocating?
+  torch::jit::Stack stack;
+  stack.reserve(sizeof...(Args));
+  torch::jit::push(stack, std::forward<Args>(args)...);
+  return stack;
+}
+
+//
 // BoxedKernelWrapper
 //
 // For a given function type FT, BoxedKernelWrapper<FT> implements
-//
-// 1. a `boxArgs` method that boxes the function's arguments - i.e.,
-//    inserts each argument into an IValue that it pushes onto a
-//    torch::jit::Stack, which it returns
-//
-// 2. a `call` method that
+// a `call` method that
 // - takes a boxed kernel and unboxed arguments as specified by FT,
 // - calls `boxArgs` to box the arguments
 // - calls the boxed kernel
@@ -111,10 +118,12 @@ struct BoxedKernelWrapper {
 };
 
 //
-// 2. Supported signatures, other than ref-passing.
+// 2. Supported signatures, other than those involving non-const Tensor refs.
 //
 
-// helper class whose specializations handle single and multiple return values, respectively
+// PopResult is a helper class whose specializations handle single and
+// multiple return values, respectively. The specialization of BoxedKernelWrapper
+// follows.
 //
 template <class Result>
 struct PopResult final {
@@ -159,14 +168,6 @@ struct BoxedKernelWrapper<
     void
   >
 > {
-  static torch::jit::Stack boxArgs(Args... args) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(sizeof...(Args));
-    torch::jit::push(stack, std::forward<Args>(args)...);
-    return stack;
-  }
-
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
@@ -194,12 +195,16 @@ struct BoxedKernelWrapper<
 };
 
 //
-// 3. signatures taking a single Tensor reference as their first argument,
-// and also returning one.
+// 3. in-place and legacy out-of-place ops take a single non-const Tensor
+// reference as their first argument, and return it.
 //
-// Note that the passed kernels are assumed to be for inplace/outplace ops,
-// and the generated BoxedKernelWrapper specializations will simply return
-// the initial argument.
+// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Because of this, the generated BoxedKernelWrapper specializations simply
+// return the in-place argument, to avoid overhead associated with needlessly
+// popping it off the IValue stack.
+//
+// TODO update comment when legacy out-of-place signatures no longer need
+// to be supported, due to hacky_wrapper reordering
 //
 
 template <class... OtherArgs>
@@ -207,21 +212,11 @@ struct BoxedKernelWrapper<
   at::Tensor&(at::Tensor&, OtherArgs...),
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
 > {
-  static torch::jit::Stack boxArgs(at::Tensor& outArg, OtherArgs... otherArgs) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(1 + sizeof...(OtherArgs));
-    torch::jit::push_one(stack, outArg);
-    torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
-    return stack;
-  }
-
   static at::Tensor& call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
     const OperatorHandle& opHandle,
-    at::Tensor& outArg,
-    OtherArgs... otherArgs
+    at::Tensor& outArg, OtherArgs... otherArgs
   ) {
     torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
     (*boxed_kernel_func)(functor, opHandle, &stack);
@@ -236,23 +231,65 @@ struct BoxedKernelWrapper<
 };
 
 //
-// 4. signatures returning a tuple of Tensor references, and taking the same
-// number of Tensor refs as their final arguments.
+// 4. an out of place op takes one or more non-const Tensor ref arguments at the
+// end of the arg list, and also returns it/them. This specialization supports
+// those that take and return a single out argument.
 //
-// Note that the passed kernels are assumed to be for out-of-place ops,
-// and the generated BoxedKernelWrapper specializations will return a tuple
-// of those out arguments.
+// Note: all signatures matching this pattern are are assumed to be for such ops.
+// This assumption permits the generated BoxedKernelWrapper specializations to simply
+// return the out argument, avoiding overhead associated with needlessly popping
+// them it the IValue stack.
+//
+template <class FirstArg, class... RestArgs>
+struct BoxedKernelWrapper<
+  at::Tensor&(FirstArg, RestArgs...),
+  std::enable_if_t<
+    can_box_all<FirstArg, RestArgs...>::value
+    // this skips over in-place (and legacy out-of-place) kernels with a non-const Tensor
+    // arg at the front, so those can unambiguously trigger the preceding specialization.
+    // TODO update comment when hacky_wrapper reorders legacy out-of-place signatures
+    && !is_mutable_tensor_ref<FirstArg>::value,
+    void
+  >
+> {
+  static at::Tensor& call(
+    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
+    OperatorKernel* functor,
+    const OperatorHandle& opHandle,
+    FirstArg firstArg, RestArgs... restArgs
+  ) {
+    torch::jit::Stack stack = boxArgs(firstArg, restArgs...);
+    (*boxed_kernel_func)(functor, opHandle, &stack);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stack.size() == 1,
+      "Boxed kernel was expected to return a single value on the stack, ",
+      "but instead returned ", stack.size(), " values."
+    );
+
+    return std::get<sizeof...(RestArgs) - 1>(std::tuple<RestArgs...>{restArgs...});
+  }
+};
+
+//
+// 4. an out of place op takes one or more non-const Tensor ref arguments at the
+// end of the arg list, and also returns it/them. This specialization supports
+// those that take and return multiple out arguments.
+//
+// Note: all signatures matching this pattern are are assumed to be for such ops.
+// This assumption permits the generated BoxedKernelWrapper specializations to simply
+// return the out arguments, avoiding overhead associated with needlessly popping
+// them off the IValue stack.
 //
 template <class Result, class... Args>
 struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
     can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value
-    // this abomination just skips over legacy kernels with out args at front, so they can trigger
+    // this abomination just skips over legacy kernels with out args at the front, so they can trigger
     // the specialization that follows.
-    // note: this test is extra awful because boolean value expressions in templates don't shortcut,
+    // note: this test is extra terrible because boolean value expressions in templates don't shortcut.
     // so without the ternary, a result tuple that's wider than the arg list will cause a compile error
-    // even with a length check preceding it in the conjunction. template metaprogramming: no way to live(tm)
+    // even with a length check preceding it in the conjunction. template metaprogramming ftw
     // TODO remove when hacky_wrapper reorders legacy kernel out args
     && !std::is_same<
         Result,
@@ -266,14 +303,6 @@ struct BoxedKernelWrapper<
     void
   >
 > {
-  static torch::jit::Stack boxArgs(Args... args) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(sizeof...(Args));
-    torch::jit::push(stack, std::forward<Args>(args)...);
-    return stack;
-  }
-
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
@@ -302,7 +331,7 @@ struct BoxedKernelWrapper<
 };
 
 //
-// 5. legacy trap for old-school multi-return out functions with mutable args
+// 4a. legacy trap for old-school multi-return out functions with mutable args
 // at start rather than end of arg list.
 // TODO remove when hacky_wrapper reorders legacy kernel out args
 //
@@ -324,14 +353,6 @@ struct BoxedKernelWrapper<
     void
   >
 > {
-  static torch::jit::Stack boxArgs(Args... args) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(sizeof...(Args));
-    torch::jit::push(stack, std::forward<Args>(args)...);
-    return stack;
-  }
-
   static Result call(
     KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
     OperatorKernel* functor,
