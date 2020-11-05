@@ -55,9 +55,6 @@ struct nnapi_wrapper {
   void(*Event_free)(ANeuralNetworksEvent* event);
   int(*Execution_getOutputOperandRank)(ANeuralNetworksExecution* execution, int32_t index, uint32_t* rank);
   int(*Execution_getOutputOperandDimensions)(ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions);
-  int(*Burst_create)(ANeuralNetworksCompilation* compilation, ANeuralNetworksBurst** burst);
-  void(*Burst_free)(ANeuralNetworksBurst* burst);
-  int(*Execution_burstCompute)(ANeuralNetworksExecution* execution, ANeuralNetworksBurst* burst);
 };
 #ifdef __cplusplus
 void nnapi_wrapper_load(struct nnapi_wrapper** nnapi, struct nnapi_wrapper** check_nnapi);

@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Any
+from typing import Optional, List
 
 import torch
 from torch.backends._nnapi.serializer import serialize_model
@@ -31,7 +31,7 @@ class NnapiModule(torch.nn.Module):
     @torch.jit.export
     def init(self):
         assert self.comp is None
-        self.weights = [ w.contiguous() for w in self.weights ]
+        self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
         comp.init(self.ser_model, self.weights)
         self.comp = comp
@@ -39,26 +39,30 @@ class NnapiModule(torch.nn.Module):
     def forward(self, args: List[torch.Tensor]) -> List[torch.Tensor]:
         comp = self.comp
         assert comp is not None
-        outs = [ torch.empty_like(out) for out in self.out_templates ]
+        outs = [torch.empty_like(out) for out in self.out_templates]
 
         assert len(args) == len(self.inp_mem_fmts)
         fixed_args = []
         for idx in range(len(args)):
             fmt = self.inp_mem_fmts[idx]
+            # These constants match the values in DimOrder in serializer.py
+            # TODO: See if it's possible to use those directly.
             if fmt == 0:
                 fixed_args.append(args[idx].contiguous())
             elif fmt == 1:
-                fixed_args.append(args[idx].permute(0,2,3,1).contiguous())
+                fixed_args.append(args[idx].permute(0, 2, 3, 1).contiguous())
             else:
                 raise Exception("Invalid mem_fmt")
         comp.run(fixed_args, outs)
         assert len(outs) == len(self.out_mem_fmts)
         for idx in range(len(self.out_templates)):
             fmt = self.out_mem_fmts[idx]
+            # These constants match the values in DimOrder in serializer.py
+            # TODO: See if it's possible to use those directly.
             if fmt == 0:
                 pass
             elif fmt == 1:
-                outs[idx] = outs[idx].permute(0,3,1,2)
+                outs[idx] = outs[idx].permute(0, 3, 1, 2)
             else:
                 raise Exception("Invalid mem_fmt")
         return outs
