@@ -7800,7 +7800,7 @@ class TestTorchDeviceType(TestCase):
         for (k, n), upper in product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
             b, A, L = self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype)
             x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertLessEqual(b.dist(A.mm(x)), 1e-12)
+            self.assertLessEqual(b.dist(A.mm(x)), 1e-11)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -10291,9 +10291,9 @@ class TestTorchDeviceType(TestCase):
                                            transpose=transpose)[0]  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
             if transpose:
-                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 3e-12)  # Correctness check
+                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 1e-11)  # Correctness check
             else:
-                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 3e-12)  # Correctness check
+                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 1e-11)  # Correctness check
 
         for (upper, unitriangular, transpose), batchsize in product(product([True, False], repeat=3), [1, 3, 4]):
             triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
@@ -12180,6 +12180,7 @@ class TestTorchDeviceType(TestCase):
         actual = fn(x).cpu().float()
         self.assertEqual(expected, actual.cpu().float())
 
+    @unittest.skipIf(IS_SANDCASTLE, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
     @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
     def test_large_cumsum(self, device, dtype):
@@ -13433,6 +13434,7 @@ class TestTorchDeviceType(TestCase):
                 for trans in [False, True]:
                     self._pdist_single(shape, device, p, torch.float64, trans, grad_check=True)
 
+    @unittest.skipIf(IS_SANDCASTLE, "sandcastle OOM with current tpx gpu/re configuration")
     @skipIfRocm
     def test_pdist_norm_large(self, device):
         # use dim0>=46342 for forward, see:
@@ -17072,6 +17074,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     m2 = torch.randn(k, m, device=device).to(dtype)
                     self._test_addmm_addmv(torch.addmm, M, m1, m2)
 
+    @unittest.skipIf(IS_SANDCASTLE, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
         # https://github.com/pytorch/pytorch/issues/45724
@@ -17967,6 +17970,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
                 self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
 
+    @unittest.skipIf(IS_SANDCASTLE, "cublas runtime error")
     @onlyCUDA
     @wrapDeterministicFlagAPITest
     def test_cublas_config_deterministic_error(self, device):
