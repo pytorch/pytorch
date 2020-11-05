@@ -1985,7 +1985,6 @@ Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
-<<<<<<< HEAD
 Tensor swapaxes(const Tensor& self, int64_t axis1, int64_t axis2) {
   return self.transpose(axis1, axis2);
 }
@@ -2000,7 +1999,8 @@ Tensor swapdims(const Tensor& self, int64_t dim1, int64_t dim2) {
 
 Tensor& swapdims_(Tensor& self, int64_t dim1, int64_t dim2) {
   return self.transpose_(dim1, dim2);
-=======
+}
+
 Tensor trace_cpu(const Tensor& self) {
   Tensor result = at::empty({}, self.options());
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
@@ -2024,7 +2024,6 @@ Tensor trace_cpu(const Tensor& self) {
   });
 
   return result;
->>>>>>> 0edc6a39c837de649bcf7305d34cb875268f7327
 }
 
 }} // at::native
