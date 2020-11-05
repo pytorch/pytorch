@@ -449,6 +449,15 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   }
 
   root_stmt_ = new Block(loops);
+
+  // If it's referenced in the root_stmt, but it's not in output_bufs_ or
+  // intermediate_bufs_ then it must be an input.
+  auto bufs = NodeFinder<Buf>::find(root_stmt_);
+  for (auto* buf : bufs) {
+    if (!output_bufs_.count(buf) && !intermediate_bufs_.count(buf)) {
+      input_bufs_.insert(buf);
+    }
+  }
 }
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
@@ -647,17 +656,18 @@ class FunctionInliner : public IRMutator {
   std::unordered_map<Let*, std::unordered_set<const Var*>> random_bindings_;
 };
 
-void LoopNest::computeInline(Stmt* s) {
+bool LoopNest::computeInline(Stmt* s) {
   auto* s_store = dynamic_cast<Store*>(s);
   if (s_store == nullptr) {
     throw std::logic_error("Could not find buffer producer to inline");
   }
-  computeInline(s_store->buf());
+  return computeInline(s_store->buf());
 }
 
-void LoopNest::computeInline(const Buf* b) {
+bool LoopNest::computeInline(const Buf* b) {
   if (output_bufs_.count(b)) {
-    throw std::logic_error("Can't inline producers of output Tensors");
+    // Cannot inline producers of output Tensors
+    return false;
   }
 
   // Find producers.
@@ -667,20 +677,35 @@ void LoopNest::computeInline(const Buf* b) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
-        throw std::logic_error("cannot inline a reduction computation");
+        // Cannot inline a reduction computation
+        return false;
       }
       if (relevant_store != nullptr) {
-        throw std::logic_error("cannot inline Buf with multiple Tensors");
+        // Cannot inline Buf with multiple Tensors
+        return false;
       }
       relevant_store = s;
     }
   }
+  TORCH_INTERNAL_ASSERT(relevant_store);
 
   FunctionInliner inliner(relevant_store);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
   // No longer computing this intermediate tensor, so don't alloc it.
   intermediate_bufs_.erase(b);
+  return true;
+}
+
+void LoopNest::inlineIntermediateBufs() {
+  // We need to collect all intermediate buffers as the buffers to be inlined
+  // before calling 'computeInline' since the buffers that are inlined are
+  // erased from the set 'intermediate_bufs_' in that function.
+  std::unordered_set<const Buf*> bufs_to_inline(
+      intermediate_bufs_.begin(), intermediate_bufs_.end());
+  for (auto b : bufs_to_inline) {
+    computeInline(b);
+  }
 }
 
 // TODO: Unify with DepTracker
