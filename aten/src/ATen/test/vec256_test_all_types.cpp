@@ -730,18 +730,13 @@ namespace {
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
     test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
-        //generate expected_val
+        // generate expected_val
         int64_t m = mask;
         for (int64_t i = 0; i < vec::size(); i++) {
-            if (m & 0x01) {
-                expected_val[i] = b[i];
-            }
-            else {
-                expected_val[i] = a[i];
-            }
+            expected_val[i] = (m & 0x01) ? b[i] : a[i];
             m = m >> 1;
         }
-        //test with blend
+        // test with blend
         auto vec_a = vec::loadu(a);
         auto vec_b = vec::loadu(b);
         auto expected = vec::loadu(expected_val);
@@ -753,18 +748,13 @@ namespace {
     template<typename vec, typename VT, int64_t idx, int64_t N>
     std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
     test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
-        //generate expected_val
+        // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
             int64_t hex_mask = 0;
             std::memcpy(&hex_mask, &mask[i], sizeof(VT));
-            if (hex_mask & 0x01) {
-                expected_val[i] = b[i];
-            }
-            else {
-                expected_val[i] = a[i];
-            }
+            expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
         }
-        //test with blendv
+        // test with blendv
         auto vec_a = vec::loadu(a);
         auto vec_b = vec::loadu(b);
         auto vec_m = vec::loadu(mask);
@@ -842,6 +832,29 @@ namespace {
         blend_init(a, b);
         constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
+    }
+    template<typename vec, typename VT>
+    void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){
+        if (count < 0) return;
+        //generate expected_val
+        for (int64_t i = 0; i < vec::size(); i++) {
+            expected_val[i] = (i < count) ? b[i] : a[i];
+        }
+        // test with set
+        auto vec_a = vec::loadu(a);
+        auto vec_b = vec::loadu(b);
+        auto expected = vec::loadu(expected_val);
+        auto actual = vec::set(vec_a, vec_b, count);
+        test_set<vec, VT>(expected_val, a, b, (count == 0 ? -1 : count / 2));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional2, Set) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        CACHE_ALIGN VT a[vec::size()];
+        CACHE_ALIGN VT b[vec::size()];
+        CACHE_ALIGN VT expected_val[vec::size()];
+        blend_init(a, b);
+        test_set<vec, VT>(expected_val, a, b, vec::size());
     }
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
         float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28 };
@@ -1100,15 +1113,6 @@ namespace {
     // CopyTest and Set are basically tests loadu and store, probably can be either merged into one, or just
     // delete them since the generic framework test loadu and store implicitly everywhere.
 
-    // Checks both loads and stores.
-    TEST(Vec256TestFloat, CopyTest) {
-      at::Tensor a = at::rand({23, 23});
-      at::Tensor b = at::zeros({23, 23});
-      // Copy goes through vec256 via tensoriterator
-      b.copy_(a);
-      ASSERT_TRUE(check_equal(a, b));
-    }
-
     template<typename T>
     void BlendTestHelperScalar(
         const T* a_ptr,
@@ -1177,89 +1181,6 @@ namespace {
       ASSERT_TRUE(check_equal(ref_res, vec_res));
       BlendTestHelperScalar(a_ptr, b_ptr, ref_res_ptr, num_els, 8);
       BlendTestHelperVector(a_ptr, b_ptr, vec_res_ptr, num_els, 8);
-      ASSERT_TRUE(check_equal(ref_res, vec_res));
-    }
-
-    // TODO:
-    // We have blend covered in the generic framework, but not blandv, they are basically the same except
-    // the input format of the mask (integer vs vector), probably no need to add blendv. Will add if
-    // necessary in next phase.
-
-    // Checks blend and blendv.
-    TEST(Vec256TestFloat, Blend) {
-      using namespace at::vec256;
-      at::Tensor a = at::rand({23, 23});
-      at::Tensor b = at::rand({23, 23});
-      at::Tensor ref_res = at::zeros({23, 23});
-      at::Tensor vec_res = at::zeros({23, 23});
-
-      // Check templatized blend.
-      // Reference result:
-      const int64_t mask = 0xC5;
-      // Only check over multiple of Vec::size elements
-      size_t num_els =
-        (a.numel() / Vec256<float>::size()) * Vec256<float>::size();
-      // Vector components
-      float* a_ptr = a.data_ptr<float>();
-      float* b_ptr = b.data_ptr<float>();
-      float* ref_res_ptr = ref_res.data_ptr<float>();
-      int64_t tmp_mask = mask;
-      for (size_t i = 0; i < num_els; ++i) {
-        if (i % Vec256<float>::size() == 0) {
-          tmp_mask = mask;
-        }
-        if (tmp_mask & 0x1) {
-          ref_res_ptr[i] = b_ptr[i];
-        } else {
-          ref_res_ptr[i] = a_ptr[i];
-        }
-        tmp_mask = tmp_mask >> 1;
-      }
-
-      // Vectorized impl
-      float* vec_res_ptr = vec_res.data_ptr<float>();
-      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {
-        auto a_elements = Vec256<float>::loadu(a_ptr);
-        auto b_elements = Vec256<float>::loadu(b_ptr);
-        a_ptr += Vec256<float>::size();
-        b_ptr += Vec256<float>::size();
-        auto res_elements = Vec256<float>::blend<mask>(a_elements, b_elements);
-        res_elements.store(vec_res_ptr);
-        vec_res_ptr += Vec256<float>::size();
-      }
-      ASSERT_TRUE(check_equal(ref_res, vec_res));
-
-      // Vector components
-      a_ptr = a.data_ptr<float>();
-      b_ptr = b.data_ptr<float>();
-      int32_t full_int_mask = 0xFFFFFFFF;
-      float* full_ptr = reinterpret_cast<float*>(&full_int_mask);
-      float full_float_mask = *full_ptr;
-      Vec256<float> float_mask(full_float_mask, 0.f, full_float_mask, 0.f,
-          0.f, full_float_mask, 0.f, 0.f);
-      float float_mask_array[Vec256<float>::size()];
-      float_mask.store(float_mask_array);
-      ref_res_ptr = ref_res.data_ptr<float>();
-      for (size_t i = 0; i < num_els; ++i) {
-        if (float_mask_array[i % Vec256<float>::size()] != 0) {
-          ref_res_ptr[i] = b_ptr[i];
-        } else {
-          ref_res_ptr[i] = a_ptr[i];
-        }
-        tmp_mask = tmp_mask >> 1;
-      }
-
-      // Vectorized impl
-      vec_res_ptr = vec_res.data_ptr<float>();
-      for (size_t i = 0; i < num_els; i += Vec256<float>::size()) {
-        auto a_elements = Vec256<float>::loadu(a_ptr);
-        auto b_elements = Vec256<float>::loadu(b_ptr);
-        a_ptr += Vec256<float>::size();
-        b_ptr += Vec256<float>::size();
-        auto res_elements = Vec256<float>::blendv(a_elements, b_elements, float_mask);
-        res_elements.store(vec_res_ptr);
-        vec_res_ptr += Vec256<float>::size();
-      }
       ASSERT_TRUE(check_equal(ref_res, vec_res));
     }
 
