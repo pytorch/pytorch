@@ -11,7 +11,15 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/resource_guard.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+
+#include <cstring>
 #include <fstream>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -32,6 +40,26 @@ std::string kernelPreamble() {
 }
 
 namespace {
+
+std::string torchLibPath() {
+#ifdef _WIN32
+// TODO $$$
+#else
+  // Used to lookup our library using dladdr()
+  static bool reference_symbol = false;
+
+  Dl_info dl_info = {};
+  TORCH_INTERNAL_ASSERT(dladdr(&reference_symbol, &dl_info));
+  const char* lib_filename = dl_info.dli_fname;
+
+  // TODO: a much better solution would be to use C++17's std::filesystem::path,
+  //  although that's currently not available to us (in the PyTorch codebase)
+  const char* last_path_sep = std::strrchr(lib_filename, '/');
+  TORCH_INTERNAL_ASSERT(last_path_sep != nullptr);
+
+  return std::string(lib_filename, last_path_sep);
+#endif
+}
 
 // return false if arg's type, number of dimensions, and device, doesn't match
 // param and provided c10:device
@@ -373,6 +401,11 @@ NvrtcFunction nvrtcCompile(
           ", ignoring the option");
     }
   }
+
+  // --include-path
+  const std::string include_path =
+      "--include-path=" + torchLibPath() + "/nvfuser";
+  args.push_back(include_path.c_str());
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
       program, func_name.c_str());

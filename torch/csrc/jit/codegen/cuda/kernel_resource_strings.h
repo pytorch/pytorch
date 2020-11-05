@@ -5,6 +5,8 @@ namespace cuda {
 
 // IO data structure for kernel code;
 static auto code_template_tensor_struct = R"(
+#include <foo.cuh>
+
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;

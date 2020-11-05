@@ -772,6 +772,21 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+
+  # Copy NVFUSER runtime sources
+  file (GLOB nvfuser_runtime "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/*.cuh")
+  foreach(src ${nvfuser_runtime})
+    get_filename_component(filename ${src} NAME)
+    set(dst "${CMAKE_BINARY_DIR}/lib/nvfuser/${filename}")
+    add_custom_command(
+      COMMENT "Copying NVFUSER runtime header: ${filename}"
+      OUTPUT ${dst}
+      DEPENDS ${src}
+      COMMAND ${CMAKE_COMMAND} -E copy ${src} ${dst}
+    )
+    add_custom_target(nvfuser_${filename} DEPENDS ${dst})
+    add_dependencies(torch_cuda nvfuser_${filename})
+  endforeach()
 endif()
 
 
