@@ -29,6 +29,14 @@ def _wrap_type_error_to_not_implemented(f):
             return NotImplemented
     return wrapped
 
+def _rebuild_from_type(func, type, args, dict):
+    if type is Tensor:
+        return func(*args)
+
+    ret = func(*args).as_subclass(type)
+    ret.__dict__ = dict
+    return ret
+
 
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
@@ -85,6 +93,10 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
+        func, args = self._reduce_ex_internal(proto)
+        return (_rebuild_from_type, (func, type(self), args, self.__dict__))
+
+    def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
@@ -178,7 +190,7 @@ class Tensor(torch._C._TensorBase):
         # All strings are unicode in Python 3.
         return torch._tensor_str._str(self)
 
-    def backward(self, gradient=None, retain_graph=None, create_graph=False):
+    def backward(self, gradient=None, retain_graph=None, create_graph=False, inputs=None):
         r"""Computes the gradient of current tensor w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
@@ -213,6 +225,11 @@ class Tensor(torch._C._TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
+            inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
+                accumulated into ``.grad``. All other Tensors will be ignored. If not
+                provided, the gradient is accumulated into all the leaf Tensors that were
+                used to compute the attr::tensors. All the provided inputs must be leaf
+                Tensors.
         """
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
@@ -223,8 +240,9 @@ class Tensor(torch._C._TensorBase):
                 self,
                 gradient=gradient,
                 retain_graph=retain_graph,
-                create_graph=create_graph)
-        torch.autograd.backward(self, gradient, retain_graph, create_graph)
+                create_graph=create_graph,
+                inputs=inputs)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs=inputs)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.
@@ -401,6 +419,29 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.lu, relevant_args, self, pivot=pivot, get_infos=get_infos)
+
+        if not torch._jit_internal.is_scripting():
+            if self.requires_grad:
+                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                    raise ValueError(
+                        'lu.backward works only with batches of squared full-rank matrices'
+                        ' of floating types.'
+                    )
+
+                from torch._autograd_functions import _LU
+                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
+                if get_infos:
+                    return LU, pivots, infos
+                else:
+                    return LU, pivots
+        else:
+            if self.requires_grad:
+                raise RuntimeError(
+                    'Script and require gradients is not supported at the moment.'
+                    'If you just want to do the forward, use .detach()'
+                    'on the input before calling the function.'
+                )
+
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
             return LU, pivots, infos
