@@ -46,7 +46,7 @@
   variants: function
 
 # Computes the gradient of current tensor w.r.t. graph leaves.
-- func: backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
+- func: _backward(Tensor self, Tensor[] inputs, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   manual_kernel_registration: True
   variants: method
@@ -842,6 +842,34 @@
 - func: bitwise_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: bitwise_not_out
+
+- func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: copysign
+
+- func: copysign_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: copysign_
+
+- func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: copysign_out
+
+- func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: copysign
+
+- func: copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: copysign_
 
 - func: logical_not(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2141,6 +2169,15 @@
   dispatch:
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
+
+- func: kron(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    Math: kron
+
+- func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: kron_out
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
@@ -3806,6 +3843,11 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU, CUDA: tensordot_out
+
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   use_c10_dispatcher: full
@@ -3873,7 +3915,7 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: flip_cpu
+    CPU, QuantizedCPU: flip_cpu
     CUDA: flip_cuda
 
 - func: fliplr(Tensor self) -> Tensor
@@ -5497,15 +5539,13 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: fmod_
-    CUDA: fmod_cuda_
+    CPU, CUDA: fmod_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: fmod_
-    CUDA: fmod_cuda_
+    CPU, CUDA: fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -6469,27 +6509,23 @@
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: fmod_out
-    CUDA: fmod_cuda_out
+    CPU, CUDA: fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: fmod
-    CUDA: fmod_cuda
+    CPU, CUDA: fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: fmod_out
-    CUDA: fmod_cuda_out
+    CPU, CUDA: fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: fmod
-    CUDA: fmod_cuda
+    CPU, CUDA: fmod
 
 - func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

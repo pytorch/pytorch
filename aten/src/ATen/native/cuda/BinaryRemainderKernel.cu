@@ -32,6 +32,24 @@ void remainder_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void fmod_kernel_cuda(TensorIterator& iter) {
+  if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return a % b;
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, iter.dtype(), "fmod_cuda", [&]() {
+      gpu_kernel_with_scalars(iter,
+        []GPU_LAMBDA(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          return ::fmod(a, b);
+        });
+    });
+  }
+}
+
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel_cuda);
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel_cuda);
 
 }} // namespace at::native

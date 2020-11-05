@@ -36,12 +36,6 @@ std::tuple<Tensor,Tensor> _th_topk(const Tensor & self, int64_t k, int64_t dim, 
 Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
-Tensor & _th_fmod_out(Tensor & result, const Tensor & self, Scalar other);
-Tensor _th_fmod(const Tensor & self, Scalar other);
-Tensor & _th_fmod_out(Tensor & result, const Tensor & self, const Tensor & other);
-Tensor _th_fmod(const Tensor & self, const Tensor & other);
-Tensor & _th_fmod_(Tensor & self, Scalar other);
-Tensor & _th_fmod_(Tensor & self, const Tensor & other);
 Tensor & _th_cross_kernel_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim);
 Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim);
 Tensor & _th_bmm_out(Tensor & result, const Tensor & self, const Tensor & mat2);
