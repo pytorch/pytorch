@@ -449,6 +449,15 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   }
 
   root_stmt_ = new Block(loops);
+
+  // If it's referenced in the root_stmt, but it's not in output_bufs_ or
+  // intermediate_bufs_ then it must be an input.
+  auto bufs = NodeFinder<Buf>::find(root_stmt_);
+  for (auto* buf : bufs) {
+    if (!output_bufs_.count(buf) && !intermediate_bufs_.count(buf)) {
+      input_bufs_.insert(buf);
+    }
+  }
 }
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
