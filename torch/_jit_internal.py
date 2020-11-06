@@ -366,9 +366,9 @@ def unused(fn):
             import torch.nn as nn
 
             class MyModule(nn.Module):
-                def __init__(self, use_memory_efficent):
+                def __init__(self, use_memory_efficient):
                     super(MyModule, self).__init__()
-                    self.use_memory_efficent = use_memory_efficent
+                    self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused
                 def memory_efficient(self, x):
@@ -383,7 +383,7 @@ def unused(fn):
                     else:
                         return x + 10
 
-            m = torch.jit.script(MyModule(use_memory_efficent=False))
+            m = torch.jit.script(MyModule(use_memory_efficient=False))
             m.save("m.pt")
 
             m = torch.jit.script(MyModule(use_memory_efficient=True))

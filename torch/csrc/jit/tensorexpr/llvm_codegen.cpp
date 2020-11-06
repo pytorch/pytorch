@@ -87,7 +87,7 @@ llvm::ElementCount ElementCount(int lanes) {
 #if LLVM_VERSION_MAJOR <= 11
   return llvm::ElementCount(static_cast<unsigned>(lanes), false);
 #elif LLVM_VERSION_MAJOR == 12
-  return llvm::ElementCount(llvm::PolySize<unsigned>::getFixed(lanes));
+  return llvm::ElementCount::getFixed(lanes);
 #else
 #error Only LLVM versions 8 through 12 are supported.
 #endif
@@ -124,7 +124,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::Type* dtypeToLLVMPtr(Dtype dtype);
   void emitWrapper(const std::vector<llvm::Type*>& params);
   void emitKernel(Stmt* stmt, const std::vector<llvm::Type*>& params);
-  llvm::Value * toVec(llvm::Value * v, int lanes);
+  llvm::Value* toVec(llvm::Value* v, int lanes);
 
  public:
   LLVMCodeGenImpl(
@@ -857,7 +857,8 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
     // Ensure bool true value is exactly one, since we convert to int
     // from bool by zero extending the int8
     if (v->dtype().scalar_type() == ScalarType::Bool) {
-      llvm::Value* zero = toVec(llvm::ConstantInt::get(srcType, 0), v->dtype().lanes());
+      llvm::Value* zero =
+          toVec(llvm::ConstantInt::get(srcType, 0), v->dtype().lanes());
       value_ = irb_.CreateICmpNE(value_, zero);
     }
     value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
@@ -1315,7 +1316,8 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       case kRsqrt: {
         v->params().front()->accept(this);
         value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
-        llvm::Value* constant = toVec(llvm::ConstantFP::get(FloatTy_, 1.0), v->dtype().lanes());
+        llvm::Value* constant =
+            toVec(llvm::ConstantFP::get(FloatTy_, 1.0), v->dtype().lanes());
         value_ = irb_.CreateFDiv(constant, value_);
         return;
       } break;

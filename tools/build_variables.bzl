@@ -225,6 +225,8 @@ core_sources_full = [
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
     "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
+    "torch/csrc/jit/tensorexpr/bounds_overlap.cpp",
+    "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
