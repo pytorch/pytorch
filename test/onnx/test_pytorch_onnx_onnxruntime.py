@@ -3115,7 +3115,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return input.split([2, 1, 2])
 
         x = torch.randn(5, 4, 3)
-        self.run_test(torch.jit.script(SplitModel3()), x)
+        self.run_test(SplitModel3(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
