@@ -488,6 +488,14 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   AT_ASSERTM(false, "Unsupported impl_index in _batch_norm_impl_index_backward: ", impl_index);
 }
 
+Tensor batch_norm(
+    const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
+    bool training, double momentum, double eps, bool cudnn_enabled) {
+  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
+                                                training, momentum, eps, cudnn_enabled));
+}
+
 std::vector<int64_t> make_reduce_dims(int64_t input_dim) {
   std::vector<int64_t> result;
   result.push_back(0);
@@ -505,14 +513,6 @@ std::vector<int64_t> make_scalar_shape(int64_t input_dim, int64_t n_input) {
     result.push_back(1);
   }
   return result;
-}
-
-Tensor batch_norm(
-    const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
-    bool training, double momentum, double eps, bool cudnn_enabled) {
-  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled));
 }
 
 Tensor math_batch_norm(
