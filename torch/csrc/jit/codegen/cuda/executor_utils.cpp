@@ -36,12 +36,12 @@ std::string kernelPreamble() {
 #endif
 
   ss << R"(
-    #include <nvfuser_runtime/tensor.cu>
-    #include <nvfuser_runtime/random_numbers.cu>
-    #include <nvfuser_runtime/helpers.cu>
     #include <nvfuser_runtime/block_reduction.cu>
-    #include <nvfuser_runtime/grid_reduction.cu>
     #include <nvfuser_runtime/broadcast.cu>
+    #include <nvfuser_runtime/grid_reduction.cu>
+    #include <nvfuser_runtime/helpers.cu>
+    #include <nvfuser_runtime/random_numbers.cu>
+    #include <nvfuser_runtime/tensor.cu>
   )";
 
   return ss.str();
