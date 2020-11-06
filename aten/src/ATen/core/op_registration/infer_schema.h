@@ -22,7 +22,7 @@ namespace infer_schema {
 struct ArgumentDef final {
   using GetTypeFn = TypePtr();
   GetTypeFn* getTypeFn;
-  ArgumentDef(): getTypeFn(nullptr) {}
+  constexpr ArgumentDef(): getTypeFn(nullptr) {}
   explicit constexpr ArgumentDef(GetTypeFn *getTypeFn): getTypeFn(getTypeFn) {}
 };
 
