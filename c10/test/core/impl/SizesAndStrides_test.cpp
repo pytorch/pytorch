@@ -11,19 +11,19 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
 
   int idx = 0;
   for (auto x: sizes) {
-    EXPECT_EQ(sz.size_at_unchecked(idx), x);
-    EXPECT_EQ(sz.size_at(idx), x);
-    EXPECT_EQ(sz.sizes_data()[idx], x);
-    EXPECT_EQ(*(sz.sizes_begin() + idx), x);
+    EXPECT_EQ(sz.size_at_unchecked(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.size_at(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.sizes_data()[idx], x) << "index: " << idx;
+    EXPECT_EQ(*(sz.sizes_begin() + idx), x) << "index: " << idx;
     idx++;
   }
 
   idx = 0;
   for (auto x: strides) {
-    EXPECT_EQ(sz.stride_at_unchecked(idx), x);
-    EXPECT_EQ(sz.stride_at(idx), x);
-    EXPECT_EQ(sz.strides_data()[idx], x);
-    EXPECT_EQ(*(sz.strides_begin() + idx), x);
+    EXPECT_EQ(sz.stride_at_unchecked(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.stride_at(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.strides_data()[idx], x) << "index: " << idx;
+    EXPECT_EQ(*(sz.strides_begin() + idx), x) << "index: " << idx;
 
     idx++;
   }

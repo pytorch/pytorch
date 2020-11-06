@@ -1776,22 +1776,17 @@ protected:
 //    autograd metadata pointer
 //    version counter pointer
 //    PyObject pointer
-//    sizes SmallVector (begin)
-//    sizes SmallVector (end)
-//    sizes SmallVector (capacity)
-//    sizes SmallVector (pre-allocated 0)
-//    sizes SmallVector (pre-allocated 1)
-//    sizes SmallVector (pre-allocated 2)
-//    sizes SmallVector (pre-allocated 3)
-//    sizes SmallVector (pre-allocated 4)
-//    strides SmallVector (begin)
-//    strides SmallVector (end)
-//    strides SmallVector (capacity)
-//    strides SmallVector (pre-allocated 0)
-//    strides SmallVector (pre-allocated 1)
-//    strides SmallVector (pre-allocated 2)
-//    strides SmallVector (pre-allocated 3)
-//    strides SmallVector (pre-allocated 4)
+//    SizesAndStrides size/pointer
+//    SizesAndStrides sizes (pre-allocated 0)
+//    SizesAndStrides sizes (pre-allocated 1)
+//    SizesAndStrides sizes (pre-allocated 2)
+//    SizesAndStrides sizes (pre-allocated 3)
+//    SizesAndStrides sizes (pre-allocated 4)
+//    SizesAndStrides strides (pre-allocated 0)
+//    SizesAndStrides strides (pre-allocated 1)
+//    SizesAndStrides strides (pre-allocated 2)
+//    SizesAndStrides strides (pre-allocated 3)
+//    SizesAndStrides strides (pre-allocated 4)
 //    storage offset
 //    numel
 //    data type
@@ -1800,7 +1795,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 29,
+              sizeof(TensorImpl) == sizeof(int64_t) * 24,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
