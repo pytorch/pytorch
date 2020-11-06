@@ -47,7 +47,7 @@ Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, i
     } else {
       tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
     }
-    ld_tensor = tensor_.strides()[1];
+    ld_tensor = tensor_.stride(1);
   }
 
   return tensor_;
@@ -166,8 +166,7 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   if (!result.is_same(self)) {
     result.resize_as_(self);
     bool is_beta_complex = beta.isComplex();
-    if ((is_beta_complex && beta.to<c10::complex<double>>() != 0.0) ||
-        (!is_beta_complex && beta.to<double>() != 0.0)) {
+    if (beta.to<c10::complex<double>>() != 0.0) {
       result.copy_(self);
     }
   }
@@ -203,7 +202,7 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2, ldb, transpose_result, k, n);
 
   ldc = result_.stride(leading_dim);
-  int64_t num_batches = result_.sizes()[0];
+  int64_t num_batches = result_.size(0);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
@@ -348,7 +347,7 @@ Tensor& addbmm_out_cuda(Tensor& out, const Tensor& self,
 
   if (&out != &self) {
     at::native::resize_as_(out, self_);
-    if (beta.to<double>() != 0.0) {
+    if (beta.to<c10::complex<double>>() != 0.0) {
       at::native::copy_(out, self_);
     }
   }

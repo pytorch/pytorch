@@ -176,8 +176,8 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
       beta,
       (char *)C + i * strideC * 2, Ctype, ldc, strideC,
       (int)count, computeType, algo);
+    TORCH_CUDABLAS_CHECK(result);
   }
-  TORCH_CUDABLAS_CHECK(result);
   return result;
 }
 #endif
@@ -193,10 +193,17 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
     CUDABLAS_POSINT_CHECK(gemm<Dtype>, ldc);  \
   } while (0)
 
+void bgemmCheckBound(int64_t m , int64_t n, int64_t k, int64_t lda, int64_t ldb, int64_t ldc, int64_t num_batches) {
+    TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (num_batches < INT_MAX),
+    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, num_batches ",
+    "with the bound [val] <= ", INT_MAX);
+}
+
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
+  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -210,6 +217,7 @@ template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
+  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -224,6 +232,7 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
     // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
+    bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
     cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -239,6 +248,7 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
     // See Note [Writing Nondeterministic Operations]
     globalContext().alertCuBLASConfigNotDeterministic();
+    bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
     cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -255,6 +265,7 @@ template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
+  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -271,38 +282,42 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0));
 #else
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-  // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
-  // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
-  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
-#endif  // CUDA_VERSION < 11000
-cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-if (prop->major >= 5){
-  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(
-      handle, opa, opb, m, n, k, (void*)(&alpha), a, CUDA_R_16F, lda, stridea,
-      b, CUDA_R_16F, ldb, strideb, (void*)(&beta), c, CUDA_R_16F, ldc, stridec, num_batches,
-      CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-} else {
-  for (int64_t i = 0; i < num_batches; ++i) {
-    cublasHgemm(handle, opa, opb, m, n, k, reinterpret_cast<const __half*>(&alpha),
-                  reinterpret_cast<const __half*>(a + i * stridea), lda,
-                  reinterpret_cast<const __half*>(b + i * strideb), ldb, reinterpret_cast<const __half*>(&beta),
-                  reinterpret_cast<__half*>(c + i * stridec), ldc);
+  #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+  #endif  // CUDA_VERSION < 11000
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+
+  if (prop->major >= 5){
+    TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(
+        handle, opa, opb, m, n, k, (void*)(&alpha), a, CUDA_R_16F, lda, stridea,
+        b, CUDA_R_16F, ldb, strideb, (void*)(&beta), c, CUDA_R_16F, ldc, stridec, num_batches,
+        CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  } else {
+    for (int64_t i = 0; i < num_batches; ++i) {
+      at::cuda::blas::gemm<at::Half>(transa, transb, m, n, k, alpha, a + i * stridea, lda,
+                                    b + i * strideb, ldb, beta, c + i * stridec, ldc);
+      cublasHgemm(handle, opa, opb, m, n, k, reinterpret_cast<const __half*>(&alpha),
+                    reinterpret_cast<const __half*>(a + i * stridea), lda,
+                    reinterpret_cast<const __half*>(b + i * strideb), ldb, reinterpret_cast<const __half*>(&beta),
+                    reinterpret_cast<__half*>(c + i * stridec), ldc);
+    }
   }
-}
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-  // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
-  // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
-  TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-#endif  // CUDA_VERSION < 11000
+  #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+  #endif  // CUDA_VERSION < 11000
 #endif // __HIP_PLATFORM_HCC__
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
+  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -329,11 +344,11 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                    c, rocblas_datatype_bf16_r, (int)ldc, stridec,
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
-#else
-  TORCH_CHECK(false, "THCudaBlas_BgemmStridedBatched is only available on CUDA_VERSION >= 11");
-#endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  #else
+    TORCH_CHECK(false, "THCudaBlas_BgemmStridedBatched is only available on CUDA_VERSION >= 11");
+  #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
-#endif
+#endif // __HIP_PLATFORM_HCC__
 
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {

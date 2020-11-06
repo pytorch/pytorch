@@ -157,7 +157,7 @@ TEST(AutogradAPITests, RetainGrad) {
 
 TEST(AutogradAPITests, AnomalyMode) {
   // Needs to have backtrace as warning and then throw an error
-  torch::autograd::AnomalyMode::set_enabled(true);
+  torch::autograd::DetectAnomalyGuard detect_anomaly;
   {
     WarningCapture warnings;
     auto x = torch::tensor({5.0}, torch::requires_grad());
@@ -186,7 +186,6 @@ TEST(AutogradAPITests, AnomalyMode) {
             "Traceback of forward call that induced the previous calculation") !=
         std::string::npos);
   }
-  torch::autograd::AnomalyMode::set_enabled(false);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
@@ -246,7 +245,7 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   };
 
   auto x = torch::ones(1, torch::requires_grad());
-  
+
   MyFunction::apply(x).backward();
   ASSERT_FALSE(x.grad().defined());
 
@@ -761,6 +760,36 @@ TEST(CustomAutogradTest, HookNone) {
   ry.register_hook(hook);
   (rx+ry).sum().backward();
   ASSERT_TRUE(was_called);
+}
+
+TEST(CustomAutogradTest, BackwardWithInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+
+  z.backward(torch::ones({5, 5}), false, false, {x});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
+}
+
+TEST(CustomAutogradTest, BackwardWithEmptyInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+  ASSERT_THROWS_WITH(z.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{}), "cannot be empty");
+}
+
+TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x;
+  Variable w = z + x * y + y * y;
+  ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
 }
 
 // TODO add these tests if needed

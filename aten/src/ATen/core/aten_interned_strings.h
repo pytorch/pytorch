@@ -237,6 +237,7 @@ _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
 _(aten, complex) \
+_(aten, copysign) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
