@@ -82,6 +82,11 @@ TEST(VulkanAPITest, add_scalar_) {
   a_cpu.add_(b_scalar, 2.1f);
   a_vulkan.add_(b_scalar, 2.1f);
 
+  const auto test_cpu = a_vulkan.cpu();
+
+  a_cpu.add_(b_scalar, 2.1f);
+  a_vulkan.add_(b_scalar, 2.1f);
+
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
