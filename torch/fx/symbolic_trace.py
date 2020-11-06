@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Optional, List, Callable, Union
+from typing import Any, Dict, Optional, List, Callable, Union
 import torch
 
 from .node import Argument
@@ -59,25 +59,7 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, torch.Tensor):
-            # TODO: slow
-            def search_for_tensor(m : torch.nn.Module) -> Optional[List[str]]:
-                """
-                Search for a tensor value in the module's attributes. If it's
-                found, return the qualified name of that attribute, given the
-                previous `qualname_atoms`. If it's not found, recurse down into
-                child submodules. If it's not found there, return None
-                """
-                for n, p in m.__dict__.items():
-                    if a is p:
-                        return [n]
-                for n, c in m.named_children():
-                    maybe_result : Optional[List[str]] = search_for_tensor(c)
-                    if maybe_result:
-                        return [n] + maybe_result
-                return None
-            # Retrieve the qualname for an existing Tensor attribute
-            qualname_atoms : Optional[List[str]] = search_for_tensor(self.root)
-            qualname = '.'.join(qualname_atoms) if qualname_atoms else None
+            qualname : Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -168,11 +150,41 @@ class Tracer(TracerBase):
             fn = root
         self.graph = Graph()
 
+        # When we encounter a Tensor value that's not a parameter, we look if it
+        # is some other attribute on the model. Construct a dict mapping Tensor
+        # values to the qualified name here for efficiency. This is used downstream
+        # in create_arg
+        self.tensor_attrs : Dict[torch.Tensor, str] = {}
+
+        def collect_tensor_attrs(m : torch.nn.Module, prefix_atoms : List[str]):
+            for k, v in m.__dict__.items():
+                if isinstance(v, torch.Tensor):
+                    self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
+            for k, v in m.named_children():
+                collect_tensor_attrs(v, prefix_atoms + [k])
+
+        collect_tensor_attrs(self.root, [])
+
         assert isinstance(fn, FunctionType)
 
         fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
         orig_call = torch.nn.Module.__call__
+        orig_getattr = torch.nn.Module.__getattr__
+
+        parameter_proxy_cache = {}  # Reduce number of get_attr calls
+
+        # Method dispatch on parameters is not recorded unless it's directly used.
+        # Thus, we need to insert a proxy when __getattr__ requests a parameter.
+        def module_getattr_wrapper(mod, attr):
+            attr_val = orig_getattr(mod, attr)
+            if isinstance(attr_val, torch.nn.Parameter):
+                for n, p in self.root.named_parameters():
+                    if attr_val is p:
+                        if n not in parameter_proxy_cache:
+                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                        return parameter_proxy_cache[n]
+            return attr_val
 
         def module_call_wrapper(mod, *args, **kwargs):
             def forward(*args, **kwargs):
@@ -181,12 +193,16 @@ class Tracer(TracerBase):
             return self.call_module(mod, forward, args, kwargs)
 
         try:
+            # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
+            torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
             torch.nn.Module.__call__ = orig_call
+            torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
+
 
 # Symbolic tracing API
 #

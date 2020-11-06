@@ -391,7 +391,7 @@ def emit_namedtuple_typedefs(declarations):
         fn_key = '_'.join(fieldnames)
         fieldsname = flddefnames.get(fn_key)
         if fieldsname is None:
-            fieldsname = 'NamedTuple_fields{}'.format('' if flddefs == [] else len(fielddefs))
+            fieldsname = 'NamedTuple_fields{}'.format('' if flddefs == [] else len(flddefs))
             fields = ['{{"{}", ""}}'.format(fn) for fn in fieldnames]
             fieldsdef = PY_NAMEDTUPLE_FIELDSDEF.substitute(
                 fieldsname=fieldsname,
@@ -701,9 +701,17 @@ def group_overloads(declarations, is_python_method):
     result = []
     for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
+            candidates = []
+            non_out_name = dictionary['out']['operator_name']
+            for declaration in declarations:
+                if declaration['name'] == non_out_name and not declaration['deprecated']:
+                    signature = get_python_signature(declaration, is_python_method, skip_outputs=True)
+                    candidates.append(signature)
             raise RuntimeError(
-                "'base' not in dictionary for {}. keys are {}".format(
-                    x, list(dictionary.keys())))
+                "While identifying overloads, we found an out schema {} without a corresponding non-out variant. "
+                "We expected the non-out variant to have schema: \n- {}\nPlease check that you spelled the schema "
+                "correctly in native_functions.yaml. We discovered the following candidate(s): \n"
+                .format(dictionary['signature'], x) + "\n".join("- {}".format(candidate) for candidate in candidates))
         result.append(dictionary)
     return sort_declarations(result)
 
@@ -871,7 +879,6 @@ def decl_to_python_signature(decl: Dict[str, Any], *, method: bool) -> PythonSig
         src_args: Dict[str, PythonArgument] = {a.name: PythonArgument(
             name=a.name,
             type=a.type,
-            cpp_type_str=a.cpp_type_str,
             default=None,
             default_init=None,
         ) for a in itertools.chain(python_sig.input_args, python_sig.input_kwargs)}

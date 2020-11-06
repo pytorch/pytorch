@@ -14,7 +14,7 @@ Tensor empty_meta(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  TensorOptions options = options_.merge_memory_format(optional_memory_format);
 
   // TODO: deduplicate this logic with empty_cpu
 

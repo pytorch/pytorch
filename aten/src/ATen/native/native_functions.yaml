@@ -46,7 +46,7 @@
   variants: function
 
 # Computes the gradient of current tensor w.r.t. graph leaves.
-- func: backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
+- func: _backward(Tensor self, Tensor[] inputs, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   manual_kernel_registration: True
   variants: method
@@ -283,13 +283,13 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    DefaultBackend: view_as_real
+    CPU, CUDA: view_as_real
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    DefaultBackend: view_as_complex
+    CPU, CUDA: view_as_complex
 
 - func: sgn(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -842,6 +842,34 @@
 - func: bitwise_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: bitwise_not_out
+
+- func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: copysign
+
+- func: copysign_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: copysign_
+
+- func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: copysign_out
+
+- func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: copysign
+
+- func: copysign_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: copysign_
 
 - func: logical_not(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1546,6 +1574,16 @@
 - func: rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
   use_c10_dispatcher: full
 
+# row_stack is the alias of vstack
+- func: row_stack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    Math: row_stack
+
+- func: row_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: row_stack_out
+
 - func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
@@ -2131,6 +2169,15 @@
   dispatch:
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
+
+- func: kron(Tensor self, Tensor other) -> Tensor
+  variants: function, method
+  dispatch:
+    Math: kron
+
+- func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: kron_out
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
@@ -3796,6 +3843,11 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU, CUDA: tensordot_out
+
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   use_c10_dispatcher: full
@@ -3863,7 +3915,7 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: flip_cpu
+    CPU, QuantizedCPU: flip_cpu
     CUDA: flip_cuda
 
 - func: fliplr(Tensor self) -> Tensor
@@ -5640,7 +5692,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_trace
+    CPU: trace_cpu
     CUDA: trace_cuda
 
 - func: trace_backward(Tensor grad, int[] sizes) -> Tensor
@@ -6495,6 +6547,21 @@
   variants: method
   dispatch:
     DefaultBackend: hypot_
+
+- func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: igamma_out
+
+- func: igamma(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU, CUDA: igamma
+
+- func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: igamma_
 
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -8649,6 +8716,15 @@
     CPU: col2im_backward_cpu
     CUDA: col2im_backward_cuda
 
+- func: column_stack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    Math: column_stack
+
+- func: column_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: column_stack_out
+
 - func: im2col.out(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
@@ -8874,6 +8950,18 @@
 - func: linalg_norm.ord_str_out(Tensor self, str ord, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+
+- func: linalg_tensorsolve(Tensor self, Tensor other, int[]? dims=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_tensorsolve
+
+- func: linalg_tensorsolve.out(Tensor self, Tensor other, int[]? dims=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_tensorsolve_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.

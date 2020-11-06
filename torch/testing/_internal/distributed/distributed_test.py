@@ -289,6 +289,9 @@ class TestDistBackend(MultiProcessTestCase):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
+
+        if torch.cuda.device_count() < int(self.world_size):
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
             dist.init_process_group(
                 init_method=self.init_method,
@@ -1001,7 +1004,6 @@ class DistributedTest:
             "Only NCCL backend supports high priority stream",
         )
         @skip_if_no_gpu
-        @skip_if_rocm
         def test_nccl_high_priority_stream(self):
             group, _, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -3140,6 +3142,13 @@ class DistributedTest:
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_allgather_object(self):
+            # Only set device for NCCL backend since it must use GPUs.
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                # Case where rank != GPU device.
+                next_rank = (self.rank + 1) % int(self.world_size)
+                torch.cuda.set_device(next_rank)
+
             gather_objects = collectives_object_test_list
             output_gathered = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(
@@ -3194,7 +3203,10 @@ class DistributedTest:
         def test_nccl_gather_object_err(self):
             output_gathered = [None for _ in range(dist.get_world_size())]
             gather_on_rank = 0
+            # Case where rank != GPU device.
             my_rank = dist.get_rank()
+            next_rank = (my_rank + 1) % dist.get_world_size()
+            torch.cuda.set_device(next_rank)
             with self.assertRaisesRegex(
                 RuntimeError, "ProcessGroupNCCL does not support gather"
             ):
@@ -3665,6 +3677,13 @@ class DistributedTest:
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_broadcast_object_list(self):
+            # Only set device for NCCL backend since it must use GPUs.
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                # Case where rank != GPU device.
+                next_rank = (self.rank + 1) % int(self.world_size)
+                torch.cuda.set_device(next_rank)
+
             src_rank = 0
             objects = collectives_object_test_list if self.rank == src_rank else [None for _ in collectives_object_test_list]
 
@@ -3799,6 +3818,39 @@ class DistributedTest:
                         ddp(inp).sum().backward()
                 else:
                     ddp(inp).sum().backward()
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_shared_grad_acc_unused_params(self):
+            # When find_unused_parameters=True, ensure we mark unused parameters
+            # even if they share gradient accumulators.
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    # net1, bias, and net1.bias are all unused params.
+                    self.net1 = nn.Linear(10, 5, bias=False)
+                    self.bias = nn.Parameter(torch.zeros(5))
+                    # net1.bias and self.bias are names for the same underlying
+                    # parameter, so they share the same grad acc. This caused
+                    # the bug reported in https://github.com/pytorch/pytorch/issues/41324.
+                    self.net1.bias = self.bias
+                    self.net2 = nn.Linear(10, 5)
+
+                def forward(self, x):
+                    return self.net2(x)
+
+            torch.cuda.set_device(self.rank)
+            model = ToyModel().to(torch.cuda.current_device())
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.rank], find_unused_parameters=True
+            )
+            inp = torch.randn(20, 10, device=self.rank)
+            for i in range(6):
+                out = ddp_model(inp)
+                loss = out.sum()
+                loss.backward()
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
