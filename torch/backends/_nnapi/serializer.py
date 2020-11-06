@@ -823,13 +823,13 @@ class _NnapiSerializer(object):
         _, max_val = self.get_constant_value(node.inputsAt(2), "FloatType")
 
         op_map = {
-            1: NNAPI_OperationCode.RELU1,
-            6: NNAPI_OperationCode.RELU6,
+            (-1, 1): NNAPI_OperationCode.RELU1,
+            ( 0, 6): NNAPI_OperationCode.RELU6,
         }
 
-        if min_val != 0 or max_val not in op_map:
-            raise Exception("NNAPI only supports hardtanh with args (0, 1) or (0, 6).")
-        opcode = op_map[max_val]
+        opcode = op_map.get((min_val, max_val))
+        if opcode is None:
+            raise Exception("NNAPI only supports hardtanh with args (-1, 1) or (0, 6).")
 
         inputs = [None] * 1
         inputs[0] = in_id
