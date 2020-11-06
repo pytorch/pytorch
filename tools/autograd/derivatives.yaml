@@ -340,6 +340,13 @@
 - name: _conj(Tensor self) -> Tensor
   self: grad.conj()
 
+- name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
+  self: copysign_tensor_self_backward(grad, self, result)
+  other: zeros_like(other)
+
+- name: copysign.Scalar(Tensor self, Scalar other) -> Tensor
+  self: copysign_tensor_self_backward(grad, self, result)
+
 - name: cos(Tensor self) -> Tensor
   self: grad * -self.sin().conj()
 
@@ -580,7 +587,7 @@
   index: non_differentiable
 
 - name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
+  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
