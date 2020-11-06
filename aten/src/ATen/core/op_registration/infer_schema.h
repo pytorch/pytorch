@@ -22,6 +22,7 @@ namespace infer_schema {
 struct ArgumentDef final {
   using GetTypeFn = TypePtr();
   GetTypeFn* getTypeFn;
+  constexpr ArgumentDef(GetTypeFn *getTypeFn): getTypeFn(getTypeFn) {}
 };
 
 template<bool V>
