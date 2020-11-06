@@ -57,11 +57,11 @@ C10_HOST_DEVICE inline T uniform_int(V val) {
   } else if (std::is_same<T, double>::value) {
     return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
   } else if (std::is_same<T, int64_t>::value) {
-    return static_cast<T>(val % (static_cast<double>(std::numeric_limits<T>::max()) + 1));
+    return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
   } else if (std::is_floating_point<T>::value || std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
     return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
   } else if (std::is_integral<T>::value) {
-    return static_cast<T>(val % (static_cast<double>(std::numeric_limits<T>::max()) + 1));
+    return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
   } else {
     assert(false);
     return 0;
