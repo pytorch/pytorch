@@ -4513,3 +4513,12 @@ the flattened row pointers of the N-D tensor that has been flattened
 using reduction as described in 
 https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc0005/RFC0003-sparse-roadmap.
 """)
+
+add_docstr_all('reduction',
+               r"""
+reduction() -> Tensor
+
+Tensor which shows the demarcation between dimensions that will be
+flattened from the N-D tensor.
+"""
+)
