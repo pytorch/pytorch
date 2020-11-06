@@ -30,7 +30,7 @@ import threading
 from typing import TYPE_CHECKING, Deque, Generator, List, Optional, Tuple, Union
 
 import torch
-from torch import ByteTensor, Tensor
+from torch import Tensor
 import torch.autograd
 
 from .dependency import fork, join
