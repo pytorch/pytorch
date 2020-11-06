@@ -212,14 +212,7 @@ class ConvRelu(QuantizeHandler):
                 convert_custom_config_dict = {}
             additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
             # 1. attach activation post process to module
-            if type(self.conv) in [
-                    torch.nn.intrinsic.ConvReLU1d,
-                    torch.nn.intrinsic.ConvReLU2d,
-                    torch.nn.intrinsic.ConvReLU3d
-            ]:
-                self.conv[1].activation_post_process = quantizer.activation_post_process_map[node.name]
-            else:
-                self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
+            self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
             qconv_cls = get_static_quant_module_class(
                 type(self.conv), additional_static_quant_mapping)
@@ -416,13 +409,7 @@ class BatchNorm(QuantizeHandler):
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
-        activation_post_process = quantizer.activation_post_process_map[node.name]
-        if type(self.bn) in \
-            [torch.nn.intrinsic.BNReLU2d,
-             torch.nn.intrinsic.BNReLU3d]:
-            self.bn[1].activation_post_process = activation_post_process
-        else:
-            self.bn.activation_post_process = activation_post_process
+        self.bn.activation_post_process = quantizer.activation_post_process_map[node.name]
         qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
