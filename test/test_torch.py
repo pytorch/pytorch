@@ -4342,7 +4342,7 @@ class TestTorchDeviceType(TestCase):
             bins = torch.randn(101, device=device, dtype=dtypes[0]).sort()[0]
         else:
             sample = torch.randint(127, (5000, ), device=device, dtype=dtypes[0])
-            bins = torch.arange(10, 111, 3)
+            bins = torch.arange(10, 111, 3, device=device)
         if dtypes[1].is_floating_point:
             weights = torch.rand(5000, device=device, dtype=dtypes[1])
         else:
@@ -4372,7 +4372,7 @@ class TestTorchDeviceType(TestCase):
             bins_noncontig = torch.randn(101, 2, device=device, dtype=dtypes[0]).sort(axis=0)[0][:, 1]
         else:
             sample_noncontig = torch.randint(127, (5000, 2), device=device, dtype=dtypes[0])[:, 1]
-            bins_noncontig = torch.arange(10, 111, 1)[::3]
+            bins_noncontig = torch.arange(10, 111, 1, device=device)[::3]
         if dtypes[1].is_floating_point:
             weights_noncontig = torch.rand(5000, device=device, dtype=dtypes[1])
         else:
