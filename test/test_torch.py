@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import \
      wrapDeterministicFlagAPITest, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCUDAIfNotRocm, \
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, \
     onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
@@ -6178,88 +6178,6 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    def test_inverse(self, device):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        def test_inverse_helper(matrix, batches, n):
-            identity = torch.eye(n, dtype=torch.float64, device=device)
-
-            # correctness test, check matrix*matrix_inverse == identity
-            matrix_inverse = torch.inverse(matrix)
-
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse), atol=1e-8, rtol=0)
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix), atol=1e-8, rtol=0)
-
-            # torch.inverse with out and batches
-            matrix_inverse_out = torch.empty(*batches, n, n, dtype=torch.float64, device=device)
-            torch.inverse(matrix, out=matrix_inverse_out)
-            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
-
-            # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
-            if matrix.ndim > 2:
-                expected_inv_list = []
-                for mat in matrix.contiguous().view(-1, n, n):
-                    expected_inv_list.append(torch.inverse(mat))
-                expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
-                self.assertEqual(matrix_inverse, expected_inv)
-
-        for batches, n in product(
-            [[], [1], [4], [2, 3], [32]],
-            [5, 256]
-        ):
-            # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
-            if batches and batches[0] == 32 and n == 256:
-                continue
-            _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches).to(device)
-            test_inverse_helper(_matrices, batches, n)
-            test_inverse_helper(_matrices.transpose(-2, -1), batches, n)
-            test_inverse_helper(
-                random_fullrank_matrix_distinct_singular_value(n * 2, *batches).to(device)
-                .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
-                batches, n
-            )
-
-        # incorrect input test
-        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
-            torch.inverse(torch.randn(2, 3, 4, 3))
-
-        # test for zero-sized tensor
-        def test_inverse_helper_zero_size(size):
-            data = torch.zeros(*size, device=device)
-            out = torch.inverse(data)
-            self.assertTrue(out.size() == data.size())
-
-        test_inverse_helper_zero_size([0, 0])
-        test_inverse_helper_zero_size([3, 0, 0])
-        test_inverse_helper_zero_size([0, 3, 3])
-
-        # non-contiguous inputs
-        if not TEST_NUMPY:
-            return
-
-        from numpy.linalg import inv
-        matrices = random_fullrank_matrix_distinct_singular_value(3, 2).to(device).permute(0, 2, 1)
-        assert not matrices.is_contiguous()
-        matrices_inverse = torch.inverse(matrices)
-        expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
-        self.assertEqual(matrices_inverse, expected_inv.to(device))
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
-    def test_inverse_singular(self, device):
-        def helper(batch_dim, n):
-            x = torch.eye(3, 3, dtype=torch.float, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
-            x[n, -1, -1] = 0
-
-            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
-                torch.inverse(x)
-
-        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
-            helper(*params)
-
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
@@ -7003,22 +6921,6 @@ class TestTorchDeviceType(TestCase):
         t2 = t1.view([0])
         self.assertFalse(t1.is_set_to(t2))
         self.assertFalse(t2.is_set_to(t1))
-
-    @slowTest
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    def test_inverse_many_batches(self, device):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        def test_inverse_many_batches_helper(b, n):
-            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n).to(device)
-            matrices_inverse = torch.inverse(matrices)
-            self.assertEqual(torch.matmul(matrices_inverse, matrices),
-                             torch.eye(b, dtype=torch.float64, device=device).expand_as(matrices))
-
-        test_inverse_many_batches_helper(5, 256)
-        test_inverse_many_batches_helper(3, 512)
-        test_inverse_many_batches_helper(64, 64)
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
@@ -17081,90 +16983,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).cuda().half()
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
-
-    def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
-        def compare_with_numpy_bin_op(torch_fn, np_fn, x, y):
-            y_np = y.cpu().numpy()
-
-            # `compare_with_numpy` takes care of moving `x` to correct device for calling np_fn.
-            self.compare_with_numpy(lambda inp: torch_fn(inp, y), lambda inp: np_fn(inp, y_np), x)
-
-        # Use this tensor for out variant tests.
-        out = torch.randn((), dtype=dtype, device=device)
-
-        def compare_out_variant(torch_fn, x, y):
-            torch_fn(v1, v2, out=out)
-            self.assertEqual(torch_fn(v1, v2), out)
-
-        for _ in range(10):
-            numel = random.randint(10, 1000)
-            v1 = torch.randn(numel, dtype=dtype, device=device)
-            v2 = torch.randn(numel, dtype=dtype, device=device)
-            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v2)
-            compare_out_variant(torch_fn, v1, v2)
-
-            # Test 0-strided
-            v3 = torch.randn(1, dtype=dtype, device=device).expand(numel)
-            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v3)
-            compare_out_variant(torch_fn, v1, v3)
-
-            compare_with_numpy_bin_op(torch_fn, np_fn, v3, v1)
-            compare_out_variant(torch_fn, v3, v1)
-
-            # Test stride greater than 1
-            v4 = torch.randn(numel, numel, dtype=dtype, device=device)[:, numel - 1]
-            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v4)
-            compare_out_variant(torch_fn, v1, v4)
-
-            compare_with_numpy_bin_op(torch_fn, np_fn, v4, v1)
-            compare_out_variant(torch_fn, v4, v1)
-
-    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_dot_vs_numpy(self, device, dtype):
-        self._test_dot_vdot_vs_numpy(device, dtype, torch.dot, np.dot)
-
-    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_vdot_vs_numpy(self, device, dtype):
-        self._test_dot_vdot_vs_numpy(device, dtype, torch.vdot, np.vdot)
-
-    def _test_dot_vdot_invalid_args(self, device, torch_fn, complex_dtypes=False):
-        if complex_dtypes:
-            x = torch.randn(1, dtype=torch.cfloat, device=device)
-            y = torch.randn(3, dtype=torch.cdouble, device=device)
-        else:
-            x = torch.randn(1, dtype=torch.float, device=device)
-            y = torch.randn(3, dtype=torch.double, device=device)
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    'dot : expected both vectors to have same dtype'):
-            torch_fn(x, y)
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    '1D tensors expected'):
-            torch_fn(x.reshape(1, 1), y)
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    'inconsistent tensor size'):
-            torch_fn(x.expand(9), y.to(x.dtype))
-
-        if self.device_type != 'cpu':
-            x_cpu = x.expand(3).cpu()
-
-            with self.assertRaisesRegex(RuntimeError,
-                                        'expected all tensors to be on the same device'):
-                torch_fn(x_cpu, y.to(x.dtype))
-
-    @onlyOnCPUAndCUDA
-    def test_vdot_invalid_args(self, device):
-        self._test_dot_vdot_invalid_args(device, torch.vdot)
-        self._test_dot_vdot_invalid_args(device, torch.vdot, complex_dtypes=True)
-
-    @onlyOnCPUAndCUDA
-    def test_dot_invalid_args(self, device):
-        self._test_dot_vdot_invalid_args(device, torch.dot)
-        self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
 
     @onlyCPU
     @slowTest
