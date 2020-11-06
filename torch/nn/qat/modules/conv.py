@@ -1,6 +1,8 @@
 import torch.nn as nn
-from torch.nn.intrinsic import ConvReLU2d
-from torch.nn.intrinsic import _FusedModule
+from torch.nn.intrinsic import (
+    ConvReLU2d,
+    _FusedModule,
+)
 
 class Conv2d(nn.Conv2d, _FusedModule):
     r"""
