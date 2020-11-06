@@ -690,11 +690,6 @@ class AbstractTestCases:
             self.assertEqual('cuda', cuda90.type)
             self.assertEqual(90, cuda90.index)
 
-            cuda23333 = torch.device('cuda', 23333)
-            self.assertEqual('cuda:23333', str(cuda23333))
-            self.assertEqual('cuda', cuda23333.type)
-            self.assertEqual(23333, cuda23333.index)
-
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
@@ -17334,8 +17329,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Verify Value
             self.assertEqual(torch_result, expected)
             # Verify Sign
-            # Use double copysign to verify the correctnes of 0.0 and -0.0, since 
-            # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the 
+            # Use double copysign to verify the correctnes of 0.0 and -0.0, since
+            # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
             self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
                              torch.copysign(torch.tensor(1.0), expected))
@@ -18169,7 +18164,7 @@ else:
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)
                 out_tensor = out_tensor.permute(perm3).contiguous().permute(invert_perm(perm3))
-                yield b1, b2, ref, out_tensor 
+                yield b1, b2, ref, out_tensor
             # broadcasting tensors
             for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
