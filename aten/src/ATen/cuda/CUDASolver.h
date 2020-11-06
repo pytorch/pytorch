@@ -19,10 +19,6 @@ template<>
 void getrf<float>(CUDASOLVER_GETRF_ARGTYPES(float));
 template<>
 void getrf<double>(CUDASOLVER_GETRF_ARGTYPES(double));
-template<>
-void getrf<c10::complex<double>>(CUDASOLVER_GETRF_ARGTYPES(c10::complex<double>));
-template<>
-void getrf<c10::complex<float>>(CUDASOLVER_GETRF_ARGTYPES(c10::complex<float>));
 
 
 #define CUDASOLVER_GETRS_ARGTYPES(Dtype)  \
@@ -36,10 +32,6 @@ template<>
 void getrs<float>(CUDASOLVER_GETRS_ARGTYPES(float));
 template<>
 void getrs<double>(CUDASOLVER_GETRS_ARGTYPES(double));
-template<>
-void getrs<c10::complex<double>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<double>));
-template<>
-void getrs<c10::complex<float>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<float>));
 
 
 } // namespace solver

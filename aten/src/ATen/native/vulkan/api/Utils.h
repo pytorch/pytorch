@@ -8,10 +8,31 @@ namespace vulkan {
 namespace api {
 namespace utils {
 
-inline uint32_t div_up(
-    const uint32_t numerator,
-    const uint32_t denominator) {
-  return (numerator + denominator - 1u) / denominator;
+template<
+    typename Type,
+    typename = std::enable_if_t<std::is_integral<Type>::value>>
+inline Type align_down(
+    const Type number,
+    const Type multiple) {
+  return (number / multiple) * multiple;
+}
+
+template<
+    typename Type,
+    typename = std::enable_if_t<std::is_integral<Type>::value>>
+inline Type align_up(
+    const Type number,
+    const Type multiple) {
+  return align_down(number + multiple - 1, multiple);
+}
+
+template<
+    typename Type,
+    typename = std::enable_if_t<std::is_integral<Type>::value>>
+inline Type div_up(
+    const Type numerator,
+    const Type denominator) {
+  return (numerator + denominator - 1) / denominator;
 }
 
 inline VkFormat convert(const caffe2::TypeMeta dtype) {

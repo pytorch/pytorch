@@ -76,6 +76,10 @@ class TORCH_API Dtype {
     return tensorexpr::is_floating_point(scalar_type_);
   }
 
+  Dtype cloneWithScalarType(ScalarType nt) const {
+    return Dtype(nt, lanes_);
+  }
+
  private:
   friend std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
   ScalarType scalar_type_;
