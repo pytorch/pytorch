@@ -99,9 +99,7 @@ class Adamax(Optimizer):
                 torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
             bias_corrections = [1 - beta1 ** state['step'] for state in states]
-            clr = [group['lr'] / bias_correction for bias_correction in bias_corrections]
-
-            for i in range(len(params_with_grad)):
-                params_with_grad[i].addcdiv_(exp_avgs[i], exp_infs[i], value=-clr[i])
+            clr = [-1 * (group['lr'] / bias_correction) for bias_correction in bias_corrections]
+            torch._foreach_addcdiv_(params_with_grad, exp_avgs, exp_infs, clr)
 
         return loss

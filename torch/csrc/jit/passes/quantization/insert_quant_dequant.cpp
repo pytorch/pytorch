@@ -360,10 +360,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
         embedding_bag_inputs[9]); // per_sample_weights
   }
 
-  if (op_name == "embedding_bag_4bit") {
-    // 4-bit op has an extra input compressed_indices_mapping
-    qembedding_bag_inputs.push_back(none);
-  }
+  qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
   qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 1]);
 
   Node* qembedding_bag =
@@ -481,7 +478,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
           matched_choose_qparam, matched_quantize, matched_dequantize));
     }
   }
-  for (const auto nodes : nodes_to_rewrite) {
+  for (const auto& nodes : nodes_to_rewrite) {
     auto quant_node = std::get<1>(nodes);
     auto dequant_node = std::get<2>(nodes);
     // get input of quantize call.

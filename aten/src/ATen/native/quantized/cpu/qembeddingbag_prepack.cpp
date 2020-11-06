@@ -142,8 +142,14 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   auto* output_data = output.data_ptr<uint8_t>();
 
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
-      weight_data, embedding_rows, embedding_cols, output_data);
+  at::parallel_for(
+      0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+        for (int64_t row = start_idx; row < end_idx; ++row) {
+          fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+            weight_data + row * embedding_cols, 1,
+              embedding_cols, output_data + row * output_shape[1]);
+        }
+      });
 #else
   size_t output_columns = output_shape[1];
   constexpr float kEpsilon = 1e-8f;
@@ -213,8 +219,14 @@ Tensor _qembeddingbag_nbit_prepack_helper(
 
 #ifdef USE_FBGEMM
   if (!optimized_qparams) {
-    fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
-        bit_width, weight_data, embedding_rows, embedding_cols, output_data);
+    at::parallel_for(
+      0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+        for (int64_t row = start_idx; row < end_idx; ++row) {
+          fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+            bit_width, weight_data + row * embedding_cols, 1,
+            embedding_cols, output_data + row * output_shape[1]);
+        }
+      });
   } else {
 #endif // USE_FBGEMM
     const auto output_columns = output.size(output.dim() - 1);

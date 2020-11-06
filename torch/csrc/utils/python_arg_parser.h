@@ -42,6 +42,7 @@
 
 #include <torch/csrc/python_headers.h>
 
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -78,7 +79,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
   DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST
 };
 
@@ -165,6 +166,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
+  inline c10::Stream stream(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
@@ -599,7 +601,7 @@ inline c10::complex<double> PythonArgs::toComplex(int i) {
 
 inline c10::complex<double> PythonArgs::toComplexWithDefault(int i, c10::complex<double> default_value) {
   if (!args[i]) return default_value;
-  return toDouble(i);
+  return toComplex(i);
 }
 
 inline bool PythonArgs::toBool(int i) {
@@ -624,6 +626,14 @@ inline c10::optional<at::Generator> PythonArgs::generator(int i) {
 inline at::Storage PythonArgs::storage(int i) {
   if (!args[i]) return at::Storage();
   return createStorage(args[i]);
+}
+
+inline c10::Stream PythonArgs::stream(int i) {
+  if (!args[i]) return c10::Stream(c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
+  if (!THPStream_Check(args[i])) {
+    throw TypeError("expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
+  }
+  return c10::Stream::unpack(((THPStream*)args[i])->cdata);
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {

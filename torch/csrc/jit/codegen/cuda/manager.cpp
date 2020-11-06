@@ -23,28 +23,29 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// [ Note -- cache entry indexing ]
-//
-// CudaFusionManager holds the cache and handles interfacing to CudaFusionGroup
-// node, including selection, construction and execution of FusionExecutors.
-//
-// CudaFusionManager bridges PyTorch IR node CudaFusionGroup to GraphCache.
-// Therefore, we want to cache on stringified graph. But it is expensive to
-// stringify and hash on a computational graph, we cache the hash of a
-// stringified graph on node via cache_id.
-//
-// CudaFusionGroup node stores:
-//     i.  a PyTorch IR in `attr::Subgraph`
-//     ii. an int in `attr::cache_id`, (a cached hash value of `attr::Subgraph`)
-//
-// We have 2 unordered_map at CudaFusionGroup:
-//   std::unordered_map<std::string, int32_t> graph_cache_ids_;
-//   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
-//
-// Mapping from std::string to graph_cache_id ensures that we assign the same
-// cache_id to CudaFusionGroup with identical computational grah, allowing
-// kernel reuse; Direct mapping from cache_id to GraphCache allows efficient
-// graph_cache indexing;
+//! [ Note -- cache entry indexing ]
+//!
+//! CudaFusionManager holds the cache and handles interfacing to CudaFusionGroup
+//! node, including selection, construction and execution of FusionExecutors.
+//!
+//! CudaFusionManager bridges PyTorch IR node CudaFusionGroup to GraphCache.
+//! Therefore, we want to cache on stringified graph. But it is expensive to
+//! stringify and hash on a computational graph, we cache the hash of a
+//! stringified graph on node via cache_id.
+//!
+//! CudaFusionGroup node stores:
+//!     i.  a PyTorch IR in `attr::Subgraph`
+//!     ii. an int in `attr::cache_id`, (a cached hash value of
+//!     `attr::Subgraph`)
+//!
+//! We have 2 unordered_map at CudaFusionGroup:
+//!   std::unordered_map<std::string, int32_t> graph_cache_ids_;
+//!   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
+//!
+//! Mapping from std::string to graph_cache_id ensures that we assign the same
+//! cache_id to CudaFusionGroup with identical computational grah, allowing
+//! kernel reuse; Direct mapping from cache_id to GraphCache allows efficient
+//! graph_cache indexing;
 
 namespace {
 

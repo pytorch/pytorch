@@ -8,10 +8,15 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends | Disp
   DispatchKey::CPU,
   DispatchKey::CUDA,
   DispatchKey::XLA,
+  DispatchKey::NestedTensor,
   DispatchKey::PrivateUse1,
   DispatchKey::PrivateUse2,
   DispatchKey::PrivateUse3,
 });
+
+bool isBackendDispatchKey(DispatchKey t) {
+  return t != DispatchKey::Undefined && backend_dispatch_keyset.has(t);
+}
 
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and autograd_dispatch_keyset
 // Alias key DispatchKey::Math maps to math_dispatch_keyset.
@@ -31,6 +36,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   }
 }
 
+// for a given autograd key, return the (guaranteed nonempty) set of associated backend keys.
+// for a non-autograd key, return the empty keyset.
 DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
   switch (t) {
     case DispatchKey::AutogradCPU:
@@ -39,6 +46,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::CUDA);
     case DispatchKey::AutogradXLA:
       return DispatchKeySet(DispatchKey::XLA);
+    case DispatchKey::AutogradNestedTensor:
+      return DispatchKeySet(DispatchKey::NestedTensor);
     case DispatchKey::AutogradPrivateUse1:
       return DispatchKeySet(DispatchKey::PrivateUse1);
     case DispatchKey::AutogradPrivateUse2:

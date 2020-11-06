@@ -60,6 +60,7 @@ enum class DispatchKey : uint8_t {
          // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
   Vulkan,
+  Metal,
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -103,6 +104,7 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
              // [Masquerading as CUDA]
 
+  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out MSNPU
@@ -216,6 +218,7 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
+  AutogradNestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,

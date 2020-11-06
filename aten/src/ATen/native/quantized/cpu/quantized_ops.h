@@ -15,6 +15,10 @@ using qclamp_fn = void (*)(
     Scalar min,
     Scalar max,
     at::Tensor& /*qy*/);
+using qclamp_minmax_fn = void (*)(
+    const at::Tensor& /*qx*/,
+    Scalar /*min or max*/,
+    at::Tensor& /*qy*/);
 using qthreshold_fn = void (*)(
     const at::Tensor& /*qx*/,
     Scalar threshold,
@@ -167,6 +171,8 @@ DECLARE_DISPATCH(qbinary_fn, qmul_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qclamp_fn, qclamp_stub);
+DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_min_stub);
+DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_max_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
 DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);

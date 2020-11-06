@@ -12,26 +12,23 @@ from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic
-from torch.quantization import (
-    is_custom_module_class,
-    is_observed_custom_module,
-)
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, QuantType
 from torch.quantization.quantization_mappings import (
-    get_dynamic_quant_module_mappings,
-    get_qconfig_propagation_list,
-    get_qat_module_mappings,
+    get_default_dynamic_quant_module_mappings,
+    get_default_qconfig_propagation_list,
+    get_default_qat_module_mappings,
 )
-# symbolic trace
-from torch.fx import symbolic_trace
 
-# graph mode quantization based on fx
-from torch.quantization import (
-    QuantType,
-    prepare_fx,
-    prepare_qat_fx,
-    convert_fx,
-)
+try:
+    # graph mode quantization based on fx
+    from torch.quantization.quantize_fx import (
+        prepare_fx,
+        prepare_qat_fx,
+        convert_fx,
+    )
+    HAS_FX = True
+except ImportError:
+    HAS_FX = False
 
 import copy
 import io
@@ -190,7 +187,7 @@ def run_ddp(rank, world_size, prepared):
 
 
 def convert_dynamic(module):
-    convert(module, get_dynamic_quant_module_mappings(), inplace=True)
+    convert(module, get_default_dynamic_quant_module_mappings(), inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig_(model, qconfig_dict)
@@ -341,12 +338,15 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(hasattr(module, 'quant'))
         self.assertTrue(hasattr(module, 'dequant'))
 
-    def checkObservers(self, module, propagate_qconfig_list=None):
+    def checkObservers(self, module, propagate_qconfig_list=None, prepare_custom_config_dict=None):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = get_qconfig_propagation_list()
+            propagate_qconfig_list = get_default_qconfig_propagation_list()
+        if prepare_custom_config_dict is None:
+            prepare_custom_config_dict = {}
+        float_to_observed_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
 
         # check if a module is a leaf module, ignoring activation_post_process attribute
         def is_leaf_module(module):
@@ -356,18 +356,18 @@ class QuantizationTestCase(TestCase):
                     submodule_name_count += 1
             return submodule_name_count == 0
 
-        if (hasattr(module, 'qconfig') and module.qconfig is not None and
-           is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
-           and type(module) in propagate_qconfig_list) or \
-           is_custom_module_class(type(module)):
+        if hasattr(module, 'qconfig') and module.qconfig is not None and \
+           ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
+            and type(module) in propagate_qconfig_list) or
+           type(module) in float_to_observed_module_class_mapping.keys()):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
-        if type(module) not in get_qat_module_mappings().values() and \
-           not is_observed_custom_module(module):
+        if type(module) not in get_default_qat_module_mappings().values() and \
+           type(module) not in float_to_observed_module_class_mapping.values():
             for child in module.children():
-                self.checkObservers(child)
+                self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
     def checkQuantDequant(self, mod):
         r"""Checks that mod has nn.Quantize and
@@ -600,71 +600,77 @@ class QuantizationTestCase(TestCase):
             print(str_to_print)
         return str_to_print
 
-    def checkGraphModeFxOp(self, model, inputs, quant_type,
-                           expected_node=None,
-                           expected_node_occurrence=None,
-                           expected_node_list=None,
-                           debug=False,
-                           print_debug_info=False):
-        """ Quantizes model with graph mode quantization on fx and check if the
-        quantized model contains the quantized_node
+    if HAS_FX:
+        def checkGraphModeFxOp(self, model, inputs, quant_type,
+                               expected_node=None,
+                               expected_node_occurrence=None,
+                               expected_node_list=None,
+                               debug=False,
+                               print_debug_info=False,
+                               custom_qconfig=None):
+            """ Quantizes model with graph mode quantization on fx and check if the
+                quantized model contains the quantized_node
 
-        Args:
-            model: floating point torch.nn.Module
-            inputs: one positional sample input arguments for model
-            expected_node: NodeSpec
-                  e.g. NodeSpec.call_function(torch.quantize_per_tensor)
-            expected_node_occurrence: a dict from NodeSpec to
-                  expected number of occurences (int)
-                  e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
-                        NodeSpec.call_method('dequantize'): 1}
-            expected_node_list: a list of NodeSpec, used to check the order
-                  of the occurrence of Node
-                  e.g. [NodeSpec.call_function(torch.quantize_per_tensor),
-                        NodeSpec.call_module(nnq.Conv2d),
-                        NodeSpec.call_function(F.hardtanh_),
-                        NodeSpec.call_method('dequantize')]
-        """
-        # TODO: make img_data a single example instead of a list
-        if type(inputs) == list:
-            inputs = inputs[0]
-        if quant_type == QuantType.QAT:
-            qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
-            model.train()
-        elif quant_type == QuantType.STATIC:
-            qconfig = get_default_qconfig(torch.backends.quantized.engine)
-            model.eval()
-        else:
-            qconfig = default_dynamic_qconfig
-            model.eval()
+                Args:
+                    model: floating point torch.nn.Module
+                    inputs: one positional sample input arguments for model
+                    expected_node: NodeSpec
+                        e.g. NodeSpec.call_function(torch.quantize_per_tensor)
+                    expected_node_occurrence: a dict from NodeSpec to
+                        expected number of occurences (int)
+                        e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
+                                NodeSpec.call_method('dequantize'): 1}
+                    expected_node_list: a list of NodeSpec, used to check the order
+                        of the occurrence of Node
+                        e.g. [NodeSpec.call_function(torch.quantize_per_tensor),
+                                NodeSpec.call_module(nnq.Conv2d),
+                                NodeSpec.call_function(F.hardtanh_),
+                                NodeSpec.call_method('dequantize')]
+            """
+            # TODO: make img_data a single example instead of a list
+            if type(inputs) == list:
+                inputs = inputs[0]
 
-        original = symbolic_trace(model)
-        if quant_type == QuantType.QAT:
-            prepare = prepare_qat_fx
-        else:
-            prepare = prepare_fx
+            if quant_type == QuantType.QAT:
+                qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+                model.train()
+            elif quant_type == QuantType.STATIC:
+                qconfig = get_default_qconfig(torch.backends.quantized.engine)
+                model.eval()
+            else:
+                qconfig = default_dynamic_qconfig
+                model.eval()
 
-        qconfig_dict = {'': qconfig}
-        prepared = prepare(original, qconfig_dict)
-        prepared(*inputs)
-        qgraph = convert_fx(prepared)
-        qgraph_debug = convert_fx(prepared, debug=True)
+            # overwrite qconfig with custom_qconfig
+            if custom_qconfig is not None:
+                qconfig = custom_qconfig
 
-        result = qgraph(*inputs)
-        result_debug = qgraph_debug(*inputs)
+            if quant_type == QuantType.QAT:
+                prepare = prepare_qat_fx
+            else:
+                prepare = prepare_fx
 
-        qgraph_to_check = qgraph_debug if debug else qgraph
-        if print_debug_info:
-            print()
-            print('quant type:', quant_type)
-            print('origianl graph module:', type(model))
-            self.printGraphModule(original)
-            print()
-            print('quantized graph module:', type(qgraph_to_check))
-            self.printGraphModule(qgraph_to_check)
-            print()
-        self.checkGraphModuleNodes(
-            qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
+            qconfig_dict = {'': qconfig}
+            prepared = prepare(model, qconfig_dict)
+            if not quant_type == QuantType.DYNAMIC:
+                prepared(*inputs)
+            prepared_copy = copy.deepcopy(prepared)
+            qgraph = convert_fx(prepared)
+            qgraph_debug = convert_fx(prepared_copy, debug=True)
+            result = qgraph(*inputs)
+            result_debug = qgraph_debug(*inputs)
+
+            qgraph_to_check = qgraph_debug if debug else qgraph
+            if print_debug_info:
+                print()
+                print('quant type:', quant_type)
+                print('original model:', model)
+                print()
+                print('quantized model:', qgraph_to_check)
+                self.printGraphModule(qgraph_to_check)
+                print()
+            self.checkGraphModuleNodes(
+                qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,

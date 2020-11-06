@@ -493,6 +493,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
+      .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
@@ -756,6 +757,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(
       m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  py::class_<StreamObjType, Type, std::shared_ptr<StreamObjType>>(
+      m, "StreamObjType")
+      .def_static("get", &StreamObjType::get);
   py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
       m, "PyObjectType")
       .def_static("get", &PyObjectType::get);

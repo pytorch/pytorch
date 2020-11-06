@@ -546,6 +546,7 @@ class PrioritizeLoad : public IRMutator {
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
+
     return load_new_var;
   }
 
@@ -657,12 +658,14 @@ class PrioritizeLoad : public IRMutator {
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
-  // We are using a global counter here to make sure difference instances
-  // within CudaCodeGen have different names.
-  static int64_t counter = 0;
-  ++counter;
-  int64_t value = counter;
-  return func_prefix + "_" + std::to_string(value);
+  int64_t counter = 0;
+  std::string name = func_prefix;
+  while (taken_func_names.count(name)) {
+    name = func_prefix + "_" + std::to_string(counter++);
+  }
+
+  taken_func_names.insert(name);
+  return name;
 }
 
 bool GPUMetaVarRewriter::isFullExtent() {
@@ -925,7 +928,7 @@ void CudaCodeGen::Initialize() {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
 
-  std::string func_name = GetUniqueFuncName("func");
+  std::string func_name = GetUniqueFuncName(kernel_func_name());
   os() << "extern \"C\" __global__" << std::endl;
 #ifdef USE_ROCM
   // CUDA has a default limit of threads per block (=flat work group size)
@@ -983,6 +986,10 @@ void CudaCodeGen::Initialize() {
   stmt_v = stmt_v->accept_mutator(&atomic_add_fuser);
 
   stmt_v = registerize(stmt_v);
+
+  // The registerizer might insert half-type scalars, we don't want this.
+  CudaHalfScalarRewriter hsFix;
+  stmt_v = stmt_v->accept_mutator(&hsFix);
 
   PrioritizeLoad prioritize_load;
   stmt_v = stmt_v->accept_mutator(&prioritize_load);

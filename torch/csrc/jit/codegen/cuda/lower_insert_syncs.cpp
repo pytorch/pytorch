@@ -1,7 +1,8 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -9,27 +10,22 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
+//! Scan through Kernel IR to insert Sync nodes to avoid
+//! Write-After-Read (WAR) race condition
+//!
 class LocalSyncInserter final : private OptOutDispatch {
  public:
-  static void InsertSyncs(Expr* expr) {
+  // Write-After-Read race conditions are only found within for-loops.
+  // Sync nodes are inserted directly into the for-loops.
+  // The expressions are modified in-place and exprs is const.
+  static void InsertSyncs(const std::vector<Expr*>& exprs) {
     LocalSyncInserter sync_inserter;
-    sync_inserter.handle(expr);
-  }
-
-  void handle(Expr* expr) final {
-    if (ir_utils::isTVOp(expr)) {
-      // For this SyncInserter
-      (!initial_sync_) ? hasOutputSmemExpr(expr, initial_)
-                       : hasInputSmemExpr(expr, final_);
-
-      // For parent SyncInserter
-      hasOutputSmemExpr(expr, all_smem_outputs_);
-      hasInputSmemExpr(expr, all_smem_inputs_);
-    } else {
-      OptOutDispatch::handle(expr);
+    for (auto expr : exprs) {
+      sync_inserter.handle(expr);
     }
   }
 
@@ -49,7 +45,42 @@ class LocalSyncInserter final : private OptOutDispatch {
     return all_smem_outputs_;
   }
 
+  const std::unordered_set<unsigned int>& all_aliased_allocations() const {
+    return all_alias_allocations_;
+  }
+
  private:
+  explicit LocalSyncInserter(
+      const std::unordered_set<unsigned int>* parent_alias_allocations =
+          nullptr) {
+    if (parent_alias_allocations != nullptr) {
+      all_alias_allocations_.insert(
+          parent_alias_allocations->begin(), parent_alias_allocations->end());
+    }
+  }
+
+  void handle(Expr* expr) final {
+    if (ir_utils::isTVOp(expr)) {
+      // For this SyncInserter
+      (!initial_sync_) ? hasOutputSmemExpr(expr, initial_)
+                       : hasInputSmemExpr(expr, final_);
+
+      // For parent SyncInserter
+      hasOutputSmemExpr(expr, all_smem_outputs_);
+      hasInputSmemExpr(expr, all_smem_inputs_);
+    } else {
+      OptOutDispatch::handle(expr);
+    }
+  }
+
+  void handle(kir::Allocate* a) final {
+    if (a->buffer()->getValType().value() == ValType::KirTensorView &&
+        a->alias() != nullptr && a->getMemoryType() == MemoryType::Shared) {
+      auto tv = a->buffer()->as<kir::TensorView>()->fuserTv();
+      all_alias_allocations_.insert(tv->name());
+    }
+  }
+
   void handle(kir::IfThenElse* ite) final {
     for (auto expr : ite->thenBody().exprs()) {
       handle(expr);
@@ -69,14 +100,18 @@ class LocalSyncInserter final : private OptOutDispatch {
         final_.clear();
       } else if (expr->getExprType().value() == ExprType::ForLoop) {
         // Recursively handle nested for-loop
-        LocalSyncInserter child_sync_inserter;
+        LocalSyncInserter child_sync_inserter(&all_alias_allocations_);
         child_sync_inserter.handle(expr);
         const auto& child_inputs = child_sync_inserter.all_smem_inputs();
         const auto& child_outputs = child_sync_inserter.all_smem_outputs();
+        const auto& child_alias_allocations =
+            child_sync_inserter.all_aliased_allocations();
 
         // Default - Track all smem inputs / outputs
         all_smem_inputs_.insert(child_inputs.begin(), child_inputs.end());
         all_smem_outputs_.insert(child_outputs.begin(), child_outputs.end());
+        all_alias_allocations_.insert(
+            child_alias_allocations.begin(), child_alias_allocations.end());
 
         if (!initial_sync_) {
           // Parent - None
@@ -137,6 +172,7 @@ class LocalSyncInserter final : private OptOutDispatch {
       // Determine if any smem TV is written to at beginning of the for-loop
       // and whether that smem TV is read from at the end of the for-loop
       // Insert new SyncThreads at end of for-loop to prevent WAR race condition
+      // TODO: replace __syncthreads with __threadfence for alias ops
       if (detect_intersection(initial_, final_) &&
           fl->body().exprs().back()->getExprType().value() != ExprType::Sync &&
           !is_last_op_sync_) {
@@ -186,6 +222,9 @@ class LocalSyncInserter final : private OptOutDispatch {
   }
 
  private:
+  // Track TensorViews for Allocate nodes that alias another memory location
+  std::unordered_set<unsigned int> all_alias_allocations_;
+
   // Track Shared Memory Inputs (Reads) for parent for-loop
   std::unordered_set<const TensorView*> all_smem_inputs_;
 
@@ -214,14 +253,11 @@ std::vector<Expr*> insertThreadSynchronization(
     const std::vector<Expr*>& exprs) {
   FUSER_PERF_SCOPE("insertThreadSynchronization");
   FusionGuard fg(fusion);
-  std::vector<Expr*> mutated_exprs;
-  for (auto expr : exprs) {
-    LocalSyncInserter::InsertSyncs(expr);
-    mutated_exprs.push_back(expr);
-  }
-  return mutated_exprs;
+  LocalSyncInserter::InsertSyncs(exprs);
+  return exprs;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

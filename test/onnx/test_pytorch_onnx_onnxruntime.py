@@ -53,7 +53,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
     input, _ = torch.jit._flatten(input_copy)
-    inputs = list(map(to_numpy, input))
+    inputs = [to_numpy(inp) for inp in input]
 
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
@@ -62,7 +62,7 @@ def run_ort(ort_sess, input):
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
-    outputs = list(map(to_numpy, output))
+    outputs = [to_numpy(outp) for outp in output]
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
@@ -430,6 +430,26 @@ class TestONNXRuntime(unittest.TestCase):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_data(self):
+        class Data(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.new_zeros(x.data.size())
+
+        x = torch.randn(3, 4)
+        self.run_test(Data(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()  # Need type inference
+    def test_index_mask_nd(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                return input[input > 0]
+
+        m1 = torch.randn(3, 4, 5, 6, 7)
+        self.run_test(MyModel(), m1)
+
     @disableScriptTest()
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -451,6 +471,42 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
+
+    def test_none_as_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if y is not None:
+                    return x + y
+                return x
+
+        x = torch.randn(2, 3)
+        self.run_test(Model(), (x, None))
+
+    def test_none_as_tuple_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if y[0] is not None:
+                    return x + y[0]
+                if y[1] is not None:
+                    return x + y[1]
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y)))
+
+    def test_none_as_named_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        self.run_test(Model(), (x, None, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cste_script(self):
@@ -713,14 +769,19 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.squeeze(x)
 
         x2 = [] if x2 is None else [x2]
-        self.run_test(Squeeze(d), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=x2)
+        if len(x2) > 0:
+            self.run_test(Squeeze(d), x1,
+                          input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}},
+                          test_with_inputs=x2)
+        else:
+            self.run_test(Squeeze(d), x1)
 
     def test_squeeze_without_no_op(self):
         x = torch.randn(2, 1, 4)
         self.squeeze_model_tests(1, x, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_squeeze(self):
+    def test_squeeze_dynamic(self):
         x_squeeze = torch.randn(2, 1, 4)
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(1, x_squeeze, x_noop)
@@ -745,10 +806,6 @@ class TestONNXRuntime(unittest.TestCase):
         x_noop = torch.randn(2, 1, 4)
         x_squeeze = torch.randn(2, 2, 1)
         self.squeeze_model_tests(2, x_noop, x_squeeze)
-
-    def test_squeeze_no_op_without_additional_inputs(self):
-        x_noop = torch.randn(2, 1, 4)
-        self.squeeze_model_tests(2, x_noop, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_runtime_dim(self):
@@ -1702,14 +1759,25 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
-    def test_std(self):
-        class StandardDeviation(torch.nn.Module):
-            def forward(self, input):
-                return torch.std(input, unbiased=False)
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_listunpack(self):
+        class ListUnpack(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape
+                return x.new_zeros((a, b))
 
-        x = torch.randn(2, 3, 4)
-        model = StandardDeviation()
-        self.run_test(model, x)
+        x = torch.randn(2, 3)
+        self.run_test(ListUnpack(), x)
+
+        class ListUnpackSlice(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape[2:]
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3, 4, 5)
+        self.run_test(ListUnpackSlice(), x)
 
     def test_pow(self):
         class PowModule(torch.nn.Module):
@@ -1732,6 +1800,22 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (2, 3, 4))
         self.run_test(PowModule(), (x, y))
 
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=True)
+
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
     def test_std_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -1741,6 +1825,14 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
     def test_std_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -1748,6 +1840,164 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
+    def test_var(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, unbiased=True)
+
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_along_dims(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_keepdim(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_mean(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, unbiased=True)
+
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_mean_along_dims(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_mean_keepdim(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, unbiased=True)
+
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean_along_dims(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean_keepdim(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
     def test_bitshift(self):
@@ -3264,6 +3514,31 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedSelectModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_fill(self):
+        class MaskedFillModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = 1
+                mask[mask == some_const] = 0
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedFillModel(), (mask, constant))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_scatter(self):
+        class MaskedScatterModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = torch.ones(8)
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedScatterModel(), (mask, constant))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
@@ -4540,6 +4815,41 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
+
+    def test_batchnorm_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3, affine=True)
+
+            def forward(self, x):
+                bn = self.bn(x)
+                return bn
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+        out = model(x)
+
+        # state after 1 train epoch
+        running_mean = model.bn.running_mean
+        running_var = model.bn.running_var
+        saved_mean = x.mean((0, 2, 3))
+        saved_var = x.var((0, 2, 3))
+
+        pytorch_out = [out.detach().numpy(),
+                       running_mean.cpu().numpy(), running_var.cpu().numpy(),
+                       saved_mean.cpu().numpy(), saved_var.cpu().numpy()]
+
+        model_export = MyModule()
+        f = io.BytesIO()
+
+        ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
+                                   training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs = run_ort(ort_sess, input=(x,))
+
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training(self):

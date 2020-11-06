@@ -111,6 +111,7 @@ from .transforms import *
 from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
+from . import transforms
 
 __all__ = [
     'Bernoulli',

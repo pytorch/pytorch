@@ -35,6 +35,13 @@ class device:
 
     def __reduce__(self) -> Tuple[Any, ...]: ...  # THPDevice_reduce
 
+# Defined in torch/csrc/Stream.cpp
+class Stream:
+    _cdata: _int  # Stream handle
+    device: device # The device of the stream
+
+    ...
+
 # Defined in torch/csrc/Size.cpp
 class Size(Tuple[_int, ...]):
     # TODO: __reduce__
@@ -137,6 +144,7 @@ class Future(object):
   def __init__(self) -> None: ...
   def done(self) -> _bool: ...
   def wait(self) -> Any: ...
+  def add_done_callback(self, callback: Callable) -> None: ...
   def then(self, callback: Callable) -> Future: ...
   def set_result(self, result: Any) -> None: ...
 
@@ -167,6 +175,8 @@ def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule',
                                   optimization_blocklist: Set[MobileOptimizerType],
                                   preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_vulkan_optimize_for_mobile(module: 'torch.jit.ScriptModule',
+                                         preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
+def _jit_pass_metal_optimize_for_mobile(module: 'torch.jit.ScriptModule',
                                          preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_inline(Graph) -> None: ...
 def _jit_get_schemas_for_operator(name :str) -> List[FunctionSchema]: ...
@@ -406,8 +416,8 @@ def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython
 def _demangle(str) -> str: ...  # c10::demangle
 
 # Defined in `valgrind.h` and `callgrind.h` respecitively.
-def valgrind_supported_platform() -> _bool: ...  # NVALGRIND
-def valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
+def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
+def _valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
 
 has_openmp: _bool
 has_mkl: _bool
@@ -589,6 +599,20 @@ class _CudaDeviceProperties:
     is_integrated: _int
     is_multi_gpu_board: _int
 
+# Defined in torch/csrc/cuda/python_comm.cpp
+def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...
+def _broadcast_out(tensor: Tensor, out_tensors: List[Tensor]) -> List[Tensor]: ...
+def _broadcast_coalesced(
+    tensors: List[Tensor],
+    devices: List[_int],
+    buffer_size: _int
+) -> List[List[Tensor]]: ...
+
+def _scatter(tensor: Tensor, devices: List[_int], chunk_sizes: Optional[List[_int]], dim: _int, streams: Optional[List[Stream]]) -> List[Tensor]: ...
+def _scatter_out(tensor: Tensor, out_tensors: List[Tensor], dim: _int, streams: Optional[List[Stream]]) -> List[Tensor]: ...
+def _gather(tensors: List[Tensor], dim: _int, destination_index: Optional[_int]) -> Tensor: ...
+def _gather_out(tensors: List[Tensor], out_tensor: Tensor, dim: _int) -> Tensor: ...
+
 # Defined in torch/csrc/cuda/Stream.cpp
 class _CudaStreamBase:
     _cdata: _int
@@ -674,6 +698,10 @@ class StringType(JitType):
 class DeviceObjType(JitType):
     @staticmethod
     def get() -> DeviceObjType: ...
+
+class StreamObjType(JitType):
+    @staticmethod
+    def get() -> StreamObjType: ...
 
 class ListType(JitType):
     def __init__(self, a: JitType) -> None: ...

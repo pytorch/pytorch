@@ -35,6 +35,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"MemoryFormat", ParameterType::MEMORY_FORMAT},
   {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
+  {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
@@ -366,6 +367,23 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
   return true;
 }
 
+bool is_float_or_complex_list(PyObject* obj) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+
+  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  if (size > 0) { 
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
+    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
@@ -420,7 +438,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
-    case ParameterType::FLOAT_LIST: return (PyTuple_Check(obj) || PyList_Check(obj));
+    case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
@@ -431,6 +449,8 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::QSCHEME: return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
+    case ParameterType::STREAM:
+      return THPStream_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
@@ -612,6 +632,10 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DEVICE) {
     if (str != "None") {
       throw std::runtime_error("invalid device: " + str);
+    }
+  } else if (type_ == ParameterType::STREAM) {
+    if (str != "None") {
+      throw std::runtime_error("invalid stream: " + str);
     }
   } else if (type_ == ParameterType::STRING) {
     if (str != "None") {

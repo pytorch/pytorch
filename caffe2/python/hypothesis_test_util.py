@@ -109,7 +109,7 @@ hypothesis.settings.register_profile(
         max_examples=50,
         min_satisfying_examples=1,
         verbosity=hypothesis.Verbosity.verbose,
-        deadline=1000))
+        deadline=10000))
 hypothesis.settings.register_profile(
     "dev",
     settings(
@@ -117,7 +117,8 @@ hypothesis.settings.register_profile(
         database=None,
         max_examples=10,
         min_satisfying_examples=1,
-        verbosity=hypothesis.Verbosity.verbose))
+        verbosity=hypothesis.Verbosity.verbose,
+        deadline=10000))
 hypothesis.settings.register_profile(
     "debug",
     settings(
@@ -125,7 +126,8 @@ hypothesis.settings.register_profile(
         database=None,
         max_examples=1000,
         min_satisfying_examples=1,
-        verbosity=hypothesis.Verbosity.verbose))
+        verbosity=hypothesis.Verbosity.verbose,
+        deadline=50000))
 
 hypothesis.settings.load_profile(
     'sandcastle' if is_sandcastle() else os.getenv('CAFFE2_HYPOTHESIS_PROFILE',

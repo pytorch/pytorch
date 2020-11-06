@@ -319,7 +319,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   NoNamesGuard guard;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
-  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+  Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
 
   int64_t size = in.size(dim);
   TORCH_CHECK(
@@ -412,7 +412,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     bool keepdim) {
   auto result = [&]() {
     NoNamesGuard guard;
-    return kthvalue_out_impl_cuda(values, indices, self, k, dim, keepdim);
+    // `kthvalue_out_impl_cuda` expects contiguous in input `self`.
+    return kthvalue_out_impl_cuda(values, indices, self.contiguous(), k, dim, keepdim);
   }();
   namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);

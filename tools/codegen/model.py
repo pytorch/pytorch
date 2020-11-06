@@ -47,10 +47,13 @@ class Location:
 # Valid values of the 'variants' field in native_functions.yaml
 Variant = Enum('Variant', ('function', 'method'))
 
-UseC10Dispatcher = Enum('UseC10Dispatcher', (
-    'full',
-    'with_codegenerated_unboxing_wrapper'
-))
+class UseC10Dispatcher(Enum):
+    full = 0
+    with_codegenerated_unboxing_wrapper = 1
+    hacky_wrapper_for_legacy_signatures = 2
+
+    def dispatcher_uses_new_style(self) -> bool:
+        return self in [UseC10Dispatcher.full, UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -95,13 +98,15 @@ class NativeFunction:
     # registrations don't participate in codegen-based selective build!
     manual_kernel_registration: bool
 
-    # Distinguish between a missing dispatch dict (historically, this
-    # means to register a catch-all kernel) and a present but empty
-    # dispatch dict (this means register nothing; arguably, this should
-    # subsume manual_kernel_registration).
+    # A mapping of dispatch keys to names of functions implementing
+    # them.  In native_functions.yaml, the dispatch entry is optional; in that
+    # case, that is equivalent to having written:
+    #
+    #   dispatch:
+    #       Math: $operator_name
     #
     # TODO: str key could be replaced with more explicit enum
-    dispatch: Optional[Dict[str, str]]
+    dispatch: Dict[str, str]
 
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
@@ -128,6 +133,8 @@ class NativeFunction:
             use_c10_dispatcher = UseC10Dispatcher.with_codegenerated_unboxing_wrapper
         elif use_c10_dispatcher_s == 'full':
             use_c10_dispatcher = UseC10Dispatcher.full
+        elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
+            use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
         else:
             raise AssertionError(
                 f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}')
@@ -157,9 +164,8 @@ class NativeFunction:
 
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Optional[Dict[str, str]] = None
+        dispatch: Dict[str, str] = {}
         if raw_dispatch is not None:
-            dispatch = {}
             for ks, v in raw_dispatch.items():
                 if ks == '__line__':
                     continue  # not worth tracking line numbers for dispatch entries
@@ -167,9 +173,14 @@ class NativeFunction:
                 assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
+        else:
+            from tools.codegen.api import cpp
+            dispatch['Math'] = cpp.name(func)
 
-        # Throws if both DefaultBackend and Math are provided
-        assert not (dispatch is not None and 'DefaultBackend' in dispatch and 'Math' in dispatch)
+        assert not ('DefaultBackend' in dispatch and 'Math' in dispatch), \
+            "cannot specify both DefaultBackend and Math on a single kernel; each " \
+            "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
+            "implementation, specify DefaultBackend; otherwise specify Math only"
 
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
@@ -201,6 +212,54 @@ class NativeFunction:
                 "(which usually manifests itself as the result variable being undefined.)"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
+
+# Represents a bundle of native functions that are semantically related.
+@dataclass(frozen=True)
+class NativeFunctionGroup:
+    functional: Optional[NativeFunction]
+    inplace: Optional[NativeFunction]
+    out: Optional[NativeFunction]
+
+    def __post_init__(self) -> None:
+        test_sig: Optional[FunctionSchema] = None
+        for f in self.functions():
+            if test_sig is None:
+                test_sig = f.func.signature()
+            else:
+                if test_sig != f.func.signature():
+                    raise AssertionError(
+                        "NativeFunctionGroup constructed from two NativeFunctions "
+                        f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                    )
+
+    def signature(self) -> 'FunctionSchema':
+        if self.out is not None:
+            return self.out.func.signature()
+        elif self.functional is not None:
+            return self.functional.func.signature()
+        elif self.inplace is not None:
+            return self.inplace.func.signature()
+        else:
+            raise AssertionError("invalid NativeFunctionGroup has no NativeFunctions")
+
+    def functions(self) -> Iterator[NativeFunction]:
+        if self.out is not None:
+            yield self.out
+        if self.functional is not None:
+            yield self.functional
+        if self.inplace is not None:
+            yield self.inplace
+
+    @staticmethod
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> 'NativeFunctionGroup':
+        functional = d.get(SchemaKind.functional)
+        inplace = d.get(SchemaKind.inplace)
+        out = d.get(SchemaKind.out)
+        return NativeFunctionGroup(
+            functional=functional,
+            inplace=inplace,
+            out=out,
+        )
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -301,6 +360,16 @@ class FunctionSchema:
             assert arg.annotation == ret.annotation, \
                 "Out arguments must have matching return Tensor; furthermore, " \
                 "the ith-argument needs to correspond to the ith return"
+        # Invariant: we expect out arguments to appear as keyword arguments in the schema.
+        # This means that all mutable returns should be aliased to a keyword argument
+        # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
+        # See Note [is_out_fn]
+        out_and_self = list(self.out_arguments) + [arg for arg in self.arguments if arg.name == "self"]
+        mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
+        for ret in mutable_returns:
+            assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
+                "All mutable returns must be aliased either to a keyword argument, or to \"self\". " \
+                "Did you forget to mark an out argument as keyword-only?"
         if self.out_arguments:
             assert len(self.out_arguments) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"
@@ -308,10 +377,10 @@ class FunctionSchema:
             # TODO: fixme
             if str(self.name) not in [
                     '_amp_foreach_non_finite_check_and_unscale_',
-                    '_foreach_add_scalar_list_',
-                    '_foreach_sub_scalar_list_',
-                    '_foreach_mul_scalar_list_',
-                    '_foreach_div_scalar_list_',
+                    '_foreach_add_.ScalarList',
+                    '_foreach_sub_.ScalarList',
+                    '_foreach_mul_.ScalarList',
+                    '_foreach_div_.ScalarList',
                     '_foreach_add_.Scalar',
                     '_foreach_sub_.Scalar',
                     '_foreach_mul_.Scalar',
@@ -322,8 +391,10 @@ class FunctionSchema:
                     '_foreach_div_.List',
                     '_foreach_exp_',
                     '_foreach_sqrt_',
-                    '_foreach_addcmul_',
-                    '_foreach_addcdiv_']:
+                    '_foreach_addcmul_.Scalar',
+                    '_foreach_addcdiv_.Scalar',
+                    '_foreach_addcmul_.ScalarList',
+                    '_foreach_addcdiv_.ScalarList']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
@@ -529,6 +600,7 @@ BaseTy = Enum('BaseTy', (
     'MemoryFormat',
     'QScheme',
     'Storage',
+    'Stream',
     'ConstQuantizerPtr',  # TODO: rename
 ))
 
