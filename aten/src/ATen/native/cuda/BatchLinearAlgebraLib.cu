@@ -50,13 +50,14 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
     int* p_infos = infos.data_ptr<int>();
     auto main_stream = at::cuda::getCurrentCUDAStream();
 
+    at::cuda::CUDAEvent main_event;
+    main_event.record(main_stream);
+
     for (int64_t i = 0; i < batch_size; i++) {
       auto stream = at::cuda::getStreamFromPool();
       at::cuda::CUDAStreamGuard guard(stream);
 
-      at::cuda::CUDAEvent can_start;
-      can_start.record(main_stream);
-      can_start.block(main_stream);
+      main_event.block(stream);
 
       auto dataPtr = allocator.allocate(sizeof(int) * n);
       int* pivot = reinterpret_cast<int*>(dataPtr.get());
