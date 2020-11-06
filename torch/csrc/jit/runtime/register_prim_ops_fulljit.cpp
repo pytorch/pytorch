@@ -568,6 +568,18 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
+     // This operator is generated inside the compiler for indexing into
+     // ModuleDict without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           push(stack, module_dict.toModule().attr(ind.toStringRef()));
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::dict() -> Dict(str, Tensor)",
          [](Stack* stack) {
@@ -635,11 +647,9 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-template <typename T>
 void hashValue(Stack* stack) {
   auto value = pop(stack);
-  auto hash = std::hash<T>()(value.to<T>());
-  push(stack, int64_t(hash));
+  push(stack, value.hash());
 }
 
 // As described in https://docs.python.org/3/library/functions.html#round
@@ -1088,16 +1098,8 @@ RegisterOperators reg2({
 
 #undef DEFINE_DIVMOD_MIXED_OP
     Operator(
-        "aten::hash.str(str t) -> int",
-        hashValue<std::string>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.int(int t) -> int",
-        hashValue<int>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.float(float t) -> int",
-        hashValue<double>,
+        "aten::hash.generic(t value) -> int",
+        hashValue,
         aliasAnalysisFromSchema()),
 });
 

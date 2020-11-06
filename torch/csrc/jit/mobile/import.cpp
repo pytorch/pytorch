@@ -86,8 +86,7 @@ void print_unsupported_ops_and_throw(
   TORCH_CHECK(
       false,
       "Following ops cannot be found. ",
-      "May need to add them explicitly to the selective build operator whitelist, ",
-      "or re-run the export_opnames to update the whitelist:",
+      "Check fburl.com/missing_ops for the fix.",
       error_message);
 }
 
@@ -223,14 +222,13 @@ void parseMethods(
   }
 }
 
-using ExtraFilesMap = std::unordered_map<std::string, std::string>;
-
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
-  mobile::Module deserialize(c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files);
+  mobile::Module deserialize(
+      c10::optional<at::Device> device,
+      ExtraFilesMap& extra_files);
   std::unordered_map<std::string, std::string> deserializeMetadata(
       c10::optional<at::Device> device);
 
@@ -400,7 +398,7 @@ c10::IValue BytecodeDeserializer::readArchive(
 mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files = default_extra_files) {
+    ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto module = _load_for_mobile(std::move(rai), device, extra_files);
   return module;
@@ -409,7 +407,7 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files = default_extra_files) {
+    ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = _load_for_mobile(std::move(rai), device, extra_files);
   return module;
@@ -427,7 +425,8 @@ mobile::Module _load_for_mobile(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader));
   try {
-    mobile::Module result = deserializer.deserialize(std::move(device), extra_files);
+    mobile::Module result =
+        deserializer.deserialize(std::move(device), extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
     if (result.metadata().find("model_name") == result.metadata().end()) {

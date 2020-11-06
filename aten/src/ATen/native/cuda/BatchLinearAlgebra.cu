@@ -328,6 +328,18 @@ inline magma_int_t magmaGetriOptimalBlocksize<float>(magma_int_t n) {
   return magma_get_sgetri_nb(n);
 }
 
+template <>
+inline magma_int_t magmaGetriOptimalBlocksize<c10::complex<double>>(
+    magma_int_t n) {
+  return magma_get_zgetri_nb(n);
+}
+
+template <>
+inline magma_int_t magmaGetriOptimalBlocksize<c10::complex<float>>(
+    magma_int_t n) {
+  return magma_get_cgetri_nb(n);
+}
+
 template<>
 void magmaGetri<double>(
     magma_int_t n, double* dA, magma_int_t ldda, magma_int_t* ipiv, double* dwork,
@@ -346,6 +358,48 @@ void magmaGetri<float>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+template <>
+void magmaGetri<c10::complex<double>>(
+    magma_int_t n,
+    c10::complex<double>* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    c10::complex<double>* dwork,
+    magma_int_t lwork,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zgetri_gpu(
+      n,
+      reinterpret_cast<magmaDoubleComplex*>(dA),
+      ldda,
+      ipiv,
+      reinterpret_cast<magmaDoubleComplex*>(dwork),
+      lwork,
+      info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaGetri<c10::complex<float>>(
+    magma_int_t n,
+    c10::complex<float>* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    c10::complex<float>* dwork,
+    magma_int_t lwork,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cgetri_gpu(
+      n,
+      reinterpret_cast<magmaFloatComplex*>(dA),
+      ldda,
+      ipiv,
+      reinterpret_cast<magmaFloatComplex*>(dwork),
+      lwork,
+      info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
 template<>
 void magmaGetriBatched<double>(
     magma_int_t n, double** dA_array, magma_int_t ldda,
@@ -361,6 +415,54 @@ void magmaGetriBatched<float>(
     magma_int_t** ipiv_array, float** dinvA_array, magma_int_t lddia,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_sgetri_outofplace_batched(n, dA_array, ldda, ipiv_array, dinvA_array, lddia, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaGetriBatched<c10::complex<double>>(
+    magma_int_t n,
+    c10::complex<double>** dA_array,
+    magma_int_t ldda,
+    magma_int_t** ipiv_array,
+    c10::complex<double>** dinvA_array,
+    magma_int_t lddia,
+    magma_int_t* info_array,
+    magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magma_zgetri_outofplace_batched(
+      n,
+      reinterpret_cast<magmaDoubleComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<magmaDoubleComplex**>(dinvA_array),
+      lddia,
+      info_array,
+      batchsize,
+      magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaGetriBatched<c10::complex<float>>(
+    magma_int_t n,
+    c10::complex<float>** dA_array,
+    magma_int_t ldda,
+    magma_int_t** ipiv_array,
+    c10::complex<float>** dinvA_array,
+    magma_int_t lddia,
+    magma_int_t* info_array,
+    magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magma_cgetri_outofplace_batched(
+      n,
+      reinterpret_cast<magmaFloatComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<magmaFloatComplex**>(dinvA_array),
+      lddia,
+      info_array,
+      batchsize,
+      magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -840,12 +942,13 @@ AT_ERROR("solve: MAGMA library not found in "
   auto b_data = b.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
+  magma_int_t lda = std::max(magma_int_t{1}, n);
 
   if (b.dim() == 2) {
     auto ipiv = at::empty({n}, at::kInt);
     magma_int_t info = 0;
-    magmaSolve<scalar_t>(n, nrhs, A_data, n, ipiv.data_ptr<magma_int_t>(),
-                        b_data, n, &info);
+    magmaSolve<scalar_t>(n, nrhs, A_data, lda, ipiv.data_ptr<magma_int_t>(),
+                        b_data, lda, &info);
     infos[0] = info;
   } else {
     auto A_mat_stride = matrixStride(A);
@@ -885,7 +988,7 @@ AT_ERROR("solve: MAGMA library not found in "
       magma_int_t* info_array_cur = &info_array[mini_idx];
 
       magmaSolveBatched<scalar_t>(
-          n, nrhs, A_array_cur, n, ipiv_array_cur, b_array_cur, n,
+          n, nrhs, A_array_cur, lda, ipiv_array_cur, b_array_cur, lda,
           info_array_cur, batch_limit, magma_queue);
     }
 
@@ -893,7 +996,7 @@ AT_ERROR("solve: MAGMA library not found in "
     // which concisely is equal to batch_size % batch_limit
     if (batch_size % batch_limit != 0) {
       magmaSolveBatched<scalar_t>(
-          n, nrhs, &A_array[mini_idx], n, &ipiv_array[mini_idx], &b_array[mini_idx], n,
+          n, nrhs, &A_array[mini_idx], lda, &ipiv_array[mini_idx], &b_array[mini_idx], lda,
           &info_array[mini_idx], batch_size % batch_limit, magma_queue);
     }
 
@@ -1018,14 +1121,14 @@ Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
   if (self.dim() > 2) {
     std::vector<int64_t> infos(batchCount(self), 0);
     auto self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse<scalar_t>(
         self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda");
   } else {
     int64_t info = 0;
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_single_inverse<scalar_t>(self_inv_working_copy, info);
     });
     singleCheckErrors(info, "inverse_cuda");

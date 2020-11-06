@@ -466,6 +466,37 @@ class TestVmapAPI(TestCase):
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
+    def test_fallback_zero_dim(self):
+        # NB: One day we will implement a batching rule for torch.atan2.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = torch.atan2
+        x = torch.randn(11)
+        y = torch.randn(11)
+        self._assert_uses_vmap_fallback((op,), (x, y))
+
+        B0, B1 = 0, 3
+        x = torch.randn(B0, 11)
+        y = torch.randn(11)
+
+        msg = 'The fallback path does not support vmap over dims of size 0'
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
+        x = torch.randn(B0, B1, 11)
+        y = torch.randn(B1, 11)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
     def test_fallback_atan2(self):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
@@ -733,6 +764,25 @@ class TestVmapAPI(TestCase):
         result = vmap(model)(tensor)
         self.assertEqual(result, model(tensor))
 
+    def test_fallback_with_undefined_grad(self):
+        B0 = 7
+        x = torch.randn(2, 3, 4, 5, requires_grad=True)
+        weight = torch.randn(3, 3, 1, 1)
+        v = torch.randn(B0, 2, 3, 4, 5)
+
+        def get_vjp(v):
+            result = torch.nn.functional.conv2d(x, weight)
+            grad_x, = torch.autograd.grad(result, x, v)
+            return grad_x
+
+        # Runs vmap(get_vjp)(v), which should not error out.
+        # The backward formula for convolution returns an undefined
+        # Tensor for grad_bias because the original bias does not exist.
+        #
+        # In the future we'll probably add a batching rule for convolution
+        # backward. When this happens, we should modify this test to use a
+        # different op (and/or create and use a dummy operator) to avoid bitrot.
+        self._assert_uses_vmap_fallback([get_vjp], [v])
 
 def slice_inputs(inputs, bdims, i):
     result = []
@@ -950,6 +1000,19 @@ class TestVmapOperators(Namespace.TestVmapBase):
         for op, getter in cases:
             self._test_unary(op, getter, 'cpu')
 
+    def test_clone(self):
+        self._test_unary(lambda x: x.clone(), TensorFactory.randn, 'cpu')
+        self._test_unary(lambda x: x.clone(memory_format=torch.preserve_format), TensorFactory.randn, 'cpu')
+
+        B0 = 3
+        msg = r'NYI: Tensor.clone\(memory_format\) with memory_format not equal to'
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(lambda x: x.clone(memory_format=torch.contiguous_format))(torch.randn(B0))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(lambda x: x.clone(memory_format=torch.channels_last))(torch.randn(B0))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(torch.randn(B0))
+
     def test_binary_pointwise_ops(self):
         def get_number(getter):
             return getter([]).item()
@@ -1160,6 +1223,93 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
+    def _test_complex_views(self, op, dtypes):
+        test = self._vmap_view_test
+
+        def run_test(op, dtype):
+            def get(shape):
+                return torch.randn(shape, dtype=dtype)
+
+            B0, B1 = 7, 11
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3])])
+            test(op, [get([3, B0])], in_dims=1)
+            test(op, [get([2, 5, B0, 3])], in_dims=2)
+            test(op, [get([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1])])
+            test(vmap(op), [get([B1, 2, 5, 3, B0])], in_dims=4)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
+        for dtype in dtypes:
+            run_test(op, dtype)
+
+    def test_real(self):
+        self._test_complex_views(torch.real, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_imag(self):
+        self._test_complex_views(torch.imag, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_view_as_real(self):
+        self._test_complex_views(torch.view_as_real, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_view_as_complex(self):
+        def run_test(dtype):
+            def get(shape):
+                return torch.randn(shape, dtype=dtype)
+
+            op = torch.view_as_complex
+            test = self._vmap_view_test
+            B0, B1 = 7, 11
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3, 2])])
+            test(op, [get([2, 5, B0, 3, 2])], in_dims=2)
+            test(op, [get([2, 5, B0, 3, 2])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1, 2])])
+            test(vmap(op), [get([B1, 2, 5, B0, 3, 2])], in_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3, 2])],
+                 in_dims=2, out_dims=2)
+
+            # Interesting case #1: Batch dim directly before dim of size 2
+            test(op, [get([3, B0, 2])], in_dims=1)
+            test(vmap(op, in_dims=1), [get([3, B1, B0, 2])], in_dims=2)
+
+            # Interesting case #2: Batch dim at end of tensor, success cases
+            # view_as_complex requires that the dim with size 2 have stride 1
+            # in order for the view to function propertly
+            test(op, [get([B0, 2]).transpose(0, 1)], in_dims=1)
+            test(vmap(op, in_dims=1), [get([B0, B1, 2]).movedim(1, 2)])
+            test(vmap(op, in_dims=2), [get([B0, 3, B1, 2]).movedim(2, 3)])
+
+            # Interesting case #3: Batch dim at end of tensor, failure cases
+            msg = "Tensor must have a last dimension with stride 1"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op, in_dims=1)(get([2, B0]))
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(vmap(op, in_dims=1), in_dims=1)(get([2, B0, B1]))
+
+            # Invalid input: no dimension of size 2
+            msg = 'Input tensor must have one or more dimensions'
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op)(get([B0]))
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(vmap(op))(get([B0, B1]))
+
+            # Invalid input: Batch dim has size 2, but the logical last dim does
+            # not have size 2
+            msg = 'Tensor must have a last dimension of size 2'
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op, in_dims=1)(get([3, 2]))
+
+        for dtype in [torch.float, torch.double]:
+            run_test(dtype)
+
     def test_is_complex(self):
         ctensor = torch.randn(3, dtype=torch.cfloat)
         tensor = torch.randn(3)
@@ -1327,6 +1477,22 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(lambda t: t[:, 0:1], in_dims=2), (torch.rand(3, 5, B0, B1),), in_dims=2)
         test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
+
+    def test_sum_dim(self):
+        test = self._vmap_test
+        B0, B1 = 5, 7
+
+        # Single vmap, various in_dims / out_dims
+        test(lambda x: x.sum(0), [torch.randn([B0])])
+        test(lambda x: x.sum(0), [torch.randn([B0, 3])])
+        test(lambda x: x.sum(-1), [torch.randn([2, 5, B0, 3])], in_dims=2)
+        test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+        # Doubly nested vmap
+        test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
+        test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
+        test(vmap(lambda x: x.sum(2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
+             in_dims=2, out_dims=2)
 
     def test_reshape(self):
         test = self._vmap_test
@@ -1742,6 +1908,21 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log1p, (x,), {})
         self._batched_grad_grad_test(torch.log1p, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_max(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.max, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_median(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.median, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_min(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.min, (x,), {})
 
     def test_permute(self, device):
         x = torch.randn(2, 3, 5, requires_grad=True, device=device)

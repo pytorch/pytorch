@@ -58,7 +58,8 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
       can_start.record(main_stream);
       can_start.block(main_stream);
 
-      int* pivot = reinterpret_cast<int*>(allocator.allocate(sizeof(int) * n).get());
+      auto dataPtr = allocator.allocate(sizeof(int) * n);
+      int* pivot = reinterpret_cast<int*>(dataPtr.get());
       _apply_single_inverse_helper<scalar_t>(
         &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot, p_infos + i * 2, n);
 
@@ -77,7 +78,8 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
       reinterpret_cast<long>(&self_inv_data[(batch_size-1) * self_inv_mat_stride]) + 1,
       static_cast<long>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
 
-    int* ipiv_array = reinterpret_cast<int*>(allocator.allocate(sizeof(int)*batch_size*n).get());
+    auto dataPtr = allocator.allocate(sizeof(int)*batch_size*n);
+    int* ipiv_array = reinterpret_cast<int*>(dataPtr.get());
 
     at::cuda::blas::getrfBatched<scalar_t>(n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
       ipiv_array, infos.data_ptr<int>(), batch_size);
@@ -104,13 +106,14 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
 
   if (self.dim() > 2 && batch_size > 1) {
     Tensor infos = at::zeros({batchCount(self) * 2}, self.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_batched_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, infos);
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+      apply_batched_inverse_lib<scalar_t>(
+        self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda", false, 2);
   } else {
     Tensor info = at::zeros({2}, self.options().dtype(at::kInt));
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_single_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, info);
     });
     batchCheckErrors(info, "inverse_cuda", false, 2);
