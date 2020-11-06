@@ -212,8 +212,8 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
         assert quant_min <= quant_max, 'quant_min should be less than or equal to quant_max'
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
-        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.float))
+        self.register_buffer('scale', torch.tensor([scale]))
+        self.register_buffer('zero_point', torch.tensor([zero_point]))
         self.dtype = dtype
         self.qscheme = qscheme
         assert _is_per_tensor(self.qscheme), 'Only per tensor quantization is supported' + \
