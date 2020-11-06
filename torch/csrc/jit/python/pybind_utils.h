@@ -61,6 +61,8 @@ inline IValue toIValue(
 
 py::object toPyObject(IValue ivalue);
 
+std::string friendlyTypeName(py::handle obj);
+
 // The PythonFutureWrapper for ivalue::Future
 //
 // NB: VISIBILITY_HIDDEN is for silencing compiling error,
@@ -637,6 +639,19 @@ inline IValue toIValue(
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
           : c10::ivalue::Tuple::create(std::move(values));
     }
+    case TypeKind::UnionType: {
+      const auto& actual_type = toTypeInferredIValue(obj);
+      const auto& possible_types = type->expect<UnionType>()->types();
+      if (!type->expect<UnionType>()->can_hold_type(
+              actual_type.type()->annotation_str())) {
+        throw py::cast_error(c10::str(
+            "Expected a member of ",
+            type->expect<UnionType>()->str(),
+            " but instead found type ",
+            actual_type.type()->annotation_str()));
+      }
+      return actual_type;
+    }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
     case TypeKind::DeviceObjType: {
@@ -847,6 +862,7 @@ inline std::string friendlyTypeName(py::handle obj) {
     ss << "))";
     return ss.str();
   } else {
+    auto foo = py::str(obj.get_type().attr("__name__"));
     return py::str(obj.get_type().attr("__name__"));
   }
 }
@@ -870,7 +886,7 @@ inline IValue argumentToIValue(
     throw schema_match_error(c10::str(
         schema.formatTypeMismatchMsg(
             argument,
-            friendlyTypeName(object),
+            toTypeInferredIValue(object).type()->annotation_str(),
             argumentPosition,
             py::repr(object)),
         "\nCast error details: ",

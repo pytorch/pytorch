@@ -36,6 +36,7 @@ from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
+from jit.test_union import TestUnion  # noqa: F401
 
 # Torch
 from torch import Tensor

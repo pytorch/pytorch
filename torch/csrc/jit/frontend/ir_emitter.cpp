@@ -986,57 +986,74 @@ struct to_ir {
   }
 
   void emitReturn(const Return& stmt) {
-    Value* result = emitExpr(stmt.expr());
-    TypePtr result_type = def_stack_.back().declared_return_type_;
+    Value* actual_return = emitExpr(stmt.expr());
+    TypePtr declared_return_type = def_stack_.back().declared_return_type_;
     // result type is annotated, every return must convert to that type
-    if (result_type) {
+    if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
       // type. otherwise forgetting a return a function returning a tensor will
       // cause a None to be converted to a tensor.
-      if (!(result_type->isSubtypeOf(TensorType::get()) &&
-            result->type()->isSubtypeOf(NoneType::get()))) {
-        result = tryConvertToType(
+      if (!(declared_return_type->isSubtypeOf(TensorType::get()) &&
+            actual_return->type()->isSubtypeOf(NoneType::get()))) {
+        actual_return = tryConvertToType(
             stmt.range(),
             *graph,
-            result_type,
-            result,
+            declared_return_type,
+            actual_return,
             /*allow_conversions=*/true);
       }
-
-      if (!result->type()->isSubtypeOf(result_type)) {
-        throw ErrorReport(stmt.range())
-            << "Return value was annotated as having type "
-            << result_type->repr_str() << " but is actually of type "
-            << result->type()->repr_str();
+      if (!actual_return->type()->isSubtypeOf(declared_return_type)) {
+        std::string actual_return_repr = actual_return->type()->repr_str();
+        std::string declared_return_type_repr =
+            declared_return_type->repr_str();
+        // UnionType does not support ::get(), so we need to match on the
+        // annotation's string representation to see if we have a Union. We
+        // throw an error if: 1) we don't have a Union, or 2) the Union does
+        // not hold the actual return type.
+        if (!declared_return_type_repr.rfind("Union", 0) == 0 ||
+            !declared_return_type->expect<UnionType>()->can_hold_type(
+                actual_return_repr)) {
+          throw ErrorReport(stmt.range())
+              << "Return value was annotated as having type "
+              << declared_return_type_repr << " but is actually of type "
+              << actual_return_repr;
+        }
       }
     } else {
-      result_type = def_stack_.back().merged_return_type_;
-      if (!result_type) {
-        result_type = result->type();
+      declared_return_type = def_stack_.back().merged_return_type_;
+      if (!declared_return_type) {
+        declared_return_type = actual_return->type();
       }
-      auto merged_result_type = unifyTypes(result_type, result->type());
-      if (!merged_result_type) {
+      auto merged_return_type =
+          unifyTypes(declared_return_type, actual_return->type());
+      if (!merged_return_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
-            << result_type->repr_str()
+            << declared_return_type->repr_str()
             << " but this return statement returns a value of type "
-            << result->type()->repr_str();
+            << actual_return->type()->repr_str();
       }
-      result_type = merged_result_type.value();
+      declared_return_type = merged_return_type.value();
     }
-    AT_ASSERT(result_type);
+    AT_ASSERT(declared_return_type);
 
-    def_stack_.back().merged_return_type_ = result_type;
+    if (declared_return_type->repr_str().rfind("Union", 0) == 0) {
+      declared_return_type = actual_return->type();
+    }
+
+    def_stack_.back().merged_return_type_ = declared_return_type;
 
     // If the annotated return type is Any and the result type is not Any,
     // cast the result to Any to facilitate type unification between return
     // statements on different code paths (e.g. different branches of an if,
     // body and containing scope of a loop).
-    if (result_type == AnyType::get() && result->type() != AnyType::get()) {
-      result = graph->insertUncheckedCast(result, result_type);
+    if (declared_return_type == AnyType::get() &&
+        actual_return->type() != AnyType::get()) {
+      actual_return =
+          graph->insertUncheckedCast(actual_return, declared_return_type);
     }
 
-    graph->insertNode(graph->create(prim::ReturnStmt, {result}, 0));
+    graph->insertNode(graph->create(prim::ReturnStmt, {actual_return}, 0));
     exit_blocks.insert(environment_stack->block());
   }
 

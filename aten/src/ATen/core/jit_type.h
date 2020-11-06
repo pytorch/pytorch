@@ -45,6 +45,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(QuantizerType)          \
   _(BoolType)               \
   _(OptionalType)           \
+  _(UnionType)              \
   _(VarType)                \
   _(DeviceObjType)          \
   _(StreamObjType)          \
@@ -1164,6 +1165,70 @@ struct CAFFE2_API TupleType : public NamedType {
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
   std::shared_ptr<FunctionSchema> schema_;
+};
+
+struct UnionType;
+using UnionTypePtr = std::shared_ptr<UnionType>;
+struct CAFFE2_API UnionType : public Type {
+  friend struct Type;
+  static const TypeKind Kind = TypeKind::UnionType;
+
+  static UnionTypePtr create(
+      std::vector<TypePtr> types) {
+    return UnionTypePtr(new UnionType(
+        std::move(types)));
+  }
+
+  bool operator==(const Type& rhs) const override {
+    if (auto union_rhs = rhs.cast<UnionType>()) {
+      return types_ == union_rhs->types_;
+    }
+    return false;
+  }
+
+  std::string str() const override {
+    return annotation_str();
+  }
+
+  at::ArrayRef<TypePtr> types() const {
+    return types_;
+  }
+
+  // The string we match against here must be the same as that provided by
+  // annotation_str() of the corresponding Type. This representation is
+  // listed in the JIT language reference:
+  // https://pytorch.org/docs/stable/jit_language_reference.html#id8
+  bool can_hold_type(std::string& name) const {
+    return std::any_of(types_.begin(), types_.end(), [&](TypePtr ptr){
+      return ptr->annotation_str() == name;
+    });
+  }
+
+  bool can_hold_type(std::string&& name) const {
+    return can_hold_type(name);
+  }
+
+  bool can_hold_type(TypePtr& tptr) {
+    return can_hold_type(tptr->annotation_str());
+  }
+
+ private:
+  // Possible types that could be held in this Union
+  UnionType(std::vector<TypePtr> types);
+
+  std::string annotation_str_impl(TypePrinter printer) const {
+    std::stringstream ss;
+    ss << "Union[";
+    for (size_t i = 0; i < types().size(); ++i) {
+      if (i > 0)
+        ss << ", ";
+      ss << types()[i]->annotation_str(printer);
+    }
+    ss << "]";
+  return ss.str();
+  }
+
+  std::vector<TypePtr> types_;
 };
 
 struct EnumType;

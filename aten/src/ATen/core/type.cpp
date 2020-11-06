@@ -718,6 +718,19 @@ TupleTypePtr TupleType::createNamed(
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
 }
 
+UnionType::UnionType(std::vector<TypePtr> types) :
+  Type(TypeKind::UnionType),
+  types_(std::move(types)) {
+  // We want the elements to be sorted so we can easily compare two UnionType
+  // objects for equality in the future
+  std::sort(types_.begin(), types_.end(),
+  [](const TypePtr a, const TypePtr b) -> bool {
+    return a->kind() > b->kind();
+  });
+  // Filter out duplicate types
+  types_.erase(std::unique(types_.begin(), types_.end()), types_.end());
+}
+
 TupleType::TupleType(
     std::vector<TypePtr> elements,
     c10::optional<c10::QualifiedName> name,
