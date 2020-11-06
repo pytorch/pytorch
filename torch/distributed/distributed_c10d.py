@@ -1020,6 +1020,9 @@ def all_reduce_multigpu(tensor_list,
     if _rank_not_in_group(group):
         return
 
+    if any([t.is_complex() for t in tensor_list]) and not supports_complex(op):
+        raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
+
     tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list]
 
     opts = AllreduceOptions()

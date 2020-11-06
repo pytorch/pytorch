@@ -2455,6 +2455,15 @@ class DistributedTest:
                 dtype=torch.cfloat,
             )
 
+        @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
+        @unittest.skipIf(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @skip_if_no_gpu
+        def test_all_reduce_multigpu_max_complex_unsupported(self):
+            group, group_id, rank = self._init_global_test()
+            with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
+                dist.all_reduce_multigpu([_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id)
+            )
+
         def _test_reduce_multigpu_helper(
             self,
             group,
