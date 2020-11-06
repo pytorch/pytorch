@@ -289,6 +289,52 @@ TEST(VulkanAPITest, reshape_) {
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
+TEST(VulkanAPITest, tensor_transpose) {
+  if (!at::is_vulkan_available())
+    return;
+
+  auto a_cpu = at::empty({1, 2, 3, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = a_cpu.data_ptr<float>();
+  auto numel = a_cpu.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  auto a_vulkan = a_cpu.vulkan();
+  auto b_cpu_expected = a_cpu.transpose(1, 2);
+  auto b_vulkan = a_vulkan.transpose(1, 2);
+  auto b_cpu = b_vulkan.cpu();
+  const auto check = almostEqual(b_cpu, b_cpu_expected);
+  if (!check) {
+    std::cout << "expected:" << b_cpu_expected << std::endl;
+    std::cout << "got:" << b_cpu << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, slice) {
+  if (!at::is_vulkan_available())
+    return;
+
+  auto a_cpu = at::empty({1, 4, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  float* data = a_cpu.data_ptr<float>();
+  auto numel = a_cpu.numel();
+  for (int i = 0; i < numel; i++) {
+    data[i] = i;
+  }
+
+  auto a_vulkan = a_cpu.vulkan();
+
+  auto b_cpu_expected = a_cpu.slice(1, 2, 4, 1);
+  auto b_cpu = a_vulkan.slice(1, 2, 4, 1).cpu();
+  const auto check = almostEqual(b_cpu, b_cpu_expected);
+  if (!check) {
+    std::cout << "expected:" << b_cpu_expected << std::endl;
+    std::cout << "got:" << b_cpu << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, copy) {
   const auto cpu =
       at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
