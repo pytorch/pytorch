@@ -86,16 +86,7 @@ namespace impl {
         // and either throw an error or clear the warning
         // Temporary error message as a full fix is too risky for now
         // Should be an internal assert again
-        if (diff_view_meta->creation_meta != CreationMeta::DEFAULT) {
-          auto grad_fn = diff_view_meta->grad_fn_.get();
-          auto grad_fn_name = grad_fn? grad_fn->name() : "a function created in no_grad mode";
-          TORCH_CHECK(false, "Output ", diff_view_meta->output_nr_, " of ", grad_fn_name, " is a view and "
-                      "is being modified inplace but this inplace operation is not allowed. You should "
-                      "either replace it by an out of place operation or do a .clone() of the Tensor "
-                      "before modifying it inplace. Note that this can happen when using DataParallel or "
-                      "DistributedDataParallel, which can send views of the original input to the forward "
-                      "method of the model.");
-        }
+        TORCH_INTERNAL_ASSERT(diff_view_meta->creation_meta == CreationMeta::DEFAULT);
         TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
         TORCH_INTERNAL_ASSERT(gradient_edge.function);
         TORCH_CHECK(
