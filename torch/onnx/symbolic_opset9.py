@@ -620,7 +620,7 @@ def floor(g, input):
 
 
 def _len(g, self):
-    return sym_help._slice_helper(g, g.op("Shape", self), axes=[0], starts=[0], ends=[1])
+    return size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
 
 
 @parse_args('v', 't', 't')
@@ -2193,6 +2193,8 @@ def log2(g, self):
 def prim_shape(g, self):
     return g.op('Shape', self)
 
+def prim_data(g, self):
+    return self
 
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):

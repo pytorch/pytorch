@@ -274,7 +274,7 @@ def masked_scatter(g, self, mask, source):
 def _len(g, self):
     if _is_tensor_list(self) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
-    return sym_help._slice_helper(g, g.op("Shape", self), axes=[0], starts=[0], ends=[1])
+    return size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
 
 
 def __getitem_(g, self, i):

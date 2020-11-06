@@ -430,6 +430,16 @@ class TestONNXRuntime(unittest.TestCase):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_data(self):
+        class Data(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.new_zeros(x.data.size())
+
+        x = torch.randn(3, 4)
+        self.run_test(Data(), x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()  # Need type inference
     def test_index_mask_nd(self):
@@ -1748,6 +1758,26 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.GroupNorm(6, 6, 0.002, affine=False)
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_listunpack(self):
+        class ListUnpack(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3)
+        self.run_test(ListUnpack(), x)
+
+        class ListUnpackSlice(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape[2:]
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3, 4, 5)
+        self.run_test(ListUnpackSlice(), x)
 
     def test_pow(self):
         class PowModule(torch.nn.Module):
