@@ -54,6 +54,11 @@
 namespace torch {
 namespace jit {
 
+struct CapsuleWrapper {
+  c10::intrusive_ptr<CustomClassHolder> obj;
+};
+
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
@@ -796,8 +801,7 @@ inline IValue toIValue(
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
-      return IValue::make_capsule(
-          py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
+      return IValue::make_capsule(py::cast<CapsuleWrapper>(obj).obj);
     }
     case TypeKind::FutureType: {
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
@@ -908,6 +912,7 @@ inline py::object getScriptedClassOrError(const std::string& name) {
   return py_class;
 }
 
+
 inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
@@ -1002,7 +1007,10 @@ inline py::object toPyObject(IValue ivalue) {
     // PyObject
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
-    return py::cast(ivalue.toCapsule());
+    auto i_ptr = ivalue.toCapsule();
+    CapsuleWrapper w;
+    w.obj = i_ptr;
+    return py::cast(w);
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isEnum()) {

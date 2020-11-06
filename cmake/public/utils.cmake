@@ -297,6 +297,7 @@ function(torch_compile_options libname)
   if(WERROR)
     target_compile_options(${libname} PRIVATE -Werror)
   endif()
+
 endfunction()
 
 
