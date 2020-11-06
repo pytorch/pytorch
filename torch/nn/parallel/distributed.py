@@ -1008,7 +1008,7 @@ class DistributedDataParallel(Module):
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
 
-    def _register_comm_hook(self, state: object, hook: callable):
+    def register_comm_hook(self, state: object, hook: callable):
         r"""
         Registers a communication hook which is an enhancement that provides a
         flexible hook to users where they can specify how DDP aggregates gradients
@@ -1059,7 +1059,7 @@ class DistributedDataParallel(Module):
         .. warning ::
             ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
             which is an internal type and should be used with caution. It can still be used by
-            ``_register_comm_hook`` API, but it is subject to some subtle differences compared
+            ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.
 
         .. warning ::
@@ -1073,7 +1073,7 @@ class DistributedDataParallel(Module):
             >>>     fut.set_result(bucket.get_tensors())
             >>>     return fut
 
-            >>> ddp._register_comm_hook(state = None, hook = noop)
+            >>> ddp.register_comm_hook(state = None, hook = noop)
 
         Example::
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
@@ -1089,7 +1089,7 @@ class DistributedDataParallel(Module):
             >>>         return decoded_tensors
             >>>     return fut.then(decode)
 
-            >>> ddp._register_comm_hook(state = None, hook = encode_and_decode)
+            >>> ddp.register_comm_hook(state = None, hook = encode_and_decode)
 
         """
         self._check_comm_hook(hook)

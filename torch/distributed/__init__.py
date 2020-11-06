@@ -1,5 +1,6 @@
 
 import torch
+import sys
 
 
 def is_available():
@@ -19,6 +20,27 @@ if is_available() and not torch._C._c10d_init():
 
 
 if is_available():
+    from torch._C._distributed_c10d import (
+        Store,
+        FileStore,
+        ProcessGroup,
+        Reducer,
+        BuiltinCommHookType,
+        _DEFAULT_FIRST_BUCKET_BYTES,
+        _GradBucket,
+        _register_comm_hook,
+        _register_builtin_comm_hook,
+        _broadcast_coalesced,
+        _compute_bucket_assignment_by_size,
+        _test_python_store,
+    )
+    if sys.platform != 'win32':
+        from torch._C._distributed_c10d import (
+            TCPStore,
+            HashStore,
+            _round_robin_process_groups,
+        )
+
     from .distributed_c10d import *
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
