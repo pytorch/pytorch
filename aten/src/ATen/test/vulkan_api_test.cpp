@@ -269,6 +269,26 @@ TEST(VulkanAPITest, avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, reshape) {
+  const auto a_cpu = at::rand({1,3,2,2}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto c_cpu = at::reshape(a_cpu, {2,3,1,2});
+  const auto c_vulkan = at::reshape(a_vulkan, {2,3,1,2});
+
+  ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
+}
+
+TEST(VulkanAPITest, reshape_) {
+  const auto a_cpu = at::rand({1,3,2,2}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  a_cpu.reshape({2,3,1,2});
+  a_vulkan.reshape({2,3,1,2});
+
+  ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
+}
+
 TEST(VulkanAPITest, copy) {
   const auto cpu =
       at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));

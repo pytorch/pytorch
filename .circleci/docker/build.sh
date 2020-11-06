@@ -81,13 +81,6 @@ case "$image" in
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
-  pytorch-linux-xenial-py3.6-gcc4.8)
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=4.8
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-py3.6-gcc5.4)
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=5
