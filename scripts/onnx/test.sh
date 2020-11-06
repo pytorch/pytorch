@@ -23,7 +23,7 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest scipy hypothesis
+pip install pytest scipy hypothesis # these are all already satisfied in CI
 
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
@@ -51,6 +51,7 @@ pytest "${args[@]}" \
   --ignore "$top_dir/test/onnx/test_custom_ops.py" \
   --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
   --ignore "$top_dir/test/onnx/test_utility_funs.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
