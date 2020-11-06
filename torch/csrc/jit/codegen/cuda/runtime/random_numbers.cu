@@ -87,7 +87,7 @@ class Philox {
     return ret;
   }
 
-private:
+ private:
   static const unsigned long kPhilox10A = 0x9E3779B9;
   static const unsigned long kPhilox10B = 0xBB67AE85;
   static const unsigned long kPhiloxSA = 0xD2511F53;
