@@ -24,7 +24,15 @@ DataType aten_opt_type_map(const c10::optional<at::ScalarType>& scalar_type) {
 } // namespace
 
 TensorView::TensorView(TensorDomain* domain, DataType dtype, MemoryType mtype)
-    : Val(ValType::TensorView, dtype), domain_(domain), memory_type_(mtype) {}
+    : Val(ValType::TensorView, dtype), domain_(domain), memory_type_(mtype) {
+  // Mark the size-1 axes as broadcast to support implicit broadcast semantic
+  for (auto* id : domain_->domain()) {
+    if (!id->isBroadcast() && !id->isReduction() &&
+        id->rawExtent()->isOneInt()) {
+      id->convertToBroadcast();
+    }
+  }
+}
 
 TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     : Val(ValType::TensorView,
@@ -93,6 +101,10 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       relative_compute_at_axis_(src->relative_compute_at_axis_),
       this_compute_at_axis_(src->this_compute_at_axis_),
       memory_type_(src->memory_type_) {}
+
+bool TensorView::hasAnyReduction() const {
+  return domain()->noReductions().size() != domain()->domain().size();
+}
 
 bool TensorView::hasReduction() const {
   return domain()->hasReduction();

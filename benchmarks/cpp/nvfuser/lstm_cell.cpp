@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 
 #include <benchmark/benchmark.h>
@@ -109,6 +110,29 @@ static void LstmCell_AutoSchedule(benchmark::State& benchmark_state) {
 }
 
 BENCHMARK(LstmCell_AutoSchedule)->Unit(benchmark::kMicrosecond);
+
+//------------------------------------------------------------------------------
+
+static void LstmCell_Lower(benchmark::State& benchmark_state) {
+  constexpr int kHiddenFeatures = 512;
+  constexpr int kBatchSize = 64;
+
+  Fusion fusion;
+
+  // setup fusion
+  setupFusion(&fusion);
+
+  // inputs
+  std::vector<c10::IValue> inputs = setupInputs(kHiddenFeatures, kBatchSize);
+
+  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+
+  for (auto _ : benchmark_state) {
+    GpuLower gpu_lower(&fusion);
+  }
+}
+
+BENCHMARK(LstmCell_Lower)->Unit(benchmark::kMillisecond);
 
 //------------------------------------------------------------------------------
 

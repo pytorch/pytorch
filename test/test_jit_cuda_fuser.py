@@ -787,6 +787,28 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_trivial_reduction(self):
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn([1, 4, 8], dtype=dtype, device=device)
+
+        def t(x: torch.Tensor):
+            o = torch.add(x, 0)
+            o = torch.sum(o, dim=[0])
+            o = torch.sum(o, dim=[0])
+            return o
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x)
+        jit_o = t_jit(x)
+        o = t(x)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
+
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_profiling_node(self):
         dtype = torch.float
         device = "cuda"

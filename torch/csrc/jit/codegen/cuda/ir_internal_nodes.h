@@ -275,6 +275,16 @@ class TORCH_CUDA_API IterDomain : public Val {
     iter_type_ = IterType::BroadcastWithStride;
   }
 
+  // Convert a serial iterdomain to broadcast, used for implicit broadcast
+  void convertToBroadcast() {
+    TORCH_INTERNAL_ASSERT(
+        !isBroadcast() && !isReduction(),
+        "convertToBroadcast: converting an non-serial iterdomain",
+        this);
+
+    iter_type_ = IterType::BroadcastWithStride;
+  }
+
   void parallelize(ParallelType t);
 
   ParallelType getParallelType() const {
@@ -292,6 +302,19 @@ class TORCH_CUDA_API IterDomain : public Val {
 
   Val* rawExtent() const {
     return extent_;
+  }
+
+  //! Check if IterDomain is a broadcast axis with compile-time
+  //! known extent. This is the case with all size-1 IterDomains on
+  //! a TensorView's root domain when the TensorView is created.
+  bool isImplicitBroadcast() const {
+    return isBroadcast() && rawExtent()->isOneInt();
+  }
+
+  //! Check if IterDomain is a reduction axis with size of 1, i.e.
+  //! a "squeeze" operator.
+  bool isTrivialReduction() const {
+    return isReduction() && rawExtent()->isOneInt();
   }
 
  private:
@@ -400,6 +423,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   void resetDomains() {
     no_reduction_domain_ = noReductions(domain_);
     no_bcast_domain_ = noBroadcasts(domain_);
+    has_reduction_ = hasNontrivialReduction(domain_);
   }
 
   // i here is int, as we want to accept negative value and ::size_type can be a
@@ -431,6 +455,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   static bool hasBroadcast(const std::vector<IterDomain*>&);
   static bool hasReduction(const std::vector<IterDomain*>&);
+  static bool hasNontrivialReduction(const std::vector<IterDomain*>&);
 
   // return std::pair<producer_id, consumer_id> representing
   // the mapping between corresponding axes. Not all axes have
@@ -494,6 +519,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   std::vector<IterDomain*> no_reduction_domain_;
   const std::vector<IterDomain*> rfactor_domain_;
   const std::vector<bool> contiguity_;
+  bool has_reduction_;
 };
 
 //! Representation a split on an IterDomain by "factor"

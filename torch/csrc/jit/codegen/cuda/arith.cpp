@@ -422,7 +422,7 @@ static TensorView* newForReduction(
     const IterDomain* id = orig_domain[dim];
 
     TORCH_CHECK(
-        !(isReduction && id->isBroadcast()),
+        !(isReduction && id->isBroadcast() && !id->isImplicitBroadcast()),
         "Cannot reduce an axis that is marked as broadcasted as it has an undetermined size. Tried to reduce ID = ",
         id,
         " of tensor ",
