@@ -449,6 +449,15 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   }
 
   root_stmt_ = new Block(loops);
+
+  // If it's referenced in the root_stmt, but it's not in output_bufs_ or
+  // intermediate_bufs_ then it must be an input.
+  auto bufs = NodeFinder<Buf>::find(root_stmt_);
+  for (auto* buf : bufs) {
+    if (!output_bufs_.count(buf) && !intermediate_bufs_.count(buf)) {
+      input_bufs_.insert(buf);
+    }
+  }
 }
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
@@ -686,6 +695,17 @@ bool LoopNest::computeInline(const Buf* b) {
   // No longer computing this intermediate tensor, so don't alloc it.
   intermediate_bufs_.erase(b);
   return true;
+}
+
+void LoopNest::inlineIntermediateBufs() {
+  // We need to collect all intermediate buffers as the buffers to be inlined
+  // before calling 'computeInline' since the buffers that are inlined are
+  // erased from the set 'intermediate_bufs_' in that function.
+  std::unordered_set<const Buf*> bufs_to_inline(
+      intermediate_bufs_.begin(), intermediate_bufs_.end());
+  for (auto b : bufs_to_inline) {
+    computeInline(b);
+  }
 }
 
 // TODO: Unify with DepTracker

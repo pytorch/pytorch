@@ -116,7 +116,7 @@ allow_list = [
     ("quantized::embedding_bag_byte", datetime.date(2020, 10, 15)),
     ("quantized::embedding_bag_4bit", datetime.date(2020, 10, 15)),
     ("quantized::embedding_byte", datetime.date(2020, 10, 15)),
-    ("quantized::embedding_bag_byte_rowwise_offsets", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_byte_rowwise_offsets", datetime.date(2020, 11, 15)),
     ("quantized::embedding_bag_4bit_rowwise_offsets", datetime.date(2020, 10, 15)),
     ("aten::_foreach_sub_scalar_list", datetime.date(2020, 11, 10)),
     ("aten::_foreach_add_scalar_list_", datetime.date(2020, 11, 10)),
