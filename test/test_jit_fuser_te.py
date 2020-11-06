@@ -178,7 +178,7 @@ class TestTEFuser(JitTestCase):
             torch.randn(4, dtype=torch.float, device='cuda'),
             torch.randn(4, dtype=torch.float, device='cuda'),
         ]
-        self.checkTrace(scaleshift, inputs)
+        self.checkScript(scaleshift, inputs)
         self.assertLastGraphAllFused()
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
