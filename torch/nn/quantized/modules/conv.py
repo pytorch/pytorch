@@ -163,6 +163,32 @@ class _ConvNd(nn.Module):
         qconv.zero_point = int(act_zp)
         return qconv
 
+    @staticmethod
+    def from_float(cls, mod):
+        if hasattr(mod, "weight_fake_quant"):
+            # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
+            # ".from_float only works for " + cls.__QAT_MODULE.__name__
+            if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
+                mod.weight, mod.bias = fuse_conv_bn_weights(
+                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
+            assert hasattr(mod, "activation_post_process"), \
+                "Input QAT module must have observer attached"
+            weight_post_process = mod.weight_fake_quant
+            activation_post_process = mod.activation_post_process
+        else:
+            assert type(mod) == cls._FLOAT_MODULE, \
+                " nnq." + cls.__name__ + ".from_float only works for " + \
+                cls._FLOAT_MODULE.__name__
+            assert hasattr(mod, "qconfig"), \
+                "Input float module must have qconfig defined."
+            if type(mod) == cls._NNI_CONV_RELU_MODULE:
+                activation_post_process = mod[1].activation_post_process
+                mod = mod[0]
+            else:
+                activation_post_process = mod.activation_post_process
+            weight_post_process = mod.qconfig.weight()
+        return cls.get_qconv(mod, activation_post_process, weight_post_process)
 
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over a quantized input signal composed of
@@ -198,6 +224,8 @@ class Conv1d(_ConvNd):
     """
 
     _FLOAT_MODULE = nn.Conv1d
+    _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn1d
+    _NNI_CONV_RELU_MODULE = nni.ConvReLU1d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -244,17 +272,7 @@ class Conv1d(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
-        assert type(mod) == cls._FLOAT_MODULE, \
-            ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
-        assert hasattr(mod, 'qconfig'), \
-            'Input float module must have qconfig defined.'
-        if type(mod) == nni.ConvReLU1d:
-            activation_post_process = mod[1].activation_post_process
-            mod = mod[0]
-        else:
-            activation_post_process = mod.activation_post_process
-        return cls.get_qconv(mod, activation_post_process)
+        return _ConvNd.from_float(cls, mod)
 
 
 class Conv2d(_ConvNd):
@@ -294,6 +312,8 @@ class Conv2d(_ConvNd):
 
     """
     _FLOAT_MODULE = nn.Conv2d
+    _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn2d
+    _NNI_CONV_RELU_MODULE = nni.ConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -339,33 +359,7 @@ class Conv2d(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
-        if hasattr(mod, 'weight_fake_quant'):
-            # assert type(mod) == cls.__QAT_MODULE, ' nnq.' + cls.__name__ + \
-            # '.from_float only works for ' + cls.__QAT_MODULE.__name__
-            if type(mod) == nniqat.ConvBn2d:
-                mod.weight, mod.bias = fuse_conv_bn_weights(
-                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
-                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
-            assert hasattr(mod, 'activation_post_process'), \
-                'Input QAT module must have observer attached'
-            weight_post_process = mod.weight_fake_quant
-            activation_post_process = mod.activation_post_process
-        else:
-            assert type(mod) == cls._FLOAT_MODULE, \
-                ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-                cls._FLOAT_MODULE.__name__
-            assert hasattr(mod, 'qconfig'), \
-                'Input float module must have qconfig defined.'
-            # workaround for sequential, ConvReLU2d should probably
-            # inherit from Conv2d instead
-            if type(mod) == nni.ConvReLU2d:
-                activation_post_process = mod[1].activation_post_process
-                mod = mod[0]
-            else:
-                activation_post_process = mod.activation_post_process
-            weight_post_process = mod.qconfig.weight()
-
-        return cls.get_qconv(mod, activation_post_process, weight_post_process)
+        return _ConvNd.from_float(cls, mod)
 
 
 class Conv3d(_ConvNd):

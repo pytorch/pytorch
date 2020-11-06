@@ -95,8 +95,7 @@ void multi_tensor_apply(
                         tensorListMeta,
                         callable,
                         args...);
-
-                    AT_CUDA_CHECK(cudaGetLastError());
+                    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 
                     // Reset.
                     loc_block_info = 0;
@@ -151,8 +150,7 @@ void multi_tensor_apply(
                         tensorListMeta,
                         callable,
                         args...);
-
-                    AT_CUDA_CHECK(cudaGetLastError());
+                    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 
                     // Reset.
                     loc_block_info = 0;

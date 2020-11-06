@@ -21,7 +21,6 @@ at::Tensor embedding_bag_4bit_impl(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(indices.dim() == 1);
   TORCH_CHECK(offsets.dim() == 1);
@@ -198,6 +197,7 @@ at::Tensor embedding_bag_byte_impl(
     const at::Tensor& offsets,
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.dim() == 2);
@@ -207,6 +207,15 @@ at::Tensor embedding_bag_byte_impl(
   const auto weight_data = weight.data_ptr<uint8_t>();
   const auto indices_data = indices.data_ptr<IndexType>();
   auto offsets_data = offsets.data_ptr<OffsetType>();
+
+  // Get compressed indices for pruned_weights.
+  int32_t* compressed_indices_mapping_data = nullptr;
+  int compressed_index_size = 0;
+  if (pruned_weights) {
+    compressed_index_size = compressed_indices_mapping.value().numel();
+    compressed_indices_mapping_data =
+        compressed_indices_mapping.value().data_ptr<int32_t>();
+  }
 
   const int64_t N = weight.size(0);
   const int64_t D = weight.size(1) - 8; // NB: -8 to account for scale and bias
@@ -233,33 +242,66 @@ at::Tensor embedding_bag_byte_impl(
   auto output = at::empty(shape, weight.options().dtype(at::kFloat));
   auto* output_data = output.data_ptr<float>();
 
+  const int index_size = indices.numel();
 #ifdef USE_FBGEMM
-  auto kernel_i8 =
-      fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
-          /*block_size=*/D,
-          /*has_weight=*/per_sample_weights_.has_value(),
-          /*normalize_by_lengths=*/false,
-          /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-          /*is_weight_positional=*/false,
-          /*use_offsets=*/true);
+  if (!pruned_weights) {
+    auto kernel_i8 =
+        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
+            /*block_size=*/D,
+            /*has_weight=*/per_sample_weights_.has_value(),
+            /*normalize_by_lengths=*/false,
+            /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+            /*is_weight_positional=*/false,
+            /*use_offsets=*/true);
 
-  at::parallel_for(0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
-    bool success = kernel_i8(
-        /*output_size=*/end_idx - start_idx,
-        /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
-        /*data_size=*/N,
+    at::parallel_for(
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+          bool success = kernel_i8(
+              /*output_size=*/end_idx - start_idx,
+              /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+              /*data_size=*/N,
+              /*input=*/weight_data,
+              /*indices=*/indices_data + offsets_data[start_idx],
+              /*offsets_or_lengths=*/offsets_data + start_idx,
+              /*weights=*/
+              per_sample_weights_
+                  ? per_sample_weights_.value().data_ptr<float>() +
+                      offsets_data[start_idx]
+                  : nullptr,
+              /*out=*/output_data + start_idx * D);
+
+          TORCH_CHECK(
+              success,
+              "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
+        });
+  } else {
+    // pruned weights
+    auto kernel_i8_sparse = fbgemm::
+        GenerateEmbeddingSpMDMRowWiseSparse<uint8_t, IndexType, OffsetType>(
+            /*block_size=*/D,
+            /*has_weight=*/per_sample_weights_.has_value(),
+            /*normalize_by_lengths=*/false,
+            /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+            /*is_weight_positional=*/false,
+            /*use_offsets=*/true);
+
+    auto success = kernel_i8_sparse(
+        /*output_size=*/output_size,
+        /*index_size=*/index_size,
+        /*data_size=*/compressed_index_size,
         /*input=*/weight_data,
-        /*indices=*/indices_data + offsets_data[start_idx],
-        /*offsets_or_lengths=*/offsets_data + start_idx,
+        /*indices=*/indices_data,
+        /*offsets=*/offsets_data,
         /*weights=*/
-        per_sample_weights_ ? per_sample_weights_.value().data_ptr<float>() +
-                offsets_data[start_idx]
-                            : nullptr,
-        /*out=*/output_data + start_idx * D);
-
+        per_sample_weights_.has_value()
+            ? per_sample_weights_.value().data_ptr<float>()
+            : nullptr,
+        /*output=*/output_data,
+        /*compressed_indices_table=*/compressed_indices_mapping_data);
     TORCH_CHECK(
-        success, "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
-  });
+        success,
+        "FBGEMM GenerateEmbeddingSpMDMRowWiseSparse kernel failed for 8-bit input");
+  }
 #endif
   // TODO add default (non-FBGEMM) implementation.
   return output;
@@ -271,6 +313,7 @@ at::Tensor embedding_bag_byte_helper(
     const c10::optional<at::Tensor>& offsets_in,
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   TORCH_CHECK(
       offsets_in.has_value(),
@@ -297,6 +340,7 @@ at::Tensor embedding_bag_byte_helper(
         offsets,
         pruned_weights,
         per_sample_weights_,
+        compressed_indices_mapping,
         include_last_offset);
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
@@ -306,6 +350,7 @@ at::Tensor embedding_bag_byte_helper(
         offsets,
         pruned_weights,
         per_sample_weights_,
+        compressed_indices_mapping,
         include_last_offset);
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
@@ -315,6 +360,7 @@ at::Tensor embedding_bag_byte_helper(
         offsets,
         pruned_weights,
         per_sample_weights_,
+        compressed_indices_mapping,
         include_last_offset);
   }
 
@@ -325,6 +371,7 @@ at::Tensor embedding_bag_byte_helper(
       offsets,
       pruned_weights,
       per_sample_weights_,
+      compressed_indices_mapping,
       include_last_offset);
 }
 
@@ -400,6 +447,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     const c10::optional<at::Tensor>& offsets_in,
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   return embedding_bag_byte_helper(
       packed_w.contiguous(),
@@ -407,6 +455,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
       offsets_in,
       pruned_weights,
       per_sample_weights_,
+      compressed_indices_mapping,
       include_last_offset);
 }
 
@@ -439,6 +488,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
     const int64_t /* mode */,
     bool pruned_weights,
     const c10::optional<Tensor>& per_sample_weights_,
+    const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   return embedding_bag_byte_helper(
       weight.contiguous(),
@@ -446,6 +496,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
       offsets_in,
       pruned_weights,
       per_sample_weights_,
+      compressed_indices_mapping,
       include_last_offset);
 }
 
@@ -488,6 +539,7 @@ class QEmbeddingBag final {
           offsets,
           pruned_weights,
           per_sample_weights_,
+          compressed_indices_mapping,
           include_last_offset);
     } else if (bit_rate == 4) {
       return packed_weight->embeddingbag_4bit(
@@ -516,7 +568,7 @@ class QEmbedding final {
     at::Tensor output;
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(
-          indices, offsets, pruned_weights, c10::nullopt, false);
+          indices, offsets, pruned_weights, c10::nullopt, c10::nullopt, false);
     } else {
       TORCH_INTERNAL_ASSERT(
           "Currently only support 8-bit embedding quantization");
