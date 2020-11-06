@@ -93,10 +93,10 @@ REGISTER_GRADIENT(SparseLengthsSum, SparseLengthsSumDef::GetGradient)
 
 REGISTER_CPU_OPERATOR(
     TTSparseLengthsSum,
-    TTSparseLengthsSumOp<float, CPUContext>);
+    TTSparseLengthsSumOp<float, TensorTypes<float, at::Half>, CPUContext>);
 REGISTER_CPU_OPERATOR(
     TTSparseLengthsSumGradient,
-    TTSparseLengthsSumGradientOp<float, CPUContext>);
+    TTSparseLengthsSumGradientOp<float, TensorTypes<float, at::Half>, CPUContext>);
 
 OPERATOR_SCHEMA(TTSparseLengthsSum)
     .NumInputs(5)

@@ -259,7 +259,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
 #endif
 };
 
-template <typename T, class Context, class Engine = DefaultEngine>
+template <typename T, class InputTypes, class Context, class Engine = DefaultEngine>
 class TTSparseLengthsSumOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -285,7 +285,18 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
 
   ~TTSparseLengthsSumOp() {}
 
-  void Ind2Sub(int64_t* out_factor_index, const int64_t* indices, int len) {
+  bool RunOnDevice() override {
+    return DispatchHelper<InputTypes>::call(this, Input(0));
+  }
+
+  template <typename InputType>
+  bool DoRunWithType() {
+    return DispatchHelper<TensorTypes2<int32_t, int64_t>, InputType>::call(
+        this, Input(3));
+  }
+
+  template<typename IndexType>
+  void Ind2Sub(IndexType* out_factor_index, const IndexType* indices, int len) {
     // TODO: vectorization
     auto N = factor_i.size();
     for (int j = 0; j < len; j++) {
@@ -297,10 +308,11 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
     }
   }
 
+  template<typename IndexType>
   bool GetSlice(
       std::vector<std::vector<T>>& tgt_slice,
       const T* core,
-      const vector<int64_t>& ind_slice,
+      const vector<IndexType>& ind_slice,
       int bs,
       int idx) {
     // implement the functinality index_select(core, 1, ind_slice)
@@ -322,8 +334,9 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
   // ind of each tensor core to extract the corresponding slice of the core. Then it does gemm operation
   // sequentially on the slices to produce the embedding result for each index.
   // In Step 2), it takes the embedding computed in step 1) and apply the sum operation for each bag.
+  template<typename IndexType>
   bool GatherAllRows(
-      int64_t* ind,
+      IndexType* ind,
       int bs,
       int x_len,
       vector<const T*> cores,
@@ -348,7 +361,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
       Z_ptr[b] = int_res[b].data();
     }
 
-    vector<int64_t> ind_slice(bs);
+    vector<IndexType> ind_slice(bs);
     int rows = 0;
     for (int i = 0; i < x_len; i++) {
       // slice cur
@@ -432,7 +445,8 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
     return true;
   }
 
-  bool RunOnDevice() override {
+  template <typename InputType, typename IndexType>
+  bool DoRunWithType2() {
     const auto& dataInput0 = Input(0);
     const auto& dataInput1 = Input(1);
     const auto& dataInput2 = Input(2);
@@ -457,17 +471,17 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
 
     vector<const T*> cores = {core0, core1, core2};
 
-    const int64_t* indices = indicesInput.template data<int64_t>();
+    const IndexType* indices = indicesInput.template data<IndexType>();
 
     // Store the factor index for backward path
     auto index_shape = vector<int64_t>({indicesInput.size(), N});
-    auto* index_data = Output(3, index_shape, at::dtype<int64_t>());
-    int64_t* out_factor_index = index_data->template mutable_data<int64_t>();
+    auto* index_data = Output(3, index_shape, at::dtype<IndexType>());
+    auto* out_factor_index = index_data->template mutable_data<IndexType>();
 
     // Store the factorized index for each core
-    Ind2Sub(out_factor_index, indices, indicesInput.size());
+    Ind2Sub<IndexType>(out_factor_index, indices, indicesInput.size());
 
-    return GatherAllRows(
+    return GatherAllRows<IndexType>(
         out_factor_index, indicesInput.size(), N, cores, M, lengths, out_data);
   }
 
@@ -479,243 +493,249 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
   int emb_size;
 };
 
-template <typename T, class Context>
+template <typename T, class InputTypes, class Context, class Engine = DefaultEngine>
 class TTSparseLengthsSumGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   template <class... Args>
   explicit TTSparseLengthsSumGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  bool RunOnDevice() override;
+  bool RunOnDevice() override {
+    return DispatchHelper<InputTypes>::call(this, Input(0));
+  }
 
+  template <typename InputType>
+  bool DoRunWithType() {
+    return DispatchHelper<TensorTypes2<int32_t, int64_t>, InputType>::call(
+        this, Input(6));
+  }
+
+  template <typename InputType, typename IndexType>
+  bool DoRunWithType2() {
+    const auto& core0 = Input(0);
+    const auto& core1 = Input(1);
+    const auto& core2 = Input(2);
+    const auto& lengths = Input(3);
+    const auto& core0_out = Input(4);
+    const auto& core1_out = Input(5);
+    const auto& index_out = Input(6);
+    const auto& dY = Input(7);
+
+    const int* lengths_data = lengths.template data<int>();
+    const T* dY_data = dY.template data<T>();
+
+    // restore the arguments from shape
+    const int64_t bs = index_out.size(0);
+    const int64_t emb_size = dY.size(1);
+    const int64_t num_segments = lengths.size(0);
+
+    auto core0_shape = core0.sizes().vec();
+    auto core1_shape = core1.sizes().vec();
+    auto core2_shape = core2.sizes().vec();
+    auto core0_out_shape = core0_out.sizes().vec();
+    auto core1_out_shape = core1_out.sizes().vec();
+
+    auto* dCore0 = Output(0, core0_shape, at::dtype<T>());
+    auto* dCore1 = Output(1, core1_shape, at::dtype<T>());
+    auto* dCore2 = Output(2, core2_shape, at::dtype<T>());
+
+    T* dCore0_data = dCore0->template mutable_data<T>();
+    T* dCore1_data = dCore1->template mutable_data<T>();
+    T* dCore2_data = dCore2->template mutable_data<T>();
+
+    memset(
+        dCore0_data,
+        0.0f,
+        sizeof(T) *
+            accumulate(
+                core0_shape.begin(), core0_shape.end(), 1, std::multiplies<T>()));
+    memset(
+        dCore1_data,
+        0.0f,
+        sizeof(T) *
+            accumulate(
+                core1_shape.begin(), core1_shape.end(), 1, std::multiplies<T>()));
+    memset(
+        dCore2_data,
+        0.0f,
+        sizeof(T) *
+            accumulate(
+                core2_shape.begin(), core2_shape.end(), 1, std::multiplies<T>()));
+
+    IndexType* index_out_data = index_out.template mutable_data<IndexType>();
+
+    vector<vector<IndexType>> index_slice(bs, vector<IndexType>(3, 0));
+    for (int64_t b = 0; b < bs; b++) {
+      memcpy(index_slice[b].data(), index_out_data + b * 3, 3 * sizeof(IndexType));
+    }
+
+    vector<const T*> A_ptr(bs);
+    vector<T*> B_ptr(bs);
+    vector<T*> C_ptr(bs);
+    // size of each batch
+    int64_t num_of_elements = 0;
+
+    // construct the ranks
+    // expand the gradient into all indices
+    vector<vector<T>> core2_out_grad(bs, vector<T>(emb_size, 0));
+    int64_t data_index = 0;
+    for (int64_t range_index = 0; range_index < num_segments; ++range_index) {
+      for (int64_t start = data_index;
+           data_index < start + lengths_data[range_index];
+           ++data_index) {
+        memcpy(
+            core2_out_grad[data_index].data(),
+            dY_data + range_index * emb_size,
+            emb_size * sizeof(T));
+      }
+    }
+
+    // =======================================================
+    // Calculate dCore2_data:
+    // 1) Transpose core1_out and multiply iwth core2_out_grad
+    // 2)  add to dCore2_data
+    vector<vector<T>> dCore2_data_slice_grad(
+        bs, vector<T>(core2_shape[1] * core2_shape[2] * core2_shape[3], 0));
+    const T* core1_out_data = core1_out.template data<T>();
+    // const T* core1_out_p[bs];
+    for (int64_t b = 0; b < bs; b++) {
+      A_ptr[b] = core1_out_data + b * core1_out.size(1) * core1_out.size(2);
+      B_ptr[b] = core2_out_grad[b].data();
+      C_ptr[b] = dCore2_data_slice_grad[b].data();
+    }
+
+    math::GemmBatched<T, CPUContext>(
+        CblasTrans,
+        CblasNoTrans,
+        bs,
+        core2.size(1), // M
+        core2.size(2) * core2.size(3), // N
+        core1_out.size(1), // K
+        1.0f,
+        const_cast<const T**>(A_ptr.data()),
+        const_cast<const T**>(B_ptr.data()),
+        0.0f,
+        C_ptr.data(),
+        &context_);
+
+    // update the corresponding slice
+    num_of_elements = core2_shape[1] * core2_shape[2] * core2_shape[3];
+
+    T* core2_data = core2.template mutable_data<T>();
+    vector<vector<T>> core2_slice(
+        bs, vector<T>(core2_shape[1] * core2_shape[2] * core2_shape[3], 0));
+
+    for (int64_t b = 0; b < bs; b++) {
+      for (int i = 0; i < num_of_elements; i++) {
+        dCore2_data[index_slice[b][2] * num_of_elements + i] += C_ptr[b][i];
+      }
+      memcpy(
+          core2_slice[b].data(),
+          core2_data + index_slice[b][2] * num_of_elements,
+          sizeof(T) * num_of_elements);
+    }
+
+    // Calculate core1_out_grad
+    vector<vector<T>> core1_out_grad(
+        bs, vector<T>(core1_out_shape[1] * core1_out_shape[2], 0));
+
+    for (int64_t b = 0; b < bs; b++) {
+      A_ptr[b] = core2_out_grad[b].data();
+      B_ptr[b] = core2_slice[b].data();
+      C_ptr[b] = core1_out_grad[b].data();
+    }
+
+    math::GemmBatched<T, CPUContext>(
+        CblasNoTrans,
+        CblasTrans,
+        bs,
+        core1_out.size(1), // M
+        core2_shape[1], // N
+        core2_shape[2] * core2_shape[3], // K
+        1.0f,
+        const_cast<const T**>(A_ptr.data()),
+        const_cast<const T**>(B_ptr.data()),
+        0.0f,
+        C_ptr.data(),
+        &context_);
+
+    // =======================================================
+    // Calcuate dCore1_data:
+    // 1) Transpose core1_out_grad and multiply with core0_out
+    // 2) Transpose the result and then add to dCore1_data
+    vector<vector<T>> dCore1_data_slice_grad(
+        bs, vector<T>(core1_shape[1] * core1_shape[2] * core1_shape[3], 0));
+    const T* core0_out_data = core0_out.template data<T>();
+    for (int64_t b = 0; b < bs; b++) {
+      A_ptr[b] = core0_out_data + b * core0_out.size(1) * core0_out.size(2);
+      B_ptr[b] = core1_out_grad[b].data();
+      C_ptr[b] = dCore1_data_slice_grad[b].data();
+    }
+
+    math::GemmBatched<T, CPUContext>(
+        CblasTrans,
+        CblasNoTrans,
+        bs,
+        core1.size(1), // M
+        core1.size(2) * core1.size(3), // N
+        core0_out.size(1), // K
+        1.0f,
+        const_cast<const T**>(A_ptr.data()),
+        const_cast<const T**>(B_ptr.data()),
+        0.0f,
+        C_ptr.data(),
+        &context_);
+
+    // update the corresponding slice
+    num_of_elements = core1_shape[1] * core1_shape[2] * core1_shape[3];
+    T* core1_data = core1.template mutable_data<T>();
+    vector<vector<T>> core1_slice(
+        bs, vector<T>(core1_shape[1] * core1_shape[2] * core1_shape[3], 0));
+
+    for (int64_t b = 0; b < bs; b++) {
+      for (int i = 0; i < num_of_elements; i++) {
+        dCore1_data[index_slice[b][1] * num_of_elements + i] += C_ptr[b][i];
+      }
+      memcpy(
+          core1_slice[b].data(),
+          core1_data + index_slice[b][1] * num_of_elements,
+          sizeof(T) * num_of_elements);
+    }
+
+    // Calcuate core0_out_grad
+    vector<vector<T>> core0_out_grad(
+        bs, vector<T>(core0_out_shape[1] * core0_out_shape[2], 0));
+
+    for (int64_t b = 0; b < bs; b++) {
+      A_ptr[b] = core1_out_grad[b].data();
+      B_ptr[b] = core1_slice[b].data();
+      C_ptr[b] = core0_out_grad[b].data();
+    }
+
+    math::GemmBatched<T, CPUContext>(
+        CblasNoTrans,
+        CblasTrans,
+        bs,
+        core0_out.size(1), // M
+        core1_shape[1], // N
+        core1_shape[2] * core1_shape[3], // K
+        1.0f,
+        const_cast<const T**>(A_ptr.data()),
+        const_cast<const T**>(B_ptr.data()),
+        0.0f,
+        C_ptr.data(),
+        &context_);
+
+    num_of_elements = core0_shape[1] * core0_shape[2] * core0_shape[3];
+
+    for (int64_t b = 0; b < bs; b++) {
+      for (int i = 0; i < num_of_elements; i++) {
+        dCore0_data[index_slice[b][0] * num_of_elements + i] += C_ptr[b][i];
+      }
+    }
+    return true;
+  }
   ~TTSparseLengthsSumGradientOp() {}
 };
-
-// implement the graident op for TTLengthSumGradient op
-template <typename T, class Context>
-bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
-  const auto& core0 = Input(0);
-  const auto& core1 = Input(1);
-  const auto& core2 = Input(2);
-  const auto& lengths = Input(3);
-  const auto& core0_out = Input(4);
-  const auto& core1_out = Input(5);
-  const auto& index_out = Input(6);
-  const auto& dY = Input(7);
-
-  const int* lengths_data = lengths.template data<int>();
-  const T* dY_data = dY.template data<T>();
-
-  // restore the arguments from shape
-  const int64_t bs = index_out.size(0);
-  const int64_t emb_size = dY.size(1);
-  const int64_t num_segments = lengths.size(0);
-
-  auto core0_shape = core0.sizes().vec();
-  auto core1_shape = core1.sizes().vec();
-  auto core2_shape = core2.sizes().vec();
-  auto core0_out_shape = core0_out.sizes().vec();
-  auto core1_out_shape = core1_out.sizes().vec();
-
-  auto* dCore0 = Output(0, core0_shape, at::dtype<T>());
-  auto* dCore1 = Output(1, core1_shape, at::dtype<T>());
-  auto* dCore2 = Output(2, core2_shape, at::dtype<T>());
-
-  T* dCore0_data = dCore0->template mutable_data<T>();
-  T* dCore1_data = dCore1->template mutable_data<T>();
-  T* dCore2_data = dCore2->template mutable_data<T>();
-
-  memset(
-      dCore0_data,
-      0.0f,
-      sizeof(T) *
-          accumulate(
-              core0_shape.begin(), core0_shape.end(), 1, std::multiplies<T>()));
-  memset(
-      dCore1_data,
-      0.0f,
-      sizeof(T) *
-          accumulate(
-              core1_shape.begin(), core1_shape.end(), 1, std::multiplies<T>()));
-  memset(
-      dCore2_data,
-      0.0f,
-      sizeof(T) *
-          accumulate(
-              core2_shape.begin(), core2_shape.end(), 1, std::multiplies<T>()));
-
-  int64_t* index_out_data = index_out.template mutable_data<int64_t>();
-
-  vector<vector<int64_t>> index_slice(bs, vector<int64_t>(3, 0));
-  for (int64_t b = 0; b < bs; b++) {
-    memcpy(index_slice[b].data(), index_out_data + b * 3, 3 * sizeof(int64_t));
-  }
-
-  vector<const T*> A_ptr(bs);
-  vector<T*> B_ptr(bs);
-  vector<T*> C_ptr(bs);
-  // size of each batch
-  int64_t num_of_elements = 0;
-
-  // construct the ranks
-  // expand the gradient into all indices
-  vector<vector<T>> core2_out_grad(bs, vector<T>(emb_size, 0));
-  int64_t data_index = 0;
-  for (int64_t range_index = 0; range_index < num_segments; ++range_index) {
-    for (int64_t start = data_index;
-         data_index < start + lengths_data[range_index];
-         ++data_index) {
-      memcpy(
-          core2_out_grad[data_index].data(),
-          dY_data + range_index * emb_size,
-          emb_size * sizeof(T));
-    }
-  }
-
-  // =======================================================
-  // Calculate dCore2_data:
-  // 1) Transpose core1_out and multiply iwth core2_out_grad
-  // 2)  add to dCore2_data
-  vector<vector<T>> dCore2_data_slice_grad(
-      bs, vector<T>(core2_shape[1] * core2_shape[2] * core2_shape[3], 0));
-  const T* core1_out_data = core1_out.template data<T>();
-  // const T* core1_out_p[bs];
-  for (int64_t b = 0; b < bs; b++) {
-    A_ptr[b] = core1_out_data + b * core1_out.size(1) * core1_out.size(2);
-    B_ptr[b] = core2_out_grad[b].data();
-    C_ptr[b] = dCore2_data_slice_grad[b].data();
-  }
-
-  math::GemmBatched<T, CPUContext>(
-      CblasTrans,
-      CblasNoTrans,
-      bs,
-      core2.size(1), // M
-      core2.size(2) * core2.size(3), // N
-      core1_out.size(1), // K
-      1.0f,
-      const_cast<const T**>(A_ptr.data()),
-      const_cast<const T**>(B_ptr.data()),
-      0.0f,
-      C_ptr.data(),
-      &context_);
-
-  // update the corresponding slice
-  num_of_elements = core2_shape[1] * core2_shape[2] * core2_shape[3];
-
-  T* core2_data = core2.template mutable_data<T>();
-  vector<vector<T>> core2_slice(
-      bs, vector<T>(core2_shape[1] * core2_shape[2] * core2_shape[3], 0));
-
-  for (int64_t b = 0; b < bs; b++) {
-    for (int i = 0; i < num_of_elements; i++) {
-      dCore2_data[index_slice[b][2] * num_of_elements + i] += C_ptr[b][i];
-    }
-    memcpy(
-        core2_slice[b].data(),
-        core2_data + index_slice[b][2] * num_of_elements,
-        sizeof(T) * num_of_elements);
-  }
-
-  // Calculate core1_out_grad
-  vector<vector<T>> core1_out_grad(
-      bs, vector<T>(core1_out_shape[1] * core1_out_shape[2], 0));
-
-  for (int64_t b = 0; b < bs; b++) {
-    A_ptr[b] = core2_out_grad[b].data();
-    B_ptr[b] = core2_slice[b].data();
-    C_ptr[b] = core1_out_grad[b].data();
-  }
-
-  math::GemmBatched<T, CPUContext>(
-      CblasNoTrans,
-      CblasTrans,
-      bs,
-      core1_out.size(1), // M
-      core2_shape[1], // N
-      core2_shape[2] * core2_shape[3], // K
-      1.0f,
-      const_cast<const T**>(A_ptr.data()),
-      const_cast<const T**>(B_ptr.data()),
-      0.0f,
-      C_ptr.data(),
-      &context_);
-
-  // =======================================================
-  // Calcuate dCore1_data:
-  // 1) Transpose core1_out_grad and multiply with core0_out
-  // 2) Transpose the result and then add to dCore1_data
-  vector<vector<T>> dCore1_data_slice_grad(
-      bs, vector<T>(core1_shape[1] * core1_shape[2] * core1_shape[3], 0));
-  const T* core0_out_data = core0_out.template data<T>();
-  for (int64_t b = 0; b < bs; b++) {
-    A_ptr[b] = core0_out_data + b * core0_out.size(1) * core0_out.size(2);
-    B_ptr[b] = core1_out_grad[b].data();
-    C_ptr[b] = dCore1_data_slice_grad[b].data();
-  }
-
-  math::GemmBatched<T, CPUContext>(
-      CblasTrans,
-      CblasNoTrans,
-      bs,
-      core1.size(1), // M
-      core1.size(2) * core1.size(3), // N
-      core0_out.size(1), // K
-      1.0f,
-      const_cast<const T**>(A_ptr.data()),
-      const_cast<const T**>(B_ptr.data()),
-      0.0f,
-      C_ptr.data(),
-      &context_);
-
-  // update the corresponding slice
-  num_of_elements = core1_shape[1] * core1_shape[2] * core1_shape[3];
-  T* core1_data = core1.template mutable_data<T>();
-  vector<vector<T>> core1_slice(
-      bs, vector<T>(core1_shape[1] * core1_shape[2] * core1_shape[3], 0));
-
-  for (int64_t b = 0; b < bs; b++) {
-    for (int i = 0; i < num_of_elements; i++) {
-      dCore1_data[index_slice[b][1] * num_of_elements + i] += C_ptr[b][i];
-    }
-    memcpy(
-        core1_slice[b].data(),
-        core1_data + index_slice[b][1] * num_of_elements,
-        sizeof(T) * num_of_elements);
-  }
-
-  // Calcuate core0_out_grad
-  vector<vector<T>> core0_out_grad(
-      bs, vector<T>(core0_out_shape[1] * core0_out_shape[2], 0));
-
-  for (int64_t b = 0; b < bs; b++) {
-    A_ptr[b] = core1_out_grad[b].data();
-    B_ptr[b] = core1_slice[b].data();
-    C_ptr[b] = core0_out_grad[b].data();
-  }
-
-  math::GemmBatched<T, CPUContext>(
-      CblasNoTrans,
-      CblasTrans,
-      bs,
-      core0_out.size(1), // M
-      core1_shape[1], // N
-      core1_shape[2] * core1_shape[3], // K
-      1.0f,
-      const_cast<const T**>(A_ptr.data()),
-      const_cast<const T**>(B_ptr.data()),
-      0.0f,
-      C_ptr.data(),
-      &context_);
-
-  num_of_elements = core0_shape[1] * core0_shape[2] * core0_shape[3];
-
-  for (int64_t b = 0; b < bs; b++) {
-    for (int i = 0; i < num_of_elements; i++) {
-      dCore0_data[index_slice[b][0] * num_of_elements + i] += C_ptr[b][i];
-    }
-  }
-  return true;
-}
 
 } // namespace caffe2
