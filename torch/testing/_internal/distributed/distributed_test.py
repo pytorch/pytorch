@@ -3667,7 +3667,6 @@ class DistributedTest:
 
             join_config = self.ddp_uneven_inputs_config
             self.assertFalse(join_config.ddp_join_enabled)
-            self.assertFalse(net.ddp_join_enabled)
             self.validate_net_equivalence(net)
 
         @require_backend({"gloo", "nccl"})
