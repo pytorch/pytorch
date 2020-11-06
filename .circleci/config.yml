@@ -2093,26 +2093,6 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
-      - binary_mac_build:
-          name: binary_macos_wheel_3_9_cpu_nightly_build
-          build_environment: "wheel 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_conda_3_9_cpu_nightly_build
-          build_environment: "conda 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_cpu_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m cpu devtoolset7"
@@ -2486,34 +2466,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: conda
           upload_subfolder: cu110
-      - binary_upload:
-          name: binary_macos_wheel_3_9_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_macos_wheel_3_9_cpu_nightly_build
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_macos_conda_3_9_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_macos_conda_3_9_cpu_nightly_build
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: cpu
     when: << pipeline.parameters.run_binary_tests >>
   ecr_gc:
     triggers:
