@@ -1271,45 +1271,6 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, a, b)
             self.assertLastGraphAllFused()
 
-    def test_half_module_backward(self):
-        devices = ["cuda"] if torch.cuda.is_available() else []
-        dtype = torch.float16
-
-        for device in devices:
-            class HalfModule(nn.Module):
-                def __init__(self, inplanes, planes):
-                    super().__init__()
-
-                    self.fixup_bias2a = nn.Parameter(torch.zeros(1))
-                    self.fixup_scale = nn.Parameter(torch.ones(1))
-                    self.fixup_bias2b = nn.Parameter(torch.zeros(1))
-
-                def forward(self, x):
-                    identity = x
-                    out = x
-
-                    out = out + self.fixup_bias2a
-                    out = out * self.fixup_scale + self.fixup_bias2b
-
-                    return out * out + identity
-
-            net_ref = HalfModule(64, 64).to(dtype=dtype, device=device)
-            net = torch.jit.script(HalfModule(64, 64)).to(dtype=dtype, device=device)
-            inp = torch.randn(16, 64, 16, 16, dtype=dtype, device=device)
-
-            for i in range(10):
-                for param in net.parameters():
-                    param.grad = None
-                for param in net_ref.parameters():
-                    param.grad = None
-
-                net(inp).mean().backward()
-                net_ref(inp).mean().backward()
-
-            # check grad, allow a little tolerance due to parallelism.
-            for (p1, p2) in zip(net.parameters(), net_ref.parameters()):
-                np.testing.assert_allclose(p1.grad.cpu(), p2.grad.cpu(), rtol=0.02)
-
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
