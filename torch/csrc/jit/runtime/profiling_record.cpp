@@ -6,8 +6,9 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include "jit/ir/ir.h"
-#include "torch/csrc/jit/codegen/cuda/interface.h"
+
+#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
