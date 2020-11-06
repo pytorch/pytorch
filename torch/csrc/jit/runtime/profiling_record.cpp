@@ -249,7 +249,8 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 
 void ProfilingRecord::removeProfilingNodes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile || it->kind() == prim::profile_optional || it->kind() == prim::profile_ivalue) {
+    if (it->kind() == prim::profile || it->kind() == prim::profile_optional ||
+        it->kind() == prim::profile_ivalue) {
       it->output()->replaceAllUsesWith(it->input());
       it.destroyCurrent();
     } else {

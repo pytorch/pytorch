@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
-#include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/partition.h>
 
 #include <torch/csrc/jit/runtime/profiling_record.h>
 

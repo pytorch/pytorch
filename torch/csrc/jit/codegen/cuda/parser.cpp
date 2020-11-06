@@ -27,8 +27,7 @@ constexpr auto kNumLerpOps = 2;
 
 namespace {
 
-
-static auto intListAttr =Symbol::attr("profiled_int_list");
+static auto intListAttr = Symbol::attr("profiled_int_list");
 static auto boolAttr = Symbol::attr("profiled_bool");
 
 typedef Val* CgValue;
@@ -635,24 +634,31 @@ ProfileIValueOp* insertProfileIValueOp(
 void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  std::function<void(Stack&)> ivalue_profiler = [pr, pn] (Stack& stack) {
+  std::function<void(Stack&)> ivalue_profiler = [pr, pn](Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
-    // TODO: we don't care about merging multiple profiling runs as we don't support it at all;
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
     int64_t frame_id = 0;
     pop(stack, frame_id);
     IValue value;
     pop(stack, value);
-    TORCH_INTERNAL_ASSERT(value.isIntList(), "profiling seeing the wrong data type");
+    TORCH_INTERNAL_ASSERT(
+        value.isIntList(), "profiling seeing the wrong data type");
     // TODO: get a real attribute
     if (!pn->hasAttribute(intListAttr)) {
-      //pn->is_(attr::a, value.toIntList().vec());
+      // pn->is_(attr::a, value.toIntList().vec());
       pn->is_(intListAttr, value.toIntVector());
     } else {
       auto profiled_ints = pn->is(intListAttr);
       auto input_ints = value.toIntList();
-      TORCH_INTERNAL_ASSERT(profiled_ints.size() == input_ints.size() &&
-          std::equal(profiled_ints.begin(), profiled_ints.end(), input_ints.begin()), "profiling ivalue doesn't support merge");
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == input_ints.size() &&
+              std::equal(
+                  profiled_ints.begin(),
+                  profiled_ints.end(),
+                  input_ints.begin()),
+          "profiling ivalue doesn't support merge");
     }
     push(stack, value);
   };
@@ -663,22 +669,26 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
 void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  std::function<void(Stack&)> ivalue_profiler = [pr, pn] (Stack& stack) {
+  std::function<void(Stack&)> ivalue_profiler = [pr, pn](Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
-    // TODO: we don't care about merging multiple profiling runs as we don't support it at all;
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
     int64_t frame_id = 0;
     pop(stack, frame_id);
     IValue value;
     pop(stack, value);
-    TORCH_INTERNAL_ASSERT(value.isBool(), "profiling seeing the wrong data type");
+    TORCH_INTERNAL_ASSERT(
+        value.isBool(), "profiling seeing the wrong data type");
     // TODO: get a real attribute
     if (!pn->hasAttribute(boolAttr)) {
       pn->i_(boolAttr, value.toBool());
     } else {
       auto profiled_bool = pn->i(boolAttr);
       auto input_bool = value.toBool();
-      TORCH_INTERNAL_ASSERT(input_bool == profiled_bool, "profiling ivalue doesn't support merge");
+      TORCH_INTERNAL_ASSERT(
+          input_bool == profiled_bool,
+          "profiling ivalue doesn't support merge");
     }
     push(stack, value);
   };
@@ -712,25 +722,27 @@ bool isNodeParsible(const Node* node) {
 
 // TODO: we should incorporate this to our parser as well;
 bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
-
   // is skip constant necessary?
   if (node->input(offset)->node()->kind() == prim::Constant) {
     return false;
   }
 
   // we should use `OperatorSet`
-  static auto reduction_operator = Symbol::fromQualString(getOperatorForLiteral(
-      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")->schema().name());
+  static auto reduction_operator = Symbol::fromQualString(
+      getOperatorForLiteral(
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
+          ->schema()
+          .name());
   if (node->kind() == reduction_operator) {
     switch (offset) {
-    case 1:
-      profileIntList(pr, node, offset);
-      break;
-    case 2:
-      profileBool(pr, node, offset);
-      break;
-    default:
-      return false;
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      case 2:
+        profileBool(pr, node, offset);
+        break;
+      default:
+        return false;
     }
     return true;
   }

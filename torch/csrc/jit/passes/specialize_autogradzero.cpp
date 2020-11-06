@@ -10,7 +10,6 @@
 namespace torch {
 namespace jit {
 
-
 static auto countsAttribute = Symbol::attr("none_counts");
 
 bool hasGradSumToSizeUses(Value* v) {
@@ -19,61 +18,65 @@ bool hasGradSumToSizeUses(Value* v) {
   });
 }
 
- void insertProfileNodesForSpecializeAutogradZero_(Block* block, ProfilingRecord* pr) {
-    for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
-      auto n = *it;
-      for (size_t offset = 0; offset < n->inputs().size(); offset++) {
-          auto i = n->input(offset);
-          if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
-              // here we are profile the definition instead of the use,
-              // because we are only optimizing in the case of a None value which is
-              // immutable
-              auto opt_pn = pr->createProfileIValueNode(i);
+void insertProfileNodesForSpecializeAutogradZero_(
+    Block* block,
+    ProfilingRecord* pr) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    auto n = *it;
+    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+      auto i = n->input(offset);
+      if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
+        // here we are profile the definition instead of the use,
+        // because we are only optimizing in the case of a None value which is
+        // immutable
+        auto opt_pn = pr->createProfileIValueNode(i);
 
-              c10::Dict<std::string, int64_t> noneCountsDict;
-              noneCountsDict.insert("num_none", 0);
-              noneCountsDict.insert("num_present", 0);
-              IValue init_val(noneCountsDict);
+        c10::Dict<std::string, int64_t> noneCountsDict;
+        noneCountsDict.insert("num_none", 0);
+        noneCountsDict.insert("num_present", 0);
+        IValue init_val(noneCountsDict);
 
-              opt_pn->ival_(countsAttribute, init_val);
+        opt_pn->ival_(countsAttribute, init_val);
 
-              std::function<void(Stack&)> optional_profiler = [pr,
-                                                              opt_pn](Stack& stack) {
-                std::lock_guard<std::mutex> lock(pr->mutex_);
+        std::function<void(Stack&)> optional_profiler = [pr,
+                                                         opt_pn](Stack& stack) {
+          std::lock_guard<std::mutex> lock(pr->mutex_);
 
-                TORCH_INTERNAL_ASSERT(opt_pn->hasAttribute(countsAttribute));
-                // frame_id is unused
-                int64_t frame_id = 0;
-                pop(stack, frame_id);
+          TORCH_INTERNAL_ASSERT(opt_pn->hasAttribute(countsAttribute));
+          // frame_id is unused
+          int64_t frame_id = 0;
+          pop(stack, frame_id);
 
-                const auto& counts_attr = opt_pn->ival(countsAttribute);
-                auto noneCounts = c10::impl::toTypedDict<std::string, int64_t>(counts_attr.toGenericDict());
-                IValue value;
-                pop(stack, value);
-                if (value.isNone()) {
-                  noneCounts.insert_or_assign("num_none", noneCounts.at("num_none") + 1);
-                } else {
-                  noneCounts.insert_or_assign(
-                      "num_present", noneCounts.at("num_present") + 1);
-                }
-                push(stack, value);
-              };
-              opt_pn->setCallback(optional_profiler);
-              opt_pn->insertAfter(i->node());
-              i->replaceAllUsesAfterNodeWith(opt_pn, opt_pn->output());
-            }
-      }
-
-      for (auto ib : n->blocks()) {
-        insertProfileNodesForSpecializeAutogradZero_(ib, pr);
+          const auto& counts_attr = opt_pn->ival(countsAttribute);
+          auto noneCounts = c10::impl::toTypedDict<std::string, int64_t>(
+              counts_attr.toGenericDict());
+          IValue value;
+          pop(stack, value);
+          if (value.isNone()) {
+            noneCounts.insert_or_assign(
+                "num_none", noneCounts.at("num_none") + 1);
+          } else {
+            noneCounts.insert_or_assign(
+                "num_present", noneCounts.at("num_present") + 1);
+          }
+          push(stack, value);
+        };
+        opt_pn->setCallback(optional_profiler);
+        opt_pn->insertAfter(i->node());
+        i->replaceAllUsesAfterNodeWith(opt_pn, opt_pn->output());
       }
     }
-  }
 
-  void InsertProfileNodesForSpecializeAutogradZero(ProfilingRecord* pr) {
-    insertProfileNodesForSpecializeAutogradZero_(pr->profiled_graph_->block(), pr);
-  } 
- 
+    for (auto ib : n->blocks()) {
+      insertProfileNodesForSpecializeAutogradZero_(ib, pr);
+    }
+  }
+}
+
+void InsertProfileNodesForSpecializeAutogradZero(ProfilingRecord* pr) {
+  insertProfileNodesForSpecializeAutogradZero_(
+      pr->profiled_graph_->block(), pr);
+}
 
 struct AutogradZeroSpecializer {
   enum class State { Nonzero, Zero, Unknown };
@@ -178,7 +181,8 @@ struct AutogradZeroSpecializer {
 
   void removeProfiledOptionalUses(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-      if (it->kind() == prim::profile_ivalue && it->hasAttribute(countsAttribute)) {
+      if (it->kind() == prim::profile_ivalue &&
+          it->hasAttribute(countsAttribute)) {
         it->output()->replaceAllUsesWith(it->input());
         it.destroyCurrent();
       } else {
@@ -209,13 +213,15 @@ struct AutogradZeroSpecializer {
     std::vector<Value*> nonzero_values;
 
     for (auto inp : graph_->inputs()) {
-      if (auto profile_optional_node = getUseWithAttribute(inp, countsAttribute)) {
-        TORCH_INTERNAL_ASSERT(profile_optional_node->hasAttribute(countsAttribute));
-        const auto& counts_attr = profile_optional_node->ival(countsAttribute).toGenericDict();
+      if (auto profile_optional_node =
+              getUseWithAttribute(inp, countsAttribute)) {
+        TORCH_INTERNAL_ASSERT(
+            profile_optional_node->hasAttribute(countsAttribute));
+        const auto& counts_attr =
+            profile_optional_node->ival(countsAttribute).toGenericDict();
         auto num_present = counts_attr.at(IValue{"num_present"}).toInt();
         auto num_none = counts_attr.at(IValue{"num_none"}).toInt();
-        if (num_present == 0 &&
-            num_none != 0) {
+        if (num_present == 0 && num_none != 0) {
           auto check = graph_->insert(aten::__is__, {inp, none_val})->node();
           checks.push_back(check->output());
           profiled_none_.insert(inp);
