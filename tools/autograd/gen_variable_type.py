@@ -113,7 +113,7 @@ DONT_PROFILE = {
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_BACKEND = set([
     'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
-    'backward', 'requires_grad_',
+    '_backward', 'requires_grad_',
 ])
 
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
@@ -165,7 +165,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
-    'bmm', 'diagonal', 'cholesky', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
+    'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero'
 }
