@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.intrinsic import LinearReLU
 
-class Linear(nn.Linear):
+class Linear(nn.Linear, _FusedModule):
     r"""
     A linear module attached with FakeQuantize modules for weight,
     used for quantization aware training.
@@ -21,7 +21,7 @@ class Linear(nn.Linear):
 
     def __init__(self, in_features, out_features, bias=True,
                  qconfig=None):
-        super(Linear, self).__init__(in_features, out_features, bias)
+        nn.Linear.__init__(in_features, out_features, bias)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight()

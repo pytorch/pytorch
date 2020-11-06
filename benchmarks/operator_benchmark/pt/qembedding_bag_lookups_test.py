@@ -176,13 +176,19 @@ class EmbedddingBagByteRowwiseOffsetsTest(op_bench.TorchBenchmarkBase):
             low=0.01, high=0.5, size=[len(self.indices)]).astype(np.float32)) if \
             self.enable_per_sample_weights else None
 
+        self.compressed_indices = None
+
+        if self.is_pruned_weights:
+            self.prepacked_weights, self.compressed_indices = get_pruned_weights_and_mapping(self.prepacked_weights)
+
         self.op_func = op_func
 
     def forward(self):
         return self.op_func(self.prepacked_weights, self.indices, self.offsets,
                             mode=0, per_sample_weights=self.per_sample_weights,
                             include_last_offset=self.include_last_offset,
-                            pruned_weights=self.is_pruned_weights)
+                            pruned_weights=self.is_pruned_weights,
+                            compressed_indices_mapping=self.compressed_indices)
 
 
 op_bench.generate_pt_tests_from_op_list(four_bit_rowwise_ops,

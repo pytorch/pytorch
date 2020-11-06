@@ -1253,6 +1253,28 @@ class TestEagerModeOps(QuantizationTestCase):
 
 
 class TestEagerModeQATOps(QuantizationTestCase):
+    def _test_activation_impl(self, Act, data):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = Act()
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.act(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().train()
+        m.qconfig = default_qat_qconfig
+        m = prepare_qat(m)
+        before_convert = m(data)
+        m = convert(m)
+        after_convert = m(data)
+        self.assertEqual(before_convert, after_convert)
+
     def test_fixed_qparam_ops(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1276,7 +1298,11 @@ class TestEagerModeQATOps(QuantizationTestCase):
         m = prepare_qat(m)
         for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
             self.assertEqual(type(getattr(m, attr).activation_post_process), FixedQParamsFakeQuantize)
+        data = torch.randn(1, 3, 2, 4)
+        before_convert = m(data)
         m = convert(m)
+        after_convert = m(data)
+        self.assertEqual(before_convert, after_convert)
         # make sure activation post process is removed
         for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
             # verify fake quant module is removd
