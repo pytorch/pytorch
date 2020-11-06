@@ -728,12 +728,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   // we should use `OperatorSet`
-  static auto reduction_operator = Symbol::fromQualString(
+  static auto reduction_operator_schema =
       getOperatorForLiteral(
           "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
-          ->schema()
-          .name());
-  if (node->kind() == reduction_operator) {
+          ->schema();
+  if (node->matches(reduction_operator_schema)) {
     switch (offset) {
       case 1:
         profileIntList(pr, node, offset);
@@ -746,14 +745,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     }
     return true;
   }
-
-  // we should use `OperatorSet`
-  // static reduction_to_size_operator = getOperatorForLiteral(
-  //     "aten::sum_to_size(Tensor self, int[] size) -> Tensor");
-  // if (node->isMemberOf(reduction_to_size_operator) && offset == 1) {
-  //   profileIntList(pr, node, offset);
-  //   return true;
-  // }
 
   return false;
 }
