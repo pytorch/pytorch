@@ -104,7 +104,8 @@ def record_stream(tensor: torch.Tensor, stream: AbstractStream) -> None:
         #
         tensor = tensor.new_empty([0]).set_(tensor.storage())
 
-        tensor.record_stream(as_cuda(stream))
+        # Typechecking: torch.cuda.Stream is incompatible with torch._C.Stream
+        tensor.record_stream(as_cuda(stream))  # type: ignore[arg-type]
 
 
 def is_cuda(stream: AbstractStream) -> bool:
