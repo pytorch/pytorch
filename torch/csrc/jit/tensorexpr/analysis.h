@@ -38,9 +38,15 @@ class NodeFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  static std::vector<Node*> find(Stmt* s) {
+  static std::vector<Node*> find(const Stmt* s) {
     NodeFinder<Node> nf;
     s->accept(&nf);
+    return nf.nodes;
+  }
+
+  static std::vector<Node*> find(const Expr* e) {
+    NodeFinder<Node> nf;
+    e->accept(&nf);
     return nf.nodes;
   }
 

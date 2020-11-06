@@ -1897,6 +1897,19 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
+  c10::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  if (to_replace->kind() == prim::CallMethod) {
+    auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
+    if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
+      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+          class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+    } else {
+      std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
+      module_instance_info = c10::make_optional(
+          ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+    }
+  }
+
   // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
@@ -1915,11 +1928,14 @@ std::vector<Value*> inlineCallTo(
       if (new_node_cs) {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs, callee, to_replace->sourceRange());
+                *new_node_cs,
+                callee,
+                to_replace->sourceRange(),
+                module_instance_info);
       } else {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange());
+                callee, to_replace->sourceRange(), module_instance_info);
       }
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
