@@ -614,7 +614,9 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
                               const Tensor& per_sample_weights) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
-  checkContiguous("embedding_bag", indices_arg);
+  if (!is_nested_tensor_impl(indices)) {
+    checkContiguous("embedding_bag", indices_arg);
+  }
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
   checkScalarTypes("embedding_bag", offsets_arg, {kLong, kInt});
   checkSameType("embedding_bag", indices_arg, offsets_arg);
