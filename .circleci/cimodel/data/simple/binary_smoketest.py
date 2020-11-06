@@ -70,7 +70,7 @@ WORKFLOW_DATA = [
         ["manywheel", "3.7m", "cu102", "devtoolset7"],
         "pytorch/manylinux-cuda102",
         "binary_linux_manywheel_3_7m_cu102_devtoolset7_build",
-        is_master_only=True,
+        is_master_only=False,
     ),
     SmoketestJob(
         "binary_linux_build",
@@ -178,7 +178,7 @@ WORKFLOW_DATA = [
         ["manywheel", "3.7m", "cu102", "devtoolset7"],
         "pytorch/manylinux-cuda102",
         "binary_linux_manywheel_3_7m_cu102_devtoolset7_test",
-        is_master_only=True,
+        is_master_only=False,
         requires=["binary_linux_manywheel_3_7m_cu102_devtoolset7_build"],
         extra_props={
             "resource_class": "gpu.medium",

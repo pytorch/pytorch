@@ -7190,12 +7190,6 @@ workflows:
       - binary_linux_build:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_build
       - binary_linux_build:
           build_environment: libtorch 3.7m cpu devtoolset7
@@ -7274,12 +7268,6 @@ workflows:
       - binary_linux_test:
           build_environment: manywheel 3.7m cu102 devtoolset7
           docker_image: pytorch/manylinux-cuda102
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
           requires:
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_build
