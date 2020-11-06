@@ -95,6 +95,7 @@ def _dump_DDP_relevant_env_vars():
 class DDPUnevenInputsConfig(NamedTuple):
     ddp_join_enabled: bool
     ddp_join_divide_by_initial_world_size: bool
+    ddp_join_throw_on_early_termination: bool
 
 
 class DistributedDataParallel(Module):
@@ -395,7 +396,9 @@ class DistributedDataParallel(Module):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.ddp_uneven_inputs_config = DDPUnevenInputsConfig(
-            ddp_join_enabled=False, ddp_join_divide_by_initial_world_size=False
+            ddp_join_enabled=False,
+            ddp_join_divide_by_initial_world_size=False,
+            ddp_join_throw_on_early_termination=False,
         )
         self.gradient_as_bucket_view = gradient_as_bucket_view
         if hasattr(module, '_ddp_params_and_buffers_to_ignore'):
@@ -657,7 +660,17 @@ class DistributedDataParallel(Module):
             self.reducer._set_forward_pass_work_handle(
                 work, self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size
             )
-
+            if self.ddp_uneven_inputs_config.ddp_join_throw_on_early_termination:
+                # Check if need to throw StopIteration.
+                zeros = torch.zeros(1, device=self.device)
+                # TODO: This allreduce can be scheduled and waited in the C++
+                # backwards pass only if the above allreduce indicated at least
+                # one rank terminated. This will be more efficient than blocking
+                # in the forward pass.
+                dist.all_reduce(zeros, group=self.process_group)
+                should_throw_stop_iteration = zeros.item()
+                if should_throw_stop_iteration:
+                    raise StopIteration("Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks.")
         # Calling _rebuild_buckets before forward compuation,
         # It may allocate new buckets before deallocating old buckets
         # inside _rebuild_buckets. To save peak memory usage,
@@ -822,7 +835,7 @@ class DistributedDataParallel(Module):
         self.process_group.allreduce(locally_used_param_maps)
 
     @contextmanager
-    def join(self, divide_by_initial_world_size=True, enable=True):
+    def join(self, divide_by_initial_world_size=True, enable=True, throw_on_early_termination=False):
         r"""
         A context manager to be used in conjunction with an instance of
         :class:`torch.nn.parallel.DistributedDataParallel` to be
@@ -917,6 +930,7 @@ class DistributedDataParallel(Module):
             self.ddp_uneven_inputs_config = DDPUnevenInputsConfig(
                 ddp_join_enabled=enable,
                 ddp_join_divide_by_initial_world_size=divide_by_initial_world_size,
+                ddp_join_throw_on_early_termination=throw_on_early_termination,
             )
             yield
         except Exception as e:
@@ -948,6 +962,12 @@ class DistributedDataParallel(Module):
                         all_procs_joined = True
                     else:
                         # Some DDP process still needs to be joined.
+                        if self.ddp_uneven_inputs_config.ddp_join_throw_on_early_termination:
+                            # Schedule allreduce telling active ranks to terminate
+                            ones = torch.ones(1, device=self.device)
+                            dist.all_reduce(ones, group=self.process_group)
+                            raise StopIteration(f"Rank {dist.get_rank(self.process_group)} exhausted all inputs.")
+
                         if is_last_joiner:
                             is_last_joiner = False
                         # It will rebuild buckets only once during training period
