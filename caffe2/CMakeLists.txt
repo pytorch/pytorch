@@ -772,14 +772,21 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+endif()
+
+if(USE_CUDA)
+  # The list of NVFUSER runtime files
+  list(APPEND NVFUSER_RUNTIME_FILES
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor_struct.cu
+  )
 
   # Copy NVFUSER runtime sources
-  file (GLOB nvfuser_runtime "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/*.cu")
-  foreach(src ${nvfuser_runtime})
+  foreach(src ${NVFUSER_RUNTIME_FILES})
     get_filename_component(filename ${src} NAME)
     set(dst "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime/${filename}")
     add_custom_command(
-      COMMENT "Copying NVFUSER runtime header: ${filename}"
+      COMMENT "Copying NVFUSER runtime files"
       OUTPUT ${dst}
       DEPENDS ${src}
       COMMAND ${CMAKE_COMMAND} -E copy ${src} ${dst}
@@ -790,10 +797,8 @@ elseif(USE_CUDA)
 
   # Install NVFUSER runtime sources
   install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime"
-    DESTINATION ${TORCH_INSTALL_LIB_DIR}
-    FILES_MATCHING PATTERN "*.cu")
+    DESTINATION ${TORCH_INSTALL_LIB_DIR})
 endif()
-
 
 if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
