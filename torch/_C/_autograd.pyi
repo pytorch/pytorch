@@ -12,7 +12,8 @@ class ProfilerState(Enum):
 
 class ProfilerConfig:
     def __init__(
-        self, state: ProfilerState,
+        self,
+        state: ProfilerState,
         report_input_shapes: bool,
         profile_memory: bool,
         with_stack: bool
