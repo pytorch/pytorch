@@ -25,6 +25,15 @@ class TORCH_CUDA_API RootDomainMap : public PolymorphicBase {
       const TensorDomain* consumer,
       const std::unordered_set<IterDomain*>& root_dims_to_map) const;
 
+  //! Return a map from a producer TensorDomain to a consumer
+  //! TensorDomain
+  //!
+  //! \param producer A producer TensorDomain
+  //! \param consumer A consumer TensorDomain
+  std::unordered_map<IterDomain*, IterDomain*> mapProducerToConsumer(
+      const TensorDomain* producer,
+      const TensorDomain* consumer) const;
+
   //! Return a map from a consumer TensorDomain to a producer
   //! TensorDomain
   //!
@@ -35,6 +44,15 @@ class TORCH_CUDA_API RootDomainMap : public PolymorphicBase {
       const TensorDomain* consumer,
       const TensorDomain* producer,
       const std::unordered_set<IterDomain*>& root_dims_to_map) const;
+
+  //! Return a map from a consumer TensorDomain to a producer
+  //! TensorDomain
+  //!
+  //! \param consumer A consumer TensorDomain
+  //! \param producer A producer TensorDomain
+  std::unordered_map<IterDomain*, IterDomain*> mapConsumerToProducer(
+      const TensorDomain* consumer,
+      const TensorDomain* producer) const;
 
  protected:
   //! Return a map between root IterDomains of a producer-consumer
@@ -208,6 +226,24 @@ class TORCH_CUDA_API ComputeAtRootDomainMap : public RootDomainMap {
   //! \param td An existing TensorDomain
   //! \param td_alias An alias of td
   void setAlias(const TensorDomain* td, const TensorDomain* td_alias);
+
+  //! Return a map between TensorDomains
+  //!
+  //! Unlike the other map functions, two TensorDomains do not need to
+  //! be a producer-consumer pair. Since they may not be a
+  //! producer-consumer pair, this function requires proper root
+  //! domains, which may be root or rfactor domains. Also, no error
+  //! check is done as we do not assume producer-consumer relationship.
+  //!
+  //! \param from_td A TensorDomain from which a map is created
+  //! \param from_root A root domain of from_td
+  //! \param to_td A TensorDomain to which a map is created
+  //! \param to_root A root domain of to_td
+  std::unordered_map<IterDomain*, IterDomain*> mapBestEffort(
+      const TensorDomain* from_td,
+      const std::vector<IterDomain*>& from_root,
+      const TensorDomain* to_td,
+      const std::vector<IterDomain*>& to_root) const;
 
  private:
   //! Returns if key_a and key(td_b, id_b) are mapped to eachother (equivalent),

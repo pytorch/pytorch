@@ -107,6 +107,10 @@ void GpuLower::lower() {
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
 
+  // Compute root-domain mappings
+  ComputeAtRootDomainMap ca_root_map;
+  ca_root_map.build();
+
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {
     kernel_->addInput(GpuLower::lowerValue(input));
@@ -120,7 +124,7 @@ void GpuLower::lower() {
       LoopNestGenerator::loweredExprs(fusion_, fusion_->exprs(true));
 
   const auto unrolled_loops =
-      UnrollPass::runPass(fusion_, lowered_exprs, preds);
+      UnrollPass::runPass(fusion_, lowered_exprs, preds, ca_root_map);
 
   // Reuse memory locations if:
   // TensorView is dynamic shared memory
@@ -131,7 +135,8 @@ void GpuLower::lower() {
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
   const auto sync_exprs = insertThreadSynchronization(reuse_mem_exprs);
 
-  const auto indexed_loops = IndexLowering::getIndexedExprs(sync_exprs, preds);
+  const auto indexed_loops =
+      IndexLowering::getIndexedExprs(sync_exprs, preds, ca_root_map);
 
   // We now have the lowered expressions, finalize the kernel IR
   kernel_->finalize(indexed_loops, preds);

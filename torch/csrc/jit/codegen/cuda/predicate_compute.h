@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 namespace torch {
 namespace jit {
@@ -45,6 +46,7 @@ class PredicateCompute {
       const kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       kir::Bool* thread_pred,
+      const ComputeAtRootDomainMap& ca_root_map,
       bool ignore_block_grid_reductions = true);
 };
 
@@ -53,13 +55,15 @@ class TORCH_CUDA_API UnrollPredicate {
   static kir::Bool* get(
       const std::vector<kir::ForLoop*>& outer_loops,
       kir::ForLoop* unrolled_loop,
-      const IterDomainMap& p2c_root_map);
+      const IterDomainMap& p2c_root_map,
+      const ComputeAtRootDomainMap& ca_root_map);
 
  private:
   UnrollPredicate(
       std::vector<kir::ForLoop*> outer_loops,
       kir::ForLoop* unrolled_loop,
-      const IterDomainMap& _p2c_root_map);
+      const IterDomainMap& _p2c_root_map,
+      const ComputeAtRootDomainMap& ca_root_map);
 
   void predicateOn(kir::Expr*);
 
@@ -70,6 +74,7 @@ class TORCH_CUDA_API UnrollPredicate {
   std::vector<kir::ForLoop*> for_loops_;
 
   const IterDomainMap& p2c_root_map_;
+  const ComputeAtRootDomainMap& ca_root_map_;
 };
 
 } // namespace cuda

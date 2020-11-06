@@ -543,7 +543,63 @@ std::deque<const TensorView*> getComputeAtTVStackFrom(
   return tv_stack;
 }
 
-// TODO: replace pair with a struct
+//! Generates index and extent expressions of tensors.
+//!
+//! A chain of tensors, ordered by traversing computeAt relationships,
+//! is used to generate indices and extents for a tensor. When the
+//! tensor is a producer, the chain is generated from its consumer
+//! with the producer itself appended at the last.
+//!
+//! The tensor chain, c2p_tv_stack, is traversed while mapping index
+//! and exten expressions between each tensor. This expression mapping
+//! is done based on how their root domaims are mapped. For
+//! root-domain mapping , ComputeAtRootDomainMap is mainly used with
+//! PairwiseRootDomainMap for one special case.
+//!
+//! The computeAt in our system defines not just where a tensor is
+//! defined but also where it is declared (allocated). When that
+//! tensor is used by multiple consumers, we need to make sure it is
+//! accessible by all its consumers. That's the logic behind the
+//! validation done in ComputeAtRootDomainMap.
+//!
+//! The tensors in the computeAt stack are the ones that are
+//! transformed based on the mapping provided by
+//! ComputeAtRootDomainMap. So, at this point, what we do is to
+//! transform index expressions by traversing the computeAt stack. We
+//! transform indices defined for one tensor to those for its next
+//! next based on the root mapping.
+//!
+//! In the special case with the additional producer tensor, the
+//! producer may not be computed at the consumer, and the only thing
+//! we can say is that it's a producer of the consumer. So,
+//! ComputeAtRootDomainMap may return no mapping for this
+//! producer-consumer pair. Instead of ComputeAtRootDomainMap,
+//! PairwiseRootDomainMap simply looks at a producer-consumer pair and
+//! maps each axis. Though it's only valid for producer-consumer
+//! pairs, it doesn't care the computeAt semantics, and that's why it
+//! is used for the special case.
+//!
+//! Note that PairwiseRootDomainMap may not work for the tensors
+//! originally in the computeAt stack since computeAt does not
+//! necessarily mean a producer-consumer relationship, i.e.,
+//! terminating output tensors may have computeAt relationships, but
+//! by definition they are not producer-consumer. So,
+//! ComputeAtRootDomainMap is used as it can be used with arbitrary
+//! pairs of tensors.
+//!
+//! All in all, in getProducerIndex, PairwiseRootDomainMap is used for
+//! the producer-consumer arguments. After that,
+//! ComputeAtRootDomainMap is used for the "real" computeAt tensors
+//! traversed from the consumer.
+//!
+//! TODO: replace pair with a struct
+//!
+//! \param c2p_tv_stack Tensors ordered based on computeAt
+//! \param loops Loops where indices and extents are used
+//! \param loop_to_ind_map Loop indices
+//! \param last_tv_root_contiguity
+//! \param ca_root_map Root-domain map for the current fusion
+//! \param producer_pushed True when a producer is appended to c2p_tv_stack
 std::pair<
     std::unordered_map<kir::IterDomain*, kir::Val*>,
     std::unordered_map<kir::IterDomain*, kir::Val*>>
@@ -551,7 +607,9 @@ generateIndexAndExtentMap(
     std::deque<const TensorView*> c2p_tv_stack,
     std::deque<kir::ForLoop*> loops,
     const std::unordered_map<kir::ForLoop*, kir::Val*>& loop_to_ind_map,
-    const std::vector<bool>& last_tv_root_contiguity) {
+    const std::vector<bool>& last_tv_root_contiguity,
+    const ComputeAtRootDomainMap& ca_root_map,
+    bool producer_pushed = false) {
   if (c2p_tv_stack.empty())
     return std::make_pair(
         std::unordered_map<kir::IterDomain*, kir::Val*>(),
@@ -572,9 +630,39 @@ generateIndexAndExtentMap(
     auto c_tv = c2p_tv_stack[i];
     auto p_tv = c2p_tv_stack[i + 1];
 
-    // Map root ID's from consumer to producer
-    auto c2p_root_map =
-        TensorDomain::mapRootCtoP(c_tv->domain(), p_tv->domain());
+    // Map root ID's from consumer to producer. c2p_tv_stack may have
+    // an additional producer tensor that is fully replayed. It may
+    // not be actually computed at the consumer. It needs to be
+    // processed specially as it needs full mapping even when it could
+    // indicate invalid root mapping in the sense of computeAt
+    // viability. For the particular case, the simpler pairwise
+    // mapping just works as they are guaranteed to be a
+    // producer-consumer pair.
+    std::unordered_map<IterDomain*, IterDomain*> c2p_root_map;
+    if (producer_pushed && i + 2 == c2p_tv_stack.size()) {
+      TORCH_INTERNAL_ASSERT(
+          c_tv->isProducerOf(p_tv),
+          "Invalid producer-consumer: ",
+          "T",
+          p_tv->name(),
+          " is not a producer of T",
+          c_tv->name());
+      c2p_root_map = PairwiseRootDomainMap(p_tv, c_tv)
+                         .mapConsumerToProducer(c_tv->domain(), p_tv->domain());
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          p_tv->getComputeAtView() == c_tv,
+          "Invalid computeAt relationship: ",
+          "T",
+          p_tv->name(),
+          " is not computed at T",
+          c_tv->name());
+      c2p_root_map = ca_root_map.mapBestEffort(
+          c_tv->domain(),
+          c_tv->getRootDomain(),
+          p_tv->domain(),
+          p_tv->getMaybeRFactorDomain());
+    }
 
     // Look for matching ID transformations in producer and consumer...
     BestEffortReplay replay(
@@ -773,7 +861,8 @@ generateIndexAndExtentMap(
 kir::TensorIndex* Index::getGlobalProducerIndex(
     TensorView* producer_tv,
     const TensorView* consumer_tv,
-    const std::vector<kir::ForLoop*>& loops) {
+    const std::vector<kir::ForLoop*>& loops,
+    const ComputeAtRootDomainMap& ca_root_map) {
   FUSER_PERF_SCOPE("getGlobalProducerIndex");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -806,7 +895,9 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
                        tv_stack,
                        std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
                        loop_to_ind_map,
-                       producer_tv->domain()->contiguity())
+                       producer_tv->domain()->contiguity(),
+                       ca_root_map,
+                       true)
                        .first;
 
   // Indices should now be mapped onto IterDomains in producer, so just grab
@@ -908,7 +999,8 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
 kir::TensorIndex* Index::getProducerIndex_impl(
     TensorView* producer_tv,
     const TensorView* consumer_tv,
-    const std::vector<kir::ForLoop*>& loops) {
+    const std::vector<kir::ForLoop*>& loops,
+    const ComputeAtRootDomainMap& ca_root_map) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -936,7 +1028,9 @@ kir::TensorIndex* Index::getProducerIndex_impl(
       tv_stack,
       std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
       loop_to_ind_map,
-      std::vector<bool>(producer_tv->getRootDomain().size(), false));
+      std::vector<bool>(producer_tv->getRootDomain().size(), false),
+      ca_root_map,
+      true);
   auto index_map = index_and_extent_map.first;
   auto extent_map = index_and_extent_map.second;
 
@@ -1015,7 +1109,8 @@ kir::TensorIndex* Index::getProducerIndex_impl(
 
 kir::TensorIndex* Index::getGlobalConsumerIndex(
     const TensorView* consumer_tv,
-    const std::vector<kir::ForLoop*>& loops) {
+    const std::vector<kir::ForLoop*>& loops,
+    const ComputeAtRootDomainMap& ca_root_map) {
   FUSER_PERF_SCOPE("getGlobalConsumerIndex");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -1034,7 +1129,8 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
                        tv_stack,
                        std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
                        loop_to_ind_map,
-                       consumer_tv->domain()->contiguity())
+                       consumer_tv->domain()->contiguity(),
+                       ca_root_map)
                        .first;
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
@@ -1090,7 +1186,8 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
 // Consumer index for either shared or local memory
 kir::TensorIndex* Index::getConsumerIndex_impl(
     const TensorView* consumer_tv,
-    const std::vector<kir::ForLoop*>& loops) {
+    const std::vector<kir::ForLoop*>& loops,
+    const ComputeAtRootDomainMap& ca_root_map) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -1104,7 +1201,8 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
       tv_stack,
       std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
       loop_to_ind_map,
-      std::vector<bool>(consumer_tv->getRootDomain().size(), false));
+      std::vector<bool>(consumer_tv->getRootDomain().size(), false),
+      ca_root_map);
 
   auto index_map = index_and_extent_map.first;
   auto extent_map = index_and_extent_map.second;
@@ -1184,7 +1282,8 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
 kir::TensorIndex* Index::getProducerIndex(
     TensorView* producer,
     const TensorView* consumer,
-    const std::vector<kir::ForLoop*>& loops) {
+    const std::vector<kir::ForLoop*>& loops,
+    const ComputeAtRootDomainMap& ca_root_map) {
   FUSER_PERF_SCOPE("Index::getProducerIndex");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -1195,16 +1294,17 @@ kir::TensorIndex* Index::getProducerIndex(
   }
 
   if (producer->getMemoryType() == MemoryType::Global) {
-    return getGlobalProducerIndex(producer, consumer, loops);
+    return getGlobalProducerIndex(producer, consumer, loops, ca_root_map);
   }
 
-  return getProducerIndex_impl(producer, consumer, loops);
+  return getProducerIndex_impl(producer, consumer, loops, ca_root_map);
 }
 
 // Consumer is the output of an expression
 kir::TensorIndex* Index::getConsumerIndex(
     const TensorView* consumer,
-    const std::vector<kir::ForLoop*>& loops) {
+    const std::vector<kir::ForLoop*>& loops,
+    const ComputeAtRootDomainMap& ca_root_map) {
   FUSER_PERF_SCOPE("Index::getConsumerIndex");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -1215,10 +1315,10 @@ kir::TensorIndex* Index::getConsumerIndex(
   }
 
   if (consumer->getMemoryType() == MemoryType::Global) {
-    return getGlobalConsumerIndex(consumer, loops);
+    return getGlobalConsumerIndex(consumer, loops, ca_root_map);
   }
 
-  return getConsumerIndex_impl(consumer, loops);
+  return getConsumerIndex_impl(consumer, loops, ca_root_map);
 }
 
 // Basically just copy getGlobalConsumerIndex, just don't do the striding and
@@ -1230,6 +1330,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
     const kir::TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops,
     const std::vector<bool>& root_contiguity,
+    const ComputeAtRootDomainMap& ca_root_map,
     bool unroll) {
   FUSER_PERF_SCOPE("Index::getConsumerRootPredIndices");
 
@@ -1266,7 +1367,8 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
                        tv_stack,
                        std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
                        loop_to_ind_map,
-                       root_contiguity)
+                       root_contiguity,
+                       ca_root_map)
                        .first;
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab

@@ -53,7 +53,7 @@ void UnrollPass::handle(kir::Expr* expr) {
   if (ir_utils::isTVOp(expr) && !for_loops_.empty()) {
     const auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
     const auto pred = PredicateCompute::getInlinePredicate(
-        expr, for_loops_, getThreadPredicate(out_tv));
+        expr, for_loops_, getThreadPredicate(out_tv), ca_root_map_);
 
     // If we need a predicate, put expr inside an if then else
     if (!pred->isConst() || !(pred->isConst() && pred->value().value())) {
@@ -92,7 +92,8 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     return;
   }
 
-  auto unroll_pred = UnrollPredicate::get(for_loops_, fl, p2c_root_map_);
+  auto unroll_pred =
+      UnrollPredicate::get(for_loops_, fl, p2c_root_map_, ca_root_map_);
 
   kir::ForLoop* parent_scope = for_loops_.empty() ? nullptr : for_loops_.back();
 
@@ -157,10 +158,11 @@ kir::Expr* UnrollPass::applyReplacements(kir::Expr* expr) const {
 std::vector<kir::Expr*> UnrollPass::runPass(
     Fusion* fusion,
     const std::vector<kir::Expr*>& exprs,
-    const ThreadPredicateMap& thread_predicates) {
+    const ThreadPredicateMap& thread_predicates,
+    const ComputeAtRootDomainMap& ca_root_map) {
   FUSER_PERF_SCOPE("UnrollPass::runPass");
 
-  UnrollPass unroll_pass(fusion, thread_predicates);
+  UnrollPass unroll_pass(fusion, thread_predicates, ca_root_map);
   unroll_pass.computeMap(exprs);
 
   std::vector<kir::Expr*> mutated_exprs;

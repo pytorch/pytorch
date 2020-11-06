@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <bitset>
 #include <unordered_map>
@@ -56,11 +57,15 @@ class TORCH_CUDA_API UnrollPass {
   static std::vector<kir::Expr*> runPass(
       Fusion* fusion,
       const std::vector<kir::Expr*>& exprs,
-      const ThreadPredicateMap& thread_predicates);
+      const ThreadPredicateMap& thread_predicates,
+      const ComputeAtRootDomainMap& ca_root_map);
 
  private:
-  UnrollPass(Fusion* fusion, const ThreadPredicateMap& thread_predicates)
-      : thread_predicates_(thread_predicates) {
+  UnrollPass(
+      Fusion* fusion,
+      const ThreadPredicateMap& thread_predicates,
+      const ComputeAtRootDomainMap& ca_root_map)
+      : thread_predicates_(thread_predicates), ca_root_map_(ca_root_map) {
     p2c_root_map_ = loop_utils::p2cRootMap(fusion->exprs(true));
   }
 
@@ -85,6 +90,8 @@ class TORCH_CUDA_API UnrollPass {
 
   // Map from TensorView
   const ThreadPredicateMap& thread_predicates_;
+
+  const ComputeAtRootDomainMap& ca_root_map_;
 
   IterDomainMap p2c_root_map_;
 

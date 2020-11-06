@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -146,23 +147,27 @@ class Index {
   static kir::TensorIndex* getProducerIndex_impl(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const ComputeAtRootDomainMap& ca_root_map);
 
   // Consumer indexing if it's in shared or local memory
   static kir::TensorIndex* getConsumerIndex_impl(
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const ComputeAtRootDomainMap& ca_root_map);
 
   // Producer if it's in global memory
   static kir::TensorIndex* getGlobalProducerIndex(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const ComputeAtRootDomainMap& ca_root_map);
 
   // Consumer indexing if it's in global memory
   static kir::TensorIndex* getGlobalConsumerIndex(
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const ComputeAtRootDomainMap& ca_root_map);
 
  public:
   // Indexing functions
@@ -172,12 +177,14 @@ class Index {
   static kir::TensorIndex* getProducerIndex(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const ComputeAtRootDomainMap& ca_root_map);
 
   // Consumer index dispatch
   static kir::TensorIndex* getConsumerIndex(
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops);
+      const std::vector<kir::ForLoop*>& loops,
+      const ComputeAtRootDomainMap& ca_root_map);
 
   // Consumer indices for predicates, keep all indices matching in root domain.
   // Even those not used for physical addressing. Returns pair <root indices, if
@@ -186,6 +193,7 @@ class Index {
       const kir::TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops,
       const std::vector<bool>& root_contiguity,
+      const ComputeAtRootDomainMap& ca_root_map,
       bool unroll = false);
 };
 

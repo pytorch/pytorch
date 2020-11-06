@@ -18,11 +18,30 @@ std::unordered_map<IterDomain*, IterDomain*> RootDomainMap::
 }
 
 std::unordered_map<IterDomain*, IterDomain*> RootDomainMap::
+    mapProducerToConsumer(
+        const TensorDomain* producer,
+        const TensorDomain* consumer) const {
+  std::unordered_set<IterDomain*> root_dims_to_map(
+      producer->getMaybeRFactorDomain().begin(),
+      producer->getMaybeRFactorDomain().end());
+  return mapProducerToConsumer(producer, consumer, root_dims_to_map);
+}
+
+std::unordered_map<IterDomain*, IterDomain*> RootDomainMap::
     mapConsumerToProducer(
         const TensorDomain* consumer,
         const TensorDomain* producer,
         const std::unordered_set<IterDomain*>& root_dims_to_map) const {
   return map(producer, consumer, root_dims_to_map, false);
+}
+
+std::unordered_map<IterDomain*, IterDomain*> RootDomainMap::
+    mapConsumerToProducer(
+        const TensorDomain* consumer,
+        const TensorDomain* producer) const {
+  std::unordered_set<IterDomain*> root_dims_to_map(
+      consumer->getRootDomain().begin(), consumer->getRootDomain().end());
+  return mapConsumerToProducer(consumer, producer, root_dims_to_map);
 }
 
 PairwiseRootDomainMap::PairwiseRootDomainMap(
@@ -333,6 +352,26 @@ std::unordered_set<const IterDomain*>& ComputeAtRootDomainMap::
   return it->second;
 }
 
+std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::
+    mapBestEffort(
+        const TensorDomain* from_td,
+        const std::vector<IterDomain*>& from_root,
+        const TensorDomain* to_td,
+        const std::vector<IterDomain*>& to_root) const {
+  std::unordered_map<IterDomain*, IterDomain*> id_map;
+  for (auto& from_id : from_root) {
+    for (const auto& to_id : to_root) {
+      if (canMap(from_td, from_id, to_td, to_id)) {
+        TORCH_INTERNAL_ASSERT(
+            id_map.insert({from_id, to_id}).second,
+            "Multiple matching ID detected for ",
+            from_id);
+      }
+    }
+  }
+  return id_map;
+}
+
 std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
     const TensorDomain* producer,
     const TensorDomain* consumer,
@@ -340,43 +379,36 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
     bool producer_to_consumer) const {
   const auto& producer_root = producer->getMaybeRFactorDomain();
   const auto& consumer_root = consumer->getRootDomain();
-  const TensorDomain* src_td = producer_to_consumer ? producer : consumer;
-  const TensorDomain* dst_td = producer_to_consumer ? consumer : producer;
-  const auto& src_ids = producer_to_consumer ? producer_root : consumer_root;
-  const auto& dst_ids = producer_to_consumer ? consumer_root : producer_root;
-  std::unordered_map<IterDomain*, IterDomain*> id_map;
-  for (auto& src_id : src_ids) {
-    if (root_dims_to_map.find(src_id) == root_dims_to_map.end()) {
+  const TensorDomain* from_td = producer_to_consumer ? producer : consumer;
+  const TensorDomain* to_td = producer_to_consumer ? consumer : producer;
+  const auto& from_ids = producer_to_consumer ? producer_root : consumer_root;
+  const auto& to_ids = producer_to_consumer ? consumer_root : producer_root;
+  std::unordered_map<IterDomain*, IterDomain*> id_map =
+      mapBestEffort(from_td, from_ids, to_td, to_ids);
+  for (auto& from_id : from_ids) {
+    if (root_dims_to_map.find(from_id) == root_dims_to_map.end()) {
+      // Remove mapping if exists
+      id_map.erase(from_id);
       continue;
     }
-    bool mapping_found = false;
-    for (const auto& dst_id : dst_ids) {
-      if (canMap(src_td, src_id, dst_td, dst_id)) {
-        TORCH_INTERNAL_ASSERT(
-            id_map.insert({src_id, dst_id}).second,
-            "Multiple matching ID detected for ",
-            src_id);
-        mapping_found = true;
-      }
-    }
-    if (mapping_found) {
+    if (id_map.find(from_id) != id_map.end()) {
       continue;
     }
-    // Matching ID not found. It's an error unless: src_id is
-    // reduction when producer_to_consumer; or src_id is a new
+    // Matching ID not found. It's an error unless: from_id is
+    // reduction when producer_to_consumer; or from_id is a new
     // broadcast when !producer_to_consumer.
-    if ((producer_to_consumer && src_id->isReduction()) ||
+    if ((producer_to_consumer && from_id->isReduction()) ||
         (!producer_to_consumer &&
-         new_broadcast_domains_.find(DomainKey(src_td, src_id)) !=
+         new_broadcast_domains_.find(DomainKey(from_td, from_id)) !=
              new_broadcast_domains_.end())) {
       continue;
     }
     TORCH_INTERNAL_ASSERT(
         false,
         "Mapping IterDomain ",
-        src_id,
+        from_id,
         " of ",
-        src_td,
+        from_td,
         " not possible as it would require recomputing the source tensor.",
         " Producer root: ",
         producer_root,

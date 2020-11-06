@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <vector>
 
@@ -17,15 +18,18 @@ class TORCH_CUDA_API IndexLowering : private kir::IrVisitor {
  public:
   static std::vector<kir::Expr*> getIndexedExprs(
       std::vector<kir::Expr*> incoming_exprs,
-      const ThreadPredicateMap& thread_predicates) {
+      const ThreadPredicateMap& thread_predicates,
+      const ComputeAtRootDomainMap& ca_root_map) {
     FUSER_PERF_SCOPE("IndexLowering::getIndexedExprs");
-    IndexLowering il(thread_predicates);
+    IndexLowering il(thread_predicates, ca_root_map);
     il.generate(incoming_exprs);
     return il.lowered_exprs_;
   }
 
  private:
-  explicit IndexLowering(const ThreadPredicateMap& thread_predicates);
+  explicit IndexLowering(
+      const ThreadPredicateMap& thread_predicates,
+      const ComputeAtRootDomainMap& ca_root_map);
 
   void pushBack(kir::Expr*);
 
@@ -59,6 +63,7 @@ class TORCH_CUDA_API IndexLowering : private kir::IrVisitor {
   kir::IrBuilder ir_builder_;
 
   const ThreadPredicateMap& thread_predicates_;
+  const ComputeAtRootDomainMap& ca_root_map_;
 };
 
 } // namespace cuda
