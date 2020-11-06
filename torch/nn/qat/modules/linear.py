@@ -1,6 +1,10 @@
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.intrinsic import LinearReLU
+from torch.nn.intrinsic import (
+    LinearReLU,
+    _FusedModule,
+)
+
 
 class Linear(nn.Linear, _FusedModule):
     r"""
