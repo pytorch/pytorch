@@ -102,10 +102,10 @@ class Linear(Module):
 # This class exists solely for Transformer; it has an annotation stating
 # that bias is never None, which appeases TorchScript
 class _LinearWithBias(Linear):
-    bias: Tensor
+    bias: Tensor  # type: ignore
 
     def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features, out_features, bias=True)
+        super().__init__(in_features, out_features, bias=True)  # type: ignore
 
 
 class Bilinear(Module):
@@ -208,7 +208,8 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     """
 
-    cls_to_become = Linear
+    cls_to_become = Linear  # type: ignore[assignment]
+    weight: UninitializedParameter
 
     def __init__(self, out_features: int, bias: bool = True) -> None:
         super().__init__(0, out_features, bias)
@@ -218,7 +219,7 @@ class LazyLinear(LazyModuleMixin, Linear):
         if not self.has_uninitialized_params() and self.in_features != 0:
             super().reset_parameters()
 
-    def initialize_parameters(self, input) -> None:
+    def initialize_parameters(self, input) -> None:  # type: ignore
         if self.has_uninitialized_params():
             with torch.no_grad():
                 self.in_features = input.shape[-1]
