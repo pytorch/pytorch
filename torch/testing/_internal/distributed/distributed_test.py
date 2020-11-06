@@ -2462,7 +2462,6 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
                 dist.all_reduce_multigpu([_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id)
-            )
 
         def _test_reduce_multigpu_helper(
             self,
