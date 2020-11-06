@@ -560,6 +560,7 @@ class TestNN(NNTestCase):
 
     def test_hook_requires_grad(self):
         test_self = self
+
         class MyModule(nn.Module):
             def forward(self, arg1, arg2, arg3):
                 test_self.assertTrue(arg1.requires_grad)
