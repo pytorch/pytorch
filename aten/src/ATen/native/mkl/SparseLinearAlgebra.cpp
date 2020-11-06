@@ -27,7 +27,7 @@
 
 namespace at { namespace native {
     using namespace at::sparse;
-    Tensor& sparse_mm_mkl(Tensor& res, const SparseTensor& sparse_, const Tensor& dense, const Tensor& t,
+    Tensor _sparse_mm_mkl_(Tensor& self, const SparseTensor& sparse_, const Tensor& dense, const Tensor& t,
                                         Scalar alpha, Scalar beta) {
       AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
     }
