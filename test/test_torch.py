@@ -6916,22 +6916,6 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(t1.is_set_to(t2))
         self.assertFalse(t2.is_set_to(t1))
 
-    @slowTest
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    def test_inverse_many_batches(self, device):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        def test_inverse_many_batches_helper(b, n):
-            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n).to(device)
-            matrices_inverse = torch.inverse(matrices)
-            self.assertEqual(torch.matmul(matrices_inverse, matrices),
-                             torch.eye(b, dtype=torch.float64, device=device).expand_as(matrices))
-
-        test_inverse_many_batches_helper(5, 256)
-        test_inverse_many_batches_helper(3, 512)
-        test_inverse_many_batches_helper(64, 64)
-
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
