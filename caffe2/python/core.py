@@ -1476,13 +1476,12 @@ class Net(object):
             self._external_input_map.update(list(self._net.external_input))
 
             # Set the next name index properly.
-            existing_names = set(
-                sum(
-                    [list(op.input) for op in self._net.op], []
-                ) + sum(
-                    existing_outputs, []
-                )
-            )
+            existing_names = set()
+            for op in self._net.op:
+                existing_names.update(list(op.input))
+            for output in existing_outputs:
+                existing_names.update(output)
+
             for outs in existing_outputs:
                 self._op_outputs.update(outs)
 
@@ -2089,7 +2088,7 @@ class Net(object):
             self._input_record = input_record
 
         for blob in self._input_record.field_blobs():
-            if blob not in self.external_inputs:
+            if not self.is_external_input(blob):
                 self.AddExternalInput(blob)
         return self._input_record
 

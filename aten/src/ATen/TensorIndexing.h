@@ -13,7 +13,7 @@ const int64_t INDEX_MIN = std::numeric_limits<int64_t>::min();
 
 enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 
-constexpr c10::nullopt_t None{c10::nullopt_t::init()};
+constexpr c10::nullopt_t None = c10::nullopt;
 
 struct CAFFE2_API EllipsisIndexType final { EllipsisIndexType() {} };
 CAFFE2_API extern const EllipsisIndexType Ellipsis;
