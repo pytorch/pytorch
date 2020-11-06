@@ -34,13 +34,11 @@ else
 fi
 
 # Clone the Pytorch branch
-retry git clone https://github.com/pytorch/builder.git "$BUILDER_ROOT"
-pushd "$BUILDER_ROOT"
-export CIRCLE_SHA1="2bf28aea9caf2d9ad4f8f828737b047320f68f16"
-export CIRCLE_BRANCH="zhanyi/cnnrnnsmoke"
+retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
+pushd "$PYTORCH_ROOT"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
-  git fetch --force origin "pull/564/head:remotes/origin/pull/564"
+  git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
   git reset --hard "$CIRCLE_SHA1"
   git checkout -q -B "$CIRCLE_BRANCH"
   git reset --hard "$CIRCLE_SHA1"
@@ -52,15 +50,14 @@ else
   echo "Can't tell what to checkout"
   exit 1
 fi
-
+retry git submodule update --init --recursive
+echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-retry git clone -q https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
-pushd "$PYTORCH_ROOT"
+retry git clone -q https://github.com/mszhanyi/builder.git -b zhanyi/cnnrnnsmoke "$BUILDER_ROOT"
+pushd "$BUILDER_ROOT"
 echo "Using builder from "
-retry git submodule update --init --recursive
-echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
