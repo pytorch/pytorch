@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
