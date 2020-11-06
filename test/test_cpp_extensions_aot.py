@@ -12,6 +12,7 @@ try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
     import torch_test_cpp_extension.rng as rng_extension
+    import torch_test_cpp_extension.torch_library as torch_library  # noqa: F401
 except ImportError as e:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
@@ -170,6 +171,27 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 1)
         del copy2
         self.assertEqual(rng_extension.getInstanceCount(), 0)
+
+
+class TestTorchLibrary(common.TestCase):
+
+    def setUp(self):
+        super().setUp()
+
+    def test_torch_library_installed(self):
+        def f(a: bool, b: bool):
+            return torch.ops.torch_library.logical_and(a, b)
+        self.assertTrue(f(True, True))
+        self.assertFalse(f(True, False))
+        self.assertFalse(f(False, True))
+        self.assertFalse(f(False, False))
+        s = torch.jit.script(f)
+        self.assertTrue(s(True, True))
+        self.assertFalse(s(True, False))
+        self.assertFalse(s(False, True))
+        self.assertFalse(s(False, False))
+        self.assertIn('torch_library::logical_and', str(s.graph))
+
 
 if __name__ == "__main__":
     common.run_tests()
