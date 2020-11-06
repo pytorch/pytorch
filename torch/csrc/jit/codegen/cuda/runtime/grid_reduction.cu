@@ -46,14 +46,14 @@ namespace reduction {
 
 // Utility functions
 template <typename _dim3>
-__host__ __device__ __forceinline__ size_t size(const _dim3& d) {
+__device__ __forceinline__ size_t size(const _dim3& d) {
   return (size_t)d.x * (size_t)d.y * (size_t)d.z;
 }
 
 #define isize(d) d.x* d.y* d.z
 
 template <typename _dim3pos, typename _dim3dim>
-__host__ __device__ __forceinline__ size_t
+__device__ __forceinline__ size_t
 offset(const _dim3pos& pos, const _dim3dim& dim) {
   return (size_t)pos.x + (size_t)pos.y * (size_t)dim.x +
       (size_t)pos.z * (size_t)dim.x * (size_t)dim.y;
@@ -63,7 +63,7 @@ offset(const _dim3pos& pos, const _dim3dim& dim) {
 
 // Returns dim3 of each reduction segment.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
-__host__ __device__ dim3 dimension_of_reduction_segment(const _dim3& grid_dim) {
+__device__ dim3 dimension_of_reduction_segment(const _dim3& grid_dim) {
   return dim3{
       X_BLOCK ? grid_dim.x : 1,
       Y_BLOCK ? grid_dim.y : 1,
@@ -72,14 +72,14 @@ __host__ __device__ dim3 dimension_of_reduction_segment(const _dim3& grid_dim) {
 
 // Returns the number of blocks in each reduction segment.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
-__host__ __device__ size_t size_of_reduction_segment(const _dim3& grid_dim) {
+__device__ size_t size_of_reduction_segment(const _dim3& grid_dim) {
   return size(
       dimension_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(grid_dim));
 }
 
 // Returns the total number of reduction segments.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
-__host__ __device__ size_t number_of_reduction_segments(const _dim3& grid_dim) {
+__device__ size_t number_of_reduction_segments(const _dim3& grid_dim) {
   return (X_BLOCK ? 1 : grid_dim.x) * (Y_BLOCK ? 1 : grid_dim.y) *
       (Z_BLOCK ? 1 : grid_dim.z);
 }
@@ -91,7 +91,7 @@ template <
     bool Z_BLOCK,
     typename _dim3bi,
     typename _dim3gd>
-__host__ __device__ size_t
+__device__ size_t
 index_of_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
   size_t seg_idx = 0;
   if (!Z_BLOCK)
@@ -110,7 +110,7 @@ template <
     bool Z_BLOCK,
     typename _dim3bi,
     typename _dim3gd>
-__host__ __device__ size_t
+__device__ size_t
 offset_in_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
   size_t offset = 0;
   if (Z_BLOCK)
@@ -124,7 +124,7 @@ offset_in_reduction_segment(const _dim3bi& block_idx, const _dim3gd& grid_dim) {
 
 // Returns dim3 of each reduction block.
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename _dim3>
-__host__ __device__ dim3 dimension_of_reduction_block(const _dim3& block_dim) {
+__device__ dim3 dimension_of_reduction_block(const _dim3& block_dim) {
   return dim3{
       X_THREAD ? block_dim.x : 1,
       Y_THREAD ? block_dim.y : 1,
@@ -133,7 +133,7 @@ __host__ __device__ dim3 dimension_of_reduction_block(const _dim3& block_dim) {
 
 // Returns the number of threads of each reduction block.
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename _dim3>
-__host__ __device__ int size_of_reduction_block(const _dim3& block_dim) {
+__device__ int size_of_reduction_block(const _dim3& block_dim) {
   auto tmp_dim =
       dimension_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(block_dim);
   return isize(tmp_dim);
@@ -146,7 +146,7 @@ template <
     bool Z_THREAD,
     typename _dim3ti,
     typename _dim3bd>
-__host__ __device__ int offset_in_reduction_block(
+__device__ int offset_in_reduction_block(
     const _dim3ti& thread_idx,
     const _dim3bd& block_dim) {
   int offset = 0;
