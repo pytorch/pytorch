@@ -35,14 +35,16 @@ std::string kernelPreamble() {
   )";
 #endif
 
+  // clang-format off
   ss << R"(
-    #include <nvfuser_runtime/block_reduction.cu>
-    #include <nvfuser_runtime/broadcast.cu>
-    #include <nvfuser_runtime/grid_reduction.cu>
-    #include <nvfuser_runtime/helpers.cu>
-    #include <nvfuser_runtime/random_numbers.cu>
     #include <nvfuser_runtime/tensor.cu>
+    #include <nvfuser_runtime/random_numbers.cu>
+    #include <nvfuser_runtime/helpers.cu>
+    #include <nvfuser_runtime/block_reduction.cu>
+    #include <nvfuser_runtime/grid_reduction.cu>
+    #include <nvfuser_runtime/broadcast.cu>
   )";
+  // clang-format on
 
   return ss.str();
 }
