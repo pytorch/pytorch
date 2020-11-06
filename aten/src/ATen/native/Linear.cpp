@@ -10,6 +10,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <csignal>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -39,6 +41,9 @@ Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
 static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArrayRef sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
+  if (left_.dim() != right_.dim())
+    std::raise(SIGINT);
+  
   TORCH_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
@@ -424,6 +429,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
 
   auto output = at::zeros(output_size, i1.options());
+  std::cout << "output: " << output << " output_size: " << output_size << std::endl;
   if (output_size[0] == 0 && output.numel() == 0) {
     return output;
   }
