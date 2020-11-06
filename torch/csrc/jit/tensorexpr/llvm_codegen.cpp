@@ -87,7 +87,7 @@ llvm::ElementCount ElementCount(int lanes) {
 #if LLVM_VERSION_MAJOR <= 11
   return llvm::ElementCount(static_cast<unsigned>(lanes), false);
 #elif LLVM_VERSION_MAJOR == 12
-  return llvm::ElementCount(llvm::PolySize<unsigned>::getFixed(lanes));
+  return llvm::ElementCount::getFixed(lanes);
 #else
 #error Only LLVM versions 8 through 12 are supported.
 #endif
