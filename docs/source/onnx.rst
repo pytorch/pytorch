@@ -249,13 +249,13 @@ E.g.: ::
     out = model(*inputs)
     torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
 
-Write pytorch model in Torch way
+Write PyTorch model in Torch way
 --------------------------------
 
-Pytorch models can be written using numpy manipulations, but this is not proper when we convert to the onnx model.
+PyTorch models can be written using numpy manipulations, but this is not proper when we convert to the ONNX model.
 For the trace-based exporter, tracing treats the numpy values as the constant node,
 therefore it calculates the wrong result if we change the input.
-So the pytorch model need implement using torch operators.
+So the PyTorch model need implement using torch operators.
 For example, do not use numpy operators on numpy tensors: ::
 
     np.concatenate((x, y, z), axis=1)
