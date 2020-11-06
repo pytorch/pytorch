@@ -3234,6 +3234,20 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_loop_multi_dim(self):
+        class LoopMultiDimModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                for x_ in torch.flip(x.narrow(0, 0, 7), [0]):
+                    y = x_[0][y]
+                return y
+
+        model = LoopMultiDimModel()
+        x = torch.randint(0, 5, (8, 1, 17), dtype=torch.long)
+        y = torch.ones(1, dtype=torch.long)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_list(self):
         class ListModel(torch.jit.ScriptModule):
             @torch.jit.script_method

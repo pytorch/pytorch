@@ -620,7 +620,7 @@ def floor(g, input):
 
 
 def _len(g, self):
-    return g.op("Size", self)
+    return sym_help._slice_helper(g, g.op("Shape", self), axes=[0], starts=[0], ends=[1])
 
 
 @parse_args('v', 't', 't')
