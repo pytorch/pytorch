@@ -47,15 +47,15 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
 # TODO: There's an issue with current Python 3.9 builds that only occurs during
 #       windows builds, let's just not build 3.9 for windows and figure out how
 #       to resolve afterwards
-WINDOWS_PYTHON_VERSIONS=[
+PYTHON_VERSIONS_NO_39=[
     v for v in dimensions.STANDARD_PYTHON_VERSIONS if v not in ['3.9']
 ]
 
 CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.GPU_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
-        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        wheel=PYTHON_VERSIONS_NO_39,
+        conda=PYTHON_VERSIONS_NO_39,
         libtorch=[
             "3.7",
         ],
@@ -64,8 +64,8 @@ CONFIG_TREE_DATA = OrderedDict(
     windows=(
         [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92'] + dimensions.ROCM_VERSION_LABELS],
         OrderedDict(
-            wheel=WINDOWS_PYTHON_VERSIONS,
-            conda=WINDOWS_PYTHON_VERSIONS,
+            wheel=PYTHON_VERSIONS_NO_39,
+            conda=PYTHON_VERSIONS_NO_39,
             libtorch=[
                 "3.7",
             ],

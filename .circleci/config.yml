@@ -3033,16 +3033,6 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
-          name: binary_macos_wheel_3_9_cpu_nightly_build
-          build_environment: "wheel 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
           name: binary_macos_conda_3_6_cpu_nightly_build
           build_environment: "conda 3.6 cpu"
           filters:
@@ -3065,16 +3055,6 @@ workflows:
       - binary_mac_build:
           name: binary_macos_conda_3_8_cpu_nightly_build
           build_environment: "conda 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_conda_3_9_cpu_nightly_build
-          build_environment: "conda 3.9 cpu"
           filters:
             branches:
               only:
@@ -6539,20 +6519,6 @@ workflows:
           package_type: wheel
           upload_subfolder: cpu
       - binary_upload:
-          name: binary_macos_wheel_3_9_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_macos_wheel_3_9_cpu_nightly_build
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
           name: binary_macos_conda_3_6_cpu_nightly_upload
           context: org-member
           requires:
@@ -6585,20 +6551,6 @@ workflows:
           context: org-member
           requires:
             - binary_macos_conda_3_8_cpu_nightly_build
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_macos_conda_3_9_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_macos_conda_3_9_cpu_nightly_build
           filters:
             branches:
               only:
@@ -9248,15 +9200,6 @@ workflows:
               only:
                 - postnightly
       - smoke_mac_test:
-          name: smoke_macos_wheel_3_9_cpu_nightly
-          build_environment: "wheel 3.9 cpu"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-      - smoke_mac_test:
           name: smoke_macos_conda_3_6_cpu_nightly
           build_environment: "conda 3.6 cpu"
           requires:
@@ -9277,15 +9220,6 @@ workflows:
       - smoke_mac_test:
           name: smoke_macos_conda_3_8_cpu_nightly
           build_environment: "conda 3.8 cpu"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-      - smoke_mac_test:
-          name: smoke_macos_conda_3_9_cpu_nightly
-          build_environment: "conda 3.9 cpu"
           requires:
             - update_s3_htmls
           filters:
