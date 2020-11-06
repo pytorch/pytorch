@@ -24,10 +24,10 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 
+#include <c10d/comm.hpp>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
-#include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -151,7 +151,15 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
     throw python_error();
   }
 
-  auto module = py::handle(c10d_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   module
       .def(
@@ -168,7 +176,16 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
-      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          py::init<
+              const std::vector<Tensor>&,
+              const std::vector<size_t>&,
+              const std::vector<size_t>&,
+              const std::vector<c10::IntArrayRef>&>(),
+          py::arg("tensors"),
+          py::arg("offsets"),
+          py::arg("lengths"),
+          py::arg("sizes_list"))
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
@@ -179,7 +196,19 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
             replicas only in the case of single process multiple device mode. In
             the single process single device mode, this list would consist of only
             a single tensor.
-           )");
+           )")
+      .def(
+          "get_offsets",
+          &::c10d::GradBucket::getOffsets,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_lengths",
+          &::c10d::GradBucket::getLengths,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_sizes_list",
+          &::c10d::GradBucket::getSizesVec,
+          py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
 An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
@@ -1079,12 +1108,12 @@ Arguments:
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
-                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend and single-process single-device mode.
                 The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                ``DistributedDataParallel.register_comm_hook``, but it is subject to some subtle
                 differences compared to ``torch.futures.Future`` due to compromises made for performance
                 reasons.
 
