@@ -412,10 +412,26 @@ void filter_clamp(T& f, T& s, T& t) {
 
 template <typename T>
 std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmod(T& a, T& b) {
-  // This is to make sure fmod won't cause overflow when doing the div
-  if (std::abs(b) < (T)1) {
-    b = b < (T)0 ? (T)-1 : T(1);
-  }
+    // This is to make sure fmod won't cause overflow when doing the div
+    if (std::abs(b) < (T)1) {
+      b = b < (T)0 ? (T)-1 : T(1);
+    }
+}
+
+template <typename T>
+std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmadd(T& a, T& b, T& c) {
+    // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
+    T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
+    T min = ((T)0 - max);
+
+    if (a > max) a = max;
+    else if (a < min) a = min;
+
+    if (b > max) b = max;
+    else if (b < min) b = min;
+
+    if (c > max) c = max;
+    else if (c < min) c = min;
 }
 
 template <typename T>
@@ -1215,6 +1231,13 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 #endif
 }
 
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
+    PreventFma noFma;
+    T ab = a * b;
+    return noFma.add(ab, c);
+}
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_sqrt(T x) {
