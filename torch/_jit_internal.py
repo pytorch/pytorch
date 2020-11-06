@@ -717,7 +717,7 @@ if torch.distributed.rpc.is_available():
 
 def is_final(ann):
     return ann.__module__ in {'typing', 'typing_extensions'} and \
-        (getattr(ann, '__origin__', None) is Final)
+        (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
