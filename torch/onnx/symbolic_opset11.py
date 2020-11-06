@@ -172,7 +172,6 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #               = onnx::ScatterND(%0, %22, %34)
         #   return (%35)
 
-
         bool_inp = list(index.node().inputs())[0]
         if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
             if values.type() is not None:
