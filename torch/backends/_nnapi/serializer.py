@@ -594,7 +594,7 @@ class _NnapiSerializer(object):
         "aten::sub": lambda self, node:
             self.add_add_sub_op(node, NNAPI_OperationCode.SUB, NNAPI_FuseCode.FUSED_NONE),
         "aten::mul": lambda self, node:
-            self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.MUL),
+            self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
         "aten::relu": lambda self, node:
             self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.RELU),
         "aten::sigmoid": lambda self, node:
@@ -793,9 +793,9 @@ class _NnapiSerializer(object):
 
         self.add_operation(opcode, inputs, outputs)
 
-    def add_pointwise_simple_binary_broadcast_op(self, node, opcode):
+    def add_pointwise_simple_binary_broadcast_op(self, node, opcode, fuse_code):
         assert node.inputsSize() == 2
-        self._do_add_binary(node, opcode)
+        self._do_add_binary(node, opcode, fuse_code)
 
     def add_add_sub_op(self, node, opcode, fuse_code):
         assert node.inputsSize() == 3
