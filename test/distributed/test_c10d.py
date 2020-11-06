@@ -2757,7 +2757,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         if ddp_comm_hook is not None:
-            ddp_model._register_comm_hook(process_group, ddp_comm_hook)
+            ddp_model.register_comm_hook(process_group, ddp_comm_hook)
 
         def step_model(model, input, target):
             model.train()
@@ -3378,7 +3378,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         # Register DDP Communication Hook
-        cpu_model._register_comm_hook(None, self._simple_hook)
+        cpu_model.register_comm_hook(None, self._simple_hook)
 
         # check whether the grads are equal to what then callback returns.
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
@@ -3395,7 +3395,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Register DDP Communication Hook if defined
         if hook is not None:
-            gpu_model._register_comm_hook(None, hook)
+            gpu_model.register_comm_hook(None, hook)
 
         return gpu_model
 
@@ -3612,7 +3612,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model = DistributedDataParallel(ModuleForDdpCommHook(), process_group=process_group)
 
         with self.assertRaisesRegex(TypeError, "Communication hook must be callable."):
-            model._register_comm_hook(state=None, hook=1)
+            model.register_comm_hook(state=None, hook=1)
 
         with self.assertRaisesRegex(
             ValueError, "bucket annotation should be dist._GradBucket."
@@ -3621,7 +3621,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
 
-            model._register_comm_hook(state=None, hook=comm_hook)
+            model.register_comm_hook(state=None, hook=comm_hook)
 
     @requires_gloo()
     def test_ddp_invalid_comm_hook_return_type(self):
@@ -3643,7 +3643,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def comm_hook(state: object, bucket: dist._GradBucket) -> int:
                 return torch.futures.Future()
 
-            model._register_comm_hook(state=None, hook=comm_hook)
+            model.register_comm_hook(state=None, hook=comm_hook)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -3653,7 +3653,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def comm_hook(state: object, bucket: dist._GradBucket):
                 return 1
 
-            model._register_comm_hook(state=None, hook=comm_hook)
+            model.register_comm_hook(state=None, hook=comm_hook)
 
             # Run forward
             output = model(8, self.rank)
@@ -3677,12 +3677,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             fut.set_result(bucket.get_tensors())
             return fut
 
-        model._register_comm_hook(None, dummy_hook)
+        model.register_comm_hook(None, dummy_hook)
 
         with self.assertRaisesRegex(
             RuntimeError, "register_comm_hook or register_builtin_comm_hook can only be called once."
         ):
-            model._register_comm_hook(None, dummy_hook)
+            model.register_comm_hook(None, dummy_hook)
 
     @requires_gloo()
     def test_ddp_comm_hook_sparse_gradients(self):
@@ -3713,7 +3713,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             fut.set_result([t / self.world_size for t in bucket.get_tensors()])
             return fut
 
-        ddp_model._register_comm_hook(None, allreduce_hook_gloo)
+        ddp_model.register_comm_hook(None, allreduce_hook_gloo)
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 

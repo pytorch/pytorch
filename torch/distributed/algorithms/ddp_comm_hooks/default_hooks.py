@@ -15,7 +15,7 @@ def allreduce_hook(
     unaffecting DDP behavior.
 
     Example::
-        >>> ddp_model._register_comm_hook(process_group, allreduce_hook)
+        >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = (
@@ -43,7 +43,7 @@ def fp16_compress_hook(
     aggregated result back to ``float32`` and takes the mean.
 
     Example::
-        >>> ddp_model._register_comm_hook(process_group, fp16_compress_hook)
+        >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = (
@@ -96,7 +96,7 @@ def _allgather_then_aggregate_hook(
         instead of ``allgather`` protocol.
 
     Example::
-        >>> ddp_model._register_comm_hook(process_group, allreduce_hook)
+        >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()

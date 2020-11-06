@@ -8,7 +8,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 
 def _ddp_comm_hook_wrapper(comm_hook, model, state):
-    model._register_comm_hook(state, comm_hook)
+    model.register_comm_hook(state, comm_hook)
 
 
 class DDPCommHookType(Enum):

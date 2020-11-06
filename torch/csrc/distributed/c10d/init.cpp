@@ -1079,12 +1079,12 @@ Arguments:
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
-                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend and single-process single-device mode.
                 The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                ``DistributedDataParallel.register_comm_hook``, but it is subject to some subtle
                 differences compared to ``torch.futures.Future`` due to compromises made for performance
                 reasons.
 
