@@ -178,7 +178,7 @@ class TestTorchLibrary(common.TestCase):
     def setUp(self):
         super().setUp()
 
-    def test_torch_library_installed(self):
+    def test_torch_library(self):
         def f(a: bool, b: bool):
             return torch.ops.torch_library.logical_and(a, b)
         self.assertTrue(f(True, True))

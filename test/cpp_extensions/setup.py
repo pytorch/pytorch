@@ -26,9 +26,6 @@ ext_modules = [
     CppExtension(
         'torch_test_cpp_extension.rng', ['rng_extension.cpp'],
         extra_compile_args=CXX_FLAGS),
-    CppExtension(
-        'torch_test_cpp_extension.torch_library', ['torch_library.cpp'],
-        extra_compile_args=CXX_FLAGS),
 ]
 
 if torch.cuda.is_available() and CUDA_HOME is not None:
@@ -56,6 +53,15 @@ elif torch.cuda.is_available() and ROCM_HOME is not None:
             'hip/hip_extension_kernel.hip',
             'hip/hip_extension_kernel2.hip',
         ])
+    ext_modules.append(extension)
+
+if torch.cuda.is_available() and CUDA_HOME is not None:
+    extension = CUDAExtension(
+        'torch_test_cpp_extension.torch_library', [
+            'torch_library.cu'
+        ],
+        extra_compile_args={'cxx': CXX_FLAGS,
+                            'nvcc': ['-O2']})
     ext_modules.append(extension)
 
 setup(
