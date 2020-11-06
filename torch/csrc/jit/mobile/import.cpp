@@ -425,8 +425,7 @@ mobile::Module _load_for_mobile(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader));
   try {
-    mobile::Module result =
-        deserializer.deserialize(device, extra_files);
+    mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
     if (result.metadata().find("model_name") == result.metadata().end()) {
