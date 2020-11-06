@@ -264,7 +264,7 @@ mobile::Module BytecodeDeserializer::deserialize(
     const std::string& key = "extra/" + kv.first;
     if (reader_->hasRecord(key)) {
       at::DataPtr meta_ptr;
-      size_t meta_size;
+      size_t meta_size = 0;
       std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
       extra_files[kv.first] =
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
@@ -426,7 +426,7 @@ mobile::Module _load_for_mobile(
   BytecodeDeserializer deserializer(std::move(reader));
   try {
     mobile::Module result =
-        deserializer.deserialize(std::move(device), extra_files);
+        deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
     if (result.metadata().find("model_name") == result.metadata().end()) {
