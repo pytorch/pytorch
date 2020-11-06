@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 
 namespace torch {
 namespace jit {
@@ -32,7 +33,10 @@ TORCH_API void ONNXAssignOutputShape(
 // The node must have ONNX namespace, and is valid ONNX node accroding to spec.
 // On successful ONNX shape inference runs, the function updates output types of
 // n with inferred shape and type. Otherwise n is unchanged.
-TORCH_API void ONNXShapeTypeInference(Node* n, int opset_version);
+TORCH_API void ONNXShapeTypeInference(
+    Node* n,
+    const ParamMap& params_dict,
+    int opset_version);
 
 // Utilize ONNX Shape Inference for graph.
 // Internally calls ONNXShapeTypeInference for each node, to achieve more
@@ -40,6 +44,7 @@ TORCH_API void ONNXShapeTypeInference(Node* n, int opset_version);
 // the entire graph.
 TORCH_API void ONNXShapeTypeInference(
     std::shared_ptr<Graph>& g,
+    const ParamMap& params_dict,
     int opset_version);
 
 } // namespace jit
