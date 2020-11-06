@@ -53,7 +53,7 @@ inline void check_inplace(const Tensor& tensor, bool requires_grad) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(tensor));
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
-      if (tensor._base().is_leaf()) {
+      if (tensor.requires_grad() && tensor._base().is_leaf()) {
           AT_ERROR(
             "a view of a leaf Variable that requires grad is being used in an in-place operation.");
       }
