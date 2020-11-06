@@ -94,15 +94,15 @@ namespace at { namespace native {
                          static_cast<int>(dense_size[1]));
     }
 
-  Tensor& sparse_mm_mkl(Tensor& res, const SparseTensor& sparse_, const Tensor& dense,
+  Tensor _sparse_mm_mkl_(Tensor& self, const SparseTensor& sparse_, const Tensor& dense,
                         const Tensor& t, Scalar alpha, Scalar beta) {
     AT_DISPATCH_FLOATING_TYPES(
       dense.scalar_type(), "addmm_sparse_gcs_dense", [&] {
-        sparse_mm_mkl_template<scalar_t>(res, sparse_.indices(),
+        sparse_mm_mkl_template<scalar_t>(self, sparse_.indices(),
                                          sparse_.pointers(), sparse_.values(), dense, t,
                                          alpha, beta, sparse_.sizes(), dense.sizes());
     });
-    return res;
+    return self;
   }
 }}
 #endif

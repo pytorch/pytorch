@@ -25,7 +25,7 @@ namespace at { namespace native {
 
   // res - result (output) tensor, sparse_ - sparse tensor to be multiplied.
   // temp_dense - temp dense (input) matrix with expanded dimensions.
-  Tensor& sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& temp_res,
+  Tensor _sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& temp_res,
                             const Tensor& dense, Scalar alpha, Scalar beta) {
 
     TORCH_CHECK(sparse_.dim() == 2, "sparse_gcs_mm_cpu: sparse matrix must have 2 dimensions, not ",
@@ -56,7 +56,7 @@ namespace at { namespace native {
     });
 
     if (at::hasMKL()) {
-      at::native::sparse_mm_mkl(res, sparse_, dense, temp_res, alpha, beta);      
+      at::_sparse_mm_mkl_(res, sparse_, dense, temp_res, alpha, beta);      
     }
     else {
       int64_t dense_stride0 = dense.stride(0);
