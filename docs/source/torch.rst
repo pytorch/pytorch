@@ -279,6 +279,7 @@ Pointwise Ops
     clamp
     clip
     conj
+    copysign
     cos
     cosh
     deg2rad
@@ -459,6 +460,7 @@ Other Operations
     flip
     fliplr
     flipud
+    kron
     rot90
     gcd
     histc
