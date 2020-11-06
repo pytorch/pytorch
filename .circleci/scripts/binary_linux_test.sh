@@ -34,7 +34,7 @@ fi
 #   conda build scripts themselves. These should really be consolidated
 pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  conda install ${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
+  conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
     retry conda install ${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
   fi
@@ -46,7 +46,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     else
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
     fi
-    retry conda install ${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+    retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
   fi
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
