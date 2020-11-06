@@ -36,15 +36,21 @@ void runFusionGroup(const Node* fusion_node, Stack& stack) {
 
 void fuseGraph(std::shared_ptr<Graph>& graph) {
   TORCH_CHECK(
-      getFuserInterface()->fn_fuse_graph != nullptr,
+      getFuserInterface()->fn_fuse_graph_ != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
-  getFuserInterface()->fn_fuse_graph(graph);
+  getFuserInterface()->fn_fuse_graph_(graph);
 }
 
 bool canFuseNode(const Node* node) {
   return getFuserInterface()->fn_can_fuse_n_ != nullptr &&
       getFuserInterface()->fn_can_fuse_n_(node);
 }
+
+void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
+  if (getFuserInterface()->fn_insert_profile_inodes_) {
+    getFuserInterface()->fn_insert_profile_inodes_(pr);
+  }
+};
 
 //! [ Note -- type guard logic in CudaFusionGuard ]
 //!

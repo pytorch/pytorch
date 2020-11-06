@@ -772,7 +772,7 @@ void insertProfileNodesForCUDAFuser_(Block* block, ProfilingRecord* pr) {
   }
 }
 
-void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
+void InsertProfileNodes(ProfilingRecord* pr) {
   insertProfileNodesForCUDAFuser_(pr->profiled_graph_->block(), pr);
 }
 
