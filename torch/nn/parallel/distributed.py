@@ -670,7 +670,9 @@ class DistributedDataParallel(Module):
                 dist.all_reduce(zeros, group=self.process_group)
                 should_throw_stop_iteration = zeros.item()
                 if should_throw_stop_iteration:
-                    raise StopIteration("Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks.")
+                    raise StopIteration(
+                        "Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks."
+                    )
         # Calling _rebuild_buckets before forward compuation,
         # It may allocate new buckets before deallocating old buckets
         # inside _rebuild_buckets. To save peak memory usage,
@@ -966,7 +968,9 @@ class DistributedDataParallel(Module):
                             # Schedule allreduce telling active ranks to terminate
                             ones = torch.ones(1, device=self.device)
                             dist.all_reduce(ones, group=self.process_group)
-                            raise StopIteration(f"Rank {dist.get_rank(self.process_group)} exhausted all inputs.")
+                            raise StopIteration(
+                                f"Rank {dist.get_rank(self.process_group)} exhausted all inputs."
+                            )
 
                         if is_last_joiner:
                             is_last_joiner = False

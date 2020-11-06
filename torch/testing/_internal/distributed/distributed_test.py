@@ -3401,10 +3401,15 @@ class DistributedTest:
             if test_case.throw_on_early_termination:
                 if min_num_iters == num_iters:
                     # Early termination rank
-                    exception_ctx = self.assertRaisesRegex(RuntimeError, "generator raised StopIteration")
+                    exception_ctx = self.assertRaisesRegex(
+                        RuntimeError, "generator raised StopIteration"
+                    )
                 else:
                     # Non early termination rank
-                    exception_ctx = self.assertRaisesRegex(StopIteration, "Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks.")
+                    exception_ctx = self.assertRaisesRegex(
+                        StopIteration,
+                        "Detected at least one rank that exhausted inputs. Throwing StopIteration across all ranks.",
+                    )
             else:
                 exception_ctx = suppress()
 
