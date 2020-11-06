@@ -1,4 +1,4 @@
-
+from .modules import _FusedModule
 from .modules import ConvBn1d
 from .modules import ConvBn2d
 from .modules import ConvBn3d
@@ -13,6 +13,7 @@ from .modules import BNReLU2d
 from .modules import BNReLU3d
 
 __all__ = [
+    '_FusedModule',
     'ConvBn1d',
     'ConvBn2d',
     'ConvBn3d',

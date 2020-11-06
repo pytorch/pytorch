@@ -1,10 +1,7 @@
 import torch.nn as nn
-from torch.nn.intrinsic import (
-    ConvReLU2d,
-    _FusedModule,
-)
+from torch.nn.intrinsic import ConvReLU2d
 
-class Conv2d(nn.Conv2d, _FusedModule):
+class Conv2d(nn.Conv2d):
     r"""
     A Conv2d module attached with FakeQuantize modules for weight,
     used for quantization aware training.
@@ -24,9 +21,9 @@ class Conv2d(nn.Conv2d, _FusedModule):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros', qconfig=None):
-        nn.Conv2d.__init__(in_channels, out_channels, kernel_size,
-                           stride=stride, padding=padding, dilation=dilation,
-                           groups=groups, bias=bias, padding_mode=padding_mode)
+        super().__init__(in_channels, out_channels, kernel_size,
+                         stride=stride, padding=padding, dilation=dilation,
+                         groups=groups, bias=bias, padding_mode=padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight()
