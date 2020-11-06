@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 #ifdef _WIN32
@@ -29,13 +28,22 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
-  ss << code_template_tensor_struct << "\n"
-     << code_fp16_support << "\n"
-     << code_random_number_gen << "\n"
-     << code_helper_funcs << "\n"
-     << code_template_block_reduction << "\n"
-     << code_template_grid_reduction << "\n"
-     << code_template_block_broadcast << "\n";
+
+#ifndef __HIP_PLATFORM_HCC__
+  ss << R"(
+    #include <nvfuser_runtime/fp16_support.cu>
+  )";
+#endif
+
+  ss << R"(
+    #include <nvfuser_runtime/tensor.cu>
+    #include <nvfuser_runtime/random_numbers.cu>
+    #include <nvfuser_runtime/helpers.cu>
+    #include <nvfuser_runtime/block_reduction.cu>
+    #include <nvfuser_runtime/grid_reduction.cu>
+    #include <nvfuser_runtime/broadcast.cu>
+  )";
+
   return ss.str();
 }
 
