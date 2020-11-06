@@ -372,6 +372,18 @@ inline magma_int_t magmaGetriOptimalBlocksize<float>(magma_int_t n) {
   return magma_get_sgetri_nb(n);
 }
 
+template <>
+inline magma_int_t magmaGetriOptimalBlocksize<c10::complex<double>>(
+    magma_int_t n) {
+  return magma_get_zgetri_nb(n);
+}
+
+template <>
+inline magma_int_t magmaGetriOptimalBlocksize<c10::complex<float>>(
+    magma_int_t n) {
+  return magma_get_cgetri_nb(n);
+}
+
 template<>
 void magmaGetri<double>(
     magma_int_t n, double* dA, magma_int_t ldda, magma_int_t* ipiv, double* dwork,
@@ -390,6 +402,48 @@ void magmaGetri<float>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+template <>
+void magmaGetri<c10::complex<double>>(
+    magma_int_t n,
+    c10::complex<double>* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    c10::complex<double>* dwork,
+    magma_int_t lwork,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zgetri_gpu(
+      n,
+      reinterpret_cast<magmaDoubleComplex*>(dA),
+      ldda,
+      ipiv,
+      reinterpret_cast<magmaDoubleComplex*>(dwork),
+      lwork,
+      info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaGetri<c10::complex<float>>(
+    magma_int_t n,
+    c10::complex<float>* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    c10::complex<float>* dwork,
+    magma_int_t lwork,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cgetri_gpu(
+      n,
+      reinterpret_cast<magmaFloatComplex*>(dA),
+      ldda,
+      ipiv,
+      reinterpret_cast<magmaFloatComplex*>(dwork),
+      lwork,
+      info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
 template<>
 void magmaGetriBatched<double>(
     magma_int_t n, double** dA_array, magma_int_t ldda,
@@ -405,6 +459,54 @@ void magmaGetriBatched<float>(
     magma_int_t** ipiv_array, float** dinvA_array, magma_int_t lddia,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_sgetri_outofplace_batched(n, dA_array, ldda, ipiv_array, dinvA_array, lddia, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaGetriBatched<c10::complex<double>>(
+    magma_int_t n,
+    c10::complex<double>** dA_array,
+    magma_int_t ldda,
+    magma_int_t** ipiv_array,
+    c10::complex<double>** dinvA_array,
+    magma_int_t lddia,
+    magma_int_t* info_array,
+    magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magma_zgetri_outofplace_batched(
+      n,
+      reinterpret_cast<magmaDoubleComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<magmaDoubleComplex**>(dinvA_array),
+      lddia,
+      info_array,
+      batchsize,
+      magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaGetriBatched<c10::complex<float>>(
+    magma_int_t n,
+    c10::complex<float>** dA_array,
+    magma_int_t ldda,
+    magma_int_t** ipiv_array,
+    c10::complex<float>** dinvA_array,
+    magma_int_t lddia,
+    magma_int_t* info_array,
+    magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magma_cgetri_outofplace_batched(
+      n,
+      reinterpret_cast<magmaFloatComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<magmaFloatComplex**>(dinvA_array),
+      lddia,
+      info_array,
+      batchsize,
+      magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1063,14 +1165,14 @@ Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
   if (self.dim() > 2) {
     std::vector<int64_t> infos(batchCount(self), 0);
     auto self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse<scalar_t>(
         self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda");
   } else {
     int64_t info = 0;
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_single_inverse<scalar_t>(self_inv_working_copy, info);
     });
     singleCheckErrors(info, "inverse_cuda");

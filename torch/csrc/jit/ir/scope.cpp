@@ -90,12 +90,30 @@ InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
     : fn_(fn), source_range_(std::move(source_range)) {}
 
 InlinedCallStack::InlinedCallStack(
+    Function* fn,
+    SourceRange source_range,
+    c10::optional<ModuleInstanceInfo> module_instance_info)
+    : fn_(fn),
+      source_range_(std::move(source_range)),
+      module_instance_info_(std::move(module_instance_info)) {}
+
+InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
     Function* fn,
     SourceRange source_range)
     : callee_(std::move(callee)),
       fn_(fn),
       source_range_(std::move(source_range)) {}
+
+InlinedCallStack::InlinedCallStack(
+    InlinedCallStackPtr callee,
+    Function* fn,
+    SourceRange source_range,
+    c10::optional<ModuleInstanceInfo> module_instance_info)
+    : callee_(std::move(callee)),
+      fn_(fn),
+      source_range_(std::move(source_range)),
+      module_instance_info_(std::move(module_instance_info)) {}
 
 c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;
@@ -110,5 +128,11 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   }
   return r;
 }
+
+ModuleInstanceInfo::ModuleInstanceInfo(
+    c10::ClassTypePtr module_type,
+    std::string instance_name)
+    : module_type_(std::move(module_type)),
+      instance_name_(std::move(instance_name)) {}
 } // namespace jit
 } // namespace torch
