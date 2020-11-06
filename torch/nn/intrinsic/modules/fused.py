@@ -6,7 +6,7 @@ class _FusedModule(torch.nn.Sequential):
     pass
 
 class ConvReLU1d(_FusedModule):
-    r"""This is a wrapper module which calls the Conv1d and ReLU modules.
+    r"""This is a sequential container which calls the Conv1d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, relu):
         assert type(conv) == Conv1d and type(relu) == ReLU, \
@@ -15,7 +15,7 @@ class ConvReLU1d(_FusedModule):
         super().__init__(conv, relu)
 
 class ConvReLU2d(_FusedModule):
-    r"""This is a wrapper module which calls the Conv2d and ReLU modules.
+    r"""This is a sequential container which calls the Conv2d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, relu):
         assert type(conv) == Conv2d and type(relu) == ReLU, \
@@ -24,7 +24,7 @@ class ConvReLU2d(_FusedModule):
         super().__init__(conv, relu)
 
 class ConvReLU3d(_FusedModule):
-    r"""This is a wrapper module which calls the Conv3d and ReLU modules.
+    r"""This is a sequential container which calls the Conv3d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, conv, relu):
         assert type(conv) == Conv3d and type(relu) == ReLU, \
