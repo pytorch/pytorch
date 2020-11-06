@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <algorithm>
 
@@ -223,13 +224,10 @@ IterDomainMap p2cRootMap(const std::vector<Expr*>& exprs) {
 
   for (auto expr : exprs) {
     auto out_tv = ir_utils::getTVOutput(expr);
-    for (auto inp : expr->inputs()) {
-      if (inp->getValType().value() != ValType::TensorView) {
-        continue;
-      }
-
-      auto root_p2c = TensorDomain::mapRootPtoC(
-          inp->as<TensorView>()->domain(), out_tv->domain());
+    for (auto in_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
+      const auto root_p2c =
+          PairwiseRootDomainMap(in_tv, out_tv)
+              .mapProducerToConsumer(in_tv->domain(), out_tv->domain());
       for (auto entry : root_p2c) {
         auto p_id = entry.first;
         auto c_id = entry.second;

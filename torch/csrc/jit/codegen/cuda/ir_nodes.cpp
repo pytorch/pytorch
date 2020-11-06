@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
@@ -195,6 +196,10 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
       out_type == ValType::TensorView && in_type == ValType::TensorView,
       "Cannot braodcast a non-tensor object.");
 
+  addOutput(out);
+  addInput(in);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+
   // This is a generic check that root dims of a consumer and producer match.
   // Maybe we shouldn't relegate it to this constructor.
   const auto c_tv = out_->as<TensorView>();
@@ -203,43 +208,36 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
   const auto& c_root = c_tv->getRootDomain();
   const auto& p_root = p_tv->getMaybeRFactorDomain();
 
-  const auto root_p2c = TensorDomain::mapDomainPandC(p_root, c_root);
+  const auto root_p2c =
+      PairwiseRootDomainMap(p_tv, c_tv)
+          .mapProducerToConsumer(p_tv->domain(), c_tv->domain());
 
-  std::vector<bool> c_mapped(c_root.size(), false);
-  std::vector<bool> p_mapped(p_root.size(), false);
+  for (auto id : p_root) {
+    if (root_p2c.find(id) == root_p2c.end()) {
+      TORCH_INTERNAL_ASSERT(
+          id->isReduction(),
+          "Invalid broadcast op: ",
+          id,
+          ". Non-reduction input dim does't match to output.");
+    }
+  }
 
+  std::unordered_set<IterDomain*> c_mapped;
   for (auto pair_entry : root_p2c) {
-    auto p_i = pair_entry.first;
-    p_mapped[p_i] = true;
-    auto c_i = pair_entry.second;
-    c_mapped[c_i] = true;
+    c_mapped.insert(pair_entry.second);
   }
 
-  bool bad_mismatch = false;
-
-  for (size_t i = 0; i < c_root.size(); i++) {
-    if (!c_mapped[i]) {
-      if (!c_root[i]->isBroadcast()) {
-        bad_mismatch = true;
-      }
+  for (size_t i = 0; i < c_root.size(); ++i) {
+    const auto c_id = c_root[i];
+    if (c_mapped.find(c_id) != c_mapped.end()) {
+      continue;
     }
+    TORCH_INTERNAL_ASSERT(
+        c_id->isBroadcast() && is_broadcast_dims_[i],
+        "Invalid broadcast op: ",
+        c_id,
+        ". Non-broadcasted output dim isn't matched from input.");
   }
-
-  for (size_t i = 0; i < p_root.size(); i++) {
-    if (!p_mapped[i]) {
-      if (!p_root[i]->isReduction()) {
-        bad_mismatch = true;
-      }
-    }
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      !bad_mismatch,
-      "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
-
-  addOutput(out);
-  addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
@@ -972,75 +970,6 @@ bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
     }
   }
   return false;
-}
-
-std::vector<std::pair<int, int>> TensorDomain::mapDomainPandC(
-    const std::vector<IterDomain*>& producer,
-    const std::vector<IterDomain*>& consumer) {
-  std::vector<std::pair<int, int>> dom_map;
-
-  size_t itc = 0, itp = 0;
-  while (itc < consumer.size() && itp < producer.size()) {
-    if (consumer[itc]->isBroadcast() && !producer[itp]->isBroadcast()) {
-      itc++;
-      continue;
-    }
-    if (producer[itp]->isReduction()) {
-      itp++;
-      continue;
-    }
-
-    dom_map.emplace_back(std::make_pair(itp, itc));
-    itc++;
-    itp++;
-  }
-  return dom_map;
-}
-
-std::vector<std::pair<IterDomain*, IterDomain*>> TensorDomain::mapRootPandC(
-    const TensorDomain* producer,
-    const TensorDomain* consumer) {
-  auto consumer_root = consumer->getRootDomain();
-  auto producer_root = producer->getMaybeRFactorDomain();
-  std::vector<std::pair<IterDomain*, IterDomain*>> root_id_map;
-  for (const auto& m : mapDomainPandC(producer_root, consumer_root)) {
-    auto producer_axis = producer_root[m.first];
-    auto consumer_axis = consumer_root[m.second];
-    root_id_map.emplace_back(std::make_pair(producer_axis, consumer_axis));
-  }
-  return root_id_map;
-}
-
-std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootCtoP(
-    const TensorDomain* consumer,
-    const TensorDomain* producer,
-    const std::unordered_set<IterDomain*>& consumer_root_dims_to_map) {
-  std::unordered_map<IterDomain*, IterDomain*> root_id_map;
-  for (const auto& kv : mapRootPandC(producer, consumer)) {
-    auto producer_axis = kv.first;
-    auto consumer_axis = kv.second;
-    if (consumer_root_dims_to_map.find(consumer_axis) !=
-        consumer_root_dims_to_map.end()) {
-      root_id_map[consumer_axis] = producer_axis;
-    }
-  }
-  return root_id_map;
-}
-
-std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootPtoC(
-    const TensorDomain* producer,
-    const TensorDomain* consumer,
-    const std::unordered_set<IterDomain*>& producer_maybe_rfactor_dims_to_map) {
-  std::unordered_map<IterDomain*, IterDomain*> root_id_map;
-  for (const auto& kv : mapRootPandC(producer, consumer)) {
-    auto producer_axis = kv.first;
-    auto consumer_axis = kv.second;
-    if (producer_maybe_rfactor_dims_to_map.find(producer_axis) !=
-        producer_maybe_rfactor_dims_to_map.end()) {
-      root_id_map[producer_axis] = consumer_axis;
-    }
-  }
-  return root_id_map;
 }
 
 // pair is in order where second is the consumer of first
