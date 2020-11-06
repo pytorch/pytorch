@@ -41,10 +41,11 @@ std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
-    at::Device device) {
+    at::Device device,
+    const std::string& kernel_func_name) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(stmt, params, device);
+  return method(stmt, params, device, kernel_func_name);
 }
 
 const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {

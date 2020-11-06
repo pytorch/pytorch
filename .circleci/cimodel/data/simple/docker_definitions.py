@@ -27,7 +27,6 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-py3-clang7-onnx",
     "pytorch-linux-xenial-py3.8",
     "pytorch-linux-xenial-py3.6-clang7",
-    "pytorch-linux-xenial-py3.6-gcc4.8",
     "pytorch-linux-xenial-py3.6-gcc5.4",  # this one is used in doc builds
     "pytorch-linux-xenial-py3.6-gcc7.2",
     "pytorch-linux-xenial-py3.6-gcc7",
@@ -43,7 +42,7 @@ def get_workflow_jobs():
         parameters = OrderedDict({
             "name": quote(f"docker-{image_name}"),
             "image_name": quote(image_name),
-        }) 
+        })
         if image_name == "pytorch-linux-xenial-py3.6-gcc5.4":
             # pushing documentation on tags requires CircleCI to also
             # build all the dependencies on tags, including this docker image
