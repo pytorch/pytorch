@@ -493,9 +493,8 @@ void ONNXAssignOutputShape(
               var.scalar_type() == new_var.scalar_type(),
               "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
         }
-        outputs_index += list_len;
-        graph->outputs()[i]->setType(ListType::create(
-            TensorType::create(var.scalar_type(), at::kCPU, {}, {})));
+        graph->outputs()[i]->setType(ListType::create(TensorType::create(var)));
+        outputs_index++;
       }
     } else if (PyTuple_Check(elem)) {
       size_t tuple_len = PyTuple_GET_SIZE(elem);
@@ -504,14 +503,14 @@ void ONNXAssignOutputShape(
           PyObject* tuple_elem = PyTuple_GET_ITEM(elem, j);
           TORCH_INTERNAL_ASSERT(THPVariable_Check(tuple_elem));
           auto& var = reinterpret_cast<THPVariable*>(tuple_elem)->cdata;
-          ONNXUpdateTypeFromTensor(
-              graph->outputs()[i + j], var, onnx_shape_inference);
+          graph->outputs()[outputs_index + j]->setType(TensorType::create(var));
         }
         outputs_index += tuple_len;
       }
     } else if (THPVariable_Check(elem)) {
       at::Tensor var = reinterpret_cast<THPVariable*>(elem)->cdata;
-      ONNXUpdateTypeFromTensor(graph->outputs()[i], var, onnx_shape_inference);
+      ONNXUpdateTypeFromTensor(
+          graph->outputs()[outputs_index], var, onnx_shape_inference);
       outputs_index++;
     } else { // Dict
       // Support for dict data type is limited to fixed size dictionaries in
@@ -521,7 +520,7 @@ void ONNXAssignOutputShape(
       auto dict_items = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
       for (size_t j = 0; j < dict_items.size(); ++j) {
         ONNXUpdateTypeFromTensor(
-            graph->outputs()[i + j],
+            graph->outputs()[outputs_index + j],
             outputs[outputs_index],
             onnx_shape_inference);
         outputs_index++;
@@ -530,7 +529,7 @@ void ONNXAssignOutputShape(
   }
 
   TORCH_INTERNAL_ASSERT(
-      outputs_index == outputs.size(),
+      outputs_index == graph->outputs().size(),
       "Incorrect number of elements provided as example outputs.");
 }
 
