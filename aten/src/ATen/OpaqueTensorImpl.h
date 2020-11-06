@@ -27,7 +27,8 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
       c10::IntArrayRef sizes)
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
-    sizes_ = sizes.vec();
+    sizes_and_strides_.resize(sizes.size());
+    std::copy(sizes.begin(), sizes.end(), sizes_and_strides_.sizes_begin());
     refresh_numel();
   }
 
@@ -84,7 +85,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_);
+        key_set(), dtype(), device(), opaque_handle_, IntArrayRef{sizes_and_strides_.sizes_data(), sizes_and_strides_.size()});
     copy_tensor_metadata(
         /*src_impl=*/this,
         /*dest_impl=*/impl.get(),
