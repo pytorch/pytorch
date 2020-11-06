@@ -77,38 +77,54 @@ class Context final : public torch::jit::CustomClassHolder {
   } unpacked_;
 };
 
+inline bool is_depthwise(
+    const IntArrayRef filter,
+    const int64_t groups) {
+  return filter[Layout::Filter::output] == groups;
+}
+
+inline bool is_pointwise(const IntArrayRef filter) {
+  return (1 == filter[Layout::Filter::height]) &&
+         (1 == filter[Layout::Filter::width]);
+}
+
 vTensor pack_weights(
     api::Resource::Pool& pool,
     const Tensor& weight,
     const int64_t groups) {
-  // Depthwise
-  if ((weight.size(Layout::Filter::output) == groups)) {
-    if (weight.is_vulkan()) {
-      return convert(weight);
-    }
-
-    vTensor v_weight{
-      api::context(),
-      &pool,
-      weight.sizes(),
-      weight.options(),
-    };
-
-    {
-      using Future = vTensor::Future<void, vTensor::Access::Write>;
-      Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
-      Future::Payload v_weight_payload = v_weight_future.wait();
-
-      memcpy(
-          v_weight_payload.get(),
-          weight.contiguous().data_ptr<float>(),
-          std::min(weight.nbytes(), v_weight.nbytes()));
-    }
-
-    return v_weight;
+  if (weight.is_vulkan()) {
+    return convert(weight);
   }
 
-  TORCH_CHECK(false, "Not implemented!");
+  const IntArrayRef filter = weight.sizes();
+
+  vTensor v_weight{
+    api::context(),
+    &pool,
+    filter,
+    weight.options(),
+  };
+
+  // Depthwise
+  if (is_depthwise(filter, groups)) {
+    using Future = vTensor::Future<void, vTensor::Access::Write>;
+    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
+    Future::Payload v_weight_payload = v_weight_future.wait();
+
+    memcpy(
+        v_weight_payload.get(),
+        weight.contiguous().data_ptr<float>(),
+        std::min(weight.nbytes(), v_weight.nbytes()));
+  }
+  // Pointwise
+  else if (is_pointwise(filter)) {
+
+  }
+  // General
+  else {
+  }
+
+  return v_weight;
 }
 
 vTensor pack_biases(
@@ -259,9 +275,8 @@ bool available(
          // Output - Groups
          ((weight.size(Layout::Filter::output) % groups) == 0) &&
          // Output Min / Max
-         (!(output_min && output_max) ||
-          (output_min->isFloatingPoint() && output_max->isFloatingPoint() &&
-            (output_max->to<float>() > output_min->to<float>()))) &&
+         (!output_min || output_min->isFloatingPoint()) &&
+         (!output_max || output_max->isFloatingPoint()) &&
          true;
 }
 
@@ -328,6 +343,73 @@ bool usable(const Tensor& input) {
          true;
 }
 
+void conv2d_depthwise(
+    api::Context* const context,
+    api::Command::Buffer& command_buffer,
+    vTensor& v_output,
+    const vTensor& v_input,
+    const vTensor& v_weight,
+    const vTensor& v_bias,
+    const IntArrayRef kernel,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const float output_min,
+    const float output_max) {
+  using namespace api::utils;
+
+  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+    const struct {
+      int32_t kernel_x, kernel_y;
+      int32_t stride_x, stride_y;
+      int32_t padding_x, padding_y;
+      int32_t dilate_x, dilate_y;
+      float clamp_x, clamp_y;
+    } block {
+      safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+      safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+      safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      output_min,
+      output_max,
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(conv2d_dw),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(command_buffer, vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_input.image(command_buffer),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_weight.image(command_buffer),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_bias.buffer(command_buffer),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
+  }
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
+}
+
 Tensor Context::run(const Tensor& input_arg) const {
   api::Context* const context = api::context();
 
@@ -339,11 +421,13 @@ Tensor Context::run(const Tensor& input_arg) const {
       "Vulkan Convolution not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by Vulkan impl.");
 
+  const IntArrayRef filter = packed_.v_weight.sizes();
+
   vTensor v_output{
     context,
     conv_output_size(
         v_input.sizes(),
-        packed_.v_weight.sizes(),
+        filter,
         packed_.padding,
         packed_.stride,
         packed_.dilation),
@@ -353,57 +437,24 @@ Tensor Context::run(const Tensor& input_arg) const {
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    using namespace api::utils;
-
-    if (v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image()) {
-      const struct {
-        int32_t kernel_x, kernel_y;
-        int32_t stride_x, stride_y;
-        int32_t padding_x, padding_y;
-        int32_t dilate_x, dilate_y;
-        float clamp_x, clamp_y;
-      } block {
-        safe_downcast<int32_t>(packed_.kernel[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.kernel[Layout::Parameter::height]),
-        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::height]),
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
-        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::height]),
-        packed_.output_min,
-        packed_.output_max,
-      };
-
-      context->dispatch(
+    if (is_depthwise(filter, packed_.groups)) {
+      conv2d_depthwise(
+          context,
           command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(conv2d_dw),
-          v_output.extents(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(command_buffer),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          packed_.v_weight.image(command_buffer),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          packed_.v_bias.buffer(command_buffer),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          v_output,
+          v_input,
+          packed_.v_weight,
+          packed_.v_bias,
+          packed_.kernel,
+          packed_.stride,
+          packed_.padding,
+          packed_.dilation,
+          packed_.output_min,
+          packed_.output_max);
+    }
+    else if (is_pointwise(filter)) {
     }
     else {
-      TORCH_CHECK(false, "Not implemented!");
     }
   }
   command_buffer.end();

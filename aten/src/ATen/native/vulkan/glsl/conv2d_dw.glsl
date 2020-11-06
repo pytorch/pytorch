@@ -32,10 +32,9 @@ void main() {
   if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
 
-    // TODO: Fix dilation
     const ivec2 start = max(ivec2(0), ipos);
     const ivec2 end = min(ipos + uBlock.kernel, isize.xy);
-    const ivec2 kstart = start - ipos;
+    const ivec2 kstart = (start - ipos) / uBlock.dilate;
 
     vec4 sum = uBias.data[pos.z];
 
