@@ -36,7 +36,7 @@ fi
 # Clone the Pytorch branch
 retry git clone https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
-export CIRCLE_SHA1="a6ed1c8a7090a88fa22291b5acd992393e12051e"
+export CIRCLE_SHA1="2bf28aea9caf2d9ad4f8f828737b047320f68f16"
 export CIRCLE_BRANCH="zhanyi/cnnrnnsmoke"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
