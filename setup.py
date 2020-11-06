@@ -368,6 +368,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             return
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
         libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
+        if not os.path.exists(libtorch_cpu_path):
+            return
         # Parse libtorch_cpu load commands
         otool_cmds = subprocess.check_output(['otool', '-l', libtorch_cpu_path]).decode('utf-8').split('\n')
         rpaths, libs = [], []
