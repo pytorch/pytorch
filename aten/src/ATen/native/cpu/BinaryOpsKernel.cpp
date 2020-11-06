@@ -639,15 +639,15 @@ void mse_kernel(TensorIterator& iter) {
 }
 
 void fmod_kernel(TensorIterator& iter) {
-  if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_cpu", [&]() {
+  if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
         TORCH_CHECK(d != 0, "ZeroDivisionError");
         return x % d;
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "fmod_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t x, scalar_t d) -> scalar_t {
@@ -777,10 +777,27 @@ void heaviside_kernel(TensorIterator& iter) {
   });
 }
 
+template<typename T>
+T copysign(T a, T b) {
+  return std::copysign(a, b);
+}
+
+// Implement copysign for half precision floats using bit ops
+// Sign is the most significant bit for both half and bfloat16 types
+template<>
+c10::Half copysign(c10::Half a, c10::Half b) {
+  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+}
+
+template<>
+c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
+   return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
+}
+
 void copysign_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        return std::copysign(a, b);
+        return copysign(a, b);
     });
   });
 }
