@@ -151,7 +151,15 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
     throw python_error();
   }
 
-  auto module = py::handle(c10d_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   module
       .def(
@@ -1078,8 +1086,7 @@ Arguments:
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_future",
+      .def("get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
