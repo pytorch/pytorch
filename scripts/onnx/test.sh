@@ -52,6 +52,7 @@ pytest "${args[@]}" \
   --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
   --ignore "$top_dir/test/onnx/test_utility_funs.py" \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
