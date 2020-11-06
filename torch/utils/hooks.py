@@ -63,6 +63,15 @@ def warn_if_has_hooks(tensor):
                               "to suppress this warning".format(repr(hook)))
 
 class BackwardHook(object):
+    """
+    A wrapper class to implement nn.Module backward hooks.
+    It handles:
+      - Ignoring non-Tensor inputs and replacing the, by None before calling the user hook
+      - Generating the proper Node to capture a set of Tensor's gradients
+      - Linking the gradients captures for the outputs with the gradients captured for the input
+      - Calling the user hook once both output and input gradients are available
+    """
+
     def __init__(self, module, user_hooks):
         self.user_hooks = user_hooks
         self.module = module
@@ -91,9 +100,12 @@ class BackwardHook(object):
         @functools.wraps(user_hook)
         def hook(grad_input, _):
             if self.grad_outputs is None:
-                raise RuntimeError("Module backward hook for grad input is called "
-                                   "before the grad output one. Ensure that both inputs "
-                                   "and outputs of the Module require gradients.")
+                raise RuntimeError("Module backward hook for grad_input is called before "
+                                   "the grad_output one. This happens because the gradient "
+                                   "in your nn.Module flows to the Module's input without "
+                                   "passing through the Module's output. Make sure that the "
+                                   "output depends on the input and that the loss is computed "
+                                   "based on the output.")
 
             grad_input = self._pack_with_none(self.input_tensors_index, grad_input, self.n_inputs)
             res = user_hook(self.module, grad_input, self.grad_outputs)
@@ -142,7 +154,7 @@ class BackwardHook(object):
         def fn(grad_fn):
             for hook in self.user_hooks:
                 self._set_user_hook(grad_fn, hook)
-        
+
         res, input_idx = self._apply_on_tensors(fn, args)
         self.n_inputs = len(args)
         self.input_tensors_index = input_idx
@@ -152,10 +164,10 @@ class BackwardHook(object):
         def fn(grad_fn):
             def hook(_, grad_output):
                 self.grad_outputs = self._pack_with_none(self.output_tensors_index,
-                                                        grad_output,
-                                                        self.n_outputs)
+                                                         grad_output,
+                                                         self.n_outputs)
             grad_fn.register_hook(hook)
-        
+
         is_tuple = True
         if not isinstance(args, tuple):
             args = (args,)

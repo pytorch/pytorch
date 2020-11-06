@@ -559,11 +559,12 @@ class TestNN(NNTestCase):
                 module(input).sum().backward()
 
     def test_hook_requires_grad(self):
+        test_self = self
         class MyModule(nn.Module):
-            def forward(mod, arg1, arg2, arg3):
-                self.assertTrue(arg1.requires_grad)
-                self.assertFalse(arg2.requires_grad)
-                self.assertTrue(arg3.requires_grad)
+            def forward(self, arg1, arg2, arg3):
+                test_self.assertTrue(arg1.requires_grad)
+                test_self.assertFalse(arg2.requires_grad)
+                test_self.assertTrue(arg3.requires_grad)
                 return arg1.sum() + arg2.sum() + arg3.sum()
 
         inp = torch.rand(2, requires_grad=True)
@@ -576,7 +577,7 @@ class TestNN(NNTestCase):
 
     def test_hook_extra_input(self):
         class MyModule(nn.Module):
-            def forward(mod, non_tensor, tensor):
+            def forward(self, non_tensor, tensor):
                 return tensor.clone(), non_tensor
 
         inp = torch.rand(2, requires_grad=True)
@@ -595,12 +596,13 @@ class TestNN(NNTestCase):
 
     def test_hook_inplace(self):
         class MyModule(nn.Module):
-            def forward(mod, inp, do_inplace):
+            def forward(self, inp, do_inplace):
                 if do_inplace:
                     inp += 1
                 return inp.clone()
 
         hook_called = [0]
+
         def hook(mod, grad_input, grad_output):
             hook_called[0] += 1
 

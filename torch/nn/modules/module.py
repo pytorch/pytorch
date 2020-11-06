@@ -1,5 +1,4 @@
 from collections import OrderedDict, namedtuple
-import functools
 import itertools
 import warnings
 
@@ -138,12 +137,13 @@ def register_module_backward_hook(
 
         hook(module, grad_input, grad_output) -> Tensor or None
 
-    The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
-    module has multiple inputs or outputs. The hook should not modify its
-    arguments, but it can optionally return a new gradient with respect to
-    input that will be used in place of :attr:`grad_input` in subsequent
-    computations. :attr:`grad_input` will only correspond to the inputs given
-    as positional arguments.
+    The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook should
+    not modify its arguments, but it can optionally return a new gradient with
+    respect to the input that will be used in place of :attr:`grad_input` in
+    subsequent computations. :attr:`grad_input` will only correspond to the inputs given
+    as positional arguments and all kwarg arguments will not appear in the hook. Entries
+    in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
+    arguments.
 
     Global hooks are called before hooks registered with `register_backward_hook`
 
@@ -638,14 +638,16 @@ class Module:
 
             hook(module, grad_input, grad_output) -> tuple(Tensor) or None
 
-        The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook should
+        The :attr:`grad_input` and :attr:`grad_output` are tuples that contain the gradients
+        with respect to the inputs and outputs respectively. The hook should
         not modify its arguments, but it can optionally return a new gradient with
         respect to the input that will be used in place of :attr:`grad_input` in
         subsequent computations. :attr:`grad_input` will only correspond to the inputs given
-        as positional arguments. Entries in :attr:`grad_input` and :attr:`grad_output` will
-        be ``None`` for all non-Tensor arguments.
+        as positional arguments and all kwarg arguments are ignored. Entries
+        in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
+        arguments.
 
-        .. warn::
+        .. warning ::
             Modifying inputs or outputs inplace is not allowed when using backward hooks and
             will raise an error.
 
