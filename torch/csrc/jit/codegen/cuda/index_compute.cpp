@@ -970,21 +970,31 @@ std::unordered_map<kir::ForLoop*, kir::Val*> indexMapFromTV(
 
   const auto zero = ir_builder.create<kir::Int>(0);
 
+  const bool is_global = tv->getMemoryType() == MemoryType::Global;
   const bool is_shared = tv->getMemoryType() == MemoryType::Shared;
   const bool is_local = tv->getMemoryType() == MemoryType::Local;
 
   std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
 
   for (auto loop : loops) {
+    kir::Val* idx = nullptr;
+    // See also LoopNestGenerator::pushAlloc.
     if (!within_alloc) {
-      loop_to_ind_map[loop] = zero;
-    } else if (loop->iter_domain()->isBlockDim() && is_shared) {
-      loop_to_ind_map[loop] = zero;
-    } else if (loop->iter_domain()->isThread() && is_local) {
-      loop_to_ind_map[loop] = zero;
+      if ((loop->iter_domain()->isThreadDim() && is_shared) ||
+          (loop->iter_domain()->isThread() && is_global)) {
+        idx = loop->index();
+      } else {
+        idx = zero;
+      }
+    } else if (
+        (loop->iter_domain()->isBlockDim() && is_shared) ||
+        (loop->iter_domain()->isThread() && is_local)) {
+      idx = zero;
     } else {
-      loop_to_ind_map[loop] = loop->index();
+      idx = loop->index();
     }
+
+    loop_to_ind_map[loop] = idx;
 
     if (!within_alloc && loop == alloc_loop) {
       within_alloc = true;

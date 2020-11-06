@@ -8789,22 +8789,34 @@ TEST(NVFuserTest, FusionSmemIndexingSimple_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  auto tv0 = makeSymbolicTensor(1);
+  auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
   auto tv1 = add(tv0, new Float(1));
-  auto tv2 = add(tv1, new Float(2));
-  fusion.addOutput(tv2);
+  auto tv2 = add(tv1, new Float(1));
+  auto tv3 = add(tv2, new Float(1));
+  fusion.addOutput(tv3);
 
-  tv0->computeAt(tv2, -1);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv0->computeAt(tv3, -1);
 
   tv1->setMemoryType(MemoryType::Shared);
-  tv1->axis(0)->parallelize(ParallelType::TIDx);
-  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->setMemoryType(MemoryType::Global);
 
-  // Lowering the fusion would cause an error due to the SMEM
-  // allocation problem.
   FusionExecutor fe;
-  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({12, 34}, options);
+  auto outputs = fe.runFusion({t0});
+
+  at::Tensor aten_output = t0 + 1.0 + 1.0 + 1.0;
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0]),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
 }
 
 TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
@@ -8876,7 +8888,7 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
   // Cache smem tiles
   tv2->setMemoryType(MemoryType::Shared);
   tv3->setMemoryType(MemoryType::Shared);
-  tv4->setMemoryType(MemoryType::Shared); // WORKS WHEN THIS IS LOCAL
+  tv4->setMemoryType(MemoryType::Shared);
   tv6->setMemoryType(MemoryType::Shared);
 
   tv5->axis(0)->parallelize(ParallelType::BIDz);
@@ -8888,12 +8900,6 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
     tv->axis(-1)->parallelize(ParallelType::TIDy);
   }
 
-  // fusion.printMath();
-  // Lowering should throw an error due to tv4 being allocated on
-  // shared memory.
-  ASSERT_ANY_THROW(fusion.printKernel());
-  // TODO: Enable the rest of the test
-#if 0
   constexpr int M = 31, K = 65, N = 32;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -8903,9 +8909,7 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion);
   // A, B, m_tile_dim, split_k, intra_cta_tile
-  auto outputs = fe.runFusion(
-      {t0, t1, 3, 4, 5},
-      torch::jit::fuser::cuda::LaunchParams(-1, -1, -1, -1, -1, -1));
+  auto outputs = fe.runFusion({t0, t1, 3, 4, 5});
 
   at::Tensor aten_output = mul(t0.unsqueeze(2), t1.unsqueeze(0)).sum(1);
 
@@ -8913,7 +8917,6 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-#endif
 }
 
 // Reproducer of issue 408
