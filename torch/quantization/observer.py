@@ -478,8 +478,8 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
         self.min_val.resize_(min_val.shape)
         self.max_val.resize_(max_val.shape)
-        self.min_val = self.min_val.copy_(min_val).to(min_val.device)
-        self.max_val = self.max_val.copy_(max_val).to(max_val.device)
+        self.min_val = self.min_val.to(min_val.device).copy_(min_val)
+        self.max_val = self.max_val.to(max_val.device).copy_(max_val)
         return x_orig
 
 class PerChannelMinMaxObserver(_ObserverBase):
@@ -556,8 +556,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
             max_vals = torch.max(max_vals_cur, max_vals)
         self.min_vals.resize_(min_vals.shape)
         self.max_vals.resize_(max_vals.shape)
-        self.min_vals = self.min_vals.copy_(min_vals).to(min_vals.device)
-        self.max_vals = self.max_vals.copy_(max_vals).to(min_vals.device)
+        self.min_vals = self.min_vals.to(min_vals.device).copy_(min_vals)
+        self.max_vals = self.max_vals.to(min_vals.device).copy_(max_vals)
         return x_orig
 
     @torch.jit.export
@@ -660,8 +660,8 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             max_vals = max_vals + self.averaging_constant * (max_vals_cur - max_vals)
         self.min_vals.resize_(min_vals.shape)
         self.max_vals.resize_(max_vals.shape)
-        self.min_vals = self.min_vals.copy_(min_vals).to(min_vals.device)
-        self.max_vals = self.max_vals.copy_(max_vals).to(min_vals.device)
+        self.min_vals = self.min_vals.to(min_vals.device).copy_(min_vals)
+        self.max_vals = self.max_vals.to(min_vals.device).copy_(max_vals)
         return x_orig
 
 class HistogramObserver(_ObserverBase):
