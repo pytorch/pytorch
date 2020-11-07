@@ -489,7 +489,7 @@ def _convert(
     for name, mod in module.named_children():
         # both fused modules and observed custom modules are
         # swapped as one unit
-        if isinstance(mod, _FusedModule) and \
+        if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
                      custom_module_class_mapping)
