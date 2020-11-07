@@ -931,9 +931,9 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
 
     .. math::
         \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
-        \cos\left(\frac{T_{cur}}{T_{i}}\pi\right)\right)
+        \cos\left(\frac{T_{cur}}{T_{i} - 1}\pi\right)\right)
 
-    When :math:`T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}`.
+    When :math:`T_{cur}=T_{i} - 1`, set :math:`\eta_t = \eta_{min}`.
     When :math:`T_{cur}=0` after restart, set :math:`\eta_t=\eta_{max}`.
 
     It has been proposed in
@@ -953,8 +953,8 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     """
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, verbose=False):
-        if T_0 <= 0 or not isinstance(T_0, int):
-            raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
+        if T_0 <= 1 or not isinstance(T_0, int):
+            raise ValueError("Expected positive integer T_0 >= 2, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
             raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
         self.T_0 = T_0
@@ -971,7 +971,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
 
-        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
+        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / (self.T_i - 1))) / 2
                 for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
