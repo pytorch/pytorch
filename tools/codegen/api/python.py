@@ -359,7 +359,9 @@ class PythonSignatureNativeFunctionPair:
 # list for both (output arguments become optional).
 @dataclass(frozen=True)
 class PythonSignatureGroup:
-    # The signature used for Python argument parsing (out-variant is preferred)
+    # The signature used for Python argument parsing. The outplace signature
+    # is preferred if exists, because it can be used to parse inputs for both
+    # the out-place variant and the base version (with output omitted).
     signature: PythonSignature
 
     # The regular ATen declaration (e.g. conv2d)

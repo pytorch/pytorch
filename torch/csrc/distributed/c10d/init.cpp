@@ -151,7 +151,15 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
     throw python_error();
   }
 
-  auto module = py::handle(c10d_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   module
       .def(
@@ -1078,8 +1086,7 @@ Arguments:
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_future",
+      .def("get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
@@ -1100,12 +1107,12 @@ Arguments:
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
-                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend and single-process single-device mode.
                 The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                ``DistributedDataParallel.register_comm_hook``, but it is subject to some subtle
                 differences compared to ``torch.futures.Future`` due to compromises made for performance
                 reasons.
 
