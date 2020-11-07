@@ -5,6 +5,7 @@ import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
+import functools
 
 
 class _RequiredParameter(object):
@@ -33,6 +34,7 @@ class Optimizer(object):
     def __init__(self, params, defaults):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
+        self.step = self._step_with_profile(self.step)
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -71,6 +73,15 @@ class Optimizer(object):
                     format_string += '    {0}: {1}\n'.format(key, group[key])
         format_string += ')'
         return format_string
+
+    def _step_with_profile(self, func):
+        """Wrap self.step under profiler. In order to avoid of instrumenting each sub-class."""
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            name = str.format("{}#{}", "Optimizer.step", func.__qualname__)
+            with torch.autograd.profiler.record_function(name):
+                return func(*args, **kwargs)
+        return wrapper
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
@@ -179,17 +190,19 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
+        name = str.format("{}#{}.{}", "Optimizer.zero_grad", self.__class__.__name__, "zero_grad")
+        with torch.autograd.profiler.record_function(name):
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        if set_to_none:
+                            p.grad = None
                         else:
-                            p.grad.requires_grad_(False)
-                        p.grad.zero_()
+                            if p.grad.grad_fn is not None:
+                                p.grad.detach_()
+                            else:
+                                p.grad.requires_grad_(False)
+                            p.grad.zero_()
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
