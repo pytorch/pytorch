@@ -5789,9 +5789,9 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCUDA(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nanprod_vs_numpy(self, device, dtype):
-        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype)
-        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_extremal=True)
-        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_keepdim=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, dim_as_int=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_extremal=True, dim_as_int=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_keepdim=True, dim_as_int=True)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -18261,9 +18261,21 @@ else:
 
     def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype,
                                             with_extremal=False, atol=None, rtol=None,
-                                            exact_dtype=True, with_keepdim=False):
+                                            exact_dtype=True, with_keepdim=False, dim_as_int=False):
         # Test 0-d to 3-d tensors.
         for ndims in range(0, 4):
+            if dim_as_int:
+                x = self._generate_input(shape, dtype, device, with_extremal)
+
+                if with_keepdim:
+                    torch_func_partial = partial(torch_func, keepdim=True, dim=ndims)
+                    np_func_partial = partial(np_func, keepdims=True, axis=ndims)
+                else:
+                    torch_func_partial = partial(torch_func, dim=ndims)
+                    np_func_partial = partial(np_func, axis=ndims)
+                self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
+                    atol=atol, rtol=rtol, exact_dtype=exact_dtype)
+                continue
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
@@ -18293,7 +18305,7 @@ else:
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
-    def _test_nanfunc_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
+    def _test_nanfunc_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False, dim_as_int=False):
         def is_integral(dtype):
             return dtype in torch.testing.get_all_int_dtypes()
 
@@ -18306,7 +18318,7 @@ else:
 
         if dtype == torch.uint8:
             with self.assertRaises(TypeError):
-                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype, with_extremal=with_extremal)
+                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype, with_extremal=with_extremal, dim_as_int)
         else:
             # TODO: Investigate why the output is not close to numpy.
             if dtype == torch.float16:
@@ -18321,7 +18333,7 @@ else:
                 rtol = None
             self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                      atol=atol, rtol=rtol, exact_dtype=exact_dtype,
-                                                     with_keepdim=with_keepdim, with_extremal=with_extremal)
+                                                     with_keepdim=with_keepdim, with_extremal=with_extremal, dim_as_int)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
