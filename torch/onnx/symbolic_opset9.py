@@ -620,7 +620,8 @@ def floor(g, input):
 
 
 def _len(g, self):
-    return size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    return g.op('Squeeze', sz_0, axes_i=[0])
 
 
 @parse_args('v', 't', 't')
