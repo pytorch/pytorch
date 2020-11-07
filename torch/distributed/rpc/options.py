@@ -1,4 +1,4 @@
-from . import _TensorPipeRpcBackendOptionsBase
+from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
 from . import constants as rpc_contants
 
 import torch
