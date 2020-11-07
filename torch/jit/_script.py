@@ -58,6 +58,20 @@ def _is_new_style_class(cls):
         return "__dict__" in dir(cls) or hasattr(cls, "__slots__")
 
 
+class ScriptClassWrapper:
+    def __init__(self, obj):
+        self.obj = obj
+
+    def __getattr__(self, attr):
+        return getattr(self.obj, attr)
+
+    def get_wrapped_class(self):
+        return self.obj
+
+    def __call__(self, *args, **kwargs):
+        instance = self.obj(*args, **kwargs)
+        return torch.jit._recursive.create_script_class(instance)
+
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
 # module with versions that get/set properties inside of Module.
 # This allows us to reuse most of nn.Module while still storing the
@@ -575,7 +589,7 @@ if _enabled:
             Returns a string representation of the internal graph for the
             ``forward`` method. See :ref:`interpreting-graphs` for details.
             """
-            return self.forward.graph
+            return self._c._get_method("forward").graph
 
         @property
         def inlined_graph(self):
@@ -1068,12 +1082,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
 
-        @functools.wraps(obj)
-        def create_obj_and_script(*args, **kwargs):
-            instance = obj(*args, **kwargs)
-            return torch.jit._recursive.create_script_class(instance)
+        return ScriptClassWrapper(obj)
 
-        return create_obj_and_script
     elif inspect.isfunction(obj):
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb

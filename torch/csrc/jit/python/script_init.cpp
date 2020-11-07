@@ -105,22 +105,19 @@ struct PythonResolver : public Resolver {
       return script_class.class_type_.type_;
     }
 
-    auto unwrapped =
-        py::module::import("torch._jit_internal").attr("safe_unwrap")(obj);
-    py::bool_ isClass =
-        py::module::import("inspect").attr("isclass")(unwrapped);
+    py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
 
     if (!py::cast<bool>(isClass)) {
       return nullptr;
     }
 
-    if (isNamedTupleClass(unwrapped)) {
-      return registerNamedTuple(unwrapped, loc);
+    if (isNamedTupleClass(obj)) {
+      return registerNamedTuple(obj, loc);
     }
 
     auto qualifiedName = c10::QualifiedName(
         py::cast<std::string>(py::module::import("torch._jit_internal")
-                                  .attr("_qualified_name")(unwrapped)));
+                                  .attr("_qualified_name")(obj)));
 
     auto pyClass =
         py::module::import("torch.jit._state")
@@ -725,7 +722,8 @@ void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
+  py::class_<CustomClassHolder, c10::intrusive_ptr<CustomClassHolder>>(
+      m, "Capsule");
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")

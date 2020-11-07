@@ -1,6 +1,7 @@
 import ast
 import enum
 import inspect
+import pdb
 import re
 import torch
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
@@ -271,6 +272,7 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
 
 
 def try_ann_to_type(ann, loc):
+    # pdb.set_trace()
     if ann is None:
         return TensorType.getInferred()
     if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
@@ -331,6 +333,10 @@ def try_ann_to_type(ann, loc):
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
             torch.jit._script._recursive_compile_class(ann, loc)
             return ClassType(qualified_name)
+    if isinstance(ann, torch.jit._script.ScriptClassWrapper):
+        ann = ann.get_wrapped_class()
+        qualified_name = _qualified_name(ann)
+        return ClassType(qualified_name)
 
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):

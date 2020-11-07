@@ -1,4 +1,5 @@
 import io
+import pdb
 import os
 import sys
 import unittest
@@ -35,6 +36,10 @@ class TestClassType(JitTestCase):
 
             def get_a(self) -> int:
                 return self.a
+
+            @staticmethod
+            def static_method(a):
+                pass
 
         def test_fn(obj: Foo):
             obj.set_a(2)
@@ -465,7 +470,7 @@ class TestClassType(JitTestCase):
             def two(self, x):
                 return x + self.b
 
-        with self.assertRaisesRegex(TypeError, r"function\(\) argument .* must be code, not str"):
+        with self.assertRaisesRegex(TypeError, r"takes 2 positional arguments but 4 were given"):
             @torch.jit.script
             class Derived(Base):
                 def two(self, x):
@@ -1179,7 +1184,7 @@ class TestClassType(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Mutable default parameters are not supported"):
             torch.jit.script(should_fail)
 
-    @unittest.skip("staticmethod hidden behind decorator :(, probably solveable with metaclass?")
+    # @unittest.skip("staticmethod hidden behind decorator :(, probably solveable with metaclass?")
     def test_staticmethod(self):
         """
         Test static methods on class types.
@@ -1216,6 +1221,7 @@ class TestClassType(JitTestCase):
         def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
             return ClassWithStaticMethod.create_from(a, b)
 
+        test_function(3, 4)
         self.checkScript(test_function, (1, 2))
 
     def test_properties(self):

@@ -838,7 +838,7 @@ def _get_named_tuple_properties(obj):
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
-            annotations.append(torch._C.TensorType.get())
+            annotations.append(torch._C.TensorType.getInferred())
     return type(obj).__name__, fields, annotations
 
 
@@ -976,9 +976,3 @@ def _isinstance(obj, target_type) -> bool:
 
     # handle non-containers
     return isinstance(obj, target_type)
-
-def safe_unwrap(obj):
-    if obj is torch.ops:
-        return obj
-
-    return inspect.unwrap(obj)

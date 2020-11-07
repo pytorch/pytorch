@@ -2102,6 +2102,13 @@ struct CAFFE2_API ClassType : public NamedType {
   // valid again.
   void unsafeRemoveAttribute(const std::string& name);
 
+  // [Internal Only] Change the type of an attribute of the ClassType,
+  // The caller is responsible to make sure the modification is safe:
+  // it is unsafe to maintain uses of the old type of the attribute,
+  // and any code that works on the attribute is now invalid.
+  // Only newly created code is valid again.
+  void unsafeChangeAttributeType(const std::string& name, TypePtr new_ty);
+
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
   size_t addOrCheckAttribute(

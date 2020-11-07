@@ -1818,6 +1818,40 @@ clip(input, min, max, *, out=None) -> Tensor
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
+add_docstr(torch.column_stack,
+           r"""
+column_stack(tensors, *, out=None) -> Tensor
+
+Creates a new tensor by horizontally stacking the tensors in :attr:`tensors`.
+
+Equivalent to ``torch.hstack(tensors)``, except each zero or one dimensional tensor ``t``
+in :attr:`tensors` is first reshaped into a ``(t.numel(), 1)`` column before being stacked horizontally.
+
+Args:
+    tensors (sequence of Tensors): sequence of tensors to concatenate
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5, 6])
+    >>> torch.column_stack((a, b))
+    tensor([[1, 4],
+        [2, 5],
+        [3, 6]])
+    >>> a = torch.arange(5)
+    >>> b = torch.arange(10).reshape(5, 2)
+    >>> torch.column_stack((a, b, b))
+    tensor([[0, 0, 1, 0, 1],
+            [1, 2, 3, 2, 3],
+            [2, 4, 5, 4, 5],
+            [3, 6, 7, 6, 7],
+            [4, 8, 9, 8, 9]])
+
+""".format(**common_args))
+
 add_docstr(torch.complex,
            r"""
 complex(real, imag, *, out=None) -> Tensor
@@ -3316,6 +3350,47 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.igamma,
+           r"""
+igamma(input, other, *, out=None) -> Tensor
+
+Computes the regularized lower incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.lgamma` for a related function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    tensor([0.3528, 0.5665, 0.7350])
+
+""".format(**common_args))
+
 add_docstr(torch.index_select,
            r"""
 index_select(input, dim, index, *, out=None) -> Tensor
@@ -3593,6 +3668,64 @@ Examples::
     ...
     RuntimeError: bool value of Tensor with no values is ambiguous
 """.format(**common_args))
+
+add_docstr(torch.kron,
+           r"""
+kron(input, other, *, out=None) -> Tensor
+
+Computes the Kronecker product, denoted by :math:`\otimes`, of :attr:`input` and :attr:`other`.
+
+If :attr:`input` is a :math:`(a_0 \times a_1 \times \dots \times a_n)` tensor and :attr:`other` is a
+:math:`(b_0 \times b_1 \times \dots \times b_n)` tensor, the result will be a
+:math:`(a_0*b_0 \times a_1*b_1 \times \dots \times a_n*b_n)` tensor with the following entries:
+
+.. math::
+    (\text{input} \otimes \text{other})_{k_0, k_1, \dots, k_n} =
+        \text{input}_{i_0, i_1, \dots, i_n} * \text{other}_{j_0, j_1, \dots, j_n},
+
+where :math:`k_t = i_t * b_t + j_t` for :math:`0 \leq t \leq n`.
+If one tensor has fewer dimensions than the other it is unsqueezed until it has the same number of dimensions.
+
+Supports real-valued and complex-valued inputs.
+
+.. note::
+    This function generalizes the typical definition of the Kronecker product for two matrices to two tensors,
+    as described above. When :attr:`input` is a :math:`(m \times n)` matrix and :attr:`other` is a
+    :math:`(p \times q)` matrix, the result will be a :math:`(p*m \times q*n)` block matrix:
+
+    .. math::
+        \mathbf{A} \otimes \mathbf{B}=\begin{bmatrix}
+        a_{11} \mathbf{B} & \cdots & a_{1 n} \mathbf{B} \\
+        \vdots & \ddots & \vdots \\
+        a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B} \end{bmatrix}
+
+    where :attr:`input` is :math:`\mathbf{A}` and :attr:`other` is :math:`\mathbf{B}`.
+
+Arguments:
+    input (Tensor)
+    other (Tensor)
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.ones(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 1., 0., 0.],
+            [1., 1., 0., 0.],
+            [0., 0., 1., 1.],
+            [0., 0., 1., 1.]])
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.arange(1, 5).reshape(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 2., 0., 0.],
+            [3., 4., 0., 0.],
+            [0., 0., 1., 2.],
+            [0., 0., 3., 4.]])
+""")
 
 add_docstr(torch.kthvalue,
            r"""
@@ -6679,6 +6812,12 @@ Example::
     torch.uint8
 """)
 
+add_docstr(torch.row_stack,
+           r"""
+row_stack(tensors, *, out=None) -> Tensor
+
+Alias of :func:`torch.vstack`.
+""".format(**common_args))
 
 add_docstr(torch.round,
            r"""
