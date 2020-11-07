@@ -497,7 +497,7 @@ class TestObserver(QuantizationTestCase):
         for obs in observerList:
             device = torch.device('cuda:1')
             x = torch.randn(1, 2, device=device)
-
+            obs.to(device)
             result = obs(x)
             scale, zero_point = obs.calculate_qparams()
 
