@@ -21,8 +21,10 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
 
+if TEST_SCIPY:
+    import scipy.special
 
 class SkipInfo(object):
     """Describes which test, or type of tests, should be skipped when testing
@@ -63,6 +65,7 @@ class OpInfo(object):
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 test_complex_grad=True,  # whether to gradcheck and gradgradcheck for complex dtypes
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
@@ -87,6 +90,7 @@ class OpInfo(object):
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
 
         self.test_inplace_grad = test_inplace_grad
+        self.test_complex_grad = test_complex_grad
         self.supports_tensor_out = supports_tensor_out
 
         self.skips = skips
@@ -438,6 +442,23 @@ op_db = [
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None)
 ]
+
+if TEST_SCIPY:
+    op_db_scipy_reference = [
+        UnaryUfuncInfo('sigmoid',
+                       ref=scipy.special.expit,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2}),),
+                       # 'expit' not supported for the input types
+                       skips=(SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                       device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),),
+                       dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                       dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       promotes_integers_to_float=True,
+                       test_complex_grad=False)
+    ]
+    op_db = op_db + op_db_scipy_reference
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
