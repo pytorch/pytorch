@@ -39,6 +39,18 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
   return input.mul(noise);
 }
 
+template<bool inplace>
+Tensor& zero_tensor(Tensor& input) {
+  static_assert(inplace, "Wrong multiply overload triggered in Dropout.cpp");
+  return input.fill_(0);
+}
+
+template<bool inplace>
+Tensor zero_tensor(const Tensor& input) {
+  static_assert(!inplace, "Wrong multiply overload triggered in Dropout.cpp");
+  return at::zeros_like(input);
+}
+
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
 Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
@@ -47,7 +59,7 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 
   if (p == 1) {
-    return multiply<inplace>(input, at::zeros({}, input.options()));
+    return zero_tensor<inplace>(input);
   }
 
   at::Tensor b; // used for alpha_dropout only
