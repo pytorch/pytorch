@@ -327,7 +327,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
         torch.jit._get_trace_graph(func, args, strict=False, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
 
-    trace_graph = _optimize_graph(trace_graph, operator_export_type)
+    trace_graph = _optimize_graph(trace_graph, operator_export_type, params_dict={})
     if return_outs:
         return trace_graph, torch_out
     return trace_graph
