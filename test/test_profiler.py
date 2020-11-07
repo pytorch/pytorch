@@ -4,6 +4,8 @@ import unittest
 
 import torch
 import torch.nn as nn
+import torch.optim
+import torch.utils.data
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
 from torch.autograd.profiler import profile
@@ -99,6 +101,70 @@ class TestProfiler(TestCase):
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
+    def test_python(self):
+        """Checks that python side high level events are recorded.
+        """
+        class RepeatedDataset(torch.utils.data.Dataset):
+            def __init__(self, N, D_in, D_out):
+                self.N = N
+                self.x = torch.randn(N, D_in)
+                self.y = torch.randn(N, D_out)
+
+            def __len__(self):
+                return self.N
+
+            def __getitem__(self, idx):
+                return self.x, self.y
+
+        class TwoLayerNet(torch.nn.Module):
+            def __init__(self, D_in, H, D_out):
+                super(TwoLayerNet, self).__init__()
+                self.linear1 = torch.nn.Linear(D_in, H)
+                self.linear2 = torch.nn.Linear(H, D_out)
+
+            def forward(self, x):
+                h_relu = self.linear1(x).clamp(min=0)
+                y_pred = self.linear2(h_relu)
+                return y_pred
+
+        def train():
+            for _, data in enumerate(dataloader):
+                x, y = data[0], data[1]
+                y_pred = model(x)
+                loss = criterion(y_pred, y)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+        N, D_in, H, D_out = 8, 10, 5, 2
+        model = TwoLayerNet(D_in, H, D_out)
+        criterion = torch.nn.MSELoss(reduction='sum')
+        optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+        ds = RepeatedDataset(N, D_in, D_out)
+        dataloader = torch.utils.data.DataLoader(ds, batch_size=1)
+
+        try:
+            train()
+        except:
+            self.assertTrue(False, "Expected no exception without profiling.")
+
+        with profile() as prof:
+            train()
+
+        expected_event_count = {
+            # "+1" because the final iteration will enter __next__ but skip the loop body.
+            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": N + 1,
+            "Optimizer.step#SGD.step": N,
+            "Optimizer.zero_grad#SGD.zero_grad": N
+            }
+        actual_event_count = {}
+        for e in prof.function_events:
+            if "#" in e.name:
+                key = e.name
+                if key in expected_event_count.keys():
+                    actual_event_count[key] = actual_event_count.setdefault(key, 0) + 1
+        for key, count in expected_event_count.items():
+            self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
 
 if __name__ == '__main__':
     run_tests()
