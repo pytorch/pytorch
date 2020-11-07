@@ -273,7 +273,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
     case Tag::Stream:
-      return rhs.isStream() && lhs.toStream() == lhs.toStream();
+      return rhs.isStream() && lhs.toStream() == rhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
