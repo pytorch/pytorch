@@ -244,12 +244,11 @@ def create_python_bindings(python_functions, is_python_method, module):
     py_forwards: List[str] = []
 
     for name in sorted(python_functions.keys()):
-        overloads = tuple(decl_to_signature_function_pair(decl, method=is_python_method)
-                          for decl in python_functions[name])
-        noarg = len(overloads) == 1 and overloads[0].signature.arguments_count() == 0
-        py_methods.append(method_impl(name, module, overloads, noarg=noarg, method=is_python_method))
-        py_method_defs.append(method_def(name, module, noarg=noarg, method=is_python_method))
-        py_forwards.extend(forward_decls(name, noarg=noarg, method=is_python_method))
+        overloads = list(decl_to_signature_function_pair(decl, method=is_python_method)
+                         for decl in python_functions[name])
+        py_methods.append(method_impl(name, module, overloads, method=is_python_method))
+        py_method_defs.append(method_def(name, module, overloads, method=is_python_method))
+        py_forwards.extend(forward_decls(name, overloads, method=is_python_method))
 
     return {
         'py_forwards': py_forwards,
@@ -265,6 +264,10 @@ def create_python_bindings(python_functions, is_python_method, module):
 
 def get_pycname(name: str) -> str:
     return f'THPVariable_{name}'
+
+
+def is_noarg(overloads: Sequence[PythonSignatureNativeFunctionPair]) -> bool:
+    return len(overloads) == 1 and overloads[0].signature.arguments_count() == 0
 
 
 def is_output(arg):
@@ -340,7 +343,7 @@ def gen_namedtuple_typename_key(f: NativeFunction) -> str:
     return '_'.join([name] + fieldnames)
 
 def emit_namedtuple_typedefs(
-    overloads: Tuple[PythonSignatureNativeFunctionPair, ...]
+    overloads: Sequence[PythonSignatureNativeFunctionPair]
 ) -> Tuple[List[str], Dict[str, str]]:
     """
     Generate block of named tuple type def inits, and add typeref snippets
@@ -454,23 +457,21 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 """)
 
 def method_impl(
-    name: str, module: str,
-    overloads: Tuple[PythonSignatureNativeFunctionPair, ...],
+    name: str,
+    module: str,
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
-    noarg: bool, method: bool
+    method: bool
 ) -> str:
     """
     Generate a python binding for all overloads of an op.
     """
     pycname = get_pycname(name)
+    noarg = is_noarg(overloads)
     namedtuple_inits, namedtuple_typenames = emit_namedtuple_typedefs(overloads)
 
     method_header = ['HANDLE_TH_ERRORS']
     method_header += namedtuple_inits
-
-    # NOTE: we type the unpacked self as Tensor not Variable to avoid return type
-    # discrepancies on method resolution (e.g. Variable::detach_ returns void
-    # rather than Tensor &)
     method_header += [
         "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
     ] if method else []
@@ -479,7 +480,7 @@ def method_impl(
 
     traceable = 'true' if all(should_trace(o.function) for o in overloads) else 'false'
 
-    grouped_overloads: Tuple[PythonSignatureGroup, ...] = group_overloads(overloads)
+    grouped_overloads: Sequence[PythonSignatureGroup] = group_overloads(overloads)
     is_singleton = len(grouped_overloads) == 1
     signatures: List[str] = []
     dispatch: List[str] = []
@@ -518,11 +519,14 @@ def method_impl(
 
 def gen_has_torch_function_check(name: str, module: str, *, noarg: bool, method: bool) -> str:
     if noarg:
-        return f"""\
+        if method:
+            return f"""\
 if(check_has_torch_function(self_)) {{
   return handle_torch_function(self_, "{name}");
 }}
-""" if method else ''
+"""
+        else:
+            return ''
 
     self_ = "self_" if method else "nullptr"
     namespace = {
@@ -577,12 +581,17 @@ def emit_dispatch_case(
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def forward_decls(name: str, *, noarg: bool, method: bool) -> Tuple[str, ...]:
+def forward_decls(
+    name: str,
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+    *,
+    method: bool
+) -> Tuple[str, ...]:
     if method:
         return ()
 
     pycname = get_pycname(name)
-    if noarg:
+    if is_noarg(overloads):
         return (f"""\
 static PyObject * {pycname}(PyObject* self_, PyObject* args);
 """,)
@@ -619,13 +628,19 @@ BINARY_OP_NAMES = [
     '__or__', '__ror__', '__ior__',
 ]
 
-def method_def(name: str, module: str, *, noarg: bool, method: bool) -> str:
+def method_def(
+    name: str,
+    module: str,
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+    *,
+    method: bool
+) -> str:
     """
     Generate method def entry.
     """
     pycname = get_pycname(name)
 
-    if noarg:
+    if is_noarg(overloads):
         pyfunc_cast = ''
         flags = 'METH_NOARGS' if method else 'METH_VARARGS | METH_KEYWORDS'
     else:
@@ -651,8 +666,8 @@ def method_def(name: str, module: str, *, noarg: bool, method: bool) -> str:
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 def group_overloads(
-    overloads: Tuple[PythonSignatureNativeFunctionPair, ...]
-) -> Tuple[PythonSignatureGroup, ...]:
+    overloads: Sequence[PythonSignatureNativeFunctionPair]
+) -> Sequence[PythonSignatureGroup]:
     bases: Dict[str, PythonSignatureNativeFunctionPair] = {}
     outplaces: Dict[str, PythonSignatureNativeFunctionPair] = {}
 
@@ -660,8 +675,18 @@ def group_overloads(
     for overload in overloads:
         sig = overload.signature.signature_str(skip_outputs=True)
         if overload.function.func.is_out_fn():
+            if sig in outplaces:
+                raise RuntimeError(
+                    f'Found duplicated function definition:\n- {overload.function.func}.\n'
+                    f'Existing definition:\n- {outplaces[sig].function.func}.'
+                )
             outplaces[sig] = overload
         else:
+            if sig in bases:
+                raise RuntimeError(
+                    f'Found duplicated function definition:\n- {overload.function.func}.\n'
+                    f'Existing definition:\n- {bases[sig].function.func}.'
+                )
             bases[sig] = overload
 
     for sig, out in outplaces.items():
@@ -674,16 +699,17 @@ def group_overloads(
                     candidates.append(overload.signature.signature_str(skip_outputs=True))
             out_sig = out.signature.signature_str()
             raise RuntimeError(
-                f"While identifying overloads, we found an out schema {out_sig} without a corresponding non-out variant. "
-                f"We expected the non-out variant to have schema: \n- {sig}\nPlease check that you spelled the schema "
-                "correctly in native_functions.yaml. We discovered the following candidate(s): \n"
-                + "\n".join(f"- {candidate}" for candidate in candidates))
+                f'While identifying overloads, we found an out schema {out_sig} without a corresponding non-out variant. '
+                f'We expected the non-out variant to have schema: \n- {sig}\nPlease check that you spelled the schema '
+                'correctly in native_functions.yaml. We discovered the following candidate(s): \n'
+                + '\n'.join(f'- {candidate}' for candidate in candidates))
 
     grouped: List[PythonSignatureGroup] = []
     for sig, base in bases.items():
         outplace = outplaces.get(sig)
         grouped.append(PythonSignatureGroup(
-            # prefer the signature with optional out=... arguments
+            # prefer the signature with optional out=... arguments because it's the
+            # superset that can be used to parse input for both base and outplace.
             signature=outplace.signature if outplace is not None else base.signature,
             base=base.function,
             outplace=outplace.function if outplace is not None else None,
@@ -736,8 +762,8 @@ def group_overloads(
 #
 
 def sort_overloads(
-    grouped_overloads: List[PythonSignatureGroup]
-) -> Tuple[PythonSignatureGroup, ...]:
+    grouped_overloads: Sequence[PythonSignatureGroup]
+) -> Sequence[PythonSignatureGroup]:
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return str(t1) == 'Scalar' and str(t2) == 'Tensor'
@@ -750,12 +776,11 @@ def sort_overloads(
         # TODO: should use some canonical form instead of 'str(arg.type)' - see comments
         # above. The old codegen used the deprecated 'dynamic_type(arg.type)', which
         # ignores the optional annotation, i.e. 'Scalar' and 'Scalar?'.
-        any_unequal = any(str(arg1.type) != str(arg2.type)
-                          for arg1, arg2 in zip(args1, args2))
-        all_smaller_or_equal = all(str(arg1.type) == str(arg2.type)
-                                   or is_arg_smaller(arg1.type, arg2.type)
-                                   for arg1, arg2 in zip(args1, args2))
-        return any_unequal and all_smaller_or_equal
+        equal = all(arg1.type == arg2.type for arg1, arg2 in zip(args1, args2))
+        smaller_or_equal = all(str(arg1.type) == str(arg2.type)
+                               or is_arg_smaller(arg1.type, arg2.type)
+                               for arg1, arg2 in zip(args1, args2))
+        return smaller_or_equal and not equal
 
     # First sort by signature
     grouped_overloads = sorted(grouped_overloads, key=lambda x: x.signature.signature_str())
@@ -768,12 +793,15 @@ def sort_overloads(
                 larger_than[i1].add(i2)
 
     if not larger_than:
-        return tuple(grouped_overloads)
+        return list(grouped_overloads)
 
     # Use a topological sort to sort overloads according to the partial order.
-    sorted_ids: List[int] = \
-        list(filter(lambda x: x not in larger_than, range(len(grouped_overloads))))
-    for i in sorted_ids:
+    N = len(grouped_overloads)
+    sorted_ids: List[int] = list(filter(lambda x: x not in larger_than, range(N)))
+
+    for idx in range(N):
+        # The size of sorted_ids will grow to N eventually.
+        i = sorted_ids[idx]
         for j in sorted(larger_than.keys()):
             larger = larger_than[j]
             larger.discard(i)
@@ -781,7 +809,7 @@ def sort_overloads(
                 del larger_than[j]
                 sorted_ids.append(j)
 
-    return tuple(map(lambda x: grouped_overloads[x], sorted_ids))
+    return list(map(lambda x: grouped_overloads[x], sorted_ids))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
