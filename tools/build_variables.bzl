@@ -504,7 +504,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/eliminate_unused_items.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
-    "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/preprocess_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",

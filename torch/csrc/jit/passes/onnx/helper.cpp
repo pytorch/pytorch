@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <onnx/onnx_pb.h>
+#include <torch/csrc/jit/passes/utils/onnx_utils.h>
 
 namespace torch {
 namespace jit {

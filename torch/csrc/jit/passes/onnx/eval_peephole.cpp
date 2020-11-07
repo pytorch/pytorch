@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/utils/onnx_utils.h>
 #include <torch/torch.h>
 
 #include <c10/util/Optional.h>
