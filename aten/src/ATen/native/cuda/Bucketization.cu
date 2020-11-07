@@ -86,7 +86,7 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
 
   searchsorted_cuda_kernel<<<grid, block, 0, stream>>>(
     data_out, data_in, data_bd, idim_in, idim_bd, numel_in, right, boundaries.dim() == 1);
-  THCudaCheck(cudaGetLastError());
+  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void dispatch(Tensor& result, const Tensor& input, const Tensor& boundaries, bool out_int32, bool right) {
