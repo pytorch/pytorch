@@ -1,5 +1,6 @@
 import torch
 import torch.overrides
+from torch.nn.modules.module import _addindent
 import linecache
 from typing import Type, Dict, List, Any, Union
 from .graph import Graph
@@ -7,6 +8,8 @@ import copy
 import sys
 import traceback
 import math
+from pathlib import Path
+
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -138,6 +141,7 @@ class GraphModule(torch.nn.Module):
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
+            self._buffers = root._buffers
             for node in graph.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
@@ -178,6 +182,40 @@ class GraphModule(torch.nn.Module):
     def graph(self, val) -> None:
         self._graph = val
         self.recompile()
+
+    def to_folder(self, folder, module_name="FxModule"):
+        folder = Path(folder)
+        Path(folder).mkdir(exist_ok=True)
+        torch.save(self.state_dict(), folder / 'state_dict.pt')
+        tab = " " * 4
+        module_str = f"""
+import torch
+class {module_name}(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        state_dict = torch.load('{folder}/state_dict.pt')
+"""
+        for module_name, module in self.named_children():
+            module_file = folder / f'{module_name}.pt'
+            torch.save(module, module_file)
+            module_str += f"{tab*2}self.{module_name} = torch.load('{module_file}')\n"
+        for buffer_name, buffer in self._buffers.items():
+            module_str += f"{tab*2}self.{buffer_name} = state_dict['{buffer_name}']\n"
+
+        for param_name, param in self._parameters.items():
+            module_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(state_dict['{param_name}'])\n"
+
+        module_str += f"{_addindent(self.code, 4)}\n"
+
+        module_file = folder / 'module.py'
+        module_file.write_text(module_str)
+
+        init_file = folder / '__init__.py'
+        init_file.write_text('from .module import *')
+
+
+
+
 
     def recompile(self) -> None:
         """

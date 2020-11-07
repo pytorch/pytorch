@@ -70,7 +70,7 @@ class Tracer(TracerBase):
                     if not hasattr(self.root, qualname):
                         break
                     i += 1
-                setattr(self.root, qualname, a)
+                self.root.register_buffer(qualname, a)
 
             return self.create_node('get_attr', qualname, (), {})
         return super().create_arg(a)
