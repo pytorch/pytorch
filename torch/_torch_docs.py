@@ -8116,7 +8116,7 @@ transpose(input, dim0, dim1) -> Tensor
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
 
-The resulting :attr:`out` tensor shares it's underlying storage with the
+The resulting :attr:`out` tensor shares its underlying storage with the
 :attr:`input` tensor, so changing the content of one would change the content
 of the other.
 
