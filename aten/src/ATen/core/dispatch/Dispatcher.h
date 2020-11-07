@@ -386,7 +386,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
-      if (guard.needs_inputs) {
+      if (guard.needsInputs()) {
         torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
         guard.before(op, stack, seq_num);
       } else {
@@ -437,7 +437,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
       if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
-      if (guard.needs_inputs) {
+      if (guard.needsInputs()) {
         guard.before(op, *stack, seq_num);
       } else {
         guard.before(op, seq_num);

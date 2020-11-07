@@ -139,7 +139,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       // Using sequence number and thread id to correlate with
       // the forward pass function
       guard.setForwardThreadId(thread_id_);
-      if (guard.needs_inputs) {
+      if (guard.needsInputs()) {
         guard.before(
           name(),
           std::vector<c10::IValue>(inputs.begin(), inputs.end()),
