@@ -1611,7 +1611,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         at::isRecordFunctionEnabled()) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
           at::RecordScope::TORCHSCRIPT_FUNCTION);
-      if (rec_fn->active) {
+      if (rec_fn->isActive()) {
         if (rec_fn->needs_inputs) {
           rec_fn->before(
               frame.function->function_name_,
