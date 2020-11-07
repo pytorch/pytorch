@@ -149,7 +149,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
            if (li < totalElements) {
     // Convert `linearIndex` into an offset of `b`
                const IndexType bOffset =
-                   cuda::detail::IndexToOffset<scalar_t, IndexType, 1>::get(li, b);
+                   cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(li, b);
                b.data[bOffset] = src[ii]*(&rand.x)[ii]*pinv;
                c.data[bOffset] = (uint8_t)(&rand.x)[ii];
            }
