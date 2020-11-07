@@ -116,11 +116,11 @@ class TestForeach(TestCase):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N - 1)])
 
                     tensors = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must be of the same length, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
                     tensors1 = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must be of the same length, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
@@ -703,56 +703,57 @@ class TestForeach(TestCase):
     #
     # Ops with list
     #
-    def test_add_list_error_cases(self, device):
-        tensors1 = []
-        tensors2 = []
+    def test_bin_op_list_error_cases(self, device):
+        for bin_op, bin_op_ in zip(self.foreach_bin_ops, self.foreach_bin_ops_):
+            tensors1 = []
+            tensors2 = []
 
-        # Empty lists
-        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
-            torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
-            torch._foreach_add_(tensors1, tensors2)
+            # Empty lists
+            with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
+                bin_op(tensors1, tensors2)
+            with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
+                bin_op_(tensors1, tensors2)
 
-        # One empty list
-        tensors1.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
-            torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
-            torch._foreach_add_(tensors1, tensors2)
+            # One empty list
+            tensors1.append(torch.tensor([1], device=device))
+            with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                bin_op(tensors1, tensors2)
+            with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                bin_op_(tensors1, tensors2)
 
-        # Lists have different amount of tensors
-        tensors2.append(torch.tensor([1], device=device))
-        tensors2.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
-            torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
-            torch._foreach_add_(tensors1, tensors2)
+            # Lists have different amount of tensors
+            tensors2.append(torch.tensor([1], device=device))
+            tensors2.append(torch.tensor([1], device=device))
+            with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
+                bin_op(tensors1, tensors2)
+            with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
+                bin_op_(tensors1, tensors2)
 
-        # Different dtypes
-        tensors1 = [torch.zeros(10, 10, device=device, dtype=torch.float) for _ in range(10)]
-        tensors2 = [torch.ones(10, 10, device=device, dtype=torch.int) for _ in range(10)]
+            # Different dtypes
+            tensors1 = [torch.zeros(10, 10, device=device, dtype=torch.float) for _ in range(10)]
+            tensors2 = [torch.ones(10, 10, device=device, dtype=torch.int) for _ in range(10)]
 
-        with self.assertRaisesRegex(RuntimeError, "All tensors in the tensor list must have the same dtype."):
-            torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "All tensors in the tensor list must have the same dtype."):
-            torch._foreach_add_(tensors1, tensors2)
+            with self.assertRaisesRegex(RuntimeError, "All tensors in the tensor list must have the same dtype."):
+                bin_op(tensors1, tensors2)
+            with self.assertRaisesRegex(RuntimeError, "All tensors in the tensor list must have the same dtype."):
+                bin_op_(tensors1, tensors2)
 
-        # different devices
-        if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-            tensor1 = torch.zeros(10, 10, device="cuda:0")
-            tensor2 = torch.ones(10, 10, device="cuda:1")
-            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-                torch._foreach_add([tensor1], [tensor2])
-            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-                torch._foreach_add_([tensor1], [tensor2])
+            # different devices
+            if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+                tensor1 = torch.zeros(10, 10, device="cuda:0")
+                tensor2 = torch.ones(10, 10, device="cuda:1")
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+                    bin_op([tensor1], [tensor2])
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+                    bin_op_([tensor1], [tensor2])
 
-        # Coresponding tensors with different sizes
-        tensors1 = [torch.zeros(10, 10, device=device) for _ in range(10)]
-        tensors2 = [torch.ones(11, 11, device=device) for _ in range(10)]
-        with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size"):
-            torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, r", got \[10, 10\] and \[11, 11\]"):
-            torch._foreach_add_(tensors1, tensors2)
+            # Corresponding tensors with different sizes
+            tensors1 = [torch.zeros(10, 10, device=device) for _ in range(10)]
+            tensors2 = [torch.ones(11, 11, device=device) for _ in range(10)]
+            with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size"):
+                bin_op(tensors1, tensors2)
+            with self.assertRaisesRegex(RuntimeError, r", got \[10, 10\] and \[11, 11\]"):
+                bin_op_(tensors1, tensors2)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_list(self, device, dtype):
@@ -798,33 +799,6 @@ class TestForeach(TestCase):
             torch._foreach_div_(tensors1, tensors2)
             self.assertEqual(res, tensors1)
             self.assertEqual(tensors1, res)
-
-    def test_bin_op_list_error_cases(self, device):
-        tensors1 = []
-        tensors2 = []
-
-        for bin_op in self.foreach_bin_ops + self.foreach_bin_ops_:
-            # Empty lists
-            with self.assertRaises(RuntimeError):
-                bin_op(tensors1, tensors2)
-
-            # One empty list
-            tensors1.append(torch.tensor([1], device=device))
-            with self.assertRaises(RuntimeError):
-                bin_op(tensors1, tensors2)
-
-            # Lists have different amount of tensors
-            tensors2.append(torch.tensor([1], device=device))
-            tensors2.append(torch.tensor([1], device=device))
-            with self.assertRaises(RuntimeError):
-                bin_op(tensors1, tensors2)
-
-            # Different dtypes
-            tensors1 = [torch.zeros(2, 2, device=device, dtype=torch.float) for _ in range(2)]
-            tensors2 = [torch.ones(2, 2, device=device, dtype=torch.int) for _ in range(2)]
-
-            with self.assertRaises(RuntimeError):
-                bin_op(tensors1, tensors2)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_list_different_sizes(self, device, dtype):
