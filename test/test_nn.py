@@ -9721,6 +9721,20 @@ class TestNNDeviceType(NNTestCase):
         module.__repr__()
         str(module)
 
+    def _test_dropout_discontiguous(self, cls, device, memory_format=torch.contiguous_format):
+        # In this test, we verify that dropout preserves the layout and data for different memory formats.
+        # We check whether, we get same values for the output of dropout, when the probability
+        # of dropout is 0 or very close to 0.
+        # Reference: https://github.com/pytorch/pytorch/issues/47176
+        close_to_zero_p = 0.0000000001  # Should be almost zero but not zero, as for p=0 different path is taken
+        for p in [0, close_to_zero_p]:
+            inp = torch.arange(2 * 3 * 3 * 3).reshape(2, 3, 3, 3)
+            inp_discontiguous = torch.empty(2, 3, 3, 6, device=device, memory_format=memory_format)[..., ::2]
+            inp_discontiguous.copy_(inp)
+            mod = cls(p=p)
+            out = mod(inp_discontiguous)
+            self.assertEqual(inp_discontiguous, out)
+
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
         b, c = input.size(0), input.size(1)
@@ -10159,6 +10173,9 @@ class TestNNDeviceType(NNTestCase):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, device, input)
 
+        self._test_dropout_discontiguous(nn.Dropout, device)
+        self._test_dropout_discontiguous(nn.Dropout, device, memory_format=torch.channels_last)
+
         if self.device_type == 'cuda' and TEST_WITH_ROCM:
             input = input.bfloat16()
             self._test_dropout(nn.Dropout, device, input)
@@ -10172,6 +10189,9 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout(nn.Dropout2d, device, input)
         self._test_dropout(nn.Dropout2d, device, input, memory_format=torch.channels_last)
 
+        self._test_dropout_discontiguous(nn.Dropout2d, device)
+        self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
+
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -10180,6 +10200,9 @@ class TestNNDeviceType(NNTestCase):
         num_features = 1000
         input = torch.Tensor(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, device, input)
+
+        self._test_dropout_discontiguous(nn.Dropout3d, device)
+        self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
