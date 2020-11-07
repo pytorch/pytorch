@@ -9,7 +9,8 @@ import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
-    skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
+    skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -166,9 +167,6 @@ except ImportError:
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
 
-# set type to List[Any] due to mypy list-of-union issue:
-# https://github.com/python/mypy/issues/3351
-device_type_test_bases: List[Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -361,9 +359,25 @@ class CUDATestBase(DeviceTypeTestBase):
 
 
 # Adds available device-type-specific test base classes
-device_type_test_bases.append(CPUTestBase)
-if torch.cuda.is_available():
-    device_type_test_bases.append(CUDATestBase)
+def get_device_type_test_bases():
+    # set type to List[Any] due to mypy list-of-union issue:
+    # https://github.com/python/mypy/issues/3351
+    test_bases: List[Any] = list()
+
+    if IS_SANDCASTLE or IS_FBCODE:
+        if IS_REMOTE_GPU:
+            test_bases.append(CUDATestBase)
+        else:
+            test_bases.append(CPUTestBase)
+    else:
+        test_bases.append(CPUTestBase)
+        if torch.cuda.is_available():
+            test_bases.append(CUDATestBase)
+
+    return test_bases
+
+
+device_type_test_bases = get_device_type_test_bases()
 
 
 # Note [How to extend DeviceTypeTestBase to add new test device]
@@ -523,20 +537,14 @@ class skipCUDAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
 
-
-# Only runs on cuda, and only run when there is enough GPU RAM
-def largeCUDATensorTest(size):
-    if isinstance(size, str):
-        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
-        size = 1024 ** 3 * int(size[:-2])
-    valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
-    return unittest.skipIf(not valid, "No CUDA or Has CUDA but GPU RAM is not large enough")
-
-
 def _has_sufficient_memory(device, size):
-    if device.startswith('cuda'):
-        return (torch.cuda.is_available() and
-                torch.cuda.get_device_properties(0).total_memory >= size)
+    if torch.device(device).type == 'cuda':
+        if not torch.cuda.is_available():
+            return False
+        gc.collect()
+        torch.cuda.empty_cache()
+        return torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device) >= size
+
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
 
@@ -558,10 +566,14 @@ def _has_sufficient_memory(device, size):
     return psutil.virtual_memory().available >= effective_size
 
 
-def largeTensorTest(size):
+def largeTensorTest(size, device=None):
     """Skip test if the device has insufficient memory to run the test
 
     size may be a number of bytes, a string of the form "N GB", or a callable
+
+    If the test is a device generic test, available memory on the primary device will be checked.
+    It can also be overriden by the optional `device=` argument.
+    In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
         assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
@@ -571,8 +583,9 @@ def largeTensorTest(size):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
             size_bytes = size(self, *args, **kwargs) if callable(size) else size
-            if not _has_sufficient_memory(self.device_type, size_bytes):
-                raise unittest.SkipTest('Insufficient {} memory'.format(self.device_type))
+            _device = device if device is not None else self.get_primary_device()
+            if not _has_sufficient_memory(_device, size_bytes):
+                raise unittest.SkipTest('Insufficient {} memory'.format(_device))
 
             return fn(self, *args, **kwargs)
         return dep_fn
