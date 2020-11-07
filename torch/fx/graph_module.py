@@ -198,7 +198,8 @@ class {module_name}(torch.nn.Module):
         for module_name, module in self.named_children():
             module_file = folder / f'{module_name}.pt'
             torch.save(module, module_file)
-            module_str += f"{tab*2}self.{module_name} = torch.load('{module_file}')\n"
+            nl = '\n'
+            module_str += f"{tab*2}self.{module_name} = torch.load('{module_file}') # {module.__repr__().replace(nl,' ')}\n"
         for buffer_name, buffer in self._buffers.items():
             module_str += f"{tab*2}self.{buffer_name} = state_dict['{buffer_name}']\n"
 
