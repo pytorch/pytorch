@@ -177,7 +177,7 @@ class SWALR(_LRScheduler):
         swa_lrs (float or list): the learning rate value for all param groups
             together or separately for each group.
         annealing_epochs (int): number of epochs in the annealing phase 
-            (default: 10)
+            (default: 0)
         annealing_strategy (str): "cos" or "linear"; specifies the annealing 
             strategy: "cos" for cosine annealing, "linear" for linear annealing
             (default: "cos")
@@ -208,7 +208,7 @@ class SWALR(_LRScheduler):
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
     """
-    def __init__(self, optimizer, swa_lr, anneal_epochs=10, anneal_strategy='cos', last_epoch=-1):
+    def __init__(self, optimizer, swa_lr, anneal_epochs=0, anneal_strategy='cos', last_epoch=-1):
         swa_lrs = self._format_param(optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
             group['swa_lr'] = swa_lr
@@ -219,8 +219,8 @@ class SWALR(_LRScheduler):
             self.anneal_func = self._cosine_anneal
         elif anneal_strategy == 'linear':
             self.anneal_func = self._linear_anneal
-        if not isinstance(anneal_epochs, int) or anneal_epochs < 1:
-            raise ValueError("anneal_epochs must be a positive integer, got {}".format(
+        if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
+            raise ValueError("anneal_epochs must be equal or greater than 0, got {}".format(
                              anneal_epochs)) 
         self.anneal_epochs = anneal_epochs
 
@@ -257,11 +257,13 @@ class SWALR(_LRScheduler):
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
         step = self._step_count - 1
-        prev_t = max(0, min(1, (step - 1) / self.anneal_epochs))
+        if self.anneal_epochs == 0:
+            step = max(1, step)
+        prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
         prev_lrs = [self._get_initial_lr(group['lr'], group['swa_lr'], prev_alpha)
                     for group in self.optimizer.param_groups]
-        t = max(0, min(1, step / self.anneal_epochs))
+        t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
         return [group['swa_lr'] * alpha + lr * (1 - alpha) 
                 for group, lr in zip(self.optimizer.param_groups, prev_lrs)]
