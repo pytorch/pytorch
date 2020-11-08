@@ -2901,10 +2901,14 @@ struct to_ir {
           TypePtr type = type_hint ? type_hint : ListType::ofTensors();
           if (!type->cast<ListType>()) {
             throw ErrorReport(apply.range())
-            << "Expected list type annotation for list(), found "
-            << type_hint->repr_str();
+                << "Expected list type annotation for list(), found "
+                << type_hint->repr_str();
           }
-          return std::make_shared<SimpleValue>(graph->insertNode(graph->createList(type->expect<ListType>()->getElementType(), {}))->output());
+          return std::make_shared<SimpleValue>(
+              graph
+                  ->insertNode(graph->createList(
+                      type->expect<ListType>()->getElementType(), {}))
+                  ->output());
         }
         // list(iter) desugars to [_elem for _elem in iter]
         checkApplyNumInputs(apply, 1);
@@ -2913,17 +2917,18 @@ struct to_ir {
         // aten::list builtin op is registered for List and Str input
         // dispatch to the builtin op to avoid perf slowdown on existing uses
         if (auto simple = asSimple(iter_input)) {
-          if (simple->type()->cast<ListType>() || simple->type()->cast<StringType>()) {
+          if (simple->type()->cast<ListType>() ||
+              simple->type()->cast<StringType>()) {
             return std::make_shared<SimpleValue>(emitBuiltinCall(
-              apply.range(), *method.graph(), aten::list, {simple}, {}));
+                apply.range(), *method.graph(), aten::list, {simple}, {}));
           }
         }
         const std::string& iter_name = createTempName("$_iter");
         environment_stack->setSugaredVar(
-          apply.range(),
-          iter_name,
-          iter_input,
-        /*annotated_type=*/nullptr);
+            apply.range(),
+            iter_name,
+            iter_input,
+            /*annotated_type=*/nullptr);
 
         const std::string& elem_name = createTempName("$_elem");
         auto ident =
