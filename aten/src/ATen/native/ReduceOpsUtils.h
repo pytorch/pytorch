@@ -156,15 +156,17 @@ static void allocate_reduction_result(
 }
 
 static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask, bool keepdim) {
-  if (keepdim) {
-    return result;
-  }
   auto shape = DimVector(result.sizes());
   auto stride = DimVector(result.strides());
   for (int dim = 0; dim < ndim; dim++) {
     if (mask[dim]) {
-      shape.insert(shape.begin() + dim, 1);
-      stride.insert(stride.begin() + dim, 0);
+      if (!keepdim) {
+        shape.insert(shape.begin() + dim, 1);
+        stride.insert(stride.begin() + dim, 0);
+      } else {
+        TORCH_INTERNAL_ASSERT(shape[dim] == 1);
+        stride[dim] = 0;
+      }
     }
   }
   return result.as_strided(shape, stride);

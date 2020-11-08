@@ -1223,7 +1223,7 @@ In-place version of :meth:`~Tensor.divide`
 
 add_docstr_all('dot',
                r"""
-dot(tensor2) -> Tensor
+dot(other) -> Tensor
 
 See :func:`torch.dot`
 """)
@@ -4024,7 +4024,7 @@ See :func:`torch.var`
 
 add_docstr_all('vdot',
                r"""
-dot(other) -> Tensor
+vdot(other) -> Tensor
 
 See :func:`torch.vdot`
 """)

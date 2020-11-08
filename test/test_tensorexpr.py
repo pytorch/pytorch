@@ -1226,21 +1226,29 @@ class TestTensorExprFuser(BaseTestClass):
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     def _test_softmax(self, device):
-        def test(x, y):
+        def test_softmax(x, y):
             a = F.softmax(x, dim=0, dtype=torch.float32)
             b = F.softmax(y, dim=0, dtype=torch.float32)
             c = F.softmax(x, dim=1, dtype=torch.float32)
             d = F.softmax(y, dim=1, dtype=torch.float32)
             return a + b + c + d
 
-        old = torch._C._jit_set_texpr_reductions_enabled(True)
-        traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
-        inp = torch.randn(2, 3, device=device)
-        res = traced(inp, inp)
-        # Use eager mode as reference.
-        ref = test(inp, inp)
-        np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
-        torch._C._jit_set_texpr_reductions_enabled(old)
+        def test_log_softmax(x, y):
+            a = F.log_softmax(x, dim=0, dtype=torch.float32)
+            b = F.log_softmax(y, dim=0, dtype=torch.float32)
+            c = F.log_softmax(x, dim=1, dtype=torch.float32)
+            d = F.log_softmax(y, dim=1, dtype=torch.float32)
+            return a + b + c + d
+
+        for test in (test_softmax, test_log_softmax):
+            old = torch._C._jit_set_texpr_reductions_enabled(True)
+            traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
+            inp = torch.randn(2, 3, device=device)
+            res = traced(inp, inp)
+            # Use eager mode as reference.
+            ref = test(inp, inp)
+            np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
+            torch._C._jit_set_texpr_reductions_enabled(old)
 
     def test_softmax_cpu(self):
         llvm = LLVMCodeGenExecuted()
@@ -1270,45 +1278,6 @@ class TestTensorExprFuser(BaseTestClass):
             traced = torch.jit.trace(bias_gelu, (a, b))
             x = warmup_and_run_forward(traced, a, b)
             self.assertLastGraphAllFused()
-
-    def test_half_module_backward(self):
-        devices = ["cuda"] if torch.cuda.is_available() else []
-        dtype = torch.float16
-
-        for device in devices:
-            class HalfModule(nn.Module):
-                def __init__(self, inplanes, planes):
-                    super().__init__()
-
-                    self.fixup_bias2a = nn.Parameter(torch.zeros(1))
-                    self.fixup_scale = nn.Parameter(torch.ones(1))
-                    self.fixup_bias2b = nn.Parameter(torch.zeros(1))
-
-                def forward(self, x):
-                    identity = x
-                    out = x
-
-                    out = out + self.fixup_bias2a
-                    out = out * self.fixup_scale + self.fixup_bias2b
-
-                    return out * out + identity
-
-            net_ref = HalfModule(64, 64).to(dtype=dtype, device=device)
-            net = torch.jit.script(HalfModule(64, 64)).to(dtype=dtype, device=device)
-            inp = torch.randn(16, 64, 16, 16, dtype=dtype, device=device)
-
-            for i in range(10):
-                for param in net.parameters():
-                    param.grad = None
-                for param in net_ref.parameters():
-                    param.grad = None
-
-                net(inp).mean().backward()
-                net_ref(inp).mean().backward()
-
-            # check grad, allow a little tolerance due to parallelism.
-            for (p1, p2) in zip(net.parameters(), net_ref.parameters()):
-                np.testing.assert_allclose(p1.grad.cpu(), p2.grad.cpu(), rtol=0.02)
 
     def test_transpose(self):
         @torch.jit.script
