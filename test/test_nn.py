@@ -9735,6 +9735,37 @@ class TestNNDeviceType(NNTestCase):
             out = mod(inp_discontiguous)
             self.assertEqual(inp_discontiguous, out)
 
+    def _test_dropout_mean_check(self, cls, device):
+        def _test_dropout_mean(inp, out):
+            self.assertNotEqual(inp, out)
+            self.assertEqual(inp.mean(), out.mean(), rtol=3, atol=1)
+
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            for p in [0.3, 0.5, 0.6, 0.9]:
+                mod = cls(p=p)
+                inp = torch.arange(2 * 3 * 4 * 5, device=device).reshape(2, 3, 4, 5)
+                inp_float = inp.float()
+                out = mod(inp_float)
+                _test_dropout_mean(inp_float, out)
+
+                x = torch.empty(2, 3, 4, 5, device=device, memory_format=memory_format)
+                x.copy_(inp)
+                x_trans = x.transpose(0, 2)
+                assert not x_trans.is_contiguous()
+                out = mod(x_trans)
+                _test_dropout_mean(x_trans, out)
+
+                x_trans = x.transpose(1, 0)
+                assert not x_trans.is_contiguous()
+                out = mod(x_trans)
+                _test_dropout_mean(x_trans, out)
+
+                x = torch.empty(2, 3, 4, 10, device=device, memory_format=memory_format)[..., ::2]
+                x.copy_(inp)
+                assert not x.is_contiguous()
+                out = mod(x)
+                _test_dropout_mean(x, out)
+
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
         b, c = input.size(0), input.size(1)
@@ -10175,6 +10206,8 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_dropout_discontiguous(nn.Dropout, device)
         self._test_dropout_discontiguous(nn.Dropout, device, memory_format=torch.channels_last)
+
+        self._test_dropout_mean_check(nn.Dropout, device)
 
         if self.device_type == 'cuda' and TEST_WITH_ROCM:
             input = input.bfloat16()
