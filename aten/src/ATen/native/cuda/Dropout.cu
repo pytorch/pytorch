@@ -102,7 +102,8 @@ template <
           typename scalar_t,
           typename accscalar_t,
           typename IndexType,
-          int ADims>
+          int ADims,
+          int BDims=ADims>
 #if __CUDA_ARCH__ >= 350
 C10_LAUNCH_BOUNDS_2(256, 8)
 #elif defined (__HIP_PLATFORM_HCC__)
@@ -149,7 +150,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
            if (li < totalElements) {
     // Convert `linearIndex` into an offset of `b`
                const IndexType bOffset =
-                   cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(li, b);
+                   cuda::detail::IndexToOffset<scalar_t, IndexType, BDims>::get(li, b);
                b.data[bOffset] = src[ii]*(&rand.x)[ii]*pinv;
                c.data[bOffset] = (uint8_t)(&rand.x)[ii];
            }
@@ -248,8 +249,13 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
               TORCH_CUDA_KERNEL_LAUNCH_CHECK();
               break;
           default:
+            if (!self.is_contiguous() && ret.is_contiguous() && mask.is_contiguous()){
+              fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+            } else {
               fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
               TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+            }
         }
       }
      });
@@ -286,8 +292,13 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
               TORCH_CUDA_KERNEL_LAUNCH_CHECK();
               break;
           default:
+            if (!self.is_contiguous() && ret.is_contiguous() && mask.is_contiguous()){
+              fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+            } else {
               fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
               TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+            }
         }
       }
      });
