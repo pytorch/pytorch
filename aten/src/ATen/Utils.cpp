@@ -64,7 +64,6 @@ Tensor empty_cpu(
 }
 
 template <typename T>
-CAFFE2_API
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
@@ -75,14 +74,12 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 }
 
 template <typename T>
-CAFFE2_API
 Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 
 template <typename T>
-CAFFE2_API
 Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
@@ -93,7 +90,6 @@ Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
 }
 
 template <typename T>
-CAFFE2_API
 Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) {
   auto cpu_tensor = tensor_complex_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
