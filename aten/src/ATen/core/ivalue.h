@@ -82,6 +82,13 @@ struct OptionalArray {
   }
 };
 
+// This is an owning wrapper for c10::intrusive_ptr<torch::CustomClassHolder>
+struct Capsule {
+  c10::intrusive_ptr<torch::CustomClassHolder> obj_ptr;
+  explicit Capsule(c10::intrusive_ptr<torch::CustomClassHolder> ptr)
+      : obj_ptr(std::move(ptr)) {}
+};
+
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
 // It is a 16-byte object with an 8-byte payload and an 8-byte tag.
