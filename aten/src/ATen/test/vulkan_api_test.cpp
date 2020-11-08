@@ -268,11 +268,11 @@ TEST(VulkanAPITest, conv2d) {
         height,
       };
     }
-  } weights {8, input.channels, 3, 3};
+  } weights {2, input.channels, 3, 3};
 
-  const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::ones(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::ones(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,

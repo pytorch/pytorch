@@ -56,7 +56,7 @@ class Context final : public torch::jit::CustomClassHolder {
   struct {
     vTensor v_weight;
     vTensor v_bias;
-    std::array<int64_t, 2> kernel;
+    std::array<int64_t, 4> filter;
     std::array<int64_t, 2> stride;
     std::array<int64_t, 2> padding;
     std::array<int64_t, 2> dilation;
@@ -68,6 +68,7 @@ class Context final : public torch::jit::CustomClassHolder {
   struct {
     Tensor weight;
     c10::optional<Tensor> bias;
+    std::vector<int64_t> filter;
     std::vector<int64_t> stride;
     std::vector<int64_t> padding;
     std::vector<int64_t> dilation;
@@ -96,18 +97,20 @@ vTensor pack_weights(
     return convert(weight_arg);
   }
 
+  /* Source */
   const Tensor weight = weight_arg.contiguous();
-  const IntArrayRef filter = weight.sizes();
+  const IntArrayRef src_filter = weight.sizes();
+  const float* const src_weight_ptr = weight.data_ptr<float>();
 
   //
   // Depthwise
   //
 
-  if (is_depthwise(filter, groups)) {
+  if (is_depthwise(src_filter, groups)) {
     vTensor v_weight{
       api::context(),
       &pool,
-      filter,
+      src_filter,
       weight.options(),
     };
 
@@ -117,7 +120,7 @@ vTensor pack_weights(
 
     memcpy(
         v_weight_payload.get(),
-        weight.data_ptr<float>(),
+        src_weight_ptr,
         std::min(weight.nbytes(), v_weight.nbytes()));
 
     return v_weight;
@@ -129,17 +132,14 @@ vTensor pack_weights(
 
   using namespace api::utils;
 
-  std::cout << "filter[Layout::Filter::input]: " << filter[Layout::Filter::input] << std::endl;
-  std::cout << "align_up(filter[Layout::Filter::input], 4ll): " << align_up(filter[Layout::Filter::input], 4ll) << std::endl;
-
   vTensor v_weight{
     api::context(),
     &pool,
     {
-      filter[Layout::Filter::output],
-      align_up(filter[Layout::Filter::input], 4ll),
-      filter[Layout::Filter::height],
-      filter[Layout::Filter::width],
+      div_up(src_filter[Layout::Filter::output], 4ll),
+      4ll * src_filter[Layout::Filter::input],
+      src_filter[Layout::Filter::height],
+      src_filter[Layout::Filter::width],
     },
     weight.options(),
   };
@@ -148,63 +148,60 @@ vTensor pack_weights(
   Future v_weight_future = v_weight.host<float, vTensor::Access::Write>();
   Future::Payload v_weight_payload = v_weight_future.wait();
 
-  const float* const weight_ptr = weight.data_ptr<float>();
-  float* const v_weight_ptr = v_weight_payload.get();
+  /* Source */
+  const int64_t src_kernel = src_filter[Layout::Filter::height] * src_filter[Layout::Filter::width];
+  const int64_t src_block = src_kernel * src_filter[Layout::Filter::input];
 
-  // Have a fast(er) code path for non-prepacked convolutions that need to go
-  // through this dance on each and every call to conv2d.
+  /* Destination */
+  const IntArrayRef dst_filter = v_weight.sizes();
+  const int64_t dst_kernel = dst_filter[Layout::Filter::height] * dst_filter[Layout::Filter::width];
+  const int64_t dst_block = dst_kernel * dst_filter[Layout::Filter::input];
+  TORCH_INTERNAL_ASSERT(src_kernel == dst_kernel, "Internal error!");
 
-  if (0 == (filter[Layout::Filter::input] % 4)) {
-    printf("~~~~~~~~~~~~~~fast path \n");
-    memcpy(
-        v_weight_ptr,
-        weight_ptr,
-        std::min(weight.nbytes(), v_weight.nbytes()));
-  }
-  else {
-    printf("~~~~~~~~~~~~~~slow path \n");
-    const IntArrayRef dst_filter = v_weight.sizes();
+  float* const dst_weight_ptr = v_weight_payload.get();
 
-    const int64_t kernel = filter[Layout::Filter::height] * filter[Layout::Filter::width];
-    const int64_t kernel_bytes = sizeof(float) * kernel;
+  /*
+    Bulk
+  */
 
-    const int64_t dst_3dfilter = dst_filter[Layout::Filter::input] * kernel;
-    const int64_t src_3dfilter = filter[Layout::Filter::input] * kernel;
+  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+    // Src
+    const float *const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block;
 
-    const int64_t bulk_copy_channels = align_down(filter[Layout::Filter::input], 4ll);
-    const int64_t bulk_copy = bulk_copy_channels * kernel;
-    const int64_t bulk_copy_bytes = bulk_copy_channels * kernel_bytes;
+    // Dst
+    const int64_t dst_oc = src_oc / 4;
+    float* const dst_weight_oc_ptr = dst_weight_ptr + dst_oc * dst_block;
 
-    for (int64_t oc = 0; oc < filter[Layout::Filter::output]; ++oc) {
-      float * v_weight_filter_ptr = v_weight_ptr + oc * dst_3dfilter;
-      const float* weight_filter_ptr = weight_ptr + oc * src_3dfilter;
+    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+      const int64_t dst_ic = 4 * src_ic;
 
       memcpy(
-          v_weight_filter_ptr,
-          weight_filter_ptr,
-          bulk_copy_bytes);
-
-      v_weight_filter_ptr += bulk_copy;
-      weight_filter_ptr += bulk_copy;
-
-      int64_t ic = 0;
-      for (; ic < filter[Layout::Filter::input] - bulk_copy_channels; ++ic) {
-        memcpy(
-            v_weight_filter_ptr,
-            weight_filter_ptr,
-            kernel_bytes);
-
-        v_weight_filter_ptr += kernel;
-        weight_filter_ptr += kernel;
-      }
-
-      memset(
-          v_weight_filter_ptr,
-          // 2's complement integers and IEEE-754 floating point numbers both
-          // have identical bit representations for 0, so can use memset.
-          0,
-          (dst_filter[Layout::Filter::input] - ic) * kernel_bytes);
+          dst_weight_oc_ptr + dst_ic * dst_kernel,
+          src_weight_oc_ptr + src_ic * src_kernel,
+          sizeof(float) * dst_kernel);
     }
+  }
+
+  /*
+    Remainder
+  */
+
+  const int64_t rem_block = 4 * dst_kernel;
+  const int64_t rem_ic = src_filter[Layout::Filter::input] % 4;
+
+  float *const rem_weight_ptr =
+      dst_weight_ptr +
+      (dst_filter[Layout::Filter::output] - 1) * dst_block +
+      rem_ic * dst_kernel;
+
+  for (int64_t rem_oc = 0; rem_oc < 4; ++rem_oc) {
+    memset(
+        rem_weight_ptr + rem_oc * rem_block,
+        // 2's complement integers and IEEE-754 floating point numbers both
+        // have identical bit representations for 0, so can use memset which
+        // only accepts uint8_t parameter.
+        0,
+        sizeof(float) * (4 - rem_ic));
   }
 
   return v_weight;
@@ -243,7 +240,8 @@ vTensor pack_biases(
         memset(
             v_bias_payload.get(),
             // 2's complement integers and IEEE-754 floating point numbers both
-            // have identical bit representations for 0, so can use memset.
+            // have identical bit representations for 0, so can use memset which
+            // only accepts uint8_t parameter.
             0,
             v_bias.nbytes());
       }
@@ -252,19 +250,23 @@ vTensor pack_biases(
   return v_bias;
 }
 
-std::array<int64_t, 2> pack_kernel(
+std::array<int64_t, 4> pack_filter(
     const Tensor& weight,
     const IntArrayRef dilation) {
+  const IntArrayRef filter = weight.sizes();
+
   const auto effective = [](const int64_t k, const int64_t d) {
     return k + (k - 1) * (d - 1);
   };
 
   return {
+    api::utils::align_up(filter[Layout::Filter::output], 4ll),
+    filter[Layout::Filter::input],
     effective(
-        weight.size(Layout::Filter::height),
+        filter[Layout::Filter::height],
         dilation[Layout::Parameter::height]),
     effective(
-        weight.size(Layout::Filter::width),
+        filter[Layout::Filter::width],
         dilation[Layout::Parameter::width]),
   };
 }
@@ -272,7 +274,7 @@ std::array<int64_t, 2> pack_kernel(
 std::array<int64_t, 2> pack_params(const std::vector<int64_t>& vector) {
   TORCH_INTERNAL_ASSERT(2u == vector.size(), "Invalid usage!");
 
-  return std::array<int64_t, 2>{
+  return {
     vector[0],
     vector[1],
   };
@@ -293,7 +295,7 @@ Context::Context(
   : packed_{
       pack_weights(pool, weight, groups),
       pack_biases(pool, bias, weight),
-      pack_kernel(weight, expand_param_if_needed(dilation, "dilation", 2)),
+      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
       pack_params(expand_param_if_needed(dilation, "dilation", 2)),
@@ -304,6 +306,7 @@ Context::Context(
     unpacked_{
       weight,
       bias,
+      weight.sizes().vec(),
       stride.vec(),
       padding.vec(),
       dilation.vec(),
@@ -433,7 +436,7 @@ void conv2d_depthwise(
     const vTensor& v_input,
     const vTensor& v_weight,
     const vTensor& v_bias,
-    const IntArrayRef kernel,
+    const IntArrayRef filter,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
@@ -449,8 +452,8 @@ void conv2d_depthwise(
       int32_t dilate_x, dilate_y;
       float clamp_x, clamp_y;
     } block {
-      safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-      safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+      safe_downcast<int32_t>(filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(filter[Layout::Filter::height]),
       safe_downcast<int32_t>(stride[Layout::Parameter::width]),
       safe_downcast<int32_t>(stride[Layout::Parameter::height]),
       safe_downcast<int32_t>(padding[Layout::Parameter::width]),
@@ -559,7 +562,7 @@ void conv2d(
     const vTensor& v_input,
     const vTensor& v_weight,
     const vTensor& v_bias,
-    const IntArrayRef kernel,
+    const IntArrayRef filter,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
@@ -570,13 +573,16 @@ void conv2d(
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
       int32_t kernel_x, kernel_y;
+      int32_t ic4, oc4;
       int32_t stride_x, stride_y;
       int32_t padding_x, padding_y;
       int32_t dilate_x, dilate_y;
       float clamp_x, clamp_y;
     } block {
-      safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-      safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+      safe_downcast<int32_t>(filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(filter[Layout::Filter::height]),
+      safe_downcast<int32_t>(filter[Layout::Filter::input]),
+      safe_downcast<int32_t>(filter[Layout::Filter::output]),
       safe_downcast<int32_t>(stride[Layout::Parameter::width]),
       safe_downcast<int32_t>(stride[Layout::Parameter::height]),
       safe_downcast<int32_t>(padding[Layout::Parameter::width]),
@@ -630,13 +636,11 @@ Tensor Context::run(const Tensor& input_arg) const {
       "Vulkan Convolution not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by Vulkan impl.");
 
-  const IntArrayRef filter = packed_.v_weight.sizes();
-
   vTensor v_output{
     context,
     conv_output_size(
         v_input.sizes(),
-        filter,
+        unpacked_.filter,
         packed_.padding,
         packed_.stride,
         packed_.dilation),
@@ -646,7 +650,7 @@ Tensor Context::run(const Tensor& input_arg) const {
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (is_depthwise(filter, packed_.groups)) {
+    if (is_depthwise(unpacked_.filter, packed_.groups)) {
       conv2d_depthwise(
           context,
           command_buffer,
@@ -654,14 +658,14 @@ Tensor Context::run(const Tensor& input_arg) const {
           v_input,
           packed_.v_weight,
           packed_.v_bias,
-          packed_.kernel,
+          packed_.filter,
           packed_.stride,
           packed_.padding,
           packed_.dilation,
           packed_.output_min,
           packed_.output_max);
     }
-    else if (is_pointwise(filter)) {
+    else if (is_pointwise(unpacked_.filter)) {
       conv2d_pointwise(
           context,
           command_buffer,
@@ -682,7 +686,7 @@ Tensor Context::run(const Tensor& input_arg) const {
           v_input,
           packed_.v_weight,
           packed_.v_bias,
-          packed_.kernel,
+          packed_.filter,
           packed_.stride,
           packed_.padding,
           packed_.dilation,
