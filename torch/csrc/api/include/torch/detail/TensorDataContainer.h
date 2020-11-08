@@ -139,9 +139,9 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
       type_(TensorDataContainerType::Tensor) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true); \
     if (scalar_type_ == at::kBool) { \
-      tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU)); \
+      tensor_ = at::detail::tensor(values, at::TensorOptions().device(at::kCPU)); \
     } else { \
-      tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU)); \
+      tensor_ = at::detail::tensor(values, at::dtype(scalar_type_).device(at::kCPU)); \
     } \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
