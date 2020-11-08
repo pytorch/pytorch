@@ -861,7 +861,6 @@ class TestCase(expecttest.TestCase):
         if is_uncoalesced:
             v = torch.cat([v, torch.randn_like(v)], 0)
             i = torch.cat([i, i], 1)
-
         x = torch.sparse_coo_tensor(i, v, torch.Size(size))
 
         if not is_uncoalesced:
@@ -877,14 +876,7 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        r = self.safeCoalesce(t)
-        return r.to_dense()
-
-    def safeCoalesce(self, t):
-        tc = t.coalesce()
-        self.assertEqual(tc.to_dense(), t.to_dense())
-        self.assertTrue(tc.is_coalesced())
-        return tc
+        return t.coalesce().to_dense()
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -1055,8 +1047,8 @@ class TestCase(expecttest.TestCase):
                         msg = debug_msg_sparse
                     self.assertTrue(False, msg=msg)
 
-                x = self.safeCoalesce(x)
-                y = self.safeCoalesce(y)
+                x = x.coalesce()
+                y = y.coalesce()
                 indices_result, debug_msg = self._compareTensors(x._indices(), y._indices(),
                                                                  rtol=rtol, atol=atol,
                                                                  equal_nan=equal_nan, exact_dtype=exact_dtype,
