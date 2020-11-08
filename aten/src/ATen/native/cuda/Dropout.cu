@@ -178,8 +178,7 @@ template <typename scalar_t>
 int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   int vec_size = 4;
   // get the vector size
-  auto memory_format = self.suggest_memory_format();
-  if (!self.is_contiguous(memory_format) || !ret.is_contiguous(memory_format) || !mask.is_contiguous(memory_format)) {
+  if (!self.is_non_overlapping_and_dense() || !ret.is_non_overlapping_and_dense() || !mask.is_non_overlapping_and_dense()) {
     vec_size = 1;
   } else {
     vec_size = memory::can_vectorize_up_to<scalar_t>((char*)self.data_ptr());
@@ -199,8 +198,8 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
 std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty_like(self, self.suggest_memory_format());
-  Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte), self.suggest_memory_format());
+  Tensor ret = at::empty_like(self);
+  Tensor mask = at::empty_like(self, self.options().dtype(kByte));
   const int64_t nelem = self.numel();
 //empty tensors should not get here, but just in case, avoid FPE
   if (nelem==0) return std::tuple<Tensor,Tensor>(self, mask);
