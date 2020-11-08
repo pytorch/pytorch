@@ -4,6 +4,11 @@ import timeit
 import textwrap
 from typing import cast, Any, Callable, Dict, List, NoReturn, Optional, Type
 
+try:
+    from typing import Protocol
+except ImportError:
+    from typing_extensions import Protocol
+
 import numpy as np
 import torch
 from torch.utils.benchmark.utils import common
@@ -26,6 +31,18 @@ PYTHON = "Python"
 CPP = "C++"
 
 
+class InnerTimer(Protocol):
+    def __init__(
+        self,
+        stmt: str,
+        setup: str,
+        timer: Callable[[], float],
+        globals: Dict[str, Any]
+    ) -> None: ...
+
+    def timeit(self, number: int) -> float: ...
+
+
 class CPPTimer:
     def __init__(
         self,
@@ -44,17 +61,8 @@ class CPPTimer:
                 "declare that CUDA syncronization is not needed."
             )
 
-        if len(globals) > 1 or "torch" not in globals:
-            # Timer will add `torch` as a convenience.
+        if globals:
             raise ValueError("C++ timing does not support globals.")
-
-        if globals.get("torch", torch) is not torch:
-            # cpp_extension is going to link against `libtorch.so` that comes
-            # from `import torch`, so changing `torch` in globals would be
-            # silently ignored.
-            raise ValueError(
-                "Swapping out `torch` is not allowed for C++ snippets."
-            )
 
         self._stmt: str = textwrap.dedent(stmt)
         self._setup: str = textwrap.dedent(setup)
@@ -63,13 +71,15 @@ class CPPTimer:
     def timeit(self, number: int) -> float:
         if self._timeit_module is None:
             self._timeit_module = cast(
+                # The module behavior is based on the template, so the type
+                # checker cannot infer it automatically.
                 cpp_jit.TimeitModuleType,
                 cpp_jit.compile_template(
                     self._stmt,
                     self._setup,
                     template=cpp_jit.CXX_TIMEIT_TEMPLATE,
-                    is_standalone=False
-                ))
+                    is_standalone=False,
+            ))
         return self._timeit_module.timeit(number)
 
 
@@ -176,7 +186,7 @@ class Timer(object):
         language: Specify if stmt and setup are Python (default) or C++ strings.
     """
 
-    _timer_cls = timeit.Timer
+    _timer_cls: Type[InnerTimer] = timeit.Timer
 
     def __init__(
         self,
@@ -194,26 +204,27 @@ class Timer(object):
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
 
-        self._language = language
-        if language not in (PYTHON, CPP):
-            raise ValueError(f"Invalid language `{language}`. (Choices: {PYTHON}, {CPP})")
-
-        if language == CPP:
-            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
-            self._timer_cls = cast(
-                # CPPTimer does not inherit from timeit.Timer, however it implements
-                # `timeit` which is sufficient for our purposes.
-                Type[timeit.Timer],
-                CPPTimer
-            )
-            setup = ("// pass" if setup == "pass" else setup)
-
-        # We copy `globals` to prevent mutations from leaking, (for instance,
-        # `eval` adds the `__builtins__` key) and include `torch` if not
-        # specified as a convenience feature.
         globals = dict(globals or {})
-        globals.setdefault("torch", torch)
-        self._globals = globals
+        if language.lower() == PYTHON.lower():
+            self._language = PYTHON
+
+            # We copy `globals` to prevent mutations from leaking, (for instance,
+            # `eval` adds the `__builtins__` key) and include `torch` if not
+            # specified as a convenience feature.
+            globals.setdefault("torch", torch)
+            self._globals = globals
+
+        elif language.lower() == CPP.lower():
+            self._language = CPP
+            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
+            self._timer_cls = CPPTimer
+            setup = ("" if setup == "pass" else setup)
+
+        else:
+            raise ValueError(
+                f"Invalid language `{language}`.\n"
+                f"  Choices (case insensitive): {PYTHON}, {CPP}"
+            )
 
         # Convenience adjustment so that multi-line code snippets defined in
         # functions do not IndentationError inside timeit.Timer. The leading
@@ -227,9 +238,9 @@ class Timer(object):
         # Stripping this down to 'print("This is a stmt")' doesn't change
         # what gets executed, but it makes __repr__'s nicer.
         stmt = textwrap.dedent(stmt)
-        stmt = (stmt[1:] if stmt[0] == "\n" else stmt).rstrip()
+        stmt = (stmt[1:] if stmt and stmt[0] == "\n" else stmt).rstrip()
         setup = textwrap.dedent(setup)
-        setup = (setup[1:] if setup[0] == "\n" else setup).rstrip()
+        setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
 
         self._timer = self._timer_cls(
             stmt=stmt,

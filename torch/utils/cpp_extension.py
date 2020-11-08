@@ -23,6 +23,8 @@ from setuptools.command.build_ext import build_ext
 
 
 IS_WINDOWS = sys.platform == 'win32'
+LIB_EXT = 'pyd' if IS_WINDOWS else 'so'
+EXEC_EXT = 'exe' if IS_WINDOWS else 'o'
 
 def _find_cuda_home() -> Optional[str]:
     r'''Finds the CUDA install path.'''
@@ -1171,10 +1173,6 @@ def _jit_compile(name,
     if is_python_module and is_standalone:
         raise ValueError("`is_python_module` and `is_standalone` are mutually exclusive.")
 
-    if is_standalone and IS_WINDOWS:
-        # FIXME
-        raise NotImplementedError("`is_standalone` does not currently support Windows.")
-
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
@@ -1367,7 +1365,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         extra_ldflags.append('torch.lib')
         extra_ldflags.append(f'/LIBPATH:{lib_path}')
 
-        assert not is_standalone
         extra_ldflags.append('torch_python.lib')
         extra_ldflags.append(f'/LIBPATH:{python_lib_path}')
     else:
@@ -1586,8 +1583,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
 
 def _import_module_from_library(module_name, path, is_python_module, is_standalone):
     if is_standalone:
-        assert not IS_WINDOWS
-        return os.path.join(path, module_name + ".o")
+        return os.path.join(path, f"{module_name}.{EXEC_EXT}")
 
     # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
     file, path, description = imp.find_module(module_name, [path])
@@ -1713,7 +1709,7 @@ def _write_ninja_file_to_build_library(path,
     elif IS_WINDOWS:
         ldflags = _nt_quote_args(ldflags)
 
-    ext = 'pyd' if IS_WINDOWS else ('o' if is_standalone else 'so')
+    ext = EXEC_EXT if is_standalone else LIB_EXT
     library_target = f'{name}.{ext}'
 
     _write_ninja_file(

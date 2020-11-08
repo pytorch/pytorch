@@ -13,6 +13,11 @@ from types import ModuleType
 from typing import cast, List, Optional, Union
 import uuid
 
+try:
+    from typing import Protocol
+except ImportError:
+    from typing_extensions import Protocol
+
 import torch
 from torch.utils import cpp_extension
 
@@ -50,18 +55,18 @@ extra_include_paths.append(SOURCE_ROOT)
 
 # MyPy has no way of knowing the methods on a C module, so we must
 # define API classes which mirror the PyBind11 methods.
-class TimeitModuleType(ModuleType):
-    def timeit(self, number: int) -> float:
-        return -1
+class TimeitModuleType(Protocol):
+    def timeit(self, number: int) -> float: ...
 
 
-class CallgrindModuleType(ModuleType):
-    def _valgrind_supported_platform(self) -> bool:
-        return True
+class CallgrindModuleType(Protocol):
+    __file__: str
+    __name__: str
+    def _valgrind_supported_platform(self) -> bool: ...
 
 
-_COMPAT_CALLGRIND_BINDINGS: Optional[ModuleType] = None
-def get_compat_bindings() -> ModuleType:
+_COMPAT_CALLGRIND_BINDINGS: Optional[CallgrindModuleType] = None
+def get_compat_bindings() -> CallgrindModuleType:
     global _COMPAT_CALLGRIND_BINDINGS
     if _COMPAT_CALLGRIND_BINDINGS is None:
         _COMPAT_CALLGRIND_BINDINGS = cpp_extension.load(

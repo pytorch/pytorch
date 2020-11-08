@@ -457,10 +457,7 @@ class _ValgrindWrapper(object):
 
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
-            self._bindings_module = cast(
-                cpp_jit.CallgrindModuleType,
-                cpp_jit.get_compat_bindings()
-            )
+            self._bindings_module = cpp_jit.get_compat_bindings()
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
