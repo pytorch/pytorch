@@ -507,10 +507,13 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
   // Weights having a different shape from input is not supported yet. TO DO:
   // Add support for weights broadcastable to input
   bool has_weights = weights.defined();
-  if (has_weights)
+  Tensor flattened_weights;
+  if (has_weights) {
     TORCH_CHECK(
         weights.sizes() == self.sizes(),
-        "histogram only supports input and weights of the same shape");
+        "histogram only supports input and weights of the same shape"); 
+    flattened_weights = weights.flatten(0);
+  }
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histogram_cuda");
@@ -520,26 +523,26 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
         switch (scalar) {
           case ScalarType::Float:
             return _histogram_cuda_template_uniform_bins<scalar_t, float>(
-                self, nbins, weights, range, density);
+                self, nbins, flattened_weights, range, density);
           case ScalarType::Double:
             return _histogram_cuda_template_uniform_bins<scalar_t, double>(
-                self, nbins, weights, range, density);
+                self, nbins, flattened_weights, range, density);
           case ScalarType::Char:
             return _histogram_cuda_template_uniform_bins<scalar_t, int8_t>(
-                self, nbins, weights, range, density);
+                self, nbins, flattened_weights, range, density);
           case ScalarType::Byte:
             return _histogram_cuda_template_uniform_bins<scalar_t, uint8_t>(
-                self, nbins, weights, range, density);
+                self, nbins, flattened_weights, range, density);
           case ScalarType::Short:
             return _histogram_cuda_template_uniform_bins<scalar_t, int16_t>(
-                self, nbins, weights, range, density);
+                self, nbins, flattened_weights, range, density);
           case ScalarType::Int:
             return _histogram_cuda_template_uniform_bins<scalar_t, int32_t>(
-                self, nbins, weights, range, density);
+                self, nbins, flattened_weights, range, density);
           case ScalarType::Long:
           case ScalarType::Undefined:
             return _histogram_cuda_template_uniform_bins<scalar_t, int64_t>(
-                self, nbins, weights, range, density);
+                self, nbins, flattened_weights, range, density);
           default:
             TORCH_CHECK(
                 false, "Scalar type ", scalar, " not supported for weights");
