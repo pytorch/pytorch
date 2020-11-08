@@ -9751,18 +9751,15 @@ class TestNNDeviceType(NNTestCase):
                 x = torch.empty(2, 3, 4, 5, device=device, memory_format=memory_format)
                 x.copy_(inp)
                 x_trans = x.transpose(0, 2)
-                assert not x_trans.is_contiguous()
                 out = mod(x_trans)
                 _test_dropout_mean(x_trans, out)
 
                 x_trans = x.transpose(1, 0)
-                assert not x_trans.is_contiguous()
                 out = mod(x_trans)
                 _test_dropout_mean(x_trans, out)
 
                 x = torch.empty(2, 3, 4, 10, device=device, memory_format=memory_format)[..., ::2]
                 x.copy_(inp)
-                assert not x.is_contiguous()
                 out = mod(x)
                 _test_dropout_mean(x, out)
 
