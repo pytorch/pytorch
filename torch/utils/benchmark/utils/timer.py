@@ -38,9 +38,11 @@ class InnerTimer(Protocol):
         setup: str,
         timer: Callable[[], float],
         globals: Dict[str, Any]
-    ) -> None: ...
+    ) -> None:
+        ...
 
-    def timeit(self, number: int) -> float: ...
+    def timeit(self, number: int) -> float:
+        ...
 
 
 class CPPTimer:
@@ -79,7 +81,7 @@ class CPPTimer:
                     self._setup,
                     template=cpp_jit.CXX_TIMEIT_TEMPLATE,
                     is_standalone=False,
-            ))
+                ))
         return self._timeit_module.timeit(number)
 
 

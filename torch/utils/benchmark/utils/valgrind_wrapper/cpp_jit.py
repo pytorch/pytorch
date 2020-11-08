@@ -56,13 +56,15 @@ extra_include_paths.append(SOURCE_ROOT)
 # MyPy has no way of knowing the methods on a C module, so we must
 # define API classes which mirror the PyBind11 methods.
 class TimeitModuleType(Protocol):
-    def timeit(self, number: int) -> float: ...
+    def timeit(self, number: int) -> float:
+        ...
 
 
 class CallgrindModuleType(Protocol):
     __file__: str
     __name__: str
-    def _valgrind_supported_platform(self) -> bool: ...
+    def _valgrind_supported_platform(self) -> bool:
+        ...
 
 
 _COMPAT_CALLGRIND_BINDINGS: Optional[CallgrindModuleType] = None
