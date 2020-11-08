@@ -1262,7 +1262,8 @@ def _write_ninja_file_and_compile_objects(
         objects=objects,
         ldflags=None,
         library_target=None,
-        with_cuda=with_cuda)
+        with_cuda=with_cuda,
+        is_standalone=False)
     if verbose:
         print('Compiling objects...')
     _run_ninja_build(
