@@ -1,5 +1,6 @@
 import sys
 import io
+import gc
 import inspect
 import itertools
 import math
@@ -406,8 +407,8 @@ class AbstractTestCases:
             height = 5
             width = 5
             for device in torch.testing.get_all_device_types():
-                for dt1 in torch.testing.get_all_math_dtypes(device):
-                    for dt2 in torch.testing.get_all_math_dtypes(device):
+                for dt1 in torch.testing.get_all_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False):
+                    for dt2 in torch.testing.get_all_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False):
                         for contiguous in [True, False]:
                             x1 = get_tensor((height, width), dt1, device, contiguous)
                             x2 = get_tensor((height, width), dt2, device, contiguous)
@@ -515,7 +516,8 @@ class AbstractTestCases:
             self._test_dim_ops(
                 lambda t, d: t.mean(d),
                 lambda n, d: n.mean(d),
-                use_integral=False)
+                use_integral=False,
+                use_complex=True)
 
         @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
         def test_std_dim(self):
@@ -5971,10 +5973,13 @@ class TestTorchDeviceType(TestCase):
                     out = torch.zeros(1, dtype=torch.complex128)  # all casts to complex128 are safe
                     compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
-    @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bool)
     def test_diag(self, device, dtype):
-        x = torch.rand(100, 100, dtype=dtype, device=device)
+        if dtype is torch.bool:
+            x = torch.rand(100, 100, device=device) >= 0.5
+        else:
+            x = torch.rand(100, 100, dtype=dtype, device=device)
+
         res1 = torch.diag(x)
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.diag(x, out=res2)
@@ -7994,6 +7999,7 @@ class TestTorchDeviceType(TestCase):
         B = np.matmul(L_, L_.T.conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
+    @skipIfRocm  # This test has many dimensions, which is larger than the maximum dims supported by ROCm (16)
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
         template = torch.rand(3, 5, device=device)
@@ -9651,7 +9657,7 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
-    @slowTest
+    @onlyCUDA
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -9660,6 +9666,13 @@ class TestTorchDeviceType(TestCase):
         result = input_.sum(dim=0)
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
+        gc.collect()
+        torch.cuda.empty_cache()
+        a = torch.randn(8, 1, 128, 1024, 1024, device=device, dtype=torch.half)
+        self.assertEqual((a.sum(1) - a.squeeze()).abs().max(), 0)
+        gc.collect()
+        torch.cuda.empty_cache()
+        self.assertEqual((a.sum(1, keepdim=True) - a).abs().max(), 0)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
@@ -19165,7 +19178,11 @@ else:
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            if (inp_dtype, out_dtype) == (torch.uint8, torch.float16):
+                # 25504.0 vs 25536.0
+                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=0, rtol=0.002)
+            else:
+                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
@@ -20797,9 +20814,12 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('minimum', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
-    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
-    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5,
+        torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes(), _cpu_types, False),
+    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5,
+        torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes(), _cpu_types, False),
+    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2,
+        torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes(), _cpu_types, False),
     # Double here because the CPU result will be wrong otherwise
     ('mean', '64bit_indexing', _giant_1d, lambda t, d: [],
         1e-3, 1e-5, 1e-5, [torch.double], _cpu_types, False, [slowTest]),
