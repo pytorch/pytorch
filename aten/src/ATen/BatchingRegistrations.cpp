@@ -208,6 +208,27 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor squeeze_batching_rule(const Tensor& self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_sizes = self_physical.tensor().sizes();
+
+  // Don't squeeze the batch dims!
+  VmapDimVector squeezed_sizes;
+  int64_t num_batch_dims = self_physical.numBatchDims();
+  squeezed_sizes.insert(
+      squeezed_sizes.end(),
+      physical_sizes.begin(),
+      physical_sizes.begin() + num_batch_dims);
+  for (auto it = physical_sizes.begin() + num_batch_dims; it != physical_sizes.end(); ++it) {
+    if (*it != 1) {
+      squeezed_sizes.push_back(*it);
+    }
+  }
+
+  auto result = self_physical.tensor().view(squeezed_sizes);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -644,6 +665,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
+  m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("transpose.int", transpose_int_batching_rule);

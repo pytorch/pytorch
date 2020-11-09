@@ -1547,6 +1547,18 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
 
+    def test_squeeze(self):
+        test = self._vmap_view_test
+        op = torch.squeeze
+        B0, B1 = 1, 11
+        test(op, (torch.rand(B0),))
+        test(op, (torch.rand(B0, 3, 5),))
+        test(op, (torch.rand(B0, 1, 5),))
+        test(op, (torch.rand(B0, 0, 1, 5, 1),))
+        test(op, (torch.rand(B0, 1, 1, 1, 1),))
+        test(vmap(op), (torch.rand(B0, B1, 1),))
+        test(vmap(op), (torch.rand(B1, 1, B0),), in_dims=2)
+
     def test_sum_dim(self):
         test = self._vmap_test
         B0, B1 = 5, 7
