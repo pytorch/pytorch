@@ -71,18 +71,18 @@ def _subprocess_main(seed=0, num_threads=1, sub_label="N/A", result_file=None, e
     torch.manual_seed(seed)
     results = []
     for n in [4, 8, 16, 32, 64, 128, 256, 512, 1024, 7, 96, 150, 225]:
-        dtypes = (("S", torch.float32), ("D", torch.float64))
+        dtypes = (("Single", torch.float32), ("Double", torch.float64))
         shapes = (
             # Square MatMul
-            ((n, n), (n, n), "(n x n) x (n x n)", "GEMM"),
+            ((n, n), (n, n), "(n x n) x (n x n)", "Matrix-Matrix Product"),
 
             # Matrix-Vector product
-            ((n, n), (n, 1), "(n x n) x (n x 1)", "GEMV"),
+            ((n, n), (n, 1), "(n x n) x (n x 1)", "Matrix-Vector Product"),
         )
-        for (dtype_prefix, dtype), (x_shape, y_shape, shape_str, blas_type) in it.product(dtypes, shapes):
+        for (dtype_name, dtype), (x_shape, y_shape, shape_str, blas_type) in it.product(dtypes, shapes):
             t = Timer(
                 stmt="torch.mm(x, y)",
-                label=f"torch.mm {shape_str} {dtype_prefix}{blas_type}",
+                label=f"torch.mm {shape_str} {blas_type} ({dtype_name})",
                 sub_label=sub_label,
                 description=f"n = {n}",
                 env=os.path.split(env or "")[1] or None,
@@ -202,6 +202,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # These flags are for subprocess control, not controlling the main loop.
     parser = argparse.ArgumentParser()
     parser.add_argument("--DETAIL_in_subprocess", action="store_true")
     parser.add_argument("--DETAIL_in_compare", action="store_true")

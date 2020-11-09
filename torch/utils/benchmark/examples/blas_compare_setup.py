@@ -37,7 +37,10 @@ SubEnvSpec = collections.namedtuple(
         "generic_installs",
         "special_installs",
         "environment_variables",
+
+        # Validate install.
         "expected_blas_symbols",
+        "expected_mkl_version",
     ))
 
 
@@ -47,6 +50,7 @@ SUB_ENVS = {
         special_installs=("intel", ("mkl=2020.3", "mkl-include=2020.3")),
         environment_variables=("BLAS=MKL",) + GENERIC_ENV_VARS,
         expected_blas_symbols=("mkl_blas_sgemm",),
+        expected_mkl_version="2020.0.3",
     ),
 
     MKL_2020_0: SubEnvSpec(
@@ -54,6 +58,7 @@ SUB_ENVS = {
         special_installs=("intel", ("mkl=2020.0", "mkl-include=2020.0")),
         environment_variables=("BLAS=MKL",) + GENERIC_ENV_VARS,
         expected_blas_symbols=("mkl_blas_sgemm",),
+        expected_mkl_version="2020.0.0",
     ),
 
     OPEN_BLAS: SubEnvSpec(
@@ -61,6 +66,7 @@ SUB_ENVS = {
         special_installs=(),
         environment_variables=("BLAS=OpenBLAS",) + GENERIC_ENV_VARS,
         expected_blas_symbols=("exec_blas",),
+        expected_mkl_version=None,
     ),
 
     # EIGEN: SubEnvSpec(
@@ -204,6 +210,9 @@ def main():
 
         for s in env_spec.expected_blas_symbols:
             assert s in check_run_stdout
+
+        if env_spec.expected_mkl_version is not None:
+            assert f"- Intel(R) Math Kernel Library Version {env_spec.expected_mkl_version}" in check_run_stdout
 
         print(f"Build complete: {env_name}")
 
