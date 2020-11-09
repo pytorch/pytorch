@@ -216,6 +216,14 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
 }
 
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
+  // PyTorch has a special case where scalar_tensor.transpose(0, 0) works and
+  // returns the scalar tensor. If the following happens:
+  // >>> x = torch.randn(B0)  # the per-examples are all scalars
+  // >>> vmap(lambda x: x.transpose(0, 0), x)
+  // then we replicate this behavior
+  if (/*logical*/self.dim() == 0 && dim0 == 0 && dim1 == 0) {
+    return self;
+  }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim0_physical = self_physical.getPhysicalDim(dim0);
   auto dim1_physical = self_physical.getPhysicalDim(dim1);

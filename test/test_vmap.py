@@ -1673,6 +1673,24 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    def test_transpose(self):
+        op = torch.transpose
+        test = self._vmap_view_test
+
+        B0, B1, B2 = 7, 11, 13
+        test(lambda x: op(x, 0, 1), (torch.rand(B0, 2, 5),))
+        test(lambda x: op(x, -1, -2), (torch.rand(B0, 2, 5),))
+        test(lambda x: op(x, 3, 1), (torch.rand(B0, 2, 5, 4, 6),))
+        test(lambda x: op(x, 1, 0), (torch.rand(2, B0, 5),), in_dims=1)
+        test(vmap(lambda x: op(x, 0, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
+        test(vmap(vmap(lambda x: op(x, 0, 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 5, B2),), in_dims=2)
+
+        # Special case: scalar tensor
+        x = torch.rand(B0)
+        result = vmap(lambda x: op(x, 0, 0))(x)
+        self.assertTrue(result is x)
+
     def test_t(self):
         op = torch.t
         test = self._vmap_view_test
