@@ -9728,40 +9728,34 @@ class TestNNDeviceType(NNTestCase):
         # Reference: https://github.com/pytorch/pytorch/issues/47176
         close_to_zero_p = 0.0000000001  # Should be almost zero but not zero, as for p=0 different path is taken
         for p in [0, close_to_zero_p]:
-            inp = torch.arange(2 * 3 * 3 * 3).reshape(2, 3, 3, 3)
+            inp = torch.ones(2, 3, 3, 3, device=device)
             inp_discontiguous = torch.empty(2, 3, 3, 6, device=device, memory_format=memory_format)[..., ::2]
             inp_discontiguous.copy_(inp)
             mod = cls(p=p)
             out = mod(inp_discontiguous)
+            self.assertEqual(out.layout, inp_discontiguous.layout)
             self.assertEqual(inp_discontiguous, out)
 
     def _test_dropout_mean_check(self, cls, device):
         def _test_dropout_mean(inp, out):
+            self.assertEqual(inp.layout, out.layout)
             self.assertNotEqual(inp, out)
-            self.assertEqual(inp.mean(), out.mean(), rtol=3, atol=1)
+            self.assertEqual(inp.mean(), out.mean(), rtol=0.5, atol=0.5)
 
-        for memory_format in [torch.contiguous_format, torch.channels_last]:
-            for p in [0.3, 0.5, 0.6, 0.9]:
-                mod = cls(p=p)
-                inp = torch.arange(2 * 3 * 4 * 5, device=device).reshape(2, 3, 4, 5)
-                inp_float = inp.float()
-                out = mod(inp_float)
-                _test_dropout_mean(inp_float, out)
+        def invert_perm(p):
+            d = {x: i for i, x in enumerate(p)}
+            return (d[0], d[1], d[2], d[3])
 
-                x = torch.empty(2, 3, 4, 5, device=device, memory_format=memory_format)
-                x.copy_(inp)
-                x_trans = x.transpose(0, 2)
-                out = mod(x_trans)
-                _test_dropout_mean(x_trans, out)
-
-                x_trans = x.transpose(1, 0)
-                out = mod(x_trans)
-                _test_dropout_mean(x_trans, out)
-
-                x = torch.empty(2, 3, 4, 10, device=device, memory_format=memory_format)[..., ::2]
-                x.copy_(inp)
-                out = mod(x)
-                _test_dropout_mean(x, out)
+        inp = torch.ones(2, 3, 4, 5, device=device)
+        shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        for perm in itertools.permutations((0, 1, 2, 3), r=4):
+            for shift in shifts:
+                for p in [0.3, 0.5, 0.7]:
+                    mod = cls(p=p)
+                    permuted_inp = inp.permute(perm).contiguous().permute(invert_perm(perm))
+                    permuted_inp = permuted_inp[shift[0]:, shift[1]:, :, :]
+                    out = mod(permuted_inp)
+                    _test_dropout_mean(permuted_inp, out)
 
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
