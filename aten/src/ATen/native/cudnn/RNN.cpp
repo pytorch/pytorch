@@ -1412,7 +1412,14 @@ Tensor try_get_weight_buf(
       AT_ASSERT(num_parameters % 3 == 0);
       AT_ASSERT(num_ptrs == num_parameters * 5 / 3);
       // TODO (igor): this one is not implemented at the moment, since no bias is not going to work anyway
+      // for (int64_t param_i = 0, ptr_i = 0;
+      //     ptr_i < num_ptrs;
+      //     ptr_i += (has_biases ? 3 : 5), param_i += 2) {
+      //   if (expected_data_ptrs[ptr_i] != parameters[param_i].data_ptr()) return {};
+      //   if (expected_data_ptrs[ptr_i + 1] != parameters[param_i + 1].data_ptr()) return {};
+      // }
       return {};
+
     }
   } else {
     AT_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
@@ -1435,9 +1442,12 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
-  int64_t hidden_size = cx.size(2);
+  int64_t hidden_size = hx.size(2);
+  // For LSTM models with projections hidden size could be different
+  if (cx.defined()) {
+    int64_t hidden_size = cx.size(2);
+  }
   int64_t proj_size = hx.size(2);
-
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
   // in weight_buf's slot.  Do we want try_get_weight_buf to return a c10::optional<Tensor>
   // instead of a defined or undefined Tensor?
@@ -1466,9 +1476,12 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
-  int64_t hidden_size = cx.size(2);
+  int64_t hidden_size = hx.size(2);
+  // For LSTM models with projections hidden size could be different
+  if (cx.defined()) {
+    int64_t hidden_size = cx.size(2);
+  }
   int64_t proj_size = hx.size(2);
-
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, proj_size, num_layers, bidirectional);
 
