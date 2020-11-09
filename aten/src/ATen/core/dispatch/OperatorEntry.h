@@ -158,15 +158,14 @@ public:
   template<class FuncType>
   void assertSignatureIsCorrect() {
     TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == cpp_signature_->signature),
-        "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
-        CppSignature::make<FuncType>().name(),
-        " but the operator was registered with ",
-        cpp_signature_->signature.name(),
-        " (schema: ",
-        (schema_.has_value() ? schema_->debug : "unknown debug info"),
-        ", kernel: ",
-        cpp_signature_->debug,
-        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
+        "\nTried to access or call an operator with a wrong signature.\n",
+        "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+        "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
+        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  accessed/called as: ", CppSignature::make<FuncType>().name(), "\n",
+        "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
+        "Please make sure that the function signature matches the signature in the operator registration call."
     );
   }
 
@@ -241,6 +240,7 @@ private:
   struct CppSignatureWithDebug {
     CppSignature signature;
     std::string debug;
+    c10::optional<DispatchKey> dispatch_key;
   };
   c10::optional<CppSignatureWithDebug> cpp_signature_;
 

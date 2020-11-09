@@ -36,9 +36,13 @@ namespace {
     c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
-        "In registration for ", toString(name), ": expected schema of operator to be \"", toString(from_def), "\" (", from_def_debug, "), ",
-        "but got inferred schema \"", toString(inferred), "\" (", inferred_debug, "). ",
-        *schema_difference);
+        "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
+        "  operator: ", toString(name), "\n",
+        "  expected schema: ", toString(from_def), "\n",
+        "    ", from_def_debug, "\n",
+        "  inferred schema: ", toString(inferred), "\n",
+        "    ", inferred_debug, "\n",
+        "  reason: ", *schema_difference);
     }
   }
 } // anonymous namespace
@@ -84,14 +88,18 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   if (cpp_signature.has_value()) {
     if (cpp_signature_.has_value()) {
       TORCH_INTERNAL_ASSERT(*cpp_signature == cpp_signature_->signature,
-        "Tried to register a kernel (", debug, ") for operator ", name_," (",
-        (this->schema_.has_value() ? this->schema_->debug : "no debug info"),
-        ") for dispatch key ", toString(dispatch_key), ", but the C++ function signature ",
-        cpp_signature->name(), " mismatched with a previous kernel (", cpp_signature_->debug,
-        ") that had the signature ", cpp_signature_->signature.name()
+        "\nMismatch in kernel C++ signatures\n",
+        "  operator: ", (this->schema_.has_value() ? toString(this->schema_->schema) : toString(name_)), "\n",
+        "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+        "  kernel 1: ", cpp_signature_->signature.name(), "\n",
+        "    dispatch key: ", toString(cpp_signature_->dispatch_key), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  kernel 2: ", cpp_signature->name(), "\n",
+        "    dispatch key: ", toString(dispatch_key), "\n",
+        "    ", debug, "\n"
       );
     } else {
-      cpp_signature_ = CppSignatureWithDebug { *cpp_signature, debug };
+      cpp_signature_ = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
     }
   }
 
@@ -105,12 +113,13 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::Math];
 
   if (k.size() > 0) {
-    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " (",
-              (this->schema_.has_value() ? this->schema_->debug : "no debug info"),
-              ") for dispatch key ", toString(dispatch_key),
-              " that overwrote a previously registered kernel (",
-              (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"),
-              ") with the same dispatch key for the same operator.");
+    TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
+               "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+               "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+               "  dispatch key: ", toString(dispatch_key), "\n",
+               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"), "\n",
+               "       new kernel: ", debug
+    );
   }
 
   if (manuallyBoxedKernel_.has_value()) {
