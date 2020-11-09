@@ -50,7 +50,7 @@ namespace at { namespace native {
 // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 template <typename scalar_t>
-static __ubsan_ignore_undefined__  // UBSAN gives false positives on negative pointer indexing
+static __ubsan_ignore_undefined__  // UBSAN gives false positives on using negative indexes with a pointer
 void _fft_fill_with_conjugate_symmetry_slice(
     Range range, at::ArrayRef<bool> is_mirrored_dim, IntArrayRef signal_half_sizes,
     IntArrayRef in_strides, const scalar_t * in_ptr,
