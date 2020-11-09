@@ -36,7 +36,7 @@ pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
-    retry conda install ${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
+    retry conda install \${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
   fi
   retry conda install -yq future numpy protobuf six
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
