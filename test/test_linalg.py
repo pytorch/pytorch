@@ -780,7 +780,6 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.double, torch.float)
     def test_eig_basic(self, device, dtype):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
