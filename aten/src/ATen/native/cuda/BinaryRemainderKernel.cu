@@ -3,11 +3,17 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/cuda/Math.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
 namespace at { namespace native {
+
+template<typename T>
+__host__ __device__ static inline c10::complex<T> floor_wrapper(c10::complex<T> v) {
+  return c10::complex<T>(std::floor(v.real()), std::floor(v.imag()));
+}
 
 void remainder_kernel_cuda(TensorIterator& iter) {
   if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
@@ -19,6 +25,18 @@ void remainder_kernel_cuda(TensorIterator& iter) {
         }
         return r;
       });
+    });
+  }
+  else if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "remainder_cuda", [&]() {
+      gpu_kernel_with_scalars(iter,
+        []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          scalar_t mod = a - floor_wrapper (a / b) * b;
+          const scalar_t zero = scalar_t(0); 
+          if ((mod != zero) && ((std::abs(b) < std::abs(zero)) != (std::abs(mod) < std::abs(zero)))) 
+            mod += b;
+          return mod;
+        });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "remainder_cuda", [&]() {
