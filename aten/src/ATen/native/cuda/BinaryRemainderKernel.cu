@@ -33,7 +33,7 @@ void remainder_kernel_cuda(TensorIterator& iter) {
         []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
           scalar_t mod = a - floor_wrapper (a / b) * b;
           const scalar_t zero = scalar_t(0); 
-          if ((mod != zero) && ((std::abs(b) < std::abs(zero)) != (std::abs(mod) < std::abs(zero)))) 
+          if ((mod != zero) && ((std::real(b) < std::real(zero)) != (std::real(mod) < std::real(zero)))) 
             mod += b;
           return mod;
         });
