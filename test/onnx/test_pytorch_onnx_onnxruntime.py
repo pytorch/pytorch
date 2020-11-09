@@ -1471,7 +1471,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CopyModel(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Missing input size (with ellipsis indexing)
+    # TODO: Limited scripting support with ellipsis indexing.
+    #       Due to dependency on input tensor rank being known.
     def test_copy_ellipsis_tracing(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, update):
@@ -1508,7 +1509,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Rand(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # symbolic update for randn
     def test_random_dynamic_size(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
@@ -4600,7 +4600,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()   # symbolic update needed for unbind: ONNX export of unbind with dynamic number of outputs
     def test_where_condition(self):
         class Model1(torch.nn.Module):
             def forward(self, input):
