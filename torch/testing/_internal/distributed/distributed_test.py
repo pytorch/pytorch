@@ -1378,6 +1378,7 @@ class DistributedTest:
             "Only Gloo and NCCL backends will have CUDA allReduce tested",
         )
         @skip_if_no_gpu
+        @skip_if_rocm
         def test_all_reduce_sum_cuda_async(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
