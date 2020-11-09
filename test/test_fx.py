@@ -1099,6 +1099,17 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(Foo())
         assert(all('constant' not in node.target for node in traced.graph.nodes))
 
+    def test_string_literal_return(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self):
+                return "foo"
+
+        m = M()
+        self.checkGraphModule(m, ())
+
 
 if __name__ == '__main__':
     run_tests()
