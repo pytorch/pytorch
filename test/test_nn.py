@@ -598,6 +598,7 @@ class TestNN(NNTestCase):
     def test_hook_inplace(self):
         class MyModule(nn.Module):
             def forward(self, inp, do_inplace):
+                self.inp = inp
                 if do_inplace:
                     inp += 1
                 return inp.clone()
@@ -616,22 +617,26 @@ class TestNN(NNTestCase):
         self.assertEqual(hook_called[0], 1)
 
         # Input inplace error should throw an error (warning during deprecation cycle)
-        with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
-                                   "and is being modified inplace."):
-            mod(inp, True)
+        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
+                                   "a view and is being modified inplace."):
+            mod(inp.clone(), True)
 
-        # Input inplace error should throw an error
-        with self.assertRaisesRegex(RuntimeError, "leaf variable has been moved into the graph interior"):
-            out = mod(inp, False)
-            inp += 1
-            out.sum().backward()
+        # Input inplace error should throw an error if we try to re-use the view after they have
+        # been modified (warning during deprecation cycle)
+        local_inp = inp.clone()
+        out = mod(local_inp, False)
+        local_inp[0] *= 1
+        with self.assertWarnsRegex(UserWarning, "Output 0 of BackwardHookFunctionBackward is "
+                                   "a view and its base or another view"):
+            # Any operation involving the view will fail here
+            mod.inp + 2
 
         # Output inplace error should throw an error (warning during deprecation cycle)
         with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
                                    "and is being modified inplace."):
             # This error won't happen once the warning above is a proper error
-            with self.assertRaisesRegex(RuntimeError, "Module backward hook for grad input is called "
-                                        "before the grad output one"):
+            with self.assertRaisesRegex(RuntimeError, "Module backward hook for grad_input is "
+                                        "called before the grad_output one."):
                 out = mod(inp, False)
                 out += 1
                 out.sum().backward()
