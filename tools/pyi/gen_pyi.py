@@ -668,9 +668,9 @@ def gen_pyi(declarations_path, out):
     # TODO: These are deprecated, maybe we shouldn't type hint them
     legacy_storage_base_hints = []
     dt = ('Double', 'Float', 'Long', 'Int',
-              'Short', 'Char', 'Byte', 'Bool',
-              'Half', 'BFloat16', 'ComplexDouble',
-              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
+          'Short', 'Char', 'Byte', 'Bool',
+          'Half', 'BFloat16', 'ComplexDouble',
+          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
     for c in dt:
         legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
     for c in dt:
