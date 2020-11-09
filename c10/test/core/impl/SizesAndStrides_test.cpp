@@ -11,19 +11,19 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
 
   int idx = 0;
   for (auto x: sizes) {
-    EXPECT_EQ(sz.size_at_unchecked(idx), x);
-    EXPECT_EQ(sz.size_at(idx), x);
-    EXPECT_EQ(sz.sizes_data()[idx], x);
-    EXPECT_EQ(*(sz.sizes_begin() + idx), x);
+    EXPECT_EQ(sz.size_at_unchecked(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.size_at(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.sizes_data()[idx], x) << "index: " << idx;
+    EXPECT_EQ(*(sz.sizes_begin() + idx), x) << "index: " << idx;
     idx++;
   }
 
   idx = 0;
   for (auto x: strides) {
-    EXPECT_EQ(sz.stride_at_unchecked(idx), x);
-    EXPECT_EQ(sz.stride_at(idx), x);
-    EXPECT_EQ(sz.strides_data()[idx], x);
-    EXPECT_EQ(*(sz.strides_begin() + idx), x);
+    EXPECT_EQ(sz.stride_at_unchecked(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.stride_at(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.strides_data()[idx], x) << "index: " << idx;
+    EXPECT_EQ(*(sz.strides_begin() + idx), x) << "index: " << idx;
 
     idx++;
   }
@@ -40,10 +40,10 @@ TEST(SizesAndStridesTest, Resize) {
 
   sz.resize(2);
 
-  // Small to small.
+  // Small to small growing.
   checkData(sz, {0, 0}, {1, 0});
 
-  // Small to small, again.
+  // Small to small growing, again.
   sz.resize(5);
   checkData(sz, {0, 0, 0, 0, 0}, {1, 0, 0, 0, 0});
 
@@ -54,20 +54,37 @@ TEST(SizesAndStridesTest, Resize) {
 
   checkData(sz, {1, 2, 3, 4, 5}, {2, 4, 6, 8, 10});
 
+  // Small to small, shrinking.
+  sz.resize(4);
+  checkData(sz, {1, 2, 3, 4}, {2, 4, 6, 8});
+
+  // Small to small with no size change.
+  sz.resize(4);
+  checkData(sz, {1, 2, 3, 4}, {2, 4, 6, 8});
+
   // Small to big.
   sz.resize(6);
 
-  checkData(sz, {1, 2, 3, 4, 5, 0}, {2, 4, 6, 8, 10, 0});
+  checkData(sz, {1, 2, 3, 4, 0, 0}, {2, 4, 6, 8, 0, 0});
 
   sz.size_at_unchecked(5) = 6;
   sz.stride_at_unchecked(5) = 12;
 
-  checkData(sz, {1, 2, 3, 4, 5, 6}, {2, 4, 6, 8, 10, 12});
+  checkData(sz, {1, 2, 3, 4, 0, 6}, {2, 4, 6, 8, 0, 12});
 
-  // Big to big.
+  // Big to big, growing.
   sz.resize(7);
 
-  checkData(sz, {1, 2, 3, 4, 5, 6, 0}, {2, 4, 6, 8, 10, 12, 0});
+  checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
+
+  // Big to big with no size change.
+  sz.resize(7);
+
+  checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
+
+  // Big to big, shrinking.
+  sz.resize(6);
+  checkData(sz, {1, 2, 3, 4, 0, 6}, {2, 4, 6, 8, 0, 12});
 
   // Finally, big to small.
 
@@ -79,7 +96,7 @@ TEST(SizesAndStridesTest, Resize) {
     sz.stride_at_unchecked(ii) = 2 * (ii - 1);
   }
 
-  checkData(sz, {-1, 0, 1, 2, 3, 4, 5}, {-2, 0, 2, 4, 6, 8, 10});
+  checkData(sz, {-1, 0, 1, 2, 3, 4}, {-2, 0, 2, 4, 6, 8});
 
   sz.resize(5);
   checkData(sz, {-1, 0, 1, 2, 3}, {-2, 0, 2, 4, 6});
@@ -155,6 +172,24 @@ static SizesAndStrides makeBig(int offset = 0) {
   return big;
 }
 
+static void checkSmall(const SizesAndStrides& sm, int offset = 0) {
+  std::vector<int64_t> sizes(3), strides(3);
+  for (int ii = 0; ii < 3; ++ii) {
+    sizes[ii] = ii + 1 + offset;
+    strides[ii] = 2 * (ii + 1 + offset);
+  }
+  checkData(sm, sizes, strides);
+}
+
+static void checkBig(const SizesAndStrides& big, int offset = 0) {
+  std::vector<int64_t> sizes(8), strides(8);
+  for (int ii = 0; ii < 8; ++ii) {
+    sizes[ii] = ii - 1 + offset;
+    strides[ii] = 2 * (ii - 1 + offset);
+  }
+  checkData(big, sizes, strides);
+}
+
 TEST(SizesAndStridesTest, MoveConstructor) {
   SizesAndStrides empty;
 
@@ -165,17 +200,17 @@ TEST(SizesAndStridesTest, MoveConstructor) {
   checkData(movedEmpty, {0}, {1});
 
   SizesAndStrides small = makeSmall();
-  checkData(small, {1, 2, 3}, {2, 4, 6});
+  checkSmall(small);
 
   SizesAndStrides movedSmall(std::move(small));
-  checkData(movedSmall, {1, 2, 3}, {2, 4, 6});
+  checkSmall(movedSmall);
   EXPECT_EQ(small.size(), 0);
 
   SizesAndStrides big = makeBig();
-  checkData(big, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkBig(big);
 
   SizesAndStrides movedBig(std::move(big));
-  checkData(movedBig, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkBig(movedBig);
   EXPECT_EQ(big.size(), 0);
 }
 
@@ -190,43 +225,43 @@ TEST(SizesAndStridesTest, CopyConstructor) {
   checkData(copiedEmpty, {0}, {1});
 
   SizesAndStrides small = makeSmall();
-  checkData(small, {1, 2, 3}, {2, 4, 6});
+  checkSmall(small);
 
   SizesAndStrides copiedSmall(small);
-  checkData(copiedSmall, {1, 2, 3}, {2, 4, 6});
-  checkData(small, {1, 2, 3}, {2, 4, 6});
+  checkSmall(copiedSmall);
+  checkSmall(small);
 
   SizesAndStrides big = makeBig();
-  checkData(big, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkBig(big);
 
   SizesAndStrides copiedBig(big);
-  checkData(big, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
-  checkData(copiedBig, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkBig(big);
+  checkBig(copiedBig);
 }
 
 TEST(SizesAndStridesTest, CopyAssignmentSmallToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides smallCopyFrom = makeSmall(1);
 
-  checkData(smallTarget, {1, 2, 3}, {2, 4, 6});
-  checkData(smallCopyFrom, {2, 3, 4}, {4, 6, 8});
+  checkSmall(smallTarget);
+  checkSmall(smallCopyFrom, 1);
 
   smallTarget = smallCopyFrom;
 
-  checkData(smallCopyFrom, {2, 3, 4}, {4, 6, 8});
-  checkData(smallTarget, {2, 3, 4}, {4, 6, 8});
+  checkSmall(smallTarget, 1);
+  checkSmall(smallCopyFrom, 1);
 }
 
 TEST(SizesAndStridesTest, MoveAssignmentSmallToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides smallMoveFrom = makeSmall(1);
 
-  checkData(smallTarget, {1, 2, 3}, {2, 4, 6});
-  checkData(smallMoveFrom, {2, 3, 4}, {4, 6, 8});
+  checkSmall(smallTarget);
+  checkSmall(smallMoveFrom, 1);
 
   smallTarget = std::move(smallMoveFrom);
 
-  checkData(smallTarget, {2, 3, 4}, {4, 6, 8});
+  checkSmall(smallTarget, 1);
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
@@ -234,25 +269,25 @@ TEST(SizesAndStridesTest, CopyAssignmentSmallToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides smallCopyFrom = makeSmall();
 
-  checkData(bigTarget, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
-  checkData(smallCopyFrom, {1, 2, 3}, {2, 4, 6});
+  checkBig(bigTarget);
+  checkSmall(smallCopyFrom);
 
   bigTarget = smallCopyFrom;
 
-  checkData(bigTarget, {1, 2, 3}, {2, 4, 6});
-  checkData(smallCopyFrom, {1, 2, 3}, {2, 4, 6});
+  checkSmall(bigTarget);
+  checkSmall(smallCopyFrom);
 }
 
 TEST(SizesAndStridesTest, MoveAssignmentSmallToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides smallMoveFrom = makeSmall();
 
-  checkData(bigTarget, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
-  checkData(smallMoveFrom, {1, 2, 3}, {2, 4, 6});
+  checkBig(bigTarget);
+  checkSmall(smallMoveFrom);
 
   bigTarget = std::move(smallMoveFrom);
 
-  checkData(bigTarget, {1, 2, 3}, {2, 4, 6});
+  checkSmall(bigTarget);
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
@@ -260,25 +295,25 @@ TEST(SizesAndStridesTest, CopyAssignmentBigToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides bigCopyFrom = makeBig(1);
 
-  checkData(bigTarget, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
-  checkData(bigCopyFrom, {0, 1, 2, 3, 4, 5, 6, 7}, {0, 2, 4, 6, 8, 10, 12, 14});
+  checkBig(bigTarget);
+  checkBig(bigCopyFrom, 1);
 
   bigTarget = bigCopyFrom;
 
-  checkData(bigTarget, {0, 1, 2, 3, 4, 5, 6, 7}, {0, 2, 4, 6, 8, 10, 12, 14});
-  checkData(bigCopyFrom, {0, 1, 2, 3, 4, 5, 6, 7}, {0, 2, 4, 6, 8, 10, 12, 14});
+  checkBig(bigTarget, 1);
+  checkBig(bigCopyFrom, 1);
 }
 
 TEST(SizesAndStridesTest, MoveAssignmentBigToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides bigMoveFrom = makeBig(1);
 
-  checkData(bigTarget, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
-  checkData(bigMoveFrom, {0, 1, 2, 3, 4, 5, 6, 7}, {0, 2, 4, 6, 8, 10, 12, 14});
+  checkBig(bigTarget);
+  checkBig(bigMoveFrom, 1);
 
   bigTarget = std::move(bigMoveFrom);
 
-  checkData(bigTarget, {0, 1, 2, 3, 4, 5, 6, 7}, {0, 2, 4, 6, 8, 10, 12, 14});
+  checkBig(bigTarget, 1);
   EXPECT_EQ(bigMoveFrom.size(), 0);
 }
 
@@ -286,24 +321,57 @@ TEST(SizesAndStridesTest, CopyAssignmentBigToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides bigCopyFrom = makeBig();
 
-  checkData(smallTarget, {1, 2, 3}, {2, 4, 6});
-  checkData(bigCopyFrom, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkSmall(smallTarget);
+  checkBig(bigCopyFrom);
 
   smallTarget = bigCopyFrom;
 
-  checkData(smallTarget, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
-  checkData(bigCopyFrom, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkBig(smallTarget);
+  checkBig(bigCopyFrom);
 }
 
 TEST(SizesAndStridesTest, MoveAssignmentBigToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides bigMoveFrom = makeBig();
 
-  checkData(smallTarget, {1, 2, 3}, {2, 4, 6});
-  checkData(bigMoveFrom, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkSmall(smallTarget);
+  checkBig(bigMoveFrom);
 
   smallTarget = std::move(bigMoveFrom);
 
-  checkData(smallTarget, {-1, 0, 1, 2, 3, 4, 5, 6}, {-2, 0, 2, 4, 6, 8, 10, 12});
+  checkBig(smallTarget);
   EXPECT_EQ(bigMoveFrom.size(), 0);
+}
+
+TEST(SizesAndStridesTest, CopyAssignmentSelf) {
+  SizesAndStrides small = makeSmall();
+  SizesAndStrides big = makeBig();
+
+  checkSmall(small);
+  checkBig(big);
+
+  small = small;
+  checkSmall(small);
+
+  big = big;
+  checkBig(big);
+}
+
+// Avoid failures due to -Wall -Wself-move.
+static void selfMove(SizesAndStrides& x, SizesAndStrides& y) {
+  x = std::move(y);
+}
+
+TEST(SizesAndStridesTest, MoveAssignmentSelf) {
+  SizesAndStrides small = makeSmall();
+  SizesAndStrides big = makeBig();
+
+  checkSmall(small);
+  checkBig(big);
+
+  selfMove(small, small);
+  checkSmall(small);
+
+  selfMove(big, big);
+  checkBig(big);
 }
