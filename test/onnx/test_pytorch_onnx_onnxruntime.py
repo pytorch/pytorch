@@ -1471,7 +1471,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CopyModel(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Missing input size (with ellipsis indexing)
+    # TODO: Limited scripting support with ellipsis indexing.
+    #       Due to dependency on input tensor rank being known.
     def test_copy_ellipsis_tracing(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, update):
