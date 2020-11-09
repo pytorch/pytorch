@@ -54,6 +54,9 @@ static IValue Table(
 }
 
 std::string getModulePath(Node* node, const std::string& root_scope_string) {
+  constexpr size_t kFunction = 0;
+  constexpr size_t kModuleInstanceInfo = 2;
+
   if (!node->callstack()) {
     return root_scope_string + ".forward";
   } else {
@@ -62,8 +65,8 @@ std::string getModulePath(Node* node, const std::string& root_scope_string) {
     const auto& vec = callstack_ptr->vec();
 
     for (const auto& element : vec) {
-      const auto& tup = element;
-      const auto& opt_module_instance_info = std::get<2>(tup);
+      const auto& opt_module_instance_info =
+          std::get<kModuleInstanceInfo>(element);
       if (opt_module_instance_info.has_value()) {
         const auto& module_instance_info = opt_module_instance_info.value();
         if (module_instance_info.class_type()) {
@@ -77,7 +80,7 @@ std::string getModulePath(Node* node, const std::string& root_scope_string) {
               .append(type_name)
               .append(")")
               .append(".")
-              .append(std::get<0>(tup)->name());
+              .append(std::get<kFunction>(element)->name());
         } else {
           module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
         }
