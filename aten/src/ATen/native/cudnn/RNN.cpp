@@ -1433,7 +1433,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
       TensorList params, bool has_biases, cudnnRNNMode_t mode,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-  // TODO (igor): this one is not implemented at the moment
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = cx.size(2);

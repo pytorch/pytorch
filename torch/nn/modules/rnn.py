@@ -608,11 +608,12 @@ class LSTM(RNNBase):
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
+            real_hidden_size = self.proj_size if self.proj_size > 0 else self.hidden_size
             h_zeros = torch.zeros(self.num_layers * num_directions,
-                                  max_batch_size, self.hidden_size,
+                                  max_batch_size, real_hidden_size,
                                   dtype=input.dtype, device=input.device)
             c_zeros = torch.zeros(self.num_layers * num_directions,
-                                  max_batch_size, self.proj_size,
+                                  max_batch_size, self.hidden_size,
                                   dtype=input.dtype, device=input.device)
             hx = (h_zeros, c_zeros)
         else:
