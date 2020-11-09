@@ -191,7 +191,6 @@ struct TupleTake<Tuple, N, std::enable_if_t<N >= 0, void>> {
 template <class Tuple, int N>
 struct TupleTake<Tuple, N, std::enable_if_t<N < 0, void>> {
   static auto call(Tuple t) {
-    static_assert(N < 0, "tuple_take: N < 0");
     constexpr size_t size = std::tuple_size<Tuple>();
     static_assert(-N <= size, "tuple_take: -N > size");
     return tuple_elements(t, make_offset_index_sequence<size + N, -N>{});
