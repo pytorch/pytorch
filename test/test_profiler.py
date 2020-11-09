@@ -145,7 +145,7 @@ class TestProfiler(TestCase):
 
         try:
             train()
-        except:
+        except Exception:
             self.assertTrue(False, "Expected no exception without profiling.")
 
         with profile() as prof:
@@ -156,7 +156,7 @@ class TestProfiler(TestCase):
             "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": N + 1,
             "Optimizer.step#SGD.step": N,
             "Optimizer.zero_grad#SGD.zero_grad": N
-            }
+        }
         actual_event_count = {}
         for e in prof.function_events:
             if "#" in e.name:
