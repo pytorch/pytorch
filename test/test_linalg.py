@@ -476,14 +476,14 @@ class TestLinalg(TestCase):
         # cond expects the input to be at least 2-dimensional
         a = torch.ones(3, dtype=dtype, device=device)
         for ord in norm_types:
-            with self.assertRaisesRegex(RuntimeError, r'Tensor of matrices must have at least 2 dimensions'):
+            with self.assertRaisesRegex(RuntimeError, r'supports matrices or batches of matrices'):
                 torch.linalg.cond(a, ord)
 
         # for some norm types cond expects the input to be square
         a = torch.ones(3, 2, dtype=dtype, device=device)
         norm_types = [1, -1, inf, -inf, 'fro', 'nuc']
         for ord in norm_types:
-            with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+            with self.assertRaisesRegex(RuntimeError, r'supports square matrices or batches of square matrices'):
                 torch.linalg.cond(a, ord)
 
         # if non-empty out tensor with wrong shape is passed a warning is given

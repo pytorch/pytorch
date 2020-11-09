@@ -1605,9 +1605,8 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 // Numerical or None norms
 Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
-  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions.");
-
-  Tensor self_inverse, result;
+  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
+    self.dim(), " dimensions.");
 
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
@@ -1617,10 +1616,10 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
     auto singular_values = std::get<1>(at::svd(self));
     auto s_max = std::get<0>(singular_values.max(/*dim=*/-1));
     auto s_min = std::get<0>(singular_values.min(/*dim=*/-1));
+    Tensor result;
     if (ord.toDouble() == -2.0) {
       result = s_min / s_max;
-    }
-    else {
+    } else {
       result = s_max / s_min;
     }
     // a trick to convert FLT_MAX or DBL_MAX to INFINITY
@@ -1630,32 +1629,41 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
     result = at::nan_to_num(result, INFINITY);
     return result;
   }
+
   // ord == ±1 ord == ±inf
-  else {
-    squareCheckInputs(self);
-    std::array<int64_t, 2> dim_arr = {-2, -1};
-    optional<IntArrayRef> dim = IntArrayRef(dim_arr);
-    // Ignore errors if not invertible, result is INFINITY in this case
-    try {
-      self_inverse = at::inverse(self);
-    } catch (const std::exception& e) {
-      if (strstr(e.what(), "singular")) {
-      result = at::empty_like(at::linalg_norm(self, ord, dim));
-      at::fill_(result, INFINITY);
-      return result;
-      }
-      else {
-        TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
-      }
+  // since at::inverse is used in the implementation, self has to be a tensor consisting of square matrices
+  // the same check as squareCheckInputs(self) but with a slightly more informative error message
+  TORCH_CHECK(self.size(-1) == self.size(-2),
+              "linalg_cond only supports square matrices or batches of square matrices "
+              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
+  std::array<int64_t, 2> dim_arr = {-2, -1};
+  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
+  // Ignore errors if not invertible, result is INFINITY in this case
+  // Currently checking for error in at::inverse causes cross-device data movement
+  // For batched input if at least one matrix in the batch is not invertible,
+  // then the result for all other (possibly) invertible matrices will be infinity as well
+  // since there is currently no way to use at::inverse with silent errors
+  Tensor self_inverse, result;
+  try {
+    self_inverse = at::inverse(self);
+  } catch (const std::exception& e) {
+    if (strstr(e.what(), "singular")) {
+    result = at::empty_like(at::linalg_norm(self, ord, dim));
+    at::fill_(result, INFINITY);
+    return result;
+    } else {
+      TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
     }
-    Tensor norm_self = at::linalg_norm(self, ord, dim);
-    Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
-    result = norm_self * norm_inverse;
   }
+  Tensor norm_self = at::linalg_norm(self, ord, dim);
+  Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+  result = norm_self * norm_inverse;
   return result;
 }
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
+  // If ord == None or ord == ±2 then SVD is used to compute the condition number
+  // the result is always real-valued, for other cases it is complex-valued for the complex-valued input.
   ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
   auto expected_dtype = std::abs(ord.toDouble()) == 2.0 ? real_dtype : self.scalar_type();
@@ -1672,12 +1680,21 @@ Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, std::string ord) {
   TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
-  squareCheckInputs(self);
+  // the same checks as squareCheckInputs(self) but with a slightly more informative error message
+  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
+    self.dim(), " dimensions.");
+  TORCH_CHECK(self.size(-1) == self.size(-2),
+              "linalg_cond only supports square matrices or batches of square matrices "
+              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
 
   Tensor self_inverse, result;
   std::array<int64_t, 2> dim_arr = {-2, -1};
   optional<IntArrayRef> dim = IntArrayRef(dim_arr);
   // Ignore errors if not invertible, result is INFINITY in this case
+  // Currently checking for error in at::inverse causes cross-device data movement
+  // For batched input if at least one matrix in the batch is not invertible,
+  // then the result for all other (possibly) invertible matrices will be infinity as well
+  // since there is currently no way to use at::inverse with silent errors
   try {
     self_inverse = at::inverse(self);
   } catch (const std::exception& e) {
