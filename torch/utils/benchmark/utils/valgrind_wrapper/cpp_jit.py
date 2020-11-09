@@ -63,6 +63,7 @@ class TimeitModuleType(Protocol):
 class CallgrindModuleType(Protocol):
     __file__: str
     __name__: str
+
     def _valgrind_supported_platform(self) -> bool:
         ...
 
