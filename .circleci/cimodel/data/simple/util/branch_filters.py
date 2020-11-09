@@ -1,6 +1,6 @@
 NON_PR_BRANCH_LIST = [
     "master",
-    r"/ci-all\/.*/",
+    r"/ci-all\/.*/",  # this PR is testing this line
     r"/release\/.*/",
 ]
 
