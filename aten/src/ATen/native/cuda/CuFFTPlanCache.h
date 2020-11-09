@@ -15,6 +15,7 @@
 
 namespace at { namespace native { namespace detail {
 
+// Enum representing the FFT type
 enum class CuFFTTransformType : int8_t {
   C2C,  // Complex-to-complex
   R2C,  // Real-to-complex
@@ -48,42 +49,41 @@ struct CuFFTParams
     TORCH_INTERNAL_ASSERT(out_strides.size() == signal_sizes.size());
     TORCH_INTERNAL_ASSERT(1 <= signal_ndim_ && signal_ndim_ <= max_rank);
 
-    std::copy(signal_sizes.begin(), signal_sizes.end(), sizes_);
-    std::copy(in_strides.begin(), in_strides.end(), input_strides_);
-    std::copy(out_strides.begin(), out_strides.end(), output_strides_);
+    std::copy(signal_sizes.cbegin(), signal_sizes.cend(), sizes_);
+    std::copy(in_strides.cbegin(), in_strides.cend(), input_strides_);
+    std::copy(out_strides.cbegin(), out_strides.cend(), output_strides_);
   }
 };
 
 static_assert(std::is_trivial<CuFFTParams>::value, "");
 
+// Returns true if the transform type has complex input
 inline bool cufft_complex_input(CuFFTTransformType type) {
   switch (type) {
     case CuFFTTransformType::C2C:
-    case CuFFTTransformType::C2R: {
+    case CuFFTTransformType::C2R:
       return true;
-    }
 
-    case CuFFTTransformType::R2C: {
+    case CuFFTTransformType::R2C:
       return false;
-    }
   }
   TORCH_INTERNAL_ASSERT(false);
 }
 
+// Returns true if the transform type has complex output
 inline bool cufft_complex_output(CuFFTTransformType type) {
   switch (type) {
     case CuFFTTransformType::C2C:
-    case CuFFTTransformType::R2C: {
+    case CuFFTTransformType::R2C:
       return true;
-    }
 
-    case CuFFTTransformType::C2R: {
+    case CuFFTTransformType::C2R:
       return false;
-    }
   }
   TORCH_INTERNAL_ASSERT(false);
 }
 
+// Create transform type enum from bools representing if input and output are complex
 inline CuFFTTransformType GetCuFFTTransformType(bool complex_input, bool complex_output) {
   if (complex_input && complex_output) {
     return CuFFTTransformType::C2C;
@@ -92,7 +92,7 @@ inline CuFFTTransformType GetCuFFTTransformType(bool complex_input, bool complex
   } else if (!complex_input && complex_output) {
     return CuFFTTransformType::R2C;
   }
-  TORCH_CHECK(false, "Real to real FFTs are not supported");
+  TORCH_INTERNAL_ASSERT(false, "Real to real FFTs are not supported");
 }
 
 
@@ -110,7 +110,7 @@ public:
   ~CuFFTHandle() {
 // Not using fftDestroy() for rocFFT to work around double freeing of handles
 #ifndef __HIP_PLATFORM_HCC__
-    CUFFT_CHECK(cufftDestroy(handle_));
+    cufftDestroy(handle_);
 #endif
   }
 };
@@ -127,25 +127,30 @@ static bool is_pow_of_two(int64_t x) {
 #endif
 
 using CuFFTDimVector = c10::SmallVector<cufft_size_type, at::kDimVectorStaticSize>;
+
+// Struct representing a tensor in CuFFT's data layout for planning transforms
+// See NOTE [ cuFFT Embedded Strides ].
 struct CuFFTDataLayout {
   CuFFTDimVector embed;
   cufft_size_type stride, dist;
   bool must_clone, simple;
 };
 
-// Returns a simple (contiguous) cufft embedding for a signal of the given size
+// Returns a cufft embedding for a contiguous signal of the given size.
+// e.g. if the input is cloned, this will be the resulting data layout
+// See NOTE [ cuFFT Embedded Strides ].
 inline CuFFTDataLayout cufft_simple_embed(IntArrayRef sizes, bool onesided) {
   const auto signal_ndim = sizes.size() - 1;
   CuFFTDataLayout layout;
   layout.simple = true;
   layout.must_clone = false;
-  layout.embed.assign(sizes.begin() + 1, sizes.end());
+  layout.embed.assign(sizes.cbegin() + 1, sizes.cend());
   if (onesided) {
     layout.embed.back() = sizes.back() / 2 + 1;
   }
   layout.stride = 1;
   layout.dist = 1;
-  for (auto len : layout.embed) {
+  for (const auto& len : layout.embed) {
     layout.dist *= len;
   }
   return layout;
@@ -242,7 +247,7 @@ public:
     CuFFTDimVector signal_sizes(sizes.begin() + 1, sizes.end());
 
     // input batch size
-    long long int batch = sizes[0];
+    const int64_t batch = sizes[0];
     const int64_t signal_ndim = sizes.size() - 1;
 
     // Since cuFFT has limited non-unit stride support and various constraints, we

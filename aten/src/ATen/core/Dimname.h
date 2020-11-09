@@ -21,7 +21,7 @@ struct CAFFE2_API Dimname {
   bool isWildcard() const { return type_ == NameType::WILDCARD; }
 
   bool matches(Dimname other) const;
-  optional<Dimname> unify(Dimname other) const;
+  c10::optional<Dimname> unify(Dimname other) const;
 
  private:
   Dimname(Symbol name)
