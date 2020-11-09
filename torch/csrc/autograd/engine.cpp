@@ -885,7 +885,7 @@ auto Engine::execute(const edge_list& roots,
         inputs_.push_back({});
       }
     }
-    execute_with_graph_task(graph_task, graph_root, inputs_);
+    execute_with_graph_task(graph_task, graph_root, std::move(inputs_));
   } else {
     execute_with_graph_task(graph_task, graph_root);
   }
@@ -908,7 +908,7 @@ void Engine::initialize_device_threads_pool() {
 std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
-    variable_list inputs) {
+    variable_list&& inputs) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);

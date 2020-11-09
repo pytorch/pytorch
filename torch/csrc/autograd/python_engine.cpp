@@ -104,9 +104,9 @@ variable_list PythonEngine::execute(
 std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
-    variable_list inputs) {
+    variable_list&& inputs) {
   try {
-    return Engine::execute_with_graph_task(graph_task, graph_root, inputs);
+    return Engine::execute_with_graph_task(graph_task, graph_root, std::move(inputs));
   } catch (python_error& e) {
     pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {
