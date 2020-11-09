@@ -380,9 +380,9 @@ TEST(VulkanAPITest, conv2d_pw) {
   }
 
   constexpr int64_t groups = 1;
-  constexpr std::array<int64_t, 2u> stride{1, 1};
-  constexpr std::array<int64_t, 2u> padding{0, 0};
-  constexpr std::array<int64_t, 2u> dilation{1, 1};
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{2, 2};
 
   constexpr struct {
     uint32_t batches;
@@ -629,6 +629,267 @@ TEST(VulkanAPITest, upsample_nearest2d) {
   if (!check) {
     std::cout << "Expected:\n" << out_cpu << std::endl;
     std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+enum class OpType {
+  addmm,
+  conv2d,
+  hardtanh_,
+  mean,
+ };
+
+class BaseOp {
+ public:
+  explicit BaseOp(const OpType type) : type_(type) {}
+  virtual ~BaseOp() = default;
+
+  virtual at::Tensor run(at::Tensor&) const = 0;
+  virtual std::string toString() const = 0;
+
+ private:
+  OpType type_;
+};
+
+class Addmm final : public BaseOp {
+ public:
+  Addmm(
+      const int64_t m1H,
+      const int64_t m1W,
+      const int64_t m2W,
+      const float beta,
+      const float alpha)
+    : BaseOp(OpType::addmm),
+      m2_(at::rand(c10::IntArrayRef({m1W, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
+      v_m2(m2_.vulkan()),
+      b_(at::rand(c10::IntArrayRef({m1H, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
+      v_b_(b_.vulkan()),
+      beta_(beta),
+      alpha_(alpha) {
+  }
+
+  at::Tensor run(at::Tensor& t) const override {
+    if (t.is_vulkan()) {
+      return at::addmm(v_b_, t, v_m2, beta_, alpha_);
+    }
+
+    return at::addmm(b_, t, m2_, beta_, alpha_);
+  }
+
+  std::string toString() const override {
+    return "addmm";
+  }
+
+ private:
+  at::Tensor m2_;
+  at::Tensor v_m2;
+  at::Tensor b_;
+  at::Tensor v_b_;
+  float beta_;
+  float alpha_;
+};
+
+class Conv2d final : public BaseOp {
+ public:
+  Conv2d(
+      const c10::IntArrayRef wsizes,
+      const int64_t groups,
+      const int64_t stride,
+      const int64_t padding)
+      : BaseOp(OpType::conv2d),
+        groups_(groups),
+        stride_(stride),
+        padding_(padding),
+        w_(at::rand(wsizes, at::device(at::kCPU).dtype(at::kFloat))),
+        b_(at::zeros(wsizes[0], at::device(at::kCPU).dtype(at::kFloat))){
+  }
+
+  at::Tensor run(at::Tensor& t) const override {
+    return at::conv2d(t, w_, b_, {stride_}, {padding_}, {1}, groups_);
+  }
+
+  std::string toString() const override {
+    return "conv2d";
+  }
+
+ private:
+  int64_t groups_;
+  int64_t stride_;
+  int64_t padding_;
+  at::Tensor w_;
+  at::Tensor b_;
+};
+
+class Hardtanh_ final : public BaseOp {
+ public:
+  Hardtanh_() : BaseOp(OpType::hardtanh_) {}
+
+  at::Tensor run(at::Tensor& input) const override {
+    return at::hardtanh_(input, 0, 6);
+  }
+
+  std::string toString() const override {
+    return "hardtanh_";
+  }
+};
+
+class Mean final : public BaseOp {
+ public:
+  Mean() : BaseOp(OpType::mean) {}
+
+  at::Tensor run(at::Tensor& input) const override {
+    return at::mean(input, {2, 3}, false);
+  }
+
+  std::string toString() const override {
+    return "mean";
+  }
+};
+
+class OpsList {
+ public:
+  OpsList() {}
+  explicit OpsList(std::vector<std::unique_ptr<BaseOp>> ops)
+    : ops_(std::move(ops)) {
+  }
+
+  auto run(const at::Tensor& input) {
+    at::Tensor output = input;
+
+    for (const auto& op : ops_) {
+      output = op->run(output);
+    }
+
+    return output;
+  }
+
+  auto run(const at::Tensor& input, const at::Tensor& v_input) {
+    at::Tensor output = input;
+    at::Tensor v_output = v_input;
+
+    for (const auto& op : ops_) {
+      output = op->run(output);
+      v_output = op->run(v_output);
+    }
+
+    return std::make_pair(output, v_output);
+  }
+
+ protected:
+  std::vector<std::unique_ptr<BaseOp>> ops_;
+};
+
+class MobileNetV2 final : public OpsList {
+ public:
+  MobileNetV2() {
+    ops_.emplace_back(new Conv2d({32, 3, 3, 3}, 1, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 1, 3, 3}, 32, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({16, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({96, 16, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 1, 3, 3}, 96, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({24, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({24, 144, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({144, 24, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({144, 1, 3, 3}, 144, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 144, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({32, 192, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({192, 32, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 192, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({320, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({1280, 320, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Mean());
+    ops_.emplace_back(new Addmm(1, 1280, 1000, 0, 1));
+  }
+};
+
+TEST(VulkanTest, mobilenetv2) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  MobileNetV2 mn2;
+  const auto input = at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto output = mn2.run(input, input.vulkan());
+
+  const auto check = almostEqual(output.first, output.second.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << output.first << std::endl;
+    std::cout << "Got:\n" << output.second.cpu() << std::endl;
   }
 
   ASSERT_TRUE(check);
