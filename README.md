@@ -149,7 +149,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 ### From Source
 
-If you are installing from source, you will need Python 3.6 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
+If you are installing from source, you will need Python 3.6.2 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
