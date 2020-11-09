@@ -796,7 +796,7 @@ inline IValue toIValue(
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
-      return IValue::make_capsule(py::cast<Capsule>(obj).obj_ptr);
+      return IValue::make_capsule(py::cast<c10::Capsule>(obj).obj_ptr);
     }
     case TypeKind::FutureType: {
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
