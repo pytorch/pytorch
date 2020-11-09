@@ -109,7 +109,7 @@ void foreach_tensor_##OP##_slow_(TensorList tensors) {                     \
 
 #define FOREACH_POINTWISE_OP_SCALAR(OP)                                                                                              \
 std::vector<Tensor> foreach_tensor_##OP##_scalar_slow(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {   \
-  check_nonempty_and_same_length(input, tensors1, tensors2);                                                                         \
+  check_foreach_api_restrictions(input, tensors1, tensors2);                                                                         \
                                                                                                                                      \
   std::vector<Tensor> result;                                                                                                        \
   for (int i = 0; i < input.size(); i++) {                                                                                           \
@@ -120,7 +120,7 @@ std::vector<Tensor> foreach_tensor_##OP##_scalar_slow(TensorList input, TensorLi
 }                                                                                                                                    \
                                                                                                                                      \
 void foreach_tensor_##OP##_scalar_slow_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                 \
-  check_nonempty_and_same_length(input, tensors1, tensors2);                                                                         \
+  check_foreach_api_restrictions(input, tensors1, tensors2);                                                                         \
                                                                                                                                      \
   for (int i = 0; i < input.size(); i++) {                                                                                           \
     input[i].OP##_(tensors1[i], tensors2[i], scalar);                                                                                \
@@ -129,7 +129,7 @@ void foreach_tensor_##OP##_scalar_slow_(TensorList input, TensorList tensors1, T
 
 #define FOREACH_POINTWISE_OP_SCALARLIST(OP)                                                                                                             \
 std::vector<Tensor> foreach_tensor_##OP##_scalarlist_slow(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {   \
-  check_nonempty_and_same_length(input, tensors1, tensors2, scalars);                                                                                   \
+  check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                   \
                                                                                                                                                         \
   std::vector<Tensor> result;                                                                                                                           \
   for (int i = 0; i < input.size(); i++) {                                                                                                              \
@@ -140,7 +140,7 @@ std::vector<Tensor> foreach_tensor_##OP##_scalarlist_slow(TensorList input, Tens
 }                                                                                                                                                       \
                                                                                                                                                         \
 void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {                 \
-  check_nonempty_and_same_length(input, tensors1, tensors2, scalars);                                                                                   \
+  check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                   \
                                                                                                                                                         \
   for (int i = 0; i < input.size(); i++) {                                                                                                              \
     input[i].OP##_(tensors1[i], tensors2[i], scalars[i]);                                                                                               \
