@@ -1001,7 +1001,7 @@ inline py::object toPyObject(IValue ivalue) {
     // PyObject
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
-    return py::cast(Capsule(ivalue.toCapsule()));
+    return py::cast(c10::Capsule(ivalue.toCapsule()));
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isEnum()) {

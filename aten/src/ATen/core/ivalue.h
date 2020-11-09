@@ -82,7 +82,13 @@ struct OptionalArray {
   }
 };
 
-// This is an owning wrapper for c10::intrusive_ptr<torch::CustomClassHolder>
+// Capsule is an internal implementation detail of custom C++ classes. We
+// define it as an owning wrapper for
+// c10::intrusive_ptr<torch::CustomClassHolder> This wrapper is here to serve as
+// an abstraction of the type erased custom class object pointer. It also allow
+// pybind11 to treat this as a standalone class to register as a separate type
+// caster, instead of a custom pointer holder which the pointer holder type
+// caster try to "unwrap" it automatically.
 struct Capsule {
   c10::intrusive_ptr<torch::CustomClassHolder> obj_ptr;
   explicit Capsule(c10::intrusive_ptr<torch::CustomClassHolder> ptr)
@@ -334,8 +340,7 @@ struct CAFFE2_API IValue final {
   /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() const&;
 
-  // Capsule. Capsule is an internal implementation detail
-  // of custom C++ classes. No new callsites of these APIs should
+  // Capsule. No new callsites of these APIs should
   // be introduced.
   static inline IValue make_capsule(
       intrusive_ptr<torch::CustomClassHolder> blob);
