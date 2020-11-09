@@ -112,6 +112,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
         input_stride0,
         input_stride1,
         input_numel);
+      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
   return result;
@@ -229,6 +230,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
         input_stride0,
         input_stride1,
         input_numel);
+      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     });
     // update weight_grad
     std::vector<int64_t> reduce_dims;
@@ -405,7 +407,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
     const T_ACC neg_three(-3.0f);
     const T_ACC one_half(0.5f);
     gpu_kernel(
-      iter, 
+      iter,
       [zero, three, neg_three, one_half]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
         T_ACC grad_val = static_cast<T_ACC>(grad_val_);
         T_ACC self_val = static_cast<T_ACC>(self_val_);
@@ -442,7 +444,7 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
     const T_ACC neg_three(-3.0f);
     const T_ACC one_sixth(1.0f / 6.0f);
     gpu_kernel(
-      iter, 
+      iter,
       [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
         T_ACC grad_val = static_cast<T_ACC>(grad_val_);
         T_ACC self_val = static_cast<T_ACC>(self_val_);
