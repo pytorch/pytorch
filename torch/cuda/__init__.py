@@ -14,7 +14,7 @@ import torch
 import traceback
 import warnings
 import threading
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Protocol
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
 from .. import device as _device
@@ -357,7 +357,7 @@ def get_gencode_flags() -> str:
     if len(arch_list) == 0:
         return ""
     arch_list_ = [arch.split("_") for arch in arch_list]
-    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list_])  # type: ignore
+    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list_])
 
 
 
@@ -462,13 +462,15 @@ def _lazy_new(cls, *args, **kwargs):
     return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
+class GetDeviceProtocol(Protocol):
+    def get_device(self) -> int:
+        ...
+
 class _CudaBase(object):
     is_cuda = True
     is_sparse = False
 
-    def get_device(self) -> int: ...  # noqa: E704
-
-    def type(self, *args, **kwargs):
+    def type(self: GetDeviceProtocol, *args, **kwargs):
         with device(self.get_device()):
             return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
