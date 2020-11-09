@@ -5501,15 +5501,15 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.vjp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
         inputs.requires_grad_()
         v.requires_grad_()
         with torch.no_grad():
-            res = autogradF.vjp(reducer, inputs, v, create_graph = True)
+            res = autogradF.vjp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
     def test_vjp_output(self):
         def reducer(x):
@@ -5671,15 +5671,15 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.jvp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
         inputs.requires_grad_()
         v.requires_grad_()
         with torch.no_grad():
-            res = autogradF.jvp(reducer, inputs, v, create_graph = True)
+            res = autogradF.jvp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
     def test_jvp_output(self):
         def reducer(x):
@@ -5907,12 +5907,12 @@ class TestAutogradFunctional(TestCase):
         with torch.no_grad():
             res = autogradF.jacobian(exp_reducer, inputs)
         self.assertIsNone(res.grad_fn)
-        self.assertNotEqual(res,torch.zeros(4, 4))
+        self.assertNotEqual(res, torch.zeros(4, 4))
 
         with torch.no_grad():
-            res = autogradF.jacobian(exp_reducer, inputs, create_graph = True)
+            res = autogradF.jacobian(exp_reducer, inputs, create_graph=True)
         self.assertIsNotNone(res.grad_fn)
-        self.assertNotEqual(res,torch.zeros(4, 4))
+        self.assertNotEqual(res, torch.zeros(4, 4))
 
     def _test_jacobian_output(self, vectorize):
         def exp_reducer(x):
@@ -6216,15 +6216,15 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(res[0][1].grad_fn)
         self.assertIsNone(res[1][0].grad_fn)
         self.assertIsNone(res[1][1].grad_fn)
-        self.assertNotEqual(res,torch.zeros(2, 2, 2))
+        self.assertNotEqual(res, torch.zeros(2, 2, 2))
 
         with torch.no_grad():
-            res = autogradF.hessian(pow_reducer, inputs, create_graph = True)
+            res = autogradF.hessian(pow_reducer, inputs, create_graph=True)
         self.assertIsNotNone(res[0][0].grad_fn)
         self.assertIsNotNone(res[0][1].grad_fn)
         self.assertIsNotNone(res[1][0].grad_fn)
         self.assertIsNotNone(res[1][1].grad_fn)
-        self.assertNotEqual(res,torch.zeros(2, 2, 2))
+        self.assertNotEqual(res, torch.zeros(2, 2, 2))
 
 
     def _test_hessian_output(self, vectorize):
@@ -6403,13 +6403,13 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.vhp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
         with torch.no_grad():
-            res = autogradF.vhp(reducer, inputs, v, create_graph = True)
+            res = autogradF.vhp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
     def test_vhp_output(self):
         def foo(a):
@@ -6578,13 +6578,13 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.hvp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
         with torch.no_grad():
-            res = autogradF.hvp(reducer, inputs, v, create_graph = True)
+            res = autogradF.hvp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1],torch.zeros(4, 4))
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
     def test_hvp_output(self):
         def foo(a):
