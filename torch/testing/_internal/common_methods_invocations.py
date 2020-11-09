@@ -725,6 +725,15 @@ def method_tests():
         ('cosh', (S, S, S), NO_ARGS, '', (True,)),
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('conj', (S, S, S), NO_ARGS),
+        ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
+        ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
+        ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
+        ('copysign', (S, 1, S), ((M, S),), 'broadcast_all', (False,)),
+        ('copysign', (S, S), (3.14,), 'scalar', (False,)),
+        ('copysign', (S, S), (0.0,), 'scalar_pos_zero', (False,)),
+        # TorchScript does not recognize -0.0: Issue #46848
+        # https://github.com/pytorch/pytorch/issues/46848
+        # ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
         ('real', (S, S, S), NO_ARGS, 'complex'),
         ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),

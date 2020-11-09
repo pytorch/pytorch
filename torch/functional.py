@@ -241,7 +241,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
             # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
             indices = _indices_product(shape[:-2])
             for idx in indices:
-                final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+                final_order = list(range(m))
                 for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
                 # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
@@ -249,7 +249,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                 p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
         else:
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+            final_order = list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
@@ -262,14 +262,16 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
-    Computes a sum of products over dimensions specified using a notation based on Einstein summation convention.
+    Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
+    based on Einstein summation convention.
 
     Einsum allows computing many common multi-dimensional, linear algebraic array operations by representing them
     in a short-hand format based on the Eintein summation, given by :attr:`equation`. The details of this format are
     described in the section below, but the general idea is to label every dimension of the input :attr:`operands`
-    with some subscript and define which subscripts are part of the output. The output is computed as a sum of products
-    over the dimensions whose subscripts are not part of the output. For example, matrix multiplication can be computed
-    using einsum as `torch.einsum("ij,jk", A, B)`. Here, j is the summation subscript (see section below for more details).
+    with some subscript and define which subscripts are part of the output. The output is then computed by summing the
+    product of the elements of the :attr:`operands` along the dimensions whose subscripts are not part of the output.
+    For example, matrix multiplication can be computed using einsum as `torch.einsum("ij,jk->ik", A, B)`. Here, j is
+    the summation subscript and i and k the output subscripts (see section below for more details on why).
 
     Equation:
 
@@ -281,7 +283,7 @@ def einsum(equation, *operands):
         must match in size and the operand will be replaced by its diagonal along these dimensions. The subscripts that
         appear exactly once in the :attr:`equation` will be part of the output, sorted in increasing alphabetical order.
         The output is computed by multiplying the input :attr:`operands` element-wise, with their dimensions aligned based
-        on the subscripts, and then summing out the dimensions whose subscripts are not part of the output.
+        on the subscripts, and then summing out the dimensions for which their subscripts are not part of the output.
 
         Optionally, the output subscripts can be explictly defined by adding an arrow ('->') at the end of the equation
         followed by the subscripts for the output. For instance, the following equation computes the transpose of a
@@ -1358,7 +1360,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 raise ValueError("dtype argument is not supported in frobenius norm")
 
             if _dim is None:
-                _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+                _dim = list(range(ndim))
             if out is None:
                 return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore
             else:
@@ -1379,7 +1381,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
-            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            _dim = list(range(ndim))
 
         if out is None:
             if dtype is None:

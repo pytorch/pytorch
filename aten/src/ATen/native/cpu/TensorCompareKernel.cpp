@@ -183,7 +183,7 @@ static void _aminmax_kernel_impl(
 }
 
 static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "where_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, iter.dtype(), "where_cpu", [&] {
     if (condition_type == at::ScalarType::Byte) {
       cpu_kernel(
         iter,
