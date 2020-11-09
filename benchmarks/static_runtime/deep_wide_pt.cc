@@ -38,6 +38,13 @@ const std::string trivial_model_1 = R"JIT(
       return a + b * c + s
 )JIT";
 
+const std::string leaky_relu_model = R"JIT(
+  def forward(self, input):
+      m = torch.LeakyReLU(0.1)
+      return m(input)
+)JIT";
+
+
 void import_libs(
     std::shared_ptr<at::CompilationUnit> cu,
     const std::string& class_name,
@@ -79,5 +86,11 @@ torch::jit::Module getDeepAndWideSciptModel(int num_features) {
 torch::jit::Module getTrivialScriptModel() {
   torch::jit::Module module("m");
   module.define(trivial_model_1);
+  return module;
+}
+
+torch::jit::Module getLeakyReLUScriptModel() {
+  torch::jit::Module module("leaky_relu");
+  module.define(leaky_relu_model);
   return module;
 }

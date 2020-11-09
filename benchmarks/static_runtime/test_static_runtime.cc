@@ -20,6 +20,22 @@ TEST(StaticRuntime, TrivialModel) {
   EXPECT_TRUE(output_1.equal(output_2));
 }
 
+TEST(StaticRuntime, LeakyReLU) {
+  torch::jit::Module mod = getLeakyReLUScriptModel();
+  auto inputs = torch::randn({2, 2});
+
+  // run jit graph executor
+  std::vector<at::IValue> input_ivalues({inputs});
+  at::Tensor output_1 = mod.forward(input_ivalues).toTensor();
+
+  // run static runtime
+  std::vector<at::Tensor> input_tensors({inputs});
+  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(g);
+  at::Tensor output_2 = runtime.run(input_tensors)[0];
+  EXPECT_TRUE(output_1.equal(output_2));
+}
+
 static at::Tensor getTensor(const at::IValue &ival) {
   if (ival.isTensor()) {
     return ival.toTensor();
