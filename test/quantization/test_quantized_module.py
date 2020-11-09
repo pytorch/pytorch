@@ -39,7 +39,8 @@ test please see `caffe2/test/test_quantized_op.py`.
 
 class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
-        relu_module = nnq.ReLU()
+        relu_module = nn.ReLU()
+        # TODO: remove nnq.ReLU6
         relu6_module = nnq.ReLU6()
 
         x = torch.arange(-10, 10, dtype=torch.float)

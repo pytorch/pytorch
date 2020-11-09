@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase
@@ -358,14 +359,15 @@ class QuantizationTestCase(TestCase):
 
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
-            and type(module) in propagate_qconfig_list) or
+             and type(module) in propagate_qconfig_list) or \
            type(module) in float_to_observed_module_class_mapping.keys()):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_default_qat_module_mappings().values() and \
-           type(module) not in float_to_observed_module_class_mapping.values():
+           type(module) not in float_to_observed_module_class_mapping.values() and \
+           not isinstance(module, _FusedModule):
             for child in module.children():
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
