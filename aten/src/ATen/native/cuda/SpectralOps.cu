@@ -448,8 +448,21 @@ void _fft_apply_normalization(const Tensor& self, int64_t normalization, IntArra
   self.div_(scale_denom);
 }
 
+// Returns true if the tensor has any zero-strided dimensions of size > 1
+bool has_broadcasted_dims(const Tensor & tensor) {
+  const auto sizes = tensor.sizes();
+  const auto strides = tensor.strides();
+  for (int64_t i = 0; i < strides.size(); ++i) {
+    if (strides[i] == 0 && sizes[i] > 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace (anonymous)
 
+// n-dimensional real to complex FFT
 Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
   TORCH_CHECK(self.is_floating_point());
   auto input_sizes = self.sizes();
@@ -460,26 +473,50 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
     out_sizes[last_dim] = last_dim_halfsize;
   }
 
-  auto input_strides = self.strides();
-  bool has_broadcasted_dims = false;
-  for (int64_t i = 0; i < input_strides.size(); ++i) {
-    if (input_strides[i] == 0 && input_sizes[i] > 1) {
-      has_broadcasted_dims = true;
+  // CuFFT requires real input to be over-aligned as if it were complex
+  const auto complex_size = 2 * self.element_size();
+  const bool complex_aligned_data_ptr = reinterpret_cast<std::uintptr_t>(self.data_ptr()) % complex_size == 0;
+  const bool complex_aligned = [&]{
+    if (!complex_aligned_data_ptr) {
+      return false;
     }
-  }
+    auto input_strides = self.strides();
+    for (int64_t i = 0; i < input_strides.size(); ++i) {
+      if (input_strides[i] % 2 != 0 && i != last_dim) {
+        return false;
+      }
+    }
+    return true;
+  }();
 
-  auto input = self;
-  if (has_broadcasted_dims) {
-    input = self.clone(MemoryFormat::Contiguous);
-  }
-
-  auto output = at::empty(out_sizes, self.options().dtype(c10::toComplexType(self.scalar_type())));
+  const auto out_options = self.options().dtype(c10::toComplexType(self.scalar_type()));
+  auto output = at::empty(out_sizes, out_options);
   // Onesided slice view of output
   auto out_slice = output.slice(last_dim, 0, last_dim_halfsize);
 
   // Do a 1D R2C transform first
   // TODO: could transform up to 2 other dims in the same cuFFT operation
-  _exec_fft(input, out_slice, dim.back(), /*forward=*/true);
+  if (complex_aligned) {
+    // CuFFT doesn't allow zero-strides so if there are any, we need to clone the input
+    auto input = has_broadcasted_dims(self) ? self.clone(MemoryFormat::Contiguous) : self;
+    _exec_fft(input, out_slice, last_dim, /*forward=*/true);
+  } else if (last_dim == input_sizes.size() - 1){
+    // If the onesided dimension comes last then, for contiguous transforms,
+    // other dimensions are batched together and so odd strides are okay.
+    auto input = complex_aligned_data_ptr ? self.contiguous() : self.clone(MemoryFormat::Contiguous);
+    _exec_fft(input, out_slice, last_dim, /*forward=*/true);
+  } else {
+    // If all else fails, do the transform with the onesided dimension at the
+    // end and then copy the result back into the output
+    auto input = self.transpose(last_dim, -1).clone(MemoryFormat::Contiguous).transpose(last_dim, -1);
+    auto temp_sizes = out_sizes;
+    temp_sizes[last_dim] = last_dim_halfsize;
+    std::swap(temp_sizes[last_dim], temp_sizes.back());
+    auto temp_options = out_options.memory_format(MemoryFormat::Contiguous);
+    auto temp = at::empty(temp_sizes, temp_options).transpose(last_dim, -1);
+    _exec_fft(input, temp, last_dim, /*forward=*/true);
+    out_slice.copy_(temp);
+  }
 
   // Any subsequent C2C transforms are done in-place
   // Sort dimensions to make valid embeddings
@@ -496,7 +533,7 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
     remaining_dims = remaining_dims.slice(ndim);
   }
 
-  _fft_apply_normalization(out_slice, normalization, input.sizes(), dim);
+  _fft_apply_normalization(out_slice, normalization, self.sizes(), dim);
 
   if (!onesided) {
     at::native::_fft_fill_with_conjugate_symmetry_(output, dim);
@@ -504,6 +541,7 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   return output;
 }
 
+// n-dimensional complex to real IFFT
 Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t lastdim) {
   TORCH_CHECK(self.is_complex());
   auto in_sizes = self.sizes();
@@ -530,31 +568,24 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   return output;
 }
 
+// n-dimensional complex to complex FFT/IFFT
 Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dims_, int64_t normalization, bool forward) {
   TORCH_CHECK(self.is_complex());
   if (dims_.empty()) {
     return self.clone();
   }
 
-  Tensor input = self;
-  auto input_strides = input.strides();
-  auto input_sizes = input.sizes();
-  bool has_broadcasted_dims = false;
-  for (int64_t i = 0; i < input_strides.size(); ++i) {
-    if (input_strides[i] == 0 && input_sizes[i] > 1) {
-      has_broadcasted_dims = true;
-    }
-  }
-
-  // Broadcasted dims cannot be represented as a cuFFT embedding so must clone
-  Tensor output;
-  if (has_broadcasted_dims) {
+  // CuFFT doesn't allow zero-strides so if there are any we need to clone the input
+  Tensor input, output;
+  if (has_broadcasted_dims(self)) {
     input = input.clone(MemoryFormat::Contiguous);
     output = input;
   } else {
+    input = self;
     output = at::empty_like(input);
   }
 
+  auto input_strides = input.strides();
   DimVector sorted_dims(dims_.begin(), dims_.end());
   std::sort(sorted_dims.begin(), sorted_dims.end(),
             [&](int64_t a, int64_t b) { return input_strides[a] < input_strides[b]; });
@@ -567,11 +598,11 @@ Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dims_, int64_t normalizati
                                              num_embeddable_dims(output_strides, sorted_dims));
     _exec_fft(input, output, IntArrayRef{sorted_dims}.slice(0, transform_ndims), forward);
     sorted_dims.erase(sorted_dims.begin(), sorted_dims.begin() + transform_ndims);
-  }
 
-  // Any subsequent passes are done in-place in the output
-  std::sort(sorted_dims.begin(), sorted_dims.end(),
-            [&](int64_t a, int64_t b) { return output_strides[a] < output_strides[b]; });
+    // Any subsequent passes are done in-place in the output
+    std::sort(sorted_dims.begin(), sorted_dims.end(),
+              [&](int64_t a, int64_t b) { return output_strides[a] < output_strides[b]; });
+  }
   IntArrayRef dims = sorted_dims;
 
 
