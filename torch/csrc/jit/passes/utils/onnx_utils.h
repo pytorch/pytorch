@@ -25,14 +25,18 @@ using ParamMap = std::map<std::string, IValue>;
 TORCH_API void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,
     ParamMap& paramsDict);
-TORCH_API ValueToParamPairMap buildValueToParamsMap(Block* b, const ParamMap& paramsDict);
+TORCH_API ValueToParamPairMap
+buildValueToParamsMap(Block* b, const ParamMap& paramsDict);
 TORCH_API void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap);
 TORCH_API void eraseUnusedBlockInputs(Block* b);
 TORCH_API void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,
     ParamMap& paramsDict);
 
-TORCH_API Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs);
+TORCH_API Node* addNodeToBlock(
+    Block* block,
+    Symbol kind,
+    ArrayRef<Value*> inputs);
 
 TORCH_API Value* addInputToBlock(Block* block);
 
