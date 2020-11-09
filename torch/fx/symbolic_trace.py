@@ -125,8 +125,12 @@ class Tracer(TracerBase):
             next(names_iter)  # skip self
             args.append(self.root)
 
+        sig = inspect.signature(fn_for_analysis)
+
         def proxy_placeholder(name: str):
-            return self.create_proxy('placeholder', name, (), {},
+            param = sig.parameters[name]
+            default = () if param.default is inspect.Parameter.empty else (param.default,)
+            return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
