@@ -20,11 +20,13 @@ import model_defs.word_language_model as word_language_model
 import torchvision
 import onnx
 
+
 def to_numpy(tensor):
     if tensor.requires_grad:
         return tensor.detach().cpu().numpy()
     else:
         return tensor.cpu().numpy()
+
 
 def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     do_constant_folding=True, keep_initializers_as_inputs=True,
@@ -50,6 +52,12 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
     ort_sess = onnxruntime.InferenceSession(f.getvalue())
     return ort_sess
 
+def inline_flatten_list(inputs, res_list):
+    for i in inputs:
+        res_list.append(i) if not isinstance(i, (list, tuple)) else inline_flatten_list(i, res_list)
+    return res_list
+
+
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
     input, _ = torch.jit._flatten(input_copy)
@@ -58,7 +66,8 @@ def run_ort(ort_sess, input):
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
 
-    return ort_outs
+    return inline_flatten_list(ort_outs, [])
+
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
@@ -91,7 +100,6 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         output = model(*input_copy)
         if isinstance(output, torch.Tensor):
             output = (output,)
-
         ort_sess = convert_to_onnx(model, input=input, opset_version=self.opset_version,
                                    example_outputs=output, do_constant_folding=do_constant_folding,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
@@ -100,9 +108,9 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    onnx_shape_inference=self.onnx_shape_inference,
                                    use_new_jit_passes=self.use_new_jit_passes)
 
+        # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
-
 
         # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
@@ -143,6 +151,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size)
+
         if self.is_script_test_enabled and self.use_new_jit_passes:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -366,19 +375,19 @@ class TestONNXRuntime(unittest.TestCase):
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
+    @disableScriptTest()  # RNN Scripting issue: #28418
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
 
-    @disableScriptTest()
+    @disableScriptTest()  # RNN Scripting issue: #28418
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
-    @disableScriptTest()
+    @disableScriptTest()  # Scripting recursive function: #39357
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
-    @disableScriptTest()
+    @disableScriptTest()  # Scripting recursive function: #39357
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
 
@@ -864,7 +873,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(8)
-    @disableScriptTest()  # Functional module not scriptable
+    @disableScriptTest()  # Functional module not scriptable issue: #45904
     def test_maxpool_with_indices(self):
         model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)
         x = torch.randn(20, 16, 50)
@@ -1079,7 +1088,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(InputIndexSlice(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    @disableScriptTest()  # scripting tuple/list append
+    @disableScriptTest()  # Scripting tuple/list append
     def test_slice_dynamic(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1223,7 +1232,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SizeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # x.stride() not scriptable
+    @disableScriptTest()  # x.stride() not scriptable.
     def test_as_strided(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -1745,7 +1754,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
-    @disableScriptTest()
     def test_groupnorm_noaffine(self):
         model = torch.nn.GroupNorm(4, 8, 0.002, affine=False)
         x = torch.randn(3, 8, 224, 224)
@@ -1758,26 +1766,6 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.GroupNorm(6, 6, 0.002, affine=False)
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_listunpack(self):
-        class ListUnpack(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                a, b = x.shape
-                return x.new_zeros((a, b))
-
-        x = torch.randn(2, 3)
-        self.run_test(ListUnpack(), x)
-
-        class ListUnpackSlice(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                a, b = x.shape[2:]
-                return x.new_zeros((a, b))
-
-        x = torch.randn(2, 3, 4, 5)
-        self.run_test(ListUnpackSlice(), x)
 
     def test_pow(self):
         class PowModule(torch.nn.Module):
@@ -1864,15 +1852,6 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.var(input, unbiased=True)
 
         model = VarianceUnbiased()
-        self.run_test(model, x)
-
-        class VarianceSqrt(torch.nn.Module):
-            def forward(self, input):
-                y = torch.var(input, 1)
-                return torch.sqrt(y + 1e-8)
-
-        x = torch.randn(1, 2, 3, 300, 300)
-        model = VarianceSqrt()
         self.run_test(model, x)
 
     def test_var_along_dims(self):
@@ -2445,7 +2424,7 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
+    @disableScriptTest()  # issue is lower pass graph scripting prim_dtype
     def test_lstm_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -2459,35 +2438,48 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LSTMModel(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
     def test_lstm(self):
-        model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+
+            def forward(self, x, h0, c0):
+                return self.rnn(x, (h0, c0))
+
+        model = LSTMModel()
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         h0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
         c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
-        self.run_test(model, (input, (h0, c0)))
+        self.run_test(model, (input, h0, c0))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
+    @disableScriptTest() # issue is lower pass graph scripting prim_dtype
     def test_lstm_default_init_state(self):
-        model = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+        class LSTMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+
+            def forward(self, x):
+                return self.rnn(x)
+
+        model = LSTMModel()
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # LSTMModel model not scriptable
     def test_lstm_fixed_batch_size(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
                 super(LSTMModel, self).__init__()
+                self.RNN_HIDDEN_SIZE = RNN_HIDDEN_SIZE
                 self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
 
             def forward(self, input):
                 batch_size = input.size()[1]
-                h0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                c0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                h0 = torch.from_numpy(h0_np)
-                c0 = torch.from_numpy(c0_np)
+                h0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
+                c0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
                 return self.lstm(input, (h0, c0))
 
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
@@ -2496,27 +2488,26 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LSTMModel(), input, fixed_batch_size=True, test_with_inputs=[input2])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
     def test_lstm_post_fix_init_state(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
                 super(LSTMModel, self).__init__()
+                self.RNN_HIDDEN_SIZE = RNN_HIDDEN_SIZE
                 self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
                                           1, bidirectional=False)
 
             def forward(self, input):
                 batch_size = input.size()[1]
-                h0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                c0_np = np.ones([1, batch_size, RNN_HIDDEN_SIZE]).astype(np.float32)
-                h0 = torch.from_numpy(h0_np)
-                c0 = torch.from_numpy(c0_np)
+                h0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
+                c0 = torch.ones([1, batch_size, self.RNN_HIDDEN_SIZE])
                 return self.lstm(input, (h0, c0))
 
         model = LSTMModel()
         input = torch.randn(RNN_SEQUENCE_LENGTH, 1, RNN_INPUT_SIZE)
         # verify with different input of different batch size
         input2 = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
-        self.run_test(model, input, dynamic_axes={'input' : {0 : 'seq', 1 : 'batch'}},
+        self.run_test(model, input, input_names=['input'],
+                      dynamic_axes={'input' : {0 : 'seq', 1 : 'batch'}},
                       test_with_inputs=[input2])
 
     @disableScriptTest()
@@ -3098,27 +3089,24 @@ class TestONNXRuntime(unittest.TestCase):
     def test_split(self):
         class SplitModel(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out1, out2, out3
+                return input.split([2, 1, 2]), input.split([3, 2])[0]
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel(), x)
 
         class SplitModel2(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 1], -2)
-                return out1, out2, out3
+                return input.split([2, 1, 1], -2), input.split([2, 2], -2)[-1]
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
         class SplitModel3(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out3, out1
+                return input.split([2, 1, 2])
 
         x = torch.randn(5, 4, 3)
-        self.run_test(torch.jit.script(SplitModel3()), x)
+        self.run_test(SplitModel3(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
@@ -3252,10 +3240,11 @@ class TestONNXRuntime(unittest.TestCase):
                     res2 += 1
                     res3 = res3 + [arr[i].sum(0, False)]
                     res4 += [arr[-1 - i].sum(0, False)]
-                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
+                return res, res1, res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
+
         self.run_test(model, inputs)
 
     @skipIfONNXShapeInference(False)
@@ -4669,7 +4658,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.assertRaises(RuntimeError, check_proto)
 
-    @disableScriptTest()  # dtype mismatch
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
