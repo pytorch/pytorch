@@ -36,9 +36,6 @@ class Optimizer(object):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
-        # Input and output are all bound method.
-        # Make the output a bound method in order to support re-wrapped
-        # by with_counter in _LRScheduler.
         def _step_with_profile(method):
             """Wrap self.step under profiler. In order to avoid of instrumenting each sub-class."""
             # Keep a weak reference to the optimizer instance to prevent cyclic references.
@@ -46,11 +43,14 @@ class Optimizer(object):
             func = method.__func__
             cls = instance_ref().__class__
             del method
+
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 name = str.format("{}#{}.{}", "Optimizer.step", cls.__name__, "step")
                 with torch.autograd.profiler.record_function(name):
                     return func(*args, **kwargs)
+            # Make the output a bound method in order to support re-wrapped
+            # by "with_counter" in "_LRScheduler.__init__".
             instance = instance_ref()
             wrapper_method = wrapper.__get__(instance, cls)
             return wrapper_method
