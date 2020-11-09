@@ -353,7 +353,6 @@ namespace c10 {
   _(attr, sizes)                     \
   _(attr, starts)                    \
   _(attr, profiled_type)             \
-  _(attr, profiled_ivalue)           \
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \

@@ -38,9 +38,6 @@ TORCH_CUDA_API bool isReductionNode(const Node* node);
 // returns whether or not a parsing function exists for the given node type.
 TORCH_CUDA_API bool isNodeParsible(const Node* node);
 
-// returns whether or not a parsing function exists for the given node type.
-bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset);
-
 void InsertProfileNodes(ProfilingRecord* pr);
 
 // lowers PyTorch jit graph to `Fusion`.

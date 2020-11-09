@@ -477,7 +477,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            // TODO: support cast of output types yet;
+            // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half and float;
@@ -624,10 +624,7 @@ ProfileIValueOp* insertProfileIValueOp(
   auto in_val = node->input(offset);
   auto pn = pr->createProfileIValueNode(in_val);
   pn->insertBefore(node);
-  // TODO: I think this is better
   node->replaceInput(offset, pn->output());
-  // TODO: why is this here?
-  // pn->ty_(attr::profiled_type, in_val->type());
   return pn;
 }
 
@@ -645,9 +642,7 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isIntList(), "profiling seeing the wrong data type");
-    // TODO: get a real attribute
     if (!pn->hasAttribute(intListAttr)) {
-      // pn->is_(attr::a, value.toIntList().vec());
       pn->is_(intListAttr, value.toIntVector());
     } else {
       auto profiled_ints = pn->is(intListAttr);
@@ -680,7 +675,6 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isBool(), "profiling seeing the wrong data type");
-    // TODO: get a real attribute
     if (!pn->hasAttribute(boolAttr)) {
       pn->i_(boolAttr, value.toBool());
     } else {
@@ -727,7 +721,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return false;
   }
 
-  // we should use `OperatorSet`
   static auto reduction_operator_schema =
       getOperatorForLiteral(
           "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")

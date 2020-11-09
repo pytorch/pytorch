@@ -182,8 +182,6 @@ struct CudaGraphFuser {
     std::unordered_map<Value*, Value*> inputs_map;
     size_t i = 0;
     size_t tensor_insert_idx = 0;
-    // TODO: update this to exclude inputs from profile_ivalue;
-    // AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
       if (input->type()->isSubtypeOf(TensorType::get()))
@@ -194,7 +192,6 @@ struct CudaGraphFuser {
     // we insert tensors first because the fuser assumes that to be the case
     // (as a legacy from tensors only)
     WithInsertPoint guard(*subgraph.nodes().begin());
-    // std::vector<Node*> profiled_ivalue_list;
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         // TODO: we are following the convention for no good reason;
@@ -250,14 +247,6 @@ struct CudaGraphFuser {
         }
       }
     }
-
-    // no need to map dummy inputs from prim::profile_ivalue
-    // for (const auto& n : profiled_ivalue_list) {
-    //   group->addInput(n->output());
-    //   // we are doing this just to keep alias_analysis silent with their
-    //   checks auto in_group = subgraph.addInput();
-    //   in_group->setType(n->output()->type());
-    // }
 
     // copy n into the graph, remapping its inputs to internal nodes
     Node* in_graph = subgraph.createClone(
@@ -892,7 +881,6 @@ struct CudaGraphFuser {
   }
 
   void refreshAliasDb() {
-    GRAPH_DUMP("refresh aliasDb: ", graph_);
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
@@ -1100,8 +1088,6 @@ void guardFusionGroup(Node* fusion) {
   // insert the if block first;
   auto versioning_if =
       fusion->owningGraph()->create(prim::If, fusion->outputs().size());
-  //->create(prim::If, {typecheck_result}, fusion->outputs().size())
-  //->insertAfter(typecheck_node);
   for (size_t idx = 0; idx < fusion->outputs().size(); ++idx) {
     versioning_if->output(idx)->setType(fusion->output(idx)->type());
     fusion->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
@@ -1161,8 +1147,7 @@ void guardFusionGroup(Node* fusion) {
     // types get copied to the fallback graph, so remove specializations before
     // replacing
     // TODO: this is not exposed here, I need to remove that before inserting
-    // the
-    //       graph
+    // the graph
     // removeTensorTypeSpecializations(false_block);
     replaceBlockWithFallbackGraph(false_block, fusion->inputs());
 
@@ -1181,15 +1166,10 @@ void guardFusionGroup(Node* fusion) {
       auto profiled_ival = fusion->input(offset)->node()->input();
       auto const_o = createConditionalConstant(fusion->input(offset)->node());
       const_o->node()->moveBefore(versioning_if);
-      // TODO: :sigh :/ aten::eq doesn't support comparison between two boolean
-      // auto eq_node =
-      //     fusion->owningGraph()
-      //         ->create(aten::eq, {profiled_ival, const_o}, 1)
-      //         ->insertBefore(versioning_if);
-      // eq_node->output()->setType(BoolType::get());
       Value* ivalue_check = nullptr;
       if (fusion->input(offset)->node()->hasAttribute(
               Symbol::attr("profiled_bool"))) {
+        // aten::eq doesn't support comparison between two boolean
         auto xor_n = fusion->owningGraph()
                          ->create(aten::__xor__, {profiled_ival, const_o}, 1)
                          ->insertBefore(versioning_if);
@@ -1207,21 +1187,6 @@ void guardFusionGroup(Node* fusion) {
       }
       ivalue_check->setType(BoolType::get());
 
-      // TODO: this is a very complicated pattern for `and`.
-      /*
-      auto cascade_if =
-          fusion->owningGraph()
-              ->create(prim::If, {ivalue_check}, 1)
-              ->insertBefore(versioning_if);
-      cascade_if->output()->setType(BoolType::get());
-      auto true_block = cascade_if->addBlock();
-      true_block->registerOutput(typecheck_result);
-      auto false_block = cascade_if->addBlock();
-      false_block->registerOutput(const_false);
-
-      // update check result
-      typecheck_result = cascade_if->output();
-       */
       typecheck_result =
           fusion->owningGraph()
               ->create(aten::__and__, {ivalue_check, typecheck_result}, 1)
@@ -1257,8 +1222,7 @@ void guardFusionGroup(Node* fusion) {
     // types get copied to the fallback graph, so remove specializations before
     // replacing
     // TODO: this is not exposed here, I need to remove that before inserting
-    // the
-    //       graph
+    // the graph
     // removeTensorTypeSpecializations(false_block);
     replaceBlockWithFallbackGraph(false_block, fusion->inputs());
   }
@@ -1266,41 +1230,12 @@ void guardFusionGroup(Node* fusion) {
   // wiring up if block
   versioning_if->addInput(typecheck_result);
 
-  // auto versioning_if =
-  //    fusion->owningGraph()
-  //        ->create(prim::If, {typecheck_result}, fusion->outputs().size())
-  //        ->insertAfter(typecheck_node);
-  // for (size_t idx = 0; idx < fusion->outputs().size(); ++idx) {
-  //  versioning_if->output(idx)->setType(fusion->output(idx)->type());
-  //  fusion->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
-  //}
-  // auto true_block = versioning_if->addBlock();
-  // auto false_block = versioning_if->addBlock();
-
-  // WithInsertPoint guard(false_block->return_node());
-  // const auto subgraph_outputs =
-  //     insertGraph(*fusion->owningGraph(), *fallback_subgraph_ptr,
-  //     fusion->inputs());
-  // for (Value* output : subgraph_outputs) {
-  //   false_block->registerOutput(output);
-  // }
-
-  // types get copied to the fallback graph, so remove specializations before
-  // replacing
-  // TODO: this is not exposed here, I need to remove that before inserting the
-  //       graph
-  // removeTensorTypeSpecializations(false_block);
-  // replaceBlockWithFallbackGraph(false_block, fusion->inputs());
-
   // Fill in the true block. It has all inputs type-checked and its
   // body should be the fusion group node.
   fusion->moveBefore(true_block->return_node());
   for (Value* output : fusion->outputs()) {
     true_block->registerOutput(output);
   }
-
-  // last step: remove all existing profile_ivalue and conditional constants and
-  // restore everything to dynamic inputs
 }
 
 void guardFusionGroups(Block* block) {
