@@ -207,6 +207,16 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
 ```
 
+Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
+
+```plaintext
+build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
+collect2: error: ld returned 1 exit status
+error: command 'g++' failed with exit status 1
+```
+
+This is caused by `ld` from Conda environment shaddowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.6.10+, 3.7.6+ and 3.8.1+.
+
 On macOS
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
