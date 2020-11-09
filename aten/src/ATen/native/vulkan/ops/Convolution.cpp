@@ -136,8 +136,8 @@ vTensor pack_weights(
     api::context(),
     &pool,
     {
-      div_up(src_filter[Layout::Filter::output], 4ll),
-      4ll * src_filter[Layout::Filter::input],
+      div_up(src_filter[Layout::Filter::output], 4),
+      4 * src_filter[Layout::Filter::input],
       src_filter[Layout::Filter::height],
       src_filter[Layout::Filter::width],
     },
@@ -149,10 +149,15 @@ vTensor pack_weights(
   Future::Payload v_weight_payload = v_weight_future.wait();
 
   /* Source */
-  const int64_t src_kernel = src_filter[Layout::Filter::height] * src_filter[Layout::Filter::width];
+
+  const int64_t src_kernel =
+      src_filter[Layout::Filter::height] *
+      src_filter[Layout::Filter::width];
+
   const int64_t src_block = src_kernel * src_filter[Layout::Filter::input];
 
   /* Destination */
+
   const IntArrayRef dst_filter = v_weight.sizes();
   const int64_t dst_kernel = dst_filter[Layout::Filter::height] * dst_filter[Layout::Filter::width];
   const int64_t dst_block = dst_kernel * dst_filter[Layout::Filter::input];
@@ -170,7 +175,12 @@ vTensor pack_weights(
 
     // Dst
     const int64_t dst_oc = src_oc / 4;
-    float* const dst_weight_oc_ptr = dst_weight_ptr + dst_oc * dst_block;
+    const int64_t dst_oc_offset = src_oc % 4;
+
+    float* const dst_weight_oc_ptr =
+        dst_weight_ptr +
+        dst_oc * dst_block +
+        dst_oc_offset * dst_kernel;
 
     for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
       const int64_t dst_ic = 4 * src_ic;
@@ -186,23 +196,26 @@ vTensor pack_weights(
     Remainder
   */
 
-  const int64_t rem_block = 4 * dst_kernel;
-  const int64_t rem_ic = src_filter[Layout::Filter::input] % 4;
+  // const int64_t rem_ic = src_filter[Layout::Filter::input] % 4;
 
-  float *const rem_weight_ptr =
-      dst_weight_ptr +
-      (dst_filter[Layout::Filter::output] - 1) * dst_block +
-      rem_ic * dst_kernel;
+  // if (rem_ic > 0) {
+  //   const int64_t rem_block = 4 * dst_kernel;
 
-  for (int64_t rem_oc = 0; rem_oc < 4; ++rem_oc) {
-    memset(
-        rem_weight_ptr + rem_oc * rem_block,
-        // 2's complement integers and IEEE-754 floating point numbers both
-        // have identical bit representations for 0, so can use memset which
-        // only accepts uint8_t parameter.
-        0,
-        sizeof(float) * (4 - rem_ic));
-  }
+  //   float *const rem_weight_ptr =
+  //       dst_weight_ptr +
+  //       (dst_filter[Layout::Filter::output] - 1) * dst_block +
+  //       rem_ic * dst_kernel;
+
+  //   for (int64_t rem_oc = 0; rem_oc < 4; ++rem_oc) {
+  //     memset(
+  //         rem_weight_ptr + rem_oc * rem_block,
+  //         // 2's complement integers and IEEE-754 floating point numbers both
+  //         // have identical bit representations for 0, so can use memset which
+  //         // only accepts uint8_t parameter.
+  //         0,
+  //         sizeof(float) * (4 - rem_ic));
+  //   }
+  // }
 
   return v_weight;
 }
@@ -260,7 +273,7 @@ std::array<int64_t, 4> pack_filter(
   };
 
   return {
-    api::utils::align_up(filter[Layout::Filter::output], 4ll),
+    api::utils::align_up(filter[Layout::Filter::output], 4),
     filter[Layout::Filter::input],
     effective(
         filter[Layout::Filter::height],

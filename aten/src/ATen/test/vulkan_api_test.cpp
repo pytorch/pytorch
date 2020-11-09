@@ -252,7 +252,7 @@ TEST(VulkanAPITest, conv2d) {
         height,
       };
     }
-  } input {1, 4, 3, 3};
+  } input {1, 73, 3, 3};
 
   constexpr struct {
     uint32_t output_channels;
@@ -268,11 +268,11 @@ TEST(VulkanAPITest, conv2d) {
         height,
       };
     }
-  } weights {2, input.channels, 3, 3};
+  } weights {4, input.channels, 3, 3};
 
-  const auto input_cpu = at::ones(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::ones(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,

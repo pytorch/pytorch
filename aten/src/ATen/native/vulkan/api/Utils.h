@@ -8,30 +8,21 @@ namespace vulkan {
 namespace api {
 namespace utils {
 
-template<
-    typename Type,
-    typename = std::enable_if_t<std::is_integral<Type>::value>>
-inline Type align_down(
-    const Type number,
-    const Type multiple) {
+inline int64_t align_down(
+    const int64_t number,
+    const int64_t multiple) {
   return (number / multiple) * multiple;
 }
 
-template<
-    typename Type,
-    typename = std::enable_if_t<std::is_integral<Type>::value>>
-inline Type align_up(
-    const Type number,
-    const Type multiple) {
+inline int64_t align_up(
+    const int64_t number,
+    const int64_t multiple) {
   return align_down(number + multiple - 1, multiple);
 }
 
-template<
-    typename Type,
-    typename = std::enable_if_t<std::is_integral<Type>::value>>
-inline Type div_up(
-    const Type numerator,
-    const Type denominator) {
+inline int64_t div_up(
+    const int64_t numerator,
+    const int64_t denominator) {
   return (numerator + denominator - 1) / denominator;
 }
 

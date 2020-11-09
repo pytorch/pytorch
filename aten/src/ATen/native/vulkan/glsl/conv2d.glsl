@@ -14,7 +14,7 @@ layout(set = 0, binding = 3)          buffer  PRECISION restrict readonly  Bias 
 } uBias;
 layout(set = 0, binding = 4)          uniform PRECISION restrict           Block {
   ivec2 kernel;
-  ivec2 c4;
+  ivec2 channels;
   ivec2 stride;
   ivec2 padding;
   ivec2 dilate;
@@ -39,18 +39,15 @@ void main() {
 
     vec4 sum = uBias.data[pos.z];
 
-    for (int z = 0, kz = pos.z / ; z < uBlock.c4.x; ++z, ++kz) {
+    for (int z = 0; z < isize.z; ++z) {
       for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
         for (int x = start.x, kx = kstart.x; x < end.x; x += uBlock.dilate.x, ++kx) {
-          const vec4 inputv = texelFetch(uInput, ivec3(x, y, z), 0);
+          const vec4 In = texelFetch(uInput, ivec3(x, y, z), 0);
 
-          texelFetch(uKernel, ivec3(kx, ky, kz), 0);
-
-          // sum = fma(
-          //     texelFetch(uInput, ivec3(x, y, pos.z * uBlock.ic4 + z), 0),
-          //     texelFetch(uKernel, ivec3(kx, ky, z), 0),
-          //     sum);
-          sum += inputv;
+          sum += In.x * texelFetch(uKernel, ivec3(kx, ky, 4 * z + 0), 0);
+          sum += In.y * texelFetch(uKernel, ivec3(kx, ky, 4 * z + 1), 0);
+          sum += In.z * texelFetch(uKernel, ivec3(kx, ky, 4 * z + 2), 0);
+          sum += In.w * texelFetch(uKernel, ivec3(kx, ky, 4 * z + 3), 0);
         }
       }
     }
