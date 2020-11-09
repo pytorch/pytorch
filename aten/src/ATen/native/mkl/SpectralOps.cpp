@@ -50,7 +50,7 @@ namespace at { namespace native {
 // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 template <typename scalar_t>
-static __ubsan_ignore_undefined__  // UBSAN gives false positives on negative pointer indexing
+static __ubsan_ignore_undefined__  // UBSAN gives false positives on using negative indexes with a pointer
 void _fft_fill_with_conjugate_symmetry_slice(
     Range range, at::ArrayRef<bool> is_mirrored_dim, IntArrayRef signal_half_sizes,
     IntArrayRef in_strides, const scalar_t * in_ptr,
@@ -178,6 +178,7 @@ REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fil
 REGISTER_AVX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
+// Constructs an mkl-fft plan descriptor representing the desired transform
 // For complex types, strides are in units of 2 * element_size(dtype)
 // sizes are for the full signal, including batch size and always two-sided
 static DftiDescriptor _plan_mkl_fft(
