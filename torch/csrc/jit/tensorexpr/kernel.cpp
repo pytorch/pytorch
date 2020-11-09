@@ -2,6 +2,7 @@
 
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -370,7 +371,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     }
 
     case aten::softmax:
-      // Output of Softmax has the same shape as input 0.
+    case aten::log_softmax:
+      // Output of softmax / log_softmax has the same shape as input 0.
       return sizesForValue(v->node()->input(0));
 
     case aten::slice:
@@ -1352,7 +1354,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
 
     case aten::softmax: {
-      return computeSoftmax(v);
+      return computeSoftmax(v, false);
+    }
+
+    case aten::log_softmax: {
+      return computeSoftmax(v, true);
     }
 
     default: {
@@ -1367,13 +1373,8 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // Compute non-output tensors_ inline
-  for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second)) {
-      continue;
-    }
-    l.computeInline(p.second->buf());
-  }
+  l.inlineIntermediateBufs();
+
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
@@ -1630,7 +1631,9 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
       reduction_info.reductionDims);
 }
 
-Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
+Tensor* TensorExprKernel::computeSoftmax(
+    const torch::jit::Value* v,
+    bool log_softmax) {
   // Softmax is computed as follows:
   //    softmax(vi) = exp(vi) / sum(exp(vi))
   //
@@ -1644,6 +1647,21 @@ Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
   //     the max of the softmax dim it belongs to.
   //   - Third loop computes the sum over the softmax dim.
   //   - Final loop computes softmax for every element in v.
+
+  // LogSoftmax is computed as follows:
+  //    log_softmax(vi) = log(softmax(vi))
+  //                    = vi - log(sum(exp(vi)))
+  //
+  // Using the same max trick as above:
+  //    log_softmax(vi) = vi - max(vi) - log(sum(exp(vi - max(vi))))
+  //
+  // This is implemented as 5 loopnests:
+  //   - First loop computes the max over the softmax dim.
+  //   - Second loop computes exp for every element in v after subtracting
+  //     the max of the softmax dim it belongs to.
+  //   - Third loop computes the sum over the softmax dim.
+  //   - Fourth loop computes log for every element in the sum.
+  //   - Final loop computes the log_softmax for every element in v.
 
   TORCH_INTERNAL_ASSERT(v->node()->inputs().size() == 3);
   auto output_dims = dimsFromSizes(sizesForValue(v));
@@ -1728,10 +1746,23 @@ Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
         return e->call(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
-  auto res = Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-    return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+  if (!log_softmax) {
+    return Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
+      return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+    });
+  }
+
+  auto log_sum = Compute(
+      "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
+        return log(sum->call(indices));
+      });
+  return Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
+    auto inp = tensorOrConstant(
+        v->node()->inputs()[0], convert_indices_to_expr_handle(indices));
+    auto non_softmax_indices = remove_softmax_dim_index(indices);
+    return inp - max->call(non_softmax_indices) -
+        log_sum->call(non_softmax_indices);
   });
-  return res;
 }
 
 TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
@@ -1847,7 +1878,12 @@ void TensorExprKernel::compile() {
   std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
 
   // Generate code.
-  codegen_ = CreateCodeGen(getCodeGenName(backendType), stmt, params, device_);
+  codegen_ = CreateCodeGen(
+      getCodeGenName(backendType),
+      stmt,
+      params,
+      device_,
+      SubgraphUtils::generateNameForGraph(graph_));
 }
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
