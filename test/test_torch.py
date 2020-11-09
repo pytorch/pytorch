@@ -15703,7 +15703,6 @@ class TestTorchDeviceType(TestCase):
                     rows, columns = matrix_size
                 if a is None:
                     a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype)).to(device)
-                a_ = a.cpu().numpy()
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
                 self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
                 self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
