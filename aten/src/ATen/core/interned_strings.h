@@ -106,6 +106,7 @@ namespace c10 {
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
   _(prim, MMBatchSide)               \
+  _(prim, list)                      \
   _(prim, min)                       \
   _(prim, max)                       \
   _(prim, abs)                       \
