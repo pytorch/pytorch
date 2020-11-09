@@ -2477,7 +2477,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (input, h0, c0))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest() # issue is lower pass graph scripting prim_dtype
+    @disableScriptTest()  # issue is lower pass graph scripting prim_dtype
     def test_lstm_default_init_state(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -3263,7 +3263,7 @@ class TestONNXRuntime(unittest.TestCase):
                     res2 += 1
                     res3 = res3 + [arr[i].sum(0, False)]
                     res4 += [arr[-1 - i].sum(0, False)]
-                return res, res1, res2, torch.stack(res3), torch.stack(res4)
+                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
