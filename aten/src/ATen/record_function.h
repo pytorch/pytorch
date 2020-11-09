@@ -112,17 +112,17 @@ struct TORCH_API RecordFunction {
   RecordFunction& operator=(const RecordFunction&) = delete;
 
   inline const StringView& name() const {
-    TORCH_CHECK(state_, "Called name() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
     return state_->name_;
   }
 
   inline int64_t seqNr() const {
-    TORCH_CHECK(state_, "Called seqNr() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called seqNr() on inactive RecordFunction");
     return state_->sequence_nr_;
   }
 
   const std::vector<c10::IValue>& inputs() const {
-    TORCH_CHECK(state_, "Called inputs() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called inputs() on inactive RecordFunction");
     return state_->inputs_;
   }
 
@@ -130,7 +130,7 @@ struct TORCH_API RecordFunction {
   // Useful for writing thread safe end callbacks that may be potentially
   // executed in a different thread (async ops)
   inline uint64_t threadId() const {
-    TORCH_CHECK(state_, "Called threadId() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called threadId() on inactive RecordFunction");
     return state_->thread_id_;
   }
 
@@ -139,17 +139,17 @@ struct TORCH_API RecordFunction {
   // used alongside with sequence number to correlate backward functions with
   // the forward ones
   inline uint64_t forwardThreadId() const {
-    TORCH_CHECK(state_, "Called forwardThreadId() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called forwardThreadId() on inactive RecordFunction");
     return state_->fwd_thread_id_;
   }
 
   inline void setForwardThreadId(uint64_t thread_id) {
-    TORCH_CHECK(state_, "Called setForwardThreadId() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setForwardThreadId() on inactive RecordFunction");
     state_->fwd_thread_id_ = thread_id;
   }
 
   inline RecordScope scope() const {
-    TORCH_CHECK(state_, "Called scope() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called scope() on inactive RecordFunction");
     return state_->scope_;
   }
 
@@ -198,17 +198,17 @@ struct TORCH_API RecordFunction {
   void end();
 
   inline RecordFunctionHandle handle() const {
-    TORCH_CHECK(state_, "Called handle() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called handle() on inactive RecordFunction");
     return state_->handle_;
   }
 
   inline c10::optional<OperatorName> operator_name() const {
-    TORCH_CHECK(state_, "Called operator_name() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called operator_name() on inactive RecordFunction");
     return state_->operator_name_;
   }
 
   inline void setHandle(RecordFunctionHandle handle) {
-    TORCH_CHECK(state_, "Called setHandle() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setHandle() on inactive RecordFunction");
     state_->handle_ = handle;
   }
 
@@ -218,7 +218,7 @@ struct TORCH_API RecordFunction {
   }
 
   bool needsInputs() const {
-    TORCH_CHECK(state_, "Called needsInputs() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called needsInputs() on inactive RecordFunction");
     return state_->needs_inputs;
   }
 
@@ -330,7 +330,7 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& samplingProb(double sampling_prob) {
-    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
         "Invalid sampling probability");
     sampling_prob_ = sampling_prob;
     return *this;

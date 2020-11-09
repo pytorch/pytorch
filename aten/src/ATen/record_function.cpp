@@ -408,7 +408,7 @@ void RecordFunction::before(
 }
 
 /* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
-  TORCH_CHECK(newDefaultNodeId >= 0, "setDefaultNodeId expects an id >= 0.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(newDefaultNodeId >= 0, "setDefaultNodeId expects an id >= 0.");
   defaultNodeId = newDefaultNodeId;
 }
 
