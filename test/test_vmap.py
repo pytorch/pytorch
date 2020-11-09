@@ -1156,6 +1156,26 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(op)(real_tensor)
         self.assertEqual(result.data_ptr(), real_tensor.data_ptr())
 
+    def test_contiguous(self):
+        op = Tensor.contiguous
+
+        self._test_unary(op, TensorFactory.randn, 'cpu')
+
+        # check that contiguous returns the original tensor if the per-examples
+        # are already contiguous
+        B0 = 3
+        x = torch.randn(B0, 2, 5, 7)
+        x = x.movedim(0, 2)
+        result = vmap(Tensor.contiguous, in_dims=2, out_dims=2)(x)
+        self.assertTrue(result is x)
+
+        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        tensor = torch.randn(B0, 3)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(op, memory_format=torch.channels_last))(tensor)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(op, memory_format=torch.channels_last_3d))(tensor)
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -1322,6 +1342,55 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         self.assertEqual(vmap(foo)(ctensor), torch.tensor([1, 1, 1]))
         self.assertEqual(vmap(foo)(tensor), torch.tensor([0, 0, 0]))
+
+    def test_is_contiguous(self):
+        def foo(x):
+            if x.is_contiguous():
+                return torch.tensor(1.)
+            else:
+                return torch.tensor(0.)
+
+        B0, B1 = 3, 5
+
+        # Single batch dim
+        contig = torch.randn(B0, 2, 7)
+        self.assertEqual(vmap(foo)(contig), torch.ones(B0))
+
+        noncontig = torch.randn(2, B0, 7)
+        self.assertEqual(vmap(foo, in_dims=1)(noncontig), torch.zeros(B0))
+
+        noncontig = torch.randn(2, 7, B0)
+        self.assertEqual(vmap(foo, in_dims=2)(noncontig), torch.zeros(B0))
+
+        # Multiple batch dims
+        contig = torch.randn(B0, B1, 3)
+        self.assertEqual(vmap(vmap(foo))(contig), torch.ones(B0, B1))
+
+        contig = torch.randn(B1, B0, 3)
+        self.assertEqual(vmap(vmap(foo), in_dims=1)(contig), torch.ones(B0, B1))
+
+        noncontig = torch.randn(B0, 3, B1)
+        self.assertEqual(vmap(vmap(foo, in_dims=1))(noncontig), torch.zeros(B0, B1))
+
+        # is_contiguous on empty tensor is True
+        def bar(x):
+            assert x.is_contiguous()
+            return x
+
+        vmap(bar)(torch.randn(B0, 0, 3))
+        vmap(bar, in_dims=1)(torch.randn(0, B0, 3))
+
+        # is_contiguous with other memory formats
+        def baz(x, memory_format):
+            x.is_contiguous(memory_format=memory_format)
+            return x
+
+        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        tensor = torch.randn(B0, 2, 7, 3)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(baz, memory_format=torch.channels_last))(tensor)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
 
     def test_movedim(self):
         op = torch.movedim

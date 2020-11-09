@@ -337,6 +337,15 @@ Tensor unfold_batching_rule(const Tensor& self, int64_t dim, int64_t size, int64
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor contiguous_batching_rule(const Tensor& self, MemoryFormat memory_format) {
+  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+      "NYI: Tensor.contiguous(...) inside of vmap for memory_format other ",
+      "than torch.contiguous_format");
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto result = physical_view.tensor().contiguous(memory_format);
+  return physical_view.newLogicalFromPhysical(result);
+}
+
 Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto size_physical = self_physical.getPhysicalShape(size);
@@ -750,6 +759,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // Tensor.new_* operators
   m.impl_UNBOXED("new_empty", new_empty_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
+
+  m.impl("contiguous", contiguous_batching_rule);
 }
 
 } // namespace at
