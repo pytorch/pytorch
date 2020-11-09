@@ -285,8 +285,8 @@ struct BoxedKernelWrapper<
     // the specialization that follows.
     // note: this test is complicated by the fact that boolean value expressions in templates
     // don't shortcut. some signatures have a result tuple that's wider than the arg list, and
-    // these will cause a template evaluation error on this test, even if a length check precedes
-    // it in the conjunction.
+    // without the length limiting ternary these will cause a template evaluation error on this
+    // test, even if a length check precedes it in the conjunction.
     // TODO remove when hacky_wrapper reorders legacy kernel out args
     && !std::is_same<
         Result,
@@ -341,8 +341,8 @@ struct BoxedKernelWrapper<
     // this test fires passes for legacy kernels with out args at the front.
     // note: this test is complicated by the fact that boolean value expressions in templates
     // don't shortcut. some signatures have a result tuple that's wider than the arg list, and
-    // these will cause a template evaluation error on this test, even if a length check precedes
-    // it in the conjunction.
+    // without the length limiting ternary these will cause a template evaluation error on this
+    // test, even if a length check precedes it in the conjunction.
     && std::is_same<
         Result,
         guts::typelist::to_tuple_t<
