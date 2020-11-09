@@ -430,6 +430,26 @@ class TestONNXRuntime(unittest.TestCase):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_data(self):
+        class Data(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.new_zeros(x.data.size())
+
+        x = torch.randn(3, 4)
+        self.run_test(Data(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()  # Need type inference
+    def test_index_mask_nd(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                return input[input > 0]
+
+        m1 = torch.randn(3, 4, 5, 6, 7)
+        self.run_test(MyModel(), m1)
+
     @disableScriptTest()
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -451,6 +471,42 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
+
+    def test_none_as_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if y is not None:
+                    return x + y
+                return x
+
+        x = torch.randn(2, 3)
+        self.run_test(Model(), (x, None))
+
+    def test_none_as_tuple_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if y[0] is not None:
+                    return x + y[0]
+                if y[1] is not None:
+                    return x + y[1]
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y)))
+
+    def test_none_as_named_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        self.run_test(Model(), (x, None, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cste_script(self):
@@ -1703,6 +1759,26 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_listunpack(self):
+        class ListUnpack(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3)
+        self.run_test(ListUnpack(), x)
+
+        class ListUnpackSlice(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape[2:]
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3, 4, 5)
+        self.run_test(ListUnpackSlice(), x)
+
     def test_pow(self):
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
@@ -1788,6 +1864,15 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.var(input, unbiased=True)
 
         model = VarianceUnbiased()
+        self.run_test(model, x)
+
+        class VarianceSqrt(torch.nn.Module):
+            def forward(self, input):
+                y = torch.var(input, 1)
+                return torch.sqrt(y + 1e-8)
+
+        x = torch.randn(1, 2, 3, 300, 300)
+        model = VarianceSqrt()
         self.run_test(model, x)
 
     def test_var_along_dims(self):
