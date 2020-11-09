@@ -17336,8 +17336,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Verify Value
             self.assertEqual(torch_result, expected)
             # Verify Sign
-            # Use double copysign to verify the correctnes of 0.0 and -0.0, since 
-            # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the 
+            # Use double copysign to verify the correctnes of 0.0 and -0.0, since
+            # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
             self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
                              torch.copysign(torch.tensor(1.0), expected))
@@ -17574,9 +17574,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected)
 
-    def _helper_test_igamma(self, loglo, loghi, device, dtype, igamma=True):
-        torch_fcn = torch.igamma if igamma else torch.igammac
-        scipy_fcn = scipy.special.gammainc if igamma else scipy.special.gammaincc
+    def _helper_test_igamma(self, loglo, loghi, device, dtype,
+                            torch_fcn, scipy_fcn):
         exp1 = 2.71828182846
         vec1 = torch.logspace(loglo, loghi, steps=500, base=exp1,
                               dtype=torch.float64, device=device).unsqueeze(-1)
@@ -17609,7 +17608,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
         loghi = 4  # approx 54.6
-        self._helper_test_igamma(loglo, loghi, device, dtype)
+        self._helper_test_igamma(loglo, loghi, device, dtype,
+                                 torch.igamma, scipy.special.gammainc)
 
     @skipCUDAIfRocm
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -17620,7 +17620,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # test igammac for reasonable range of values
         loglo = -4  # approx 0.018
         loghi = 4  # approx 54.6
-        self._helper_test_igamma(loglo, loghi, device, dtype)
+        self._helper_test_igamma(loglo, loghi, device, dtype,
+                                 torch.igammac, scipy.special.gammaincc)
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
@@ -18213,7 +18214,7 @@ else:
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)
                 out_tensor = out_tensor.permute(perm3).contiguous().permute(invert_perm(perm3))
-                yield b1, b2, ref, out_tensor 
+                yield b1, b2, ref, out_tensor
             # broadcasting tensors
             for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)

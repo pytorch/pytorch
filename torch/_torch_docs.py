@@ -2640,7 +2640,7 @@ Computes the dot product of two 1D tensors. The vdot(a, b) function handles comp
 differently than dot(a, b). If the first argument is complex, the complex conjugate of the
 first argument is used for the calculation of the dot product.
 
-.. note:: 
+.. note::
 
     Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
     of two 1D tensors with the same number of elements.
@@ -3446,8 +3446,12 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
     tensor([0.3528, 0.5665, 0.7350])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
 
 """.format(**common_args))
 
@@ -3487,8 +3491,12 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
-    tensor([0.3528, 0.5665, 0.7350])
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
+    tensor([0.6472, 0.4335, 0.2650])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
 
 """.format(**common_args))
 
