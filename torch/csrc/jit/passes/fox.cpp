@@ -13,6 +13,9 @@
 
 using namespace torch::jit::tensorexpr;
 
+namespace torch {
+namespace jit {
+
 void foxPass() {
     KernelScope kernel_scope;
 
@@ -50,3 +53,16 @@ void foxPass() {
               << "B[10] = " << data_B[10] << std::endl
               << "X[10] = A[10] + B[10] = " << data_X[10] << std::endl;
 }
+
+tensorexpr::KernelArena* enterNewKernelScope() {
+    auto* old_arena = KernelArena::GetCurrentKernelArena();
+    KernelArena::SetCurrentKernelArena(new KernelArena);
+    return old_arena;
+}
+
+void exitKernelScope(tensorexpr::KernelArena *orig) {
+    delete KernelArena::GetCurrentKernelArena();
+    KernelArena::SetCurrentKernelArena(orig);
+}
+
+}}  // namespace torch::jit

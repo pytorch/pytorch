@@ -567,6 +567,9 @@ const DataLayout& PytorchLLVMJIT::getDataLayout() {
 }
 
 #else // LLVM_VERSION_MAJOR
+#define XSTR(x) STR(x)
+#define STR(x) #x
+#pragma message XSTR(LLVM_VERSION_MAJOR)
 #error Only LLVM versions 8 through 12 are supported.
 #endif
 

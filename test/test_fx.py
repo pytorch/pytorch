@@ -819,7 +819,9 @@ class TestFX(JitTestCase):
         rn18 = resnet18()
         rn18.eval()
 
-        input = torch.randn(5, 3, 224, 224)
+        print(rn18)
+        input = torch.randn(5, 3, 224, 224).contiguous(memory_format=torch.channels_last)
+        print(input.stride())
         cost, profiling_model = estimate_cpu_cost(rn18, [input])
 
         self.assertTrue(cost.ops > 0)
