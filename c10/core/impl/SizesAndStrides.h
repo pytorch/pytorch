@@ -236,12 +236,12 @@ class C10_API SizesAndStrides {
       return;
     }
     if (C10_LIKELY(newSize <= MAX_INLINE_SIZE)) {
-      size_t oldInlineSize = 0;
       if (C10_LIKELY(isInline())) {
-        oldInlineSize = oldSize;
-        const auto bytesToZero = (newSize - oldInlineSize) * sizeof(inlineStorage_[0]);
-        memset(&inlineStorage_[oldInlineSize], 0, bytesToZero);
-        memset(&inlineStorage_[MAX_INLINE_SIZE + oldInlineSize], 0, bytesToZero);
+        if (oldSize < newSize) {
+          const auto bytesToZero = (newSize - oldSize) * sizeof(inlineStorage_[0]);
+          memset(&inlineStorage_[oldSize], 0, bytesToZero);
+          memset(&inlineStorage_[MAX_INLINE_SIZE + oldSize], 0, bytesToZero);
+        }
       } else {
         memcpy(&inlineStorage_[0], outOfLineStorage()->data(), MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
         memcpy(
