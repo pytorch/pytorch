@@ -197,6 +197,7 @@ class vTensor final {
   const TensorOptions& options() const;
   IntArrayRef sizes() const;
   IntArrayRef strides() const;
+  size_t nbytes() const;
 
  private:
   // Some overloads below are intentionally disabled to enforce a usage pattern
@@ -495,6 +496,11 @@ inline const TensorOptions& vTensor::options() const {
 
 inline IntArrayRef vTensor::sizes() const {
   return view_->sizes();
+}
+
+inline size_t vTensor::nbytes() const {
+  return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
+         prod_intlist(sizes());
 }
 
 inline IntArrayRef vTensor::strides() const {
