@@ -52,6 +52,7 @@ class HelperWrapper(object):
         'concat': concat,
         'depth_concat': depth_concat,
         'sum': sum,
+        'sub': sub,
         'transpose': transpose,
         'iter': iter,
         'accuracy': accuracy,

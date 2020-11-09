@@ -101,11 +101,11 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
       "Invalid Vulkan shader module!");
 
   constexpr uint32_t x_offset = 0u;
-  constexpr uint32_t x_size = sizeof(Shader::WorkGroup::x);
+  constexpr uint32_t x_size = sizeof(Shader::WorkGroup::width);
   constexpr uint32_t y_offset = x_offset + x_size;
-  constexpr uint32_t y_size = sizeof(Shader::WorkGroup::y);
+  constexpr uint32_t y_size = sizeof(Shader::WorkGroup::height);
   constexpr uint32_t z_offset = y_offset + y_size;
-  constexpr uint32_t z_size = sizeof(Shader::WorkGroup::z);
+  constexpr uint32_t z_size = sizeof(Shader::WorkGroup::depth);
 
   constexpr VkSpecializationMapEntry specialization_map_entires[3]{
     // X

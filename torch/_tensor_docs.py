@@ -939,6 +939,19 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('copysign',
+               r"""
+copysign(other) -> Tensor
+
+See :func:`torch.copysign`
+""")
+
+add_docstr_all('copysign_', r"""
+copysign_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.copysign`
+""")
+
 add_docstr_all('cos',
                r"""
 cos() -> Tensor
@@ -1210,7 +1223,7 @@ In-place version of :meth:`~Tensor.divide`
 
 add_docstr_all('dot',
                r"""
-dot(tensor2) -> Tensor
+dot(other) -> Tensor
 
 See :func:`torch.dot`
 """)
@@ -1542,6 +1555,20 @@ i0_() -> Tensor
 In-place version of :meth:`~Tensor.i0`
 """)
 
+add_docstr_all('igamma',
+               r"""
+igamma(other) -> Tensor
+
+See :func:`torch.igamma`
+""")
+
+add_docstr_all('igamma_',
+               r"""
+igamma_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.igamma`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -1664,7 +1691,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (LongTensor): indices of :attr:`tensor` to select from
+    index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to add
 
 Example::
@@ -1940,6 +1967,13 @@ Example::
     >>> x.item()
     1.0
 
+""")
+
+add_docstr_all('kron',
+               r"""
+kron(other) -> Tensor
+
+See :func:`torch.kron`
 """)
 
 add_docstr_all('kthvalue',
@@ -3990,7 +4024,7 @@ See :func:`torch.var`
 
 add_docstr_all('vdot',
                r"""
-dot(other) -> Tensor
+vdot(other) -> Tensor
 
 See :func:`torch.vdot`
 """)
