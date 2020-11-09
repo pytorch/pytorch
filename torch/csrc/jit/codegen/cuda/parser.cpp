@@ -27,8 +27,8 @@ constexpr auto kNumLerpOps = 2;
 
 namespace {
 
-static auto intListAttr = Symbol::attr("profiled_int_list");
-static auto boolAttr = Symbol::attr("profiled_bool");
+static const auto intListAttr = Symbol::attr("profiled_int_list");
+static const auto boolAttr = Symbol::attr("profiled_bool");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;

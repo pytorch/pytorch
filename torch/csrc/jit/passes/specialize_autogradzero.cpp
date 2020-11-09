@@ -11,7 +11,7 @@
 namespace torch {
 namespace jit {
 
-static auto countsAttribute = Symbol::attr("none_counts");
+static const auto countsAttribute = Symbol::attr("none_counts");
 
 bool hasGradSumToSizeUses(Value* v) {
   return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {

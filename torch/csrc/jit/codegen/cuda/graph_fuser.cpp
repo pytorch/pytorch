@@ -217,7 +217,7 @@ struct CudaGraphFuser {
           group->addInput(input);
         } else if (input->node()->kind() == prim::Constant) {
           // inline the constants directly in the body of the fused group.
-          Node* out_const = input->node();
+
           // we'll only merge constant into a non-empty graph, which will always
           // have inputs
           // Value* dummy_input = subgraph.inputs()[0];
@@ -238,10 +238,6 @@ struct CudaGraphFuser {
                 in_group->setType(v->type());
                 return in_group;
               });
-          // if (!in_const->inputs().empty()) {
-          //  profiled_ivalue_list.push_back(out_const->input()->node());
-          //  in_const->removeAllInputs();
-          //}
 
           subgraph.insertNode(in_const);
           inputs_map[input] = in_const->output();
@@ -565,6 +561,7 @@ struct CudaGraphFuser {
       bchunk = promoteChunkToBroadcastingChunk(chunk);
     }
     size_t nchunks = bchunk->i(attr::chunks);
+    TORCH_INTERNAL_ASSERT(nchunks > 0, "number of chunks cannot be zero");
     WithInsertPoint guard(bchunk->next());
 
     std::vector<Value*> producer_chunk_outputs;
