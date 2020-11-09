@@ -167,7 +167,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'exp', 'nonzero', 'inverse'
+    'exp', 'nonzero'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -441,6 +441,7 @@ def find_factory_functions(declarations):
             FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
+# TODO: consolidate with 'gen_python_functions.should_trace()'
 def should_trace(declaration):
     # Operations involving Storage or Type are not traceable at the moment
     if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
