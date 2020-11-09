@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
 #include <c10/util/hash.h>
@@ -32,18 +34,24 @@ namespace api {
 // and destruct the aforementioned Vulkan objects.
 //
 
-struct C10_EXPORT Shader final {
+struct Shader final {
   //
   // Layout
   //
 
   struct Layout final {
     /*
+      Signature
+    */
+
+    typedef c10::SmallVector<VkDescriptorType, 8u> Signature;
+
+    /*
       Descriptor
     */
 
     struct Descriptor final {
-      c10::SmallVector<VkDescriptorSetLayoutBinding, 16u> bindings;
+      Signature signature;
     };
 
     /*
@@ -52,7 +60,7 @@ struct C10_EXPORT Shader final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorSetLayout) Deleter;
@@ -68,15 +76,35 @@ struct C10_EXPORT Shader final {
       VkDevice device_;
     };
 
+    struct Object final {
+      VkDescriptorSetLayout handle;
+      Signature signature;
+
+      operator bool() const;
+    };
+
     /*
       Cache
     */
 
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
+    class Cache final {
+     public:
+      explicit Cache(Factory factory);
+      Cache(const Cache&) = delete;
+      Cache& operator=(const Cache&) = delete;
+      Cache(Cache&&) = default;
+      Cache& operator=(Cache&&) = default;
+      ~Cache() = default;
 
-    explicit Layout(const VkDevice device)
-      : cache(Factory(device)) {
+      Object retrieve(const Descriptor& descriptor);
+      void purge();
+
+     private:
+      api::Cache<Factory> cache_;
+    } cache;
+
+    explicit Layout(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
   } layout;
 
@@ -84,11 +112,7 @@ struct C10_EXPORT Shader final {
   // Work Group
   //
 
-  struct WorkGroup final {
-    uint32_t x;
-    uint32_t y;
-    uint32_t z;
-  };
+  typedef VkExtent3D WorkGroup;
 
   /*
     Descriptor
@@ -122,7 +146,7 @@ struct C10_EXPORT Shader final {
 
   class Factory final {
    public:
-    explicit Factory(VkDevice device);
+    explicit Factory(const GPU& gpu);
     Factory(const Factory&) = delete;
     Factory& operator=(const Factory&) = delete;
     Factory(Factory&&);
@@ -152,9 +176,9 @@ struct C10_EXPORT Shader final {
   typedef api::Cache<Factory> Cache;
   Cache cache;
 
-  explicit Shader(const VkDevice device)
-    : layout(device),
-      cache(Factory(device)) {
+  explicit Shader(const GPU& gpu)
+    : layout(gpu),
+      cache(Factory(gpu)) {
   }
 };
 
@@ -165,33 +189,68 @@ struct C10_EXPORT Shader final {
 inline bool operator==(
     const Shader::Layout::Descriptor& _1,
     const Shader::Layout::Descriptor& _2) {
-  return _1.bindings == _2.bindings;
+  return _1.signature == _2.signature;
 }
 
 inline size_t Shader::Layout::Factory::Hasher::operator()(
     const Descriptor& descriptor) const {
   size_t hash = 0u;
 
-  for (const VkDescriptorSetLayoutBinding& binding : descriptor.bindings) {
+  for (const VkDescriptorType type : descriptor.signature) {
     hash = c10::hash_combine(
         hash,
-        c10::get_hash(
-            binding.binding,
-            binding.descriptorType,
-            binding.descriptorCount,
-            binding.stageFlags,
-            binding.pImmutableSamplers));
+        c10::get_hash(type));
   }
 
   return hash;
 }
 
+inline Shader::Layout::Object::operator bool() const {
+  return VK_NULL_HANDLE != handle;
+}
+
+inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
+    const Descriptor& descriptor) {
+  return {
+    cache_.retrieve(descriptor),
+    descriptor.signature,
+  };
+}
+
+inline void Shader::Layout::Cache::purge() {
+  cache_.purge();
+}
+
 inline bool operator==(
-    const Shader::WorkGroup& work_group_1,
-    const Shader::WorkGroup& work_group_2) {
-  return (work_group_1.x == work_group_2.x) &&
-         (work_group_1.y == work_group_2.y) &&
-         (work_group_1.z == work_group_2.z);
+    const Shader::WorkGroup& _1,
+    const Shader::WorkGroup& _2) {
+  return (_1.width == _2.width) &&
+         (_1.height == _2.height) &&
+         (_1.depth == _2.depth);
+}
+
+inline Shader::Descriptor::Descriptor(const char* const glsl)
+ : type(Type::Source),
+   shader{
+    .source = {
+      glsl,
+      0u,
+    },
+   } {
+  TORCH_CHECK(glsl, "Invalid shader source code!");
+}
+
+inline Shader::Descriptor::Descriptor(
+    const uint32_t* const code,
+    const uint32_t size)
+ : type(Type::Binary),
+   shader{
+    .binary = {
+      code,
+      size,
+    },
+   } {
+  TORCH_CHECK(code && (0u != size), "Invalid shader binary!");
 }
 
 inline bool operator==(
@@ -232,3 +291,5 @@ inline bool operator==(
          (_1.stageFlags == _2.stageFlags) &&
          (_1.pImmutableSamplers == _2.pImmutableSamplers);
 }
+
+#endif /* USE_VULKAN_API */

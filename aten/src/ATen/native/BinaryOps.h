@@ -10,7 +10,8 @@ namespace at { namespace native {
 inline void alpha_check(const ScalarType dtype, Scalar alpha) {
   TORCH_CHECK(! alpha.isBoolean() || dtype == ScalarType::Bool,
               "Boolean alpha only supported for Boolean results.");
-  TORCH_CHECK(isFloatingType(dtype) || alpha.isIntegral(true),
+  TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype)
+              || alpha.isIntegral(true),
               "For integral input tensors, argument alpha must not be a floating point number.");
 }
 
@@ -25,6 +26,7 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
 }
 
 using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
+using binary_fn_beta = void(*)(TensorIterator&, double beta);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
     void(*)(TensorIterator&, Scalar alpha, Scalar min_val, Scalar max_val);
@@ -54,7 +56,7 @@ DECLARE_DISPATCH(binary_fn, max_elementwise_stub);
 DECLARE_DISPATCH(binary_fn, min_elementwise_stub);
 DECLARE_DISPATCH(binary_fn, maximum_stub);
 DECLARE_DISPATCH(binary_fn, minimum_stub);
-DECLARE_DISPATCH(binary_fn, smooth_l1_stub);
+DECLARE_DISPATCH(binary_fn_beta, smooth_l1_stub);
 DECLARE_DISPATCH(binary_fn, sigmoid_backward_stub);
 DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);
 DECLARE_DISPATCH(binary_fn, tanh_backward_stub);
@@ -66,7 +68,9 @@ DECLARE_DISPATCH(binary_fn, logaddexp2_stub);
 DECLARE_DISPATCH(binary_fn, gcd_stub);
 DECLARE_DISPATCH(binary_fn, lcm_stub);
 DECLARE_DISPATCH(binary_fn, hypot_stub);
+DECLARE_DISPATCH(binary_fn, igamma_stub);
 DECLARE_DISPATCH(binary_fn, nextafter_stub);
 DECLARE_DISPATCH(binary_fn, heaviside_stub);
+DECLARE_DISPATCH(binary_fn, copysign_stub);
 
 }} // namespace at::native

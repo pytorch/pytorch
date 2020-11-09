@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 
 import operator_benchmark as op_bench
 
@@ -10,7 +5,7 @@ import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 
-from . import configs
+from pt import configs
 
 """
 Microbenchmarks for Quantized Linear operators.

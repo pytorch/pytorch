@@ -390,7 +390,7 @@ script::Module optimizeForMobile(
   if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
     FuseAddRelu(cloned_module);
   }
-
+  cloned_module.register_attribute("mobile_optimized", BoolType::get(), true);
   return cloned_module;
 }
 

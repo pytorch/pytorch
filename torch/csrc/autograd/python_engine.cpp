@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapMode.h>
 #include <pybind11/pybind11.h>
@@ -86,13 +87,14 @@ variable_list PythonEngine::execute(
     const variable_list& inputs,
     bool keep_graph,
     bool create_graph,
+    bool accumulate_grad,
     const edge_list& outputs) {
   TORCH_CHECK(!PyGILState_Check(), "The autograd engine was called while holding the GIL. If you are using the C++ "
                                    "API, the autograd engine is an expensive operation that does not require the "
                                    "GIL to be held so you should release it with 'pybind11::gil_scoped_release no_gil;'"
                                    ". If you are not using the C++ API, please report a bug to the pytorch team.")
   try {
-    return Engine::execute(roots, inputs, keep_graph, create_graph, outputs);
+    return Engine::execute(roots, inputs, keep_graph, create_graph, accumulate_grad, outputs);
   } catch (python_error& e) {
     e.restore();
     throw;
@@ -118,7 +120,7 @@ std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 PyObject *THPEngineClass = nullptr;
 
 // Implementation of torch._C._EngineBase.run_backward
-PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
+PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
   PyObject *tensors = nullptr;
@@ -127,14 +129,14 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   unsigned char create_graph = 0;
   PyObject *inputs = nullptr;
   unsigned char allow_unreachable = 0;
-  const char *accepted_kwargs[] = {
+  unsigned char accumulate_grad = 0; // Indicate whether to accumulate grad into leaf Tensors or capture
+  const char *accepted_kwargs[] = { // NOLINT
       "tensors", "grad_tensors", "keep_graph", "create_graph", "inputs",
-      "allow_unreachable", nullptr
+      "allow_unreachable", "accumulate_grad", nullptr
   };
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Ob", (char**)accepted_kwargs,
-        &tensors, &grad_tensors, &keep_graph, &create_graph, &inputs, &allow_unreachable))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Obb", (char**)accepted_kwargs,
+        &tensors, &grad_tensors, &keep_graph, &create_graph, &inputs, &allow_unreachable, &accumulate_grad))
     return nullptr;
-
   THPUtils_assert(PyTuple_Check(tensors), "tensors argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(tensors));
   THPUtils_assert(PyTuple_Check(grad_tensors), "grad_tensors argument is "
@@ -146,7 +148,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       "gradients", num_tensors, num_gradients);
 
   // The user either called autograd.backward(...) or autograd.grad(...) to get here
-  bool backward_api_called = inputs == nullptr;
+  bool backward_api_called = accumulate_grad;
   TORCH_CHECK(!backward_api_called || at::impl::VmapMode::current_vmap_level() == 0,
       "backward() called inside torch.vmap. This is not supported, "
       "please call backward() outside torch.vmap or instead use "
@@ -167,10 +169,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
         "vmapped tensors (output ", i, " is being vmapped over). Please "
         "call autograd.grad() outside torch.vmap or file a bug report "
         "with your use case.")
-    if(variable.is_complex()) {
-      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
-                      "gradients for functions we have not fixed yet");
-    }
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);
@@ -196,7 +194,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   }
 
   std::vector<Edge> output_edges;
-  if (!backward_api_called) {
+  if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
     for (int i = 0; i < num_inputs; ++i) {
@@ -213,7 +211,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
-          grad_fn = torch::autograd::impl::try_get_grad_accumulator(input_var->cdata);
+        grad_fn = torch::autograd::impl::try_get_grad_accumulator(input_var->cdata);
+      }
+      if (accumulate_grad) {
+        THPUtils_assert(input_var->cdata.is_leaf(),
+          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor");
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
@@ -229,10 +231,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   {
     pybind11::gil_scoped_release no_gil;
     auto& engine = python::PythonEngine::get_python_engine();
-    outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
+    outputs = engine.execute(roots, grads, keep_graph, create_graph, accumulate_grad, output_edges);
   }
 
-  if (!backward_api_called) {
+  if (!backward_api_called && inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
@@ -281,9 +283,11 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 }
 
 static struct PyMethodDef THPEngine_methods[] = {
-  {(char*)"run_backward", (PyCFunction)(void(*)(void))THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
-  {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
-  {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
+  {(char*)"run_backward",
+    castPyCFunctionWithKeywords(THPEngine_run_backward),
+    METH_VARARGS | METH_KEYWORDS, nullptr},
+  {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
+  {(char*)"is_checkpoint_valid", THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
   {nullptr}
 };
 

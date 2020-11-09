@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
@@ -91,7 +91,7 @@ class Reducer {
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Buffer& buf)
+  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>
@@ -104,7 +104,7 @@ class Reducer {
   }
 
   ReduceOp* operator()(
-      Buf* result_buf,
+      const Buf* result_buf,
       ExprHandle body,
       std::vector<const Expr*> output,
       std::vector<const Var*> inner) const {
@@ -201,8 +201,8 @@ inline ExprHandle minimumVal(ScalarType type) {
 
 class Maximum : public Reducer {
  public:
-  // TODO possible to remove this arg by deferring the init value until we know
-  // the dtype of the body.
+  // TODO possible to remove this arg by deferring the init value until we
+  // know the dtype of the body.
   Maximum(Dtype dtype)
       : Reducer(
             minimumVal(dtype.scalar_type()),

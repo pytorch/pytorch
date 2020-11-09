@@ -1,6 +1,5 @@
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
-from __future__ import absolute_import, division, print_function, unicode_literals
 import locale
 import re
 import subprocess
@@ -32,6 +31,9 @@ SystemEnv = namedtuple('SystemEnv', [
     'pip_version',  # 'pip' or 'pip3'
     'pip_packages',
     'conda_packages',
+    'hip_compiled_version',
+    'hip_runtime_version',
+    'miopen_runtime_version',
 ])
 
 
@@ -103,7 +105,7 @@ def get_nvidia_driver_version(run_lambda):
 
 
 def get_gpu_info(run_lambda):
-    if get_platform() == 'darwin':
+    if get_platform() == 'darwin' or (TORCH_AVAILABLE and torch.version.hip is not None):
         if TORCH_AVAILABLE and torch.cuda.is_available():
             return torch.cuda.get_device_name(None)
         return None
@@ -268,8 +270,17 @@ def get_env_info():
         debug_mode_str = str(torch.version.debug)
         cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
+        if torch.version.hip is None:  # cuda version
+            hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
+        else:  # HIP version
+            cfg = torch._C._show_config().split('\n')
+            hip_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'HIP Runtime' in s][0]
+            miopen_runtime_version = [s.rsplit(None, 1)[-1] for s in cfg if 'MIOpen' in s][0]
+            cuda_version_str = 'N/A'
+            hip_compiled_version = torch.version.hip
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
+        hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
 
     return SystemEnv(
         torch_version=version_str,
@@ -281,6 +292,9 @@ def get_env_info():
         nvidia_gpu_models=get_gpu_info(run_lambda),
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
+        hip_compiled_version=hip_compiled_version,
+        hip_runtime_version=hip_runtime_version,
+        miopen_runtime_version=miopen_runtime_version,
         pip_version=pip_version,
         pip_packages=pip_list_output,
         conda_packages=get_conda_packages(run_lambda),
@@ -294,6 +308,7 @@ env_info_fmt = """
 PyTorch version: {torch_version}
 Is debug build: {is_debug_build}
 CUDA used to build PyTorch: {cuda_compiled_version}
+ROCM used to build PyTorch: {hip_compiled_version}
 
 OS: {os}
 GCC version: {gcc_version}
@@ -306,6 +321,8 @@ CUDA runtime version: {cuda_runtime_version}
 GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
+HIP runtime version: {hip_runtime_version}
+MIOpen runtime version: {miopen_runtime_version}
 
 Versions of relevant libraries:
 {pip_packages}

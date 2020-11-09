@@ -896,6 +896,19 @@ class THCCachingAllocator {
 
 THCCachingAllocator caching_allocator;
 
+// Returns whether to force all allocations to bypass the caching allocator and
+// go straight to cudaMalloc.  This setting is useful when debugging GPU memory
+// errors, since the caching allocator foils cuda-memcheck.
+bool forceUncachedAllocator() {
+  static bool force_uncached =
+      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
+  return force_uncached;
+}
+
+static void uncached_delete(void* ptr) {
+  C10_CUDA_CHECK(cudaFree(ptr));
+}
+
 // NB: I decided not to fold this into THCCachingAllocator, because the latter
 // has a lot more methods and it wasn't altogether clear that they should
 // actually be publicly exposed
@@ -904,6 +917,10 @@ struct CudaCachingAllocator : public Allocator {
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
+    if (forceUncachedAllocator()) {
+      C10_CUDA_CHECK(cudaMalloc(&r, size));
+      return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
+    }
     if (size != 0) {
       caching_allocator.malloc(&r, device, size, cuda::getCurrentCUDAStream(device));
     }
@@ -949,8 +966,8 @@ std::mutex* getFreeMutex()
 }
 
 static inline void assertValidDevice(int device) {
-  int device_num = device_count();
-  AT_ASSERTM(0 <= device && device < device_num, "Invalid device argument.");
+  int device_num = caching_allocator.device_allocator.size();
+  TORCH_CHECK(0 <= device && device < device_num, "Invalid device argument.");
 }
 
 DeviceStats getDeviceStats(int device) {

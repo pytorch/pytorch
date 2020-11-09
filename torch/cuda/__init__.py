@@ -96,11 +96,11 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
     supported_sm = [int(arch.split('_')[1]) for arch in arch_list if 'sm_' in arch]
     for idx in range(device_count()):
         cap_major, cap_minor = get_device_capability(idx)
-        capability = cap_major * 10 + cap_minor
-        # NVIDIA GPU compute architectures are backward compatible within 5 minor revisions versions
-        supported = any([capability >= sm and capability - (sm // 5) * 5 < 5 for sm in supported_sm])
+        # NVIDIA GPU compute architectures are backward compatible within major version
+        supported = any([sm // 10 == cap_major for sm in supported_sm])
         if not supported:
             device_name = get_device_name(idx)
+            capability = cap_major * 10 + cap_minor
             warnings.warn(incompatible_device_warn.format(device_name, capability, " ".join(arch_list), device_name))
 
 

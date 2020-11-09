@@ -1,7 +1,11 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10d/FileStore.hpp>
+#ifndef _WIN32
 #include <c10d/HashStore.hpp>
+#include <c10d/ProcessGroupRoundRobin.hpp>
+#include <c10d/TCPStore.hpp>
+#endif
 #include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -17,13 +21,13 @@
 #endif
 
 #include <c10d/PrefixStore.hpp>
-#include <c10d/ProcessGroupRoundRobin.hpp>
-#include <c10d/TCPStore.hpp>
+#include <fmt/format.h>
 #include <pybind11/chrono.h>
 
+#include <c10d/comm.hpp>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -50,6 +54,11 @@ std::vector<std::string> split(char separator, const std::string& string) {
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
+
+constexpr auto kDeprecationWarning =
+    "{} API is being deprecated, please ping "
+    "https://github.com/pytorch/pytorch/issues/46291 "
+    "if you see this warning";
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -92,6 +101,14 @@ class PythonStore : public ::c10d::Store {
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
   }
 
+  int64_t getNumKeys() override {
+    PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, getNumKeys);
+  }
+
+  bool deleteKey(const std::string& key) override {
+    PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, deleteKey, key);
+  }
+
   bool check(const std::vector<std::string>& keys) override {
     PYBIND11_OVERLOAD_PURE(bool, ::c10d::Store, check, keys);
   }
@@ -107,38 +124,68 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
-// This method is called from DDP's Python API. Its inputs are
-// a c10d reducer object, state, and callable comm_hook. State and
-// comm_hook inputs are Python objects and this function creates a
-// c10d PythonCommHook object using these inputs. It later calls
-// register_comm_hook function of the reducer input to register that
-// PythonCommHook object.
+// Called from DDP's Python API to create a c10d Python comm hook object.
+// The input state and callable comm_hook are Python objects. It later calls
+// register_comm_hook function of the reducer input to register the hook.
 void _register_comm_hook(
     ::c10d::Reducer& reducer,
     py::object state,
     py::object comm_hook) {
   reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
       std::move(state), std::move(comm_hook)));
-};
+}
 
-PyObject* c10d_init(PyObject* _unused) {
+// Called from DDP's Python API to create a c10d C++ comm hook.
+// The input is an enum hook type. It later calls register_builtin_comm_hook
+// function of the reducer input to set the hook type.
+void _register_builtin_comm_hook(
+    ::c10d::Reducer& reducer,
+    ::c10d::BuiltinCommHookType comm_hook_type) {
+  reducer.register_builtin_comm_hook(comm_hook_type);
+}
+
+PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
 
-  auto module = py::handle(c10d_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
 
-  module.def(
-      "_register_comm_hook",
-      &_register_comm_hook,
-      py::arg("ddp_model"),
-      py::arg("state"),
-      py::arg("comm_hook"));
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+
+  auto module = py::handle(m).cast<py::module>();
+
+  module
+      .def(
+          "_register_comm_hook",
+          &_register_comm_hook,
+          py::arg("reducer"),
+          py::arg("state"),
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_register_builtin_comm_hook",
+          &_register_builtin_comm_hook,
+          py::arg("reducer"),
+          py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
-      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          py::init<
+              const std::vector<Tensor>&,
+              const std::vector<size_t>&,
+              const std::vector<size_t>&,
+              const std::vector<c10::IntArrayRef>&>(),
+          py::arg("tensors"),
+          py::arg("offsets"),
+          py::arg("lengths"),
+          py::arg("sizes_list"))
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
@@ -149,7 +196,24 @@ PyObject* c10d_init(PyObject* _unused) {
             replicas only in the case of single process multiple device mode. In
             the single process single device mode, this list would consist of only
             a single tensor.
-           )");
+           )")
+      .def(
+          "get_offsets",
+          &::c10d::GradBucket::getOffsets,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_lengths",
+          &::c10d::GradBucket::getLengths,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_sizes_list",
+          &::c10d::GradBucket::getSizesVec,
+          py::call_guard<py::gil_scoped_release>());
+
+  py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
+An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
+      .value("ALLREDUCE", ::c10d::BuiltinCommHookType::ALLREDUCE)
+      .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS);
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -159,6 +223,7 @@ PyObject* c10d_init(PyObject* _unused) {
               std::shared_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
+              bool,
               bool>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
@@ -166,6 +231,7 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
+          py::arg("gradient_as_bucket_view") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",
@@ -181,7 +247,10 @@ PyObject* c10d_init(PyObject* _unused) {
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
-      .def("_rebuild_buckets", &::c10d::Reducer::rebuild_buckets)
+      .def(
+          "_rebuild_buckets",
+          &::c10d::Reducer::rebuild_buckets,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "get_bucket_tensors",
           &::c10d::Reducer::get_bucket_tensors,
@@ -204,6 +273,8 @@ An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 
 Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
+
+Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
@@ -269,7 +340,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   auto store =
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
-          module, "Store")
+          module,
+          "Store",
+          R"(
+Base class for all store implementations, such as the 3 provided by PyTorch
+distributed: (:class:`~torch.distributed.TCPStore`, :class:`~torch.distributed.FileStore`,
+and :class:`~torch.distributed.HashStore`).
+)")
           // Default constructor.
           .def(py::init<>())
           // Convert from std::string to std::vector<uint8>.
@@ -281,7 +358,23 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 std::vector<uint8_t> value_(value.begin(), value.end());
                 store.set(key, value_);
               },
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Inserts the key-value pair into the store based on the supplied ``key`` and
+``value``. If ``key`` already exists in the store, it will overwrite the old
+value with the new supplied ``value``.
+
+Arguments:
+    key (str): The key to be added to the store.
+    value (str): The value associated with ``key`` to be added to the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store.set("first_key", "first_value")
+    >>> # Should return "first_value"
+    >>> store.get("first_key")
+)")
           // Convert from std::vector<uint8_t> to py::bytes.
           // The returned value is not guaranteed to be valid UTF-8.
           .def(
@@ -291,21 +384,141 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
+present in the store, the function will wait for ``timeout``, which is defined
+when initializing the store, before throwing an exception.
+
+Arguments:
+    key (str): The function will return the value associated with this key.
+
+Returns:
+    Value associated with ``key`` if ``key`` is in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store.set("first_key", "first_value")
+    >>> # Should return "first_value"
+    >>> store.get("first_key")
+)")
           .def(
               "add",
               &::c10d::Store::add,
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+The first call to add for a given ``key`` creates a counter associated
+with ``key`` in the store, initialized to ``amount``. Subsequent calls to add
+with the same ``key`` increment the counter by the specified ``amount``.
+Calling :meth:`~torch.distributed.store.add` with a key that has already
+been set in the store by :meth:`~torch.distributed.store.set` will result
+in an exception.
+
+Arguments:
+    key (str): The key in the store whose counter will be incremented.
+    amount (int): The quantity by which the counter will be incremented.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store.add("first_key", 1)
+    >>> store.add("first_key", 6)
+    >>> # Should return 7
+    >>> store.get("first_key")
+)")
+          .def(
+              "delete_key",
+              &::c10d::Store::deleteKey,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Deletes the key-value pair associated with ``key`` from the store. Returns
+`true` if the key was successfully deleted, and `false` if it was not.
+
+.. warning::
+    The ``delete_key`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
+
+Arguments:
+    key (str): The key to be deleted from the store
+
+Returns:
+    `true` if ``key`` was deleted, otherwise `false`.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store.set("first_key")
+    >>> # This should return true
+    >>> store.delete_key("first_key")
+    >>> # This should return false
+    >>> store.delete_key("bad_key")
+)")
+          .def(
+              "num_keys",
+              &::c10d::Store::getNumKeys,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Returns the number of keys set in the store. Note that this number will typically
+be one greater than the number of keys added by :meth:`~torch.distributed.store.set`
+and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
+the workers using the store.
+
+.. warning::
+    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
+
+Returns:
+    The number of keys present in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store.set("first_key", "first_value")
+    >>> # This should return 2
+    >>> store.num_keys()
+)")
           .def(
               "set_timeout",
               &::c10d::Store::setTimeout,
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Sets the store's default timeout. This timeout is used during initialization and in
+:meth:`~torch.distributed.store.wait` and :meth:`~torch.distributed.store.get`.
+
+Arguments:
+    timeout (timedelta): timeout to be set in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> store.set_timeout(timedelta(seconds=10))
+    >>> # This will throw an exception after 10 seconds
+    >>> store.wait(["bad_key"])
+)")
           .def(
               "wait",
               [](::c10d::Store& store, const std::vector<std::string>& keys) {
                 store.wait(keys);
               },
-              py::call_guard<py::gil_scoped_release>())
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Waits for each key in ``keys`` to be added to the store. If not all keys are
+set before the ``timeout`` (set during store initialization), then ``wait``
+will throw an exception.
+
+Arguments:
+    keys (list): List of keys on which to wait until they are set in the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> # This will throw an exception after 30 seconds
+    >>> store.wait(["bad_key"])
+)")
           .def(
               "wait",
               [](::c10d::Store& store,
@@ -313,15 +526,88 @@ They are used in specifying strategies for reduction collectives, e.g.,
                  const std::chrono::milliseconds& timeout) {
                 store.wait(keys, timeout);
               },
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Waits for each key in ``keys`` to be added to the store, and throws an exception
+if the keys have not been set by the supplied ``timeout``.
 
-  shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
+Arguments:
+    keys (list): List of keys on which to wait until they are set in the store.
+    timeout (timedelta): Time to wait for the keys to be added before throwing an exception.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, other store types can also be used
+    >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> # This will throw an exception after 10 seconds
+    >>> store.wait(["bad_key"], timedelta(seconds=10))
+)");
+
+  shared_ptr_class_<::c10d::FileStore>(
+      module,
+      "FileStore",
+      store,
+      R"(
+A store implementation that uses a file to store the underlying key-value pairs.
+
+Arguments:
+    file_name (str): path of the file in which to store the key-value pairs
+    world_size (int): The total number of processes using the store
+
+Example::
+    >>> import torch.distributed as dist
+    >>> store1 = dist.FileStore("/tmp/filestore", 2)
+    >>> store2 = dist.FileStore("/tmp/filestore", 2)
+    >>> # Use any of the store methods from either the client or server after initialization
+    >>> store1.set("first_key", "first_value")
+    >>> store2.get("first_key")
+
+      )")
       .def(py::init<const std::string&, int>());
 
-  shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store)
+#ifndef _WIN32
+  shared_ptr_class_<::c10d::HashStore>(
+      module,
+      "HashStore",
+      store,
+      R"(
+A thread-safe store implementation based on an underlying hashmap. This store can be used
+within the same process (for example, by other threads), but cannot be used across processes.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> store = dist.HashStore()
+    >>> # store can be used from other threads
+    >>> # Use any of the store methods after initialization
+    >>> store.set("first_key", "first_value")
+      )")
       .def(py::init<>());
 
-  shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
+  shared_ptr_class_<::c10d::TCPStore>(
+      module,
+      "TCPStore",
+      store,
+      R"(
+A TCP-based distributed key-value store implementation. The server store holds
+the data, while the client stores can connect to the server store over TCP and
+perform actions such as :meth:`~torch.distributed.store.set` to insert a key-value
+pair, :meth:`~torch.distributed.store.get` to retrieve a key-value pair, etc.
+
+Arguments:
+    host_name (str): The hostname or IP Address the server store should run on.
+    port (int): The port on which the server store should listen for incoming requests.
+    world_size (int): The total number of store users (number of clients + 1 for the server).
+    is_master (bool): True when initializing the server store, False for client stores.
+    timeout (timedelta): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> server_store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
+    >>> client_store = dist.TCPStore("127.0.0.1", 0, false)
+    >>> # Use any of the store methods from either the client or server after initialization
+    >>> server_store.set("first_key", "first_value")
+    >>> client_store.get("first_key")
+      )")
       .def(
           py::init<
               const std::string&,
@@ -335,8 +621,21 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("is_master"),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
+#endif
 
-  shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
+  shared_ptr_class_<::c10d::PrefixStore>(
+      module,
+      "PrefixStore",
+      store,
+      R"(
+A wrapper around any of the 3 key-value stores (:class:`~torch.distributed.TCPStore`,
+:class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`)
+that adds a prefix to each key inserted to the store.
+
+Arguments:
+    prefix (str): The prefix string that is prepended to each key before being inserted into the store.
+    store (torch.distributed.store): A store object that forms the underlying key-value store.
+      )")
       .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
 
   auto processGroup =
@@ -602,6 +901,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>());
 
+#ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
       [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
@@ -615,6 +915,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       },
       py::arg("process_groups"),
       py::call_guard<py::gil_scoped_release>());
+#endif
 
 #ifdef USE_C10D_GLOO
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -646,11 +947,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("interface") = "");
 
   processGroupGloo
-      .def(py::init<
-           const std::shared_ptr<::c10d::Store>&,
-           int,
-           int,
-           ::c10d::ProcessGroupGloo::Options>())
+      .def(
+          py::init<
+              const std::shared_ptr<::c10d::Store>&,
+              int,
+              int,
+              ::c10d::ProcessGroupGloo::Options>(),
+          py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
@@ -681,23 +984,50 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
+          py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL
-  shared_ptr_class_<::c10d::ProcessGroupNCCL>(
-      module, "ProcessGroupNCCL", processGroup)
-      .def(
-          py::init<
-              const std::shared_ptr<::c10d::Store>&,
-              int,
-              int,
-              const std::chrono::milliseconds&>(),
-          py::arg("store"),
-          py::arg("rank"),
-          py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(
-              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis));
+  auto processGroupNCCL =
+      shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+          module, "ProcessGroupNCCL", processGroup)
+          .def(
+              py::init<
+                  const std::shared_ptr<::c10d::Store>&,
+                  int,
+                  int,
+                  ::c10d::ProcessGroupNCCL::Options>(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              py::init([](const std::shared_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          const std::chrono::milliseconds& timeout) {
+                ::c10d::ProcessGroupNCCL::Options options;
+                options.isHighPriorityStream = false;
+                options.opTimeout = timeout;
+                return std::make_shared<::c10d::ProcessGroupNCCL>(
+                    store, rank, size, options);
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("timeout") = std::chrono::milliseconds(
+                  ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
+              py::call_guard<py::gil_scoped_release>());
+
+  py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
+      .def(py::init<>())
+      .def_readwrite(
+          "is_high_priority",
+          &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
+      .def_readwrite(
+          "op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
+  processGroupNCCL.def_static(
+      "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
+  processGroupNCCL.def_static(
+      "_group_end", []() { ::c10d::ProcessGroupNCCL::groupEnd(); });
 #endif
 
 #ifdef USE_C10D_MPI
@@ -707,29 +1037,56 @@ They are used in specifying strategies for reduction collectives, e.g.,
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
   // part of a sub group that is to be created.
-  processGroupMPI.def_static("create", [](std::vector<int> ranks) {
-    return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-  });
+  processGroupMPI.def_static(
+      "create",
+      [](std::vector<int> ranks) {
+        return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+      },
+      py::call_guard<py::gil_scoped_release>());
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
-      .def("exception", &::c10d::ProcessGroup::Work::exception)
-      .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+      .def(
+          "is_success",
+          [](::c10d::ProcessGroup::Work& work) -> bool {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::is_success"));
+            return work.isSuccess();
+          })
+      .def(
+          "exception",
+          [](::c10d::ProcessGroup::Work& work) -> std::exception_ptr {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::exception"));
+            return work.exception();
+          })
+      .def(
+          "source_rank",
+          [](::c10d::ProcessGroup::Work& work) -> int {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::source_rank"));
+            return work.sourceRank();
+          })
+      .def("_source_rank", &::c10d::ProcessGroup::Work::sourceRank)
       .def(
           "result",
           [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
             return work.result();
           })
-      .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
+      .def(
+          "synchronize",
+          [](::c10d::ProcessGroup::Work& work) -> void {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::synchronize"));
+            work.synchronize();
+          })
       .def(
           "wait",
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_future",
+      .def("get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
@@ -750,12 +1107,12 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
-                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend and single-process single-device mode.
                 The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                ``DistributedDataParallel.register_comm_hook``, but it is subject to some subtle
                 differences compared to ``torch.futures.Future`` due to compromises made for performance
                 reasons.
 
@@ -858,11 +1215,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
   Py_RETURN_TRUE;
 }
 
+#undef PROCESS_GROUP_DEPRECATION_WARNING
+
 } // namespace
 
 // c10d methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-    {"_c10d_init", (PyCFunction)c10d_init, METH_NOARGS, nullptr},
+    {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

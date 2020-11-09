@@ -17,6 +17,18 @@ struct OperatorKernel;
 // boxing/unboxing codepath.
 CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
+// Note [Ambiguity in AutogradOther kernel]
+// This kernel implements reporting an error message when there're kernels registered
+// to both Math and a backend of AutogradOther, we don't know which kernel to pick:
+// - if we pick Math kernel for AutogradOther, the kernel registered to backend will be
+//   silently ignored and never called.
+// - if we skip using Math kernel for AutogradOther (it might pick Autograd kernel if available),
+//   it'll break all backends mapped to AutogradOther without a direct registration to backend.
+//   See c10/core/DispatchKeySet.cpp for a list of backends mapped to AutogradOther.
+// Thus if backend extender indeed want to override Math kernel behavior, they should request
+// a dedicated Autograd key for their backend to resolve the ambiguity.
+CAFFE2_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+
 // Note [named_not_supported_kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This kernel implements reporting an error message saying that named tensor is
@@ -181,6 +193,7 @@ public:
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
 
   static KernelFunction makeFallthrough();
+  static KernelFunction makeAmbiguousAutogradOther();
   static KernelFunction makeNamedNotSupported();
 
   /**
@@ -192,7 +205,9 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    */
   template<bool AllowLegacyTypes = false, class Lambda>
-  static KernelFunction makeFromUnboxedLambda(Lambda&& lambda);
+  static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
+  template<bool AllowLegacyTypes = false, class Lambda>
+  static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
 
   std::string dumpState() const;
   // For testing internal invariants only

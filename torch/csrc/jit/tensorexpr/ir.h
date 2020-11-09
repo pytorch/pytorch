@@ -55,7 +55,7 @@ inline int getPrecedence(IRNodeType ty) {
   }
 }
 
-class Buffer;
+class Placeholder;
 
 class Cast : public ExprNode<Cast> {
  public:
@@ -391,26 +391,28 @@ class TORCH_API Load : public ExprNode<Load> {
     return buf_;
   }
   static ExprHandle make(
-      const Buffer& buffer,
+      Dtype dtype,
+      const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
   static ExprHandle make(
-      Dtype dtype,
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
 
   Load(
-      const Buffer& buffer,
+      Dtype dtype,
+      const Buf* base_handle,
       const std::vector<const Expr*>& indices,
       const Expr* mask);
   Load(
-      Dtype dtype,
       const Buf* base_handle,
       const std::vector<const Expr*>& indices,
       const Expr* mask);
 
  private:
+  void verify_dtypes() const;
+
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* mask_;
@@ -593,6 +595,14 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       throw malformed_input("bad dtype in CompareSelect");
     }
   }
+
+  CompareSelect(const Expr* lhs, const Expr* rhs, CompareSelectOperation cmp_op)
+      : ExprNodeBase(kInt),
+        lhs_(lhs),
+        rhs_(rhs),
+        ret_val1_(new IntImm(1)),
+        ret_val2_(new IntImm(0)),
+        compare_op_(cmp_op) {}
 
  private:
   const Expr* lhs_;
@@ -802,6 +812,8 @@ class Intrinsics : public CallNode<Intrinsics> {
 
 class Polynomial;
 class Term;
+class MaxTerm;
+class MinTerm;
 
 class FunctionCall;
 

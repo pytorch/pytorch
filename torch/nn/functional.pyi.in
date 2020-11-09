@@ -22,9 +22,9 @@ GRID_SAMPLE_PADDING_MODES = Dict[str, int]
 # This was necessary since the JIT uses BroadcastingList* types but static checking with mypy etc requires a `Sequence`
 # type. There is no way to express the expected lengths of these lists in the current Python typing system.
 #
-# Functions created via `_add_docstr` in `functional.py` where merely typed as `Any` by `stubgen`, so those were 
-# deleted from the stub and replaced by generated declarations. See `gen_pyi` for the implementation of the code 
-# generation logic for those functions. In the future, it might be worth looking into using the mypy plugin system 
+# Functions created via `_add_docstr` in `functional.py` where merely typed as `Any` by `stubgen`, so those were
+# deleted from the stub and replaced by generated declarations. See `gen_pyi` for the implementation of the code
+# generation logic for those functions. In the future, it might be worth looking into using the mypy plugin system
 # to encode the type semantics of `_add_docstr`, should that system ever become widespread.
 def fractional_max_pool2d_with_indices(input: Tensor, kernel_size: _size, output_size: Optional[_size] = ...,
                                        output_ratio: Optional[_ratio_any_t] = ..., return_indices: bool = ...,
@@ -189,7 +189,8 @@ def embedding(input: Tensor, weight: Tensor, padding_idx: Optional[int] = ..., m
 
 def embedding_bag(input: Tensor, weight: Tensor, offsets: Optional[Tensor] = ..., max_norm: Optional[float] = ...,
                   norm_type: float = ..., scale_grad_by_freq: bool = ..., mode: str = ...,
-                  sparse: bool = ...) -> Tensor: ...
+                  sparse: bool = ..., per_sample_weights: Optional[Tensor] = ...,
+                  include_last_offset: bool = ...) -> Tensor: ...
 
 def batch_norm(input: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor],
                weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ..., training: bool = ...,
@@ -317,6 +318,11 @@ def pairwise_distance(x1: Tensor, x2: Tensor, p: float = ..., eps: float = ..., 
 def triplet_margin_loss(anchor: Tensor, positive: Tensor, negative: Tensor, margin: float = ..., p: float = ...,
                         eps: float = ..., swap: bool = ..., size_average: Optional[bool] = ...,
                         reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
+
+
+def triplet_margin_with_distance_loss(anchor: Tensor, positive: Tensor, negative: Tensor, *,
+                                      distance_function: Optional[Callable[[Tensor, Tensor], Tensor]]=...,
+                                      margin: float=..., swap: bool=..., reduction: str=...) -> Tensor: ...
 
 
 def normalize(input: Tensor, p: float = ..., dim: int = ..., eps: float = ...,

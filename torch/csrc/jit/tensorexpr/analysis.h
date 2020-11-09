@@ -38,9 +38,15 @@ class NodeFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  static std::vector<Node*> find(Stmt* s) {
+  static std::vector<Node*> find(const Stmt* s) {
     NodeFinder<Node> nf;
     s->accept(&nf);
+    return nf.nodes;
+  }
+
+  static std::vector<Node*> find(const Expr* e) {
+    NodeFinder<Node> nf;
+    e->accept(&nf);
     return nf.nodes;
   }
 
@@ -72,6 +78,90 @@ class VarFinder : public IRVisitor {
 
  private:
   std::unordered_set<const Var*> vars_;
+};
+
+// Finds all kinds of write operations to the provided Buf.
+class WritesToBuf : public IRVisitor {
+ public:
+  WritesToBuf(const Buf* target) : target_(target) {}
+
+  std::vector<const Stmt*> writes() {
+    return writes_;
+  }
+
+  static std::vector<const Stmt*> find(Stmt* s, const Buf* b) {
+    WritesToBuf finder(b);
+    s->accept(&finder);
+    return finder.writes();
+  }
+
+ private:
+  void visit(const Store* v) override {
+    if (v->buf() == target_) {
+      writes_.push_back(v);
+    }
+  }
+
+  void visit(const AtomicAdd* v) override {
+    if (v->buf() == target_) {
+      writes_.push_back(v);
+    }
+  }
+
+  const Buf* target_;
+  std::vector<const Stmt*> writes_;
+};
+
+// Traverses the IR to determine if a particular Var is modified within it.
+class ModifiesVarChecker : public IRVisitor {
+ public:
+  ModifiesVarChecker(const Var* v) : var_(v) {}
+
+  static bool check(const Stmt* s, const Var* v) {
+    ModifiesVarChecker checker(v);
+    s->accept(&checker);
+    return checker.found();
+  }
+
+  bool found() {
+    return found_;
+  }
+
+ private:
+  void visit(const Store* v) override {
+    if (v->buf()->base_handle() == var_) {
+      found_ = true;
+      return;
+    }
+    IRVisitor::visit(v);
+  }
+
+  void visit(const AtomicAdd* v) override {
+    if (v->buf()->base_handle() == var_) {
+      found_ = true;
+      return;
+    }
+    IRVisitor::visit(v);
+  }
+
+  void visit(const Let* v) override {
+    if (v->var() == var_) {
+      found_ = true;
+      return;
+    }
+    IRVisitor::visit(v);
+  }
+
+  void visit(const For* v) override {
+    if (v->var() == var_) {
+      found_ = true;
+      return;
+    }
+    IRVisitor::visit(v);
+  }
+
+  const Var* var_;
+  bool found_{false};
 };
 
 // A class that analyzes the given program relevant for Block backend

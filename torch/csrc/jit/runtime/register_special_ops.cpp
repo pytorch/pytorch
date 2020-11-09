@@ -210,13 +210,15 @@ void createTensorFromList(Stack* stack) {
   auto tensor =
       at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
-  recursiveStore(
-      (char*)tensor.data_ptr(),
-      sizes,
-      tensor.strides(),
-      0,
-      tensor.element_size(),
-      data);
+  if (tensor.numel() != 0) {
+    recursiveStore(
+        (char*)tensor.data_ptr(),
+        sizes,
+        tensor.strides(),
+        0,
+        tensor.element_size(),
+        data);
+  }
 
   tensor = castTensorTo(tensor, dtype, device);
   auto default_type = at::typeMetaToScalarType(at::get_default_dtype());
@@ -429,10 +431,7 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack* stack) {
-          torch::GradMode::set_enabled(pop(stack).toBool());
-          push(stack, IValue());
-        },
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
 });
 } // namespace

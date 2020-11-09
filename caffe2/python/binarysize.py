@@ -15,10 +15,10 @@ To assist visualization, pass in '--color' to make the symbols color coded to
 green, assuming that you have a xterm connection that supports color.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import argparse
 import subprocess
 import sys

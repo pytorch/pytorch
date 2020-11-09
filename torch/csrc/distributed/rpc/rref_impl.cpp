@@ -141,9 +141,6 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
         "to_here#({})->({})",
         RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
         RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_);
-    auto& remoteProfilerManager =
-        torch::distributed::rpc::RemoteProfilerManager::getInstance();
-    remoteProfilerManager.setCurrentKey(toHereKey);
   }
   RECORD_USER_SCOPE(toHereKey);
   TORCH_CHECK(
@@ -170,12 +167,16 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
     msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
   }
 
+  // toHere is profiled as a blocking call, and does not execute operations on
+  // the remote node. Hence, don't wrap it with a profiling message since we
+  // don't need the profiler to be enabled remotely.
   auto futureResponse = autograd::sendMessageWithAutograd(
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
       true /* forceGradRecording */,
-      timeoutSeconds);
+      timeoutSeconds,
+      true /* forceDisableProfiling */);
 
   // TODO: we should ideally be able to interrupt this blocking wait if we check
   // getTimedOut() and it is true

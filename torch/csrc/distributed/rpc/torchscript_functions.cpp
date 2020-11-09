@@ -30,7 +30,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
            .isCurrentKeySet();
   if (shouldProfile) {
     auto rpcAsyncJitKey = fmt::format(
-        "rpc_async_jit#({})#({})->({})",
+        "rpc_async_jit#{}({} -> {})",
         qualifiedName
             .qualifiedName(), /* name of torchscript function being run */
         RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,

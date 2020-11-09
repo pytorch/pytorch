@@ -186,6 +186,9 @@ message TensorBoundShape {
   }
   repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
   optional string name = 3;
+  // a flag to indicate whether the shape is final and cannot be changed
+  // eg: input/output of in-place ops
+  optional bool shape_is_final = 4;
 }
 
 message TensorBoundShapes {

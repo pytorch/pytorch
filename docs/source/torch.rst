@@ -85,6 +85,7 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    column_stack
     dstack
     gather
     hstack
@@ -94,11 +95,13 @@ Indexing, Slicing, Joining, Mutating Ops
     narrow
     nonzero
     reshape
+    row_stack
     split
     squeeze
     stack
     t
     take
+    tensor_split
     transpose
     unbind
     unsqueeze
@@ -276,15 +279,18 @@ Pointwise Ops
     clamp
     clip
     conj
+    copysign
     cos
     cosh
     deg2rad
     div
+    divide
     digamma
     erf
     erfc
     erfinv
     exp
+    exp2
     expm1
     fix
     floor
@@ -306,8 +312,12 @@ Pointwise Ops
     logical_xor
     logit
     hypot
+    i0
+    igamma
     mul
+    multiply
     mvlgamma
+    nan_to_num
     neg
     negative
     nextafter
@@ -349,12 +359,14 @@ Reduction Ops
     logsumexp
     mean
     median
+    nanmedian
     mode
     nanprod
     norm
     nansum
     prod
     quantile
+    nanquantile
     std
     std_mean
     sum
@@ -375,7 +387,9 @@ Comparison Ops
     eq
     equal
     ge
+    greater_equal
     gt
+    greater
     isclose
     isfinite
     isinf
@@ -385,10 +399,13 @@ Comparison Ops
     isreal
     kthvalue
     le
+    less_equal
     lt
+    less
     maximum
     minimum
     ne
+    not_equal
     sort
     topk
 
@@ -409,6 +426,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations
@@ -443,12 +461,14 @@ Other Operations
     flip
     fliplr
     flipud
+    kron
     rot90
     gcd
     histc
     meshgrid
     lcm
     logcumsumexp
+    ravel
     renorm
     repeat_interleave
     roll
@@ -525,3 +545,5 @@ Utilities
     promote_types
     set_deterministic
     is_deterministic
+    vmap
+    Assert

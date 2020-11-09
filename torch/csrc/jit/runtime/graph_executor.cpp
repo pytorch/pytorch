@@ -85,6 +85,17 @@ bool getAutodiffSubgraphInlining() {
   return autodiff_subgraph_inlining;
 }
 
+// for debugging it is helpful to be able to force fusion groups
+// to be created
+static std::atomic<bool> fusion_group_inlining(true);
+void debugSetFusionGroupInlining(bool state) {
+  fusion_group_inlining = state;
+}
+
+bool getFusionGroupInlining() {
+  return fusion_group_inlining;
+}
+
 thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
@@ -156,6 +167,12 @@ struct CaptureList {
           stack.push_back(*ivalue_capture_it++);
         } break;
       }
+    }
+  }
+
+  void release_variables() {
+    for (auto& var_capture_ : var_captures_) {
+      var_capture_.reset_data();
     }
   }
 
@@ -309,6 +326,10 @@ struct DifferentiableGraphBackward : public autograd::Node {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
     }
+  }
+
+  void release_variables() override {
+    captures_.release_variables();
   }
 
  private:
@@ -489,13 +510,15 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  ExecutionPlan plan =
+  const ExecutionPlan& plan =
       getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
 
-c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
+c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
+    Stack& stack,
+    TaskLauncher taskLauncher) {
   TORCH_CHECK(
       stack.size() >= num_inputs,
       "expected ",
@@ -508,13 +531,14 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
   struct Frame {
-    explicit Frame(ExecutionPlan eplan)
-        : plan(std::move(eplan)), state(plan.code) {}
+    explicit Frame(ExecutionPlan eplan, TaskLauncher taskLauncher)
+        : plan(std::move(eplan)), state(plan.code, std::move(taskLauncher)) {}
     ExecutionPlan plan;
     InterpreterState state;
   };
   auto frame = std::make_shared<Frame>(
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()),
+      std::move(taskLauncher));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
@@ -539,7 +563,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
       override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
@@ -593,7 +617,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    SOURCE_DUMP("Optimizing the following function:", opt_graph);
+    GRAPH_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
@@ -710,15 +734,17 @@ void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
 }
 
-c10::intrusive_ptr<Future> GraphExecutor::runAsync(Stack& stack) {
-  return pImpl->runAsync(stack);
+c10::intrusive_ptr<Future> GraphExecutor::runAsync(
+    Stack& stack,
+    TaskLauncher taskLauncher) {
+  return pImpl->runAsync(stack, std::move(taskLauncher));
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
   return getProfilingMode() ? getBailoutDepth().load() : 0;
 }
 
-ExecutionPlan GraphExecutor::getPlanFor(
+const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
     size_t remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);

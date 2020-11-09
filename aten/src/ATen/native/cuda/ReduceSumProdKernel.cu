@@ -65,15 +65,12 @@ static void reduce_dispatch(TensorIterator& iter, GeneralDispatcher op) {
   } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return OpFunctor<at::Half, float, float>{}(iter);
-  }
-  #ifdef __HIP_PLATFORM_HCC__
-  else if (iter.dtype() == kBFloat16) {
+  } else if (iter.dtype() == kBFloat16) {
     return OpFunctor<at::BFloat16, float>{}(iter);
   } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return OpFunctor<at::BFloat16, float, float>{}(iter);
   }
-  #endif
   op(iter);
 }
 
@@ -114,7 +111,6 @@ static void nanprod_kernel_cuda(TensorIterator& iter) {
             nanprod_functor<scalar_t>{}(iter);
         });
     };
-
     reduce_dispatch<nanprod_functor>(iter, general_dispatcher);
 }
 

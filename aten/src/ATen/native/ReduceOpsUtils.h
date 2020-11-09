@@ -3,6 +3,7 @@
 #include <limits>
 #include <ATen/ATen.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 namespace at { namespace native {
 
@@ -124,15 +125,11 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 using DimMask = TensorIterator::DimMask;
 
 static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
-  auto mask = DimMask();
+  DimMask mask;
   if (dims.empty()) {
-    mask.flip();
+    mask = DimMask().flip();
   } else {
-    for (int64_t dim : dims) {
-      int64_t pos_dim = maybe_wrap_dim(dim, ndim);
-      TORCH_CHECK(pos_dim < 64, "PyTorch doesn't support reduction operations for dim>=64");
-      mask.set(pos_dim);
-    }
+    mask = at::dim_list_to_bitset(dims, ndim);
   }
   return mask;
 }
@@ -159,15 +156,17 @@ static void allocate_reduction_result(
 }
 
 static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask, bool keepdim) {
-  if (keepdim) {
-    return result;
-  }
   auto shape = DimVector(result.sizes());
   auto stride = DimVector(result.strides());
   for (int dim = 0; dim < ndim; dim++) {
     if (mask[dim]) {
-      shape.insert(shape.begin() + dim, 1);
-      stride.insert(stride.begin() + dim, 0);
+      if (!keepdim) {
+        shape.insert(shape.begin() + dim, 1);
+        stride.insert(stride.begin() + dim, 0);
+      } else {
+        TORCH_INTERNAL_ASSERT(shape[dim] == 1);
+        stride[dim] = 0;
+      }
     }
   }
   return result.as_strided(shape, stride);

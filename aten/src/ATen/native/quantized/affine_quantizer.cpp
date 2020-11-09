@@ -17,6 +17,8 @@ DEFINE_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
+DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
+DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
 namespace {
 
@@ -55,7 +57,8 @@ void checkQuantizedTensor(const std::string& fn_name, Tensor t) {
       fn_name,
       " expects a ",
       caffe2::TypeMeta::Make<T>(),
-      " Tensor");
+      " Tensor, got ",
+      t.scalar_type());
 }
 
 template <typename T>
@@ -103,13 +106,21 @@ Tensor quantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
-  quantize_tensor_per_tensor_affine_stub(
+  // Temporary solution to pack the tensor if dtype is torch.quint4x2
+  // Can move this into the fbgemm::Quantize op.
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+    quantize_tensor_per_tensor_affine_sub_byte_stub(
       rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  }
+  else {
+    quantize_tensor_per_tensor_affine_stub(
+      rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  }
   return qtensor;
 }
 
@@ -163,7 +174,7 @@ Tensor quantize_tensor_per_channel_float_qparams(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
 
@@ -195,13 +206,18 @@ Tensor dequantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
-  dequantize_tensor_per_tensor_affine_stub(
-      qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+    dequantize_tensor_per_tensor_affine_sub_byte_stub(
+        qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  } else {
+    dequantize_tensor_per_tensor_affine_stub(
+        qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  }
   return rtensor;
 }
 
@@ -253,7 +269,7 @@ Tensor dequantize_tensor_per_channel_float_qparams(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
   });
 
@@ -359,7 +375,8 @@ uint8_t quantize_val_arm(
     const float value) {
   const int32_t qmin = std::numeric_limits<uint8_t>::min();
   const int32_t qmax = std::numeric_limits<uint8_t>::max();
-  auto r = zero_point + static_cast<int32_t>(Round(value / scale));
+  float inv_scale = 1.0f / scale;
+  auto r = zero_point + static_cast<int32_t>(Round(value * inv_scale));
   r = std::max(r, qmin);
   r = std::min(r, qmax);
   return static_cast<uint8_t>(r);
@@ -394,17 +411,13 @@ CAFFE2_API float dequantize_val(double scale, int64_t zero_point, T value) {
 * Note: For the case of embedding quantization we will set zero_point
 * to (-Xmin/scale), where Xmin is the min value in input tensor row.
 */
-template <typename T>
-T quantize_val_float_qparams(float scale, float zero_point, float value) {
-  int64_t qvalue;
+int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax) {
+  int qvalue;
 
-  // TODO make sure qmax and qmin for dtypes other than int8, uint8 is correctly defined.
-  constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
-  constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
   float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
   qvalue = lrintf(value * inv_scale + zero_point);
   qvalue = std::max(qmin, std::min(qvalue, qmax));
-  return static_cast<T>(qvalue);
+  return qvalue;
 }
 
 template <typename SRC_T, typename DST_T>
@@ -491,11 +504,5 @@ requantize_from_int<quint8>(double, int64_t, int64_t);
 template CAFFE2_API qint32
 requantize_from_int<qint32>(double, int64_t, int64_t);
 
-template CAFFE2_API qint8
-quantize_val_float_qparams<qint8>(float scale, float zero_point, float value);
-template CAFFE2_API quint8
-quantize_val_float_qparams<quint8>(float scale, float zero_point, float value);
-template CAFFE2_API qint32
-quantize_val_float_qparams<qint32>(float scale, float zero_point, float value);
 } // namespace native
 } // namespace at

@@ -241,6 +241,32 @@ const Expr* IRMutator::mutate(const RoundOff* v) {
       v->lhs()->accept_mutator(this), v->rhs()->accept_mutator(this));
 }
 
+const Expr* IRMutator::mutate(const MaxTerm* v) {
+  const Expr* newScalar = nullptr;
+  if (v->scalar()) {
+    newScalar = v->scalar()->accept_mutator(this);
+  }
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new MaxTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+}
+
+const Expr* IRMutator::mutate(const MinTerm* v) {
+  const Expr* newScalar = nullptr;
+  if (v->scalar()) {
+    newScalar = v->scalar()->accept_mutator(this);
+  }
+
+  std::vector<const Expr*> variables;
+  for (const auto* t : v->variables()) {
+    variables.push_back(t->accept_mutator(this));
+  }
+  return new MinTerm(v->hasher(), newScalar, v->propagate_nans(), variables);
+}
+
 const Expr* IRMutator::mutate(const ReduceOp* v) {
   const Expr* buf_new_expr = v->accumulator()->accept_mutator(this);
   const Buf* buf_new = dynamic_cast<const Buf*>(buf_new_expr);

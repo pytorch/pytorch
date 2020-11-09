@@ -1,9 +1,5 @@
 ## @package task
 # Module caffe2.python.task
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 from caffe2.python import core, context
 from caffe2.python.schema import Field, from_blob_list
@@ -354,7 +350,9 @@ class TaskGroup(object):
 
     def __repr__(self):
         return "TaskGroup(tasks={}, workspace_type={}, remote_nets={})".format(
-            self.tasks(), self.workspace_type(), self.remote_nets())
+            self._tasks + self._tasks_to_add,
+            self.workspace_type(),
+            self.remote_nets())
 
 
 class TaskOutput(object):

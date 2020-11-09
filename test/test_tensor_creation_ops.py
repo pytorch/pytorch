@@ -6,11 +6,11 @@ import random
 import torch
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, do_test_empty_full, TEST_NUMPY, suppress_warnings,
-     IS_WINDOWS, torch_to_numpy_dtype_dict, slowTest)
+    (TestCase, run_tests, do_test_empty_full, TEST_NUMPY, TEST_WITH_ROCM, suppress_warnings,
+     torch_to_numpy_dtype_dict, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
-     onlyCPU, skipCUDAIfNotRocm, largeCUDATensorTest, precisionOverride, dtypes,
+     onlyCPU, skipCUDAIfNotRocm, largeTensorTest, precisionOverride, dtypes,
      onlyCUDA, skipCPUIf, dtypesIfCUDA)
 
 if TEST_NUMPY:
@@ -702,6 +702,23 @@ class TestTensorCreation(TestCase):
         for dtype in torch.testing.get_all_dtypes():
             if dtype == torch.bfloat16:
                 continue
+            # Test the RuntimeError is raised when either m or n is a negative number
+            for n, m in ((-1, 1), (1, -1), (-1, -1)):
+                with self.assertRaisesRegex(RuntimeError, 'must be greater or equal to'):
+                    torch.eye(n, m, device=device, dtype=dtype)
+
+            # Test when the `m` parameter is not provided
+            for n in (3, 5, 7):
+                res1 = torch.eye(n, device=device, dtype=dtype)
+                naive_eye = torch.zeros(n, n, dtype=dtype, device=device)
+                naive_eye.diagonal(dim1=-2, dim2=-1).fill_(1)
+                self.assertEqual(naive_eye, res1)
+
+                # Check eye_out outputs
+                res2 = torch.empty(0, device=device, dtype=dtype)
+                torch.eye(n, out=res2)
+                self.assertEqual(res1, res2)
+
             for n, m in product([3, 5, 7], repeat=2):
                 # Construct identity using diagonal and fill
                 res1 = torch.eye(n, m, device=device, dtype=dtype)
@@ -732,7 +749,7 @@ class TestTensorCreation(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
-    @dtypes(torch.float, torch.double)
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     def test_logspace_vs_numpy(self, device, dtype):
         start = -0.0316082797944545745849609375
         end = .0315315723419189453125
@@ -745,7 +762,20 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[0], a[0])
             self.assertEqual(t[steps - 1], a[steps - 1])
 
-    @largeCUDATensorTest('16GB')
+    def _linspace_logspace_warning_helper(self, op, device, dtype):
+        with self.maybeWarnsRegex(UserWarning, "Not providing a value for .+"):
+            op(0, 10, device=device, dtype=dtype)
+
+    @dtypes(torch.float)
+    def test_linspace_steps_warning(self, device, dtype):
+        self._linspace_logspace_warning_helper(torch.linspace, device, dtype)
+
+    @dtypes(torch.float)
+    def test_logspace_steps_warning(self, device, dtype):
+        self._linspace_logspace_warning_helper(torch.logspace, device, dtype)
+
+    @slowTest
+    @largeTensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
         t = torch.arange(bigint, dtype=torch.long, device=device)
@@ -810,10 +840,7 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
-                    # TODO: https://github.com/pytorch/pytorch/issues/33793
-                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
-                elif dt == torch.bool:
+                if dt == torch.bool:
                     self.assertEqual(shape, torch.randint(2, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 2).shape)
                 elif dt.is_complex:
@@ -841,6 +868,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual((0,), torch.bartlett_window(0, periodic=False, device=device).shape)
         self.assertEqual((0,), torch.hamming_window(0, device=device).shape)
         self.assertEqual((0,), torch.hann_window(0, device=device).shape)
+        self.assertEqual((0,), torch.kaiser_window(0, device=device).shape)
         self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
         self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
@@ -1037,9 +1065,10 @@ class TestTensorCreation(TestCase):
             self._test_logspace(device, dtype, steps=steps)
             self._test_logspace_base2(device, dtype, steps=steps)
 
-    @precisionOverride({torch.half: 1e-1, torch.float: 1e-5, torch.double: 1e-10})
-    @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
-    @dtypesIfCUDA(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
+    @dtypesIfCUDA(*((torch.testing.get_all_int_dtypes() + [torch.float32, torch.float16, torch.bfloat16])
+                    if TEST_WITH_ROCM
+                    else torch.testing.get_all_dtypes(include_bool=False, include_half=True, include_complex=False)))
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
@@ -1171,7 +1200,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
 
-    @dtypes(torch.half, torch.float, torch.double,
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         SIZE = 100
@@ -1244,6 +1273,20 @@ class TestRandomTensorCreation(TestCase):
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(non_contiguous_tensor, res)
 
+    # Test exceptions when device and generator types are incompatible
+    @onlyCUDA
+    def test_randperm_device_compatibility(self, device):
+        cuda_gen = torch.Generator(device='cuda')
+        cpu_gen = torch.Generator(device='cpu')
+        for n in (0, 3, 100, 30000):
+            regex = 'Expected a .* generator device but found .*'
+            cuda_t = torch.tensor(n, device='cuda')
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))
+            cpu_t = torch.tensor(n, device='cpu')
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):

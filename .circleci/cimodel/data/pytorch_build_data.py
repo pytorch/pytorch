@@ -18,7 +18,16 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("5", [
                 ("3.6", [
-                    ("asan", [XImportant(True)]),
+                    ("asan", [
+                        (True, [
+                            ("shard_test", [XImportant(True)]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            ("7", [
+                ("3.6", [
+                    ("onnx", [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -40,14 +49,22 @@ CONFIG_TREE_DATA = [
             ]),
             ("10.2", [
                 ("3.6", [
-                    ("important", [X(True)]),
-                    ("libtorch", [X(True)]),
+                    ("shard_test", [XImportant(True)]),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [X(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
             ("11.0", [
                 ("3.8", [
                     X(True),
-                    ("libtorch", [XImportant(True)])
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [XImportant(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
         ]),
@@ -67,7 +84,11 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("9", [
                 ("3.8", [
-                    ("coverage", [XImportant(True)]),
+                    ("coverage", [
+                        (True, [
+                            ("shard_test", [XImportant(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
         ]),
@@ -149,9 +170,11 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "parallel_native": ParallelNativeConfigNode,
+            "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "build_only": BuildOnlyConfigNode,
+            "shard_test": ShardTestConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
@@ -187,6 +210,17 @@ class AsanConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_asan"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
+
+
+class ONNXConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Onnx=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_onnx"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
@@ -233,7 +267,7 @@ class LibTorchConfigNode(TreeConfigNode):
         self.props["is_libtorch"] = node_name
 
     def child_constructor(self):
-        return ImportantConfigNode
+        return ExperimentalFeatureConfigNode
 
 
 class CudaGccOverrideConfigNode(TreeConfigNode):
@@ -243,8 +277,8 @@ class CudaGccOverrideConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ExperimentalFeatureConfigNode
 
-class BuildOnlyConfigNode(TreeConfigNode):
 
+class BuildOnlyConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["build_only"] = node_name
 
@@ -252,8 +286,15 @@ class BuildOnlyConfigNode(TreeConfigNode):
         return ExperimentalFeatureConfigNode
 
 
-class CoverageConfigNode(TreeConfigNode):
+class ShardTestConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["shard_test"] = node_name
 
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class CoverageConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["is_coverage"] = node_name
 
@@ -273,7 +314,6 @@ class ImportantConfigNode(TreeConfigNode):
 
 
 class XenialCompilerConfigNode(TreeConfigNode):
-
     def modify_label(self, label):
         return label or "<unspecified>"
 
@@ -287,7 +327,6 @@ class XenialCompilerConfigNode(TreeConfigNode):
 
 
 class BionicCompilerConfigNode(TreeConfigNode):
-
     def modify_label(self, label):
         return label or "<unspecified>"
 

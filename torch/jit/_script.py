@@ -18,7 +18,7 @@ from typing import Any, Dict
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
-from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
+from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
@@ -60,7 +60,8 @@ def _is_new_style_class(cls):
 
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
-    torch._C._jit_script_class_compile(qualified_name, ast, rcb)
+    defaults = torch.jit.frontend.get_default_args_for_class(obj)
+    torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
     torch.jit._state._add_script_class(obj, qualified_name)
 
 
@@ -191,16 +192,22 @@ class ScriptMeta(type):
 
         @functools.wraps(original_init)
         def init_then_script(self, *args, **kwargs):
+            num_methods = len(cls._methods)
             original_init(self, *args, **kwargs)
+            added_methods_in_init = len(cls._methods) > num_methods
+
             if type(self) == cls:
 
                 def make_stubs(module):
                     cls = type(module)
-                    return [v for k, v in sorted(cls._methods.items())]
+                    if hasattr(cls, "_methods"):
+                        return [v for k, v in sorted(cls._methods.items())]
+                    else:
+                        return infer_methods_to_compile(module)
 
                 self.__dict__[
                     "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(self, make_stubs)
+                ] = torch.jit._recursive.create_script_module(self, make_stubs, share_types=not added_methods_in_init)
 
                 # Delete the Python attributes that now shadow the ScriptModule
                 # ones, so that __getattr__ and __setattr__ will properly find
@@ -269,6 +276,7 @@ if _enabled:
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
+        __jit_unused_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
 
         def __init__(self):
             super(ScriptModule, self).__init__()
@@ -435,7 +443,7 @@ if _enabled:
             Returns a string representation of the internal graph for the
             ``forward`` method. See :ref:`interpreting-graphs` for details.
             """
-            return self.forward.graph
+            return self._c._get_method("forward").graph
 
         @property
         def inlined_graph(self):
@@ -470,13 +478,13 @@ if _enabled:
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))
 
-        def save(self, *args, **kwargs):
+        def save(self, f, **kwargs):
             r"""
             save(f, _extra_files={})
 
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
-            return self._c.save(*args, **kwargs)
+            return self._c.save(str(f), **kwargs)
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""

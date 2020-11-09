@@ -6,16 +6,16 @@ def allreduce_hook(
     process_group: object, bucket: dist._GradBucket
 ) -> torch.futures.Future:
     """
-        This DDP communication hook just calls ``allreduce`` using ``GradBucket``
-        tensors. Once gradient tensors are aggregated across all workers, its ``then``
-        callback takes the mean and returns the result. If user registers this hook,
-        DDP results is expected to be same as the case where no hook was registered.
-        Hence, this won't change behavior of DDP and user can use this as a reference
-        or modify this hook to log useful information or any other purposes while
-        unaffecting DDP behavior.
+    This DDP communication hook just calls ``allreduce`` using ``GradBucket``
+    tensors. Once gradient tensors are aggregated across all workers, its ``then``
+    callback takes the mean and returns the result. If user registers this hook,
+    DDP results is expected to be same as the case where no hook was registered.
+    Hence, this won't change behavior of DDP and user can use this as a reference
+    or modify this hook to log useful information or any other purposes while
+    unaffecting DDP behavior.
 
-        Example::
-            >>> ddp_model._register_comm_hook(process_group, allreduce_hook)
+    Example::
+        >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = (
@@ -31,17 +31,19 @@ def allreduce_hook(
     return fut.then(then_callback)
 
 
-def fp16_compress_hook(process_group: object, bucket: dist._GradBucket):
+def fp16_compress_hook(
+    process_group: object, bucket: dist._GradBucket
+) -> torch.futures.Future:
     """
-        This DDP communication hook implements a simple gradient compression
-        approach that converts ``GradBucket`` tensors whose type is assumed to be
-        ``torch.float32`` to half-precision floating point format (``torch.float16``).
-        It allreduces those ``float16`` gradient tensors. Once compressed gradient
-        tensors are allreduced, its then callback called ``decompress`` converts the
-        aggregated result back to ``float32`` and takes the mean.
+    This DDP communication hook implements a simple gradient compression
+    approach that converts ``GradBucket`` tensors whose type is assumed to be
+    ``torch.float32`` to half-precision floating point format (``torch.float16``).
+    It allreduces those ``float16`` gradient tensors. Once compressed gradient
+    tensors are allreduced, its then callback called ``decompress`` converts the
+    aggregated result back to ``float32`` and takes the mean.
 
-        Example::
-            >>> ddp_model._register_comm_hook(process_group, fp16_compress_hook)
+    Example::
+        >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = (
@@ -55,7 +57,11 @@ def fp16_compress_hook(process_group: object, bucket: dist._GradBucket):
     ).get_future()
 
     def decompress(fut):
-        return [fut.value()[0].to(torch.float32).div_(world_size)]
+        decompressed_tensor = bucket.get_tensors()[0]
+        # Decompress in place to reduce the peak memory.
+        # See: https://github.com/pytorch/pytorch/issues/45968
+        decompressed_tensor.copy_(fut.value()[0].div_(world_size))
+        return [decompressed_tensor]
 
     return fut.then(decompress)
 
@@ -76,21 +82,21 @@ def _allgather_then_aggregate_hook(
     process_group: object, bucket: dist._GradBucket
 ) -> torch.futures.Future:
     """
-        Similar to ``allreduce_hook``, this hook first gathers ``GradBucket`` tensors
-        and its ``then`` callback aggregates the gathered gradient tensors and takes
-        mean. Instead of ``allreduce`` this hook uses ``allgather``. Note that with
-        W workers, both the computation and communication time scale as O(W) for
-        allgather compared to O(logW) for allreduce. Therefore, this hook is expected
-        to be much slower than ``allreduce_hook`` although both essentially do the
-        same thing with the gradients.
+    Similar to ``allreduce_hook``, this hook first gathers ``GradBucket`` tensors
+    and its ``then`` callback aggregates the gathered gradient tensors and takes
+    mean. Instead of ``allreduce`` this hook uses ``allgather``. Note that with
+    W workers, both the computation and communication time scale as O(W) for
+    allgather compared to O(logW) for allreduce. Therefore, this hook is expected
+    to be much slower than ``allreduce_hook`` although both essentially do the
+    same thing with the gradients.
 
-        .. warning ::
-            This is for test and experiments. User is suggested to use a faster
-            alternative called ``allreduce_hook``  that uses ``allreduce`` protocol
-            instead of ``allgather`` protocol.
+    .. warning ::
+        This is for test and experiments. User is suggested to use a faster
+        alternative called ``allreduce_hook``  that uses ``allreduce`` protocol
+        instead of ``allgather`` protocol.
 
-        Example::
-            >>> ddp_model._register_comm_hook(process_group, allreduce_hook)
+    Example::
+        >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()

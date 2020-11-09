@@ -22,7 +22,7 @@ class _DecoratorContextManager:
 
         @functools.wraps(func)
         def decorate_context(*args, **kwargs):
-            with self:
+            with self.__class__():
                 return func(*args, **kwargs)
         return cast(F, decorate_context)
 
@@ -33,7 +33,7 @@ class _DecoratorContextManager:
             gen = func(*args, **kwargs)
             while True:
                 try:
-                    with self:
+                    with self.__class__():
                         x = next(gen)
                     yield x
                 except StopIteration:

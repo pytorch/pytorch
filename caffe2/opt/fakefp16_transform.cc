@@ -92,8 +92,8 @@ void fakeFp16FoldLayerNorm(NetDef* net) {
         continue;
       }
 
-      const std::string& lm_output = op.output(0);
-      auto next_ops = findMutableOperatorByInput(net, lm_output);
+      const std::string& ln_output = op.output(0);
+      auto next_ops = findMutableOperatorByInput(net, ln_output);
 
       if (next_ops.size() != 1 || next_ops[0]->type() != "MulFakeFp16") {
         LOG(INFO) << "next op isn't MulFakeFp16, skipping";
@@ -120,6 +120,51 @@ void fakeFp16FoldLayerNorm(NetDef* net) {
       add_op->set_type("delete_me_optimized_away");
 
       LOG(INFO) << "Fused LayerNormFakeFP16NNPI";
+    }
+  }
+}
+
+void fakeFp16FoldLayerNormQuant(NetDef* net) {
+  for (auto& op : *net->mutable_op()) {
+    if (op.type() == "LayerNormFakeFP16NNPI") {
+      auto layernormNetPos = ArgumentHelper::GetSingleArgument<OperatorDef, int>(
+                             op, "net_pos", -1);
+      LOG(INFO) << "Attemping to fuse LayerNormFakeFP16NNPI w Quant at "
+                << layernormNetPos;
+      if (op.input().size() != 1) {
+        LOG(INFO) << "input isn't 1, is " << op.input().size() << " skipping";
+        continue;
+      }
+
+      const std::string& ln_output = op.output(0);
+      auto next_ops = findMutableOperatorByInput(net, ln_output);
+
+      if (next_ops.size() != 1 || next_ops[0]->type() != "Int8QuantizeNNPI") {
+        LOG(INFO) << "next op isn't Int8QuantizeNNPI, skipping";
+        continue;
+      }
+
+      auto* quantOp = next_ops[0];
+
+      if (quantOp->output().size() != 1) {
+        LOG(INFO) << "more than one output for quant, skipping";
+        continue;
+      }
+
+      op.set_type("LayerNormInt8QuantizeFakeNNPI");
+
+      *op.mutable_output(0) = quantOp->output(0);
+      op.add_arg()->CopyFrom(MakeArgument("Y_scale",
+                      ArgumentHelper::GetSingleArgument<OperatorDef, float>(*quantOp, "Y_scale", -1)));
+      op.add_arg()->CopyFrom(MakeArgument("Y_zero_point",
+                      ArgumentHelper::GetSingleArgument<OperatorDef, int>(*quantOp, "Y_zero_point", -1)));
+
+      auto quantNetPos = ArgumentHelper::GetSingleArgument<OperatorDef, int>(
+                          *quantOp, "net_pos", -1);
+
+      quantOp->set_type("delete_me_optimized_away");
+
+      LOG(INFO) << "Fused LayerNormFakeFP16NNPI w Quant at " << layernormNetPos << " " << quantNetPos;
     }
   }
 }
@@ -236,6 +281,7 @@ void fakeFp16FuseOps(NetDef* net) {
   fakeFp16FoldLayerNorm(net);
   fakeFp16FoldSwish(net);
   fakeFp16FoldTanhQuant(net);
+  fakeFp16FoldLayerNormQuant(net);
 
   auto iter = net->mutable_op()->begin();
   while (iter != net->mutable_op()->end()) {

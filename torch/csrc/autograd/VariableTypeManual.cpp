@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
@@ -82,18 +83,20 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
 
 namespace {
 
-void backward(
+void _backward(
     const Tensor& self,
+    TensorList inputs,
     const c10::optional<Tensor>& gradient,
     c10::optional<bool> keep_graph,
     bool create_graph) {
   // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
   // instead of us having to unwrap it to Tensor _gradient here.
   Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
-  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph);
+  std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph, input_vars);
 }
 
-void set_data(const Tensor & self, const Tensor & new_data) {
+void set_data(Tensor & self, const Tensor & new_data) {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
   // tensor type.
@@ -160,7 +163,7 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   return self.set_requires_grad(_requires_grad);
 }
 
-void retain_grad(const Tensor & self) {
+void retain_grad(Tensor & self) {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
   if (self.is_leaf()) {  // no-op for leaves
     return;
@@ -269,7 +272,12 @@ Tensor & detach_(Tensor & self) {
                    "of detach_(). Alternatively, create this view with an "
                    "`unsafe_` version of the function that produced it.");
     } else {
-      AT_ERROR("Can't detach views in-place. Use detach() instead");
+      AT_ERROR("If you are using DistributedDataParallel (DDP) for training, "
+               "and gradient_as_bucket_view is set as True, gradients are "
+               "views of DDP buckets, and hence detach_() cannot be called "
+               "on these gradients. To fix this error, please refer to the "
+               "Optimizer.zero_grad() function in torch/optim/optimizer.py "
+               "as the solution.");
     }
   }
   // I think the choice here is conservative.  In principle, doing
@@ -285,87 +293,49 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-// Some ops in the following registration list are registered as catch-all kernels,
-// some as catch-all kernels and additionally as backend kernels for Autograd.
-// The reason for this is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
-// kernels) need to get a separate Autograd kernel instead of a catch-all kernel,
-// otherwise we won't ever call it for CPU/CUDA/QuantizedCPU tensors, because the backend
-// kernel has a higher priority than catch-all kernels.
-// Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
-// skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
-// (and that don't use dispatch), we register them as catch-all kernels instead.
+// Ops in the following registration list are registered as
+//   (1) Math kernels
+//   (2) Autograd kernels
+//   (3) DefaultBackend kernels and additionally Autograd kernels
+// The reason for (3) is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
+// kernels) will skip picking up Math kernels for Autograd, so we register them to both
+// DefaultBackend and Autograd instead. See
+// https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword
+// for more details.
 // Invariant:
-// - Ops registered to catchAll below must match `MANUAL_CATCHALL` set in tools/autograd/gen_variable_type.py.
+// - Ops registered to Math or DefaultBackend below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
 //   and they have manual_kernel_registration=True in native_functions.yaml.
 // - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
-static auto registry = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .kernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::Autograd))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .kernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::Autograd))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::detach(Tensor(a) self) -> Tensor(a)")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .kernel<decltype(VariableType::detach), &VariableType::detach>(DispatchKey::Autograd))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .kernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::Autograd))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .kernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::Autograd))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    // For backward(), we need the catch-all kernel (see comment above), but we also need the Autograd backend
-    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
-    // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
-    // tensor argument.
-    // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
-    //      and remove the backend Autograd kernel here, only leaving the catch-all kernel.
-    .kernel<decltype(VariableType::backward), &VariableType::backward>(DispatchKey::Autograd)
-    .catchAllKernel<decltype(VariableType::backward), &VariableType::backward>())
-  .op(torch::RegisterOperators::options()
-    .schema("aten::set_data(Tensor(a!) self, Tensor new_data) -> ()")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .catchAllKernel<decltype(VariableType::set_data), &VariableType::set_data>())
-  .op(torch::RegisterOperators::options()
-    .schema("aten::data(Tensor self) -> Tensor")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .catchAllKernel<decltype(VariableType::data), &VariableType::data>())
-  .op(torch::RegisterOperators::options()
-    .schema("aten::is_leaf(Tensor self) -> bool")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .catchAllKernel<decltype(VariableType::is_leaf), &VariableType::is_leaf>())
-  .op(torch::RegisterOperators::options()
-    .schema("aten::output_nr(Tensor self) -> int")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .catchAllKernel<decltype(VariableType::output_nr), &VariableType::output_nr>())
-  .op(torch::RegisterOperators::options()
-    .schema("aten::_version(Tensor self) -> int")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .catchAllKernel<decltype(VariableType::_version), &VariableType::_version>())
-  .op(torch::RegisterOperators::options()
-    .schema("aten::requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the Autograd backend
-    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
-    // which calls callBoxed(), which doesn't support mutable tensor arguments yet and requires_grad_() has a mutable
-    // tensor argument.
-    // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
-    //      and remove the backend Autograd kernel here, only leaving the catch-all kernel.
-    .kernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::Autograd)
-    .catchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
-  .op(torch::RegisterOperators::options()
-    .schema("aten::retain_grad(Tensor(a!) self) -> ()")
-    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .catchAllKernel<decltype(VariableType::retain_grad), &VariableType::retain_grad>())
-  ;
+
+TORCH_LIBRARY_IMPL(aten, Autograd, m) {
+  m.impl("resize_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_)));
+  m.impl("resize_as_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::resize_as_)));
+  m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
+  m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
+  m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
+  // For backward() and requires_grad_(), we need the DefaultBackend kernel, but we also need the Autograd backend
+  // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
+  // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
+  // tensor argument.
+  // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
+  //      and requires_grad_(), then remove the backend Autograd kernel here, only leaving the Math kernel.
+  m.impl("_backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_backward)));
+  m.impl("requires_grad_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::requires_grad_)));
+}
+
+TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
+  m.impl("_backward", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::_backward)));
+  m.impl("requires_grad_", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::requires_grad_)));
+}
+
+TORCH_LIBRARY_IMPL(aten, Math, m) {
+  m.impl("set_data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::set_data)));
+  m.impl("data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::data)));
+  m.impl("is_leaf", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::is_leaf)));
+  m.impl("output_nr", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::output_nr)));
+  m.impl("_version", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::_version)));
+  m.impl("retain_grad", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::retain_grad)));
+}
 
 }  // namespace
 }}} // namespace torch::autograd::VariableType

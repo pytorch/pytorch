@@ -104,7 +104,7 @@ To get an idea of the precision and speed, see the example code below:
   ab_fp32 = a @ b  # takes 0.11s on GA100
   error = (ab_fp32 - ab_full).abs().max()  # 0.0031
   relative_error = error / mean  # 0.000039
-  
+
 From the above example, we can see that with TF32 enabled, the speed is ~7x faster, relative error
 compared to double precision is approximately 2 orders of magnitude larger.  If the full FP32 precision
 is needed, users can disable TF32 by:
@@ -113,6 +113,13 @@ is needed, users can disable TF32 by:
 
   torch.backends.cuda.matmul.allow_tf32 = False
   torch.backends.cudnn.allow_tf32 = False
+
+To toggle the TF32 flags off in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowTF32CuBLAS(false);
+  at::globalContext().setAllowTF32CuDNN(false);
 
 For more information about TF32, see:
 
@@ -189,6 +196,41 @@ necessary synchronization when data is moved around, as explained above.
 However, when using non-default streams, it is the user's responsibility to
 ensure proper synchronization.
 
+.. _bwd-cuda-stream-semantics:
+
+Stream semantics of backward passes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Internally, each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+
+When manually supplying CUDA tensor(s) as a backward pass's initial gradient(s) (e.g.,
+:func:`autograd.backward(..., grad_tensors=initial_grads)<torch.autograd.backward>`,
+:func:`autograd.grad(..., grad_outputs=initial_grads)<torch.autograd.grad>`, or
+:meth:`tensor.backward(..., gradient=initial_grad)<torch.Tensor.backward>`),
+the acts of
+
+1. populating the initial gradient(s) and
+2. invoking the backward pass
+
+have the same stream-semantics relationship as any pair of ops::
+
+    # Safe, populating initial_grad and invoking backward are in the same stream context
+    with torch.cuda.stream(strm):
+        loss.backward(gradient=torch.ones_like(loss))
+
+    # Unsafe, populating initial_grad and invoking backward are in different stream contexts,
+    # without synchronization
+    initial_grad = torch.ones_like(loss)
+    with torch.cuda.stream(strm):
+        loss.backward(gradient=initial_grad)
+
+    # Safe, with synchronization
+    initial_grad = torch.ones_like(loss)
+    strm.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(strm):
+        initial_grad.record_stream(strm)
+        loss.backward(gradient=initial_grad)
+
 .. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
 .. _cuda-memory-management:
@@ -213,6 +255,10 @@ For more advanced users, we offer more comprehensive memory benchmarking via
 complete snapshot of the memory allocator state via
 :meth:`~torch.cuda.memory_snapshot`, which can help you understand the
 underlying allocation patterns produced by your code.
+
+Use of a caching allocator can interfere with memory checking tools such as
+``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
+``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
 .. _cufft-plan-cache:
 
@@ -399,7 +445,7 @@ The difference between :class:`~torch.nn.parallel.DistributedDataParallel` and
 uses multiprocessing where a process is created for each GPU, while
 :class:`~torch.nn.DataParallel` uses multithreading. By using multiprocessing,
 each GPU has its dedicated process, this avoids the performance overhead caused
-by GIL of Python interpreter. 
+by GIL of Python interpreter.
 
-If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use 
+If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 `torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.

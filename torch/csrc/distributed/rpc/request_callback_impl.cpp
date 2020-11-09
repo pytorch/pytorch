@@ -12,6 +12,8 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
@@ -500,6 +502,60 @@ void RequestCallbackImpl::processRpcWithErrors(
   } catch (std::exception& e) {
     responseFuture->markCompleted(handleError(e, messageType, messageId));
   }
+}
+
+bool RequestCallbackImpl::cudaAvailable() const {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
+
+void RequestCallbackImpl::processRRefBackward(
+    RpcCommandBase& rpc,
+    const int64_t messageId,
+    const std::shared_ptr<FutureMessage>& responseFuture) const {
+  auto& rrefBackwardReq = static_cast<RRefBackwardReq&>(rpc);
+
+  // Get all fields
+  const auto& rrefId = rrefBackwardReq.getRRefId();
+  const auto& autogradContextId = rrefBackwardReq.getAutogradContextId();
+  const auto& retainGraph = rrefBackwardReq.retainGraph();
+
+  auto futureOwner = RRefContext::getInstance().getOwnerRRef(rrefId);
+  futureOwner->addCallback([responseFuture,
+                            messageId,
+                            futureOwner,
+                            autogradContextId,
+                            retainGraph]() {
+    const auto& rref = futureOwner->constValue();
+    auto whenValueSet = rref->getFuture();
+
+    whenValueSet->addCallback([responseFuture,
+                               messageId,
+                               rref,
+                               whenValueSet,
+                               autogradContextId,
+                               retainGraph]() {
+      if (whenValueSet->hasError()) {
+        responseFuture->setError(whenValueSet->tryRetrieveErrorMessage());
+        return;
+      }
+
+      try {
+        // Run backward (TODO: make this async?).
+        PyRRef::backward(autogradContextId, retainGraph, rref);
+
+        // Return the response.
+        Message m = RRefBackwardResp().toMessage();
+        m.setId(messageId);
+        responseFuture->markCompleted(std::move(m));
+      } catch (const std::exception& e) {
+        responseFuture->setError(e.what());
+      }
+    });
+  });
 }
 
 } // namespace rpc
