@@ -213,7 +213,7 @@ class List(Field):
         self._items = _normalize_field(values)
         self.lengths._set_parent(self, 0)
         self._items._set_parent(self, 1)
-        Field.__init__(self, [self.lengths, self._items])
+        super(List, self).__init__([self.lengths, self._items])
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -287,7 +287,7 @@ class ListWithEvicted(List):
             self._evicted_values = _normalize_field(evicted_values)
         else:
             self._evicted_values = Scalar(np.int64, evicted_values)
-        List.__init__(self, values, lengths_blob=lengths_blob)
+        super(ListWithEvicted, self).__init__(values, lengths_blob=lengths_blob)
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -408,7 +408,7 @@ class Struct(Field):
             self.fields[name] = self.fields[name] + field
         for id, (_, field) in enumerate(viewitems(self.fields)):
             field._set_parent(self, id)
-        Field.__init__(self, viewvalues(self.fields))
+        super(Struct, self).__init__(viewvalues(self.fields))
         self._frozen = True
 
     def _struct_from_nested_name(self, nested_name, field):
@@ -713,7 +713,7 @@ class Scalar(Field):
     def __init__(self, dtype=None, blob=None, metadata=None):
         self._metadata = None
         self.set(dtype, blob, metadata, unsafe=True)
-        Field.__init__(self, [])
+        super(Scalar, self).__init__([])
 
     def field_names(self):
         return ['']
