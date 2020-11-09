@@ -239,6 +239,7 @@ _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
 _(aten, complex) \
+_(aten, copysign) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
@@ -371,6 +372,8 @@ _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
 _(aten, i0_) \
+_(aten, igamma) \
+_(aten, igamma_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -736,7 +739,6 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
-_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
@@ -781,6 +783,7 @@ _(attr, ceil_mode) \
 _(attr, checked_signal_sizes) \
 _(attr, chunks) \
 _(attr, columns) \
+_(attr, column_stack) \
 _(attr, complex_input) \
 _(attr, complex_output) \
 _(attr, condition) \

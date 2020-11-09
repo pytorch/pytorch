@@ -366,9 +366,9 @@ def unused(fn):
             import torch.nn as nn
 
             class MyModule(nn.Module):
-                def __init__(self, use_memory_efficent):
+                def __init__(self, use_memory_efficient):
                     super(MyModule, self).__init__()
-                    self.use_memory_efficent = use_memory_efficent
+                    self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused
                 def memory_efficient(self, x):
@@ -383,7 +383,7 @@ def unused(fn):
                     else:
                         return x + 10
 
-            m = torch.jit.script(MyModule(use_memory_efficent=False))
+            m = torch.jit.script(MyModule(use_memory_efficient=False))
             m.save("m.pt")
 
             m = torch.jit.script(MyModule(use_memory_efficient=True))
@@ -717,7 +717,7 @@ if torch.distributed.rpc.is_available():
 
 def is_final(ann):
     return ann.__module__ in {'typing', 'typing_extensions'} and \
-        (getattr(ann, '__origin__', None) is Final)
+        (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
@@ -839,7 +839,7 @@ def _get_named_tuple_properties(obj):
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
-            annotations.append(torch._C.TensorType.get())
+            annotations.append(torch._C.TensorType.getInferred())
     return type(obj).__name__, fields, annotations
 
 
