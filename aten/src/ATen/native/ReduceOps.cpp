@@ -90,6 +90,19 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) 
   return result;
 }
 
+Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
+  TORCH_CHECK(
+          !dtype.has_value() || (self.scalar_type() == dtype.value()),
+          "provided dtype must match dtype of result in cumsum. Got ",
+          toString(self.scalar_type()),
+          " and ",
+          toString(dtype.value()),
+          ".");
+
+  return at::_cumsum_out(self, self, dim);
+}
+
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
@@ -1149,6 +1162,9 @@ Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
 }
 Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
+}
+Tensor& cumsum_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+    return native::cumsum_(self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
