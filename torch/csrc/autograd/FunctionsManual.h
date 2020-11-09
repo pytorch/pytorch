@@ -63,9 +63,6 @@ at::Tensor prod_backward(const at::Tensor& grad, const at::Tensor& input, const 
 at::Tensor prod_backward(at::Tensor grad, const at::Tensor& input, at::Tensor result, int64_t dim, bool keepdim);
 at::Tensor nanprod_backward(const at::Tensor& grad, const at::Tensor& input, const at::Tensor& result);
 at::Tensor nanprod_backward(at::Tensor grad, const at::Tensor& input, at::Tensor result, int64_t dim, bool keepdim);
-at::Tensor sum_scan_exclusive(const at::Tensor& x, int64_t dim);
-at::Tensor cumprod_backward(const at::Tensor &grad, const at::Tensor &input, int64_t dim);
-at::Tensor cumprod_backward(const at::Tensor &grad, const at::Tensor &input, int64_t dim, optional<ScalarType> dtype);
 at::Tensor solve_backward_self(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A);
 at::Tensor solve_backward_A(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A, const at::Tensor & solution);
 at::Tensor cumsum_backward(const at::Tensor & x, int64_t dim);
