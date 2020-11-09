@@ -32,18 +32,10 @@ void upsample_nearest2d(
   auto physicalDevice = context().physicalDevice();
   int64_t C = IN * IC;
   struct ConstBlock {
-    int32_t IW;
-    int32_t IH;
-    int32_t OW;
-    int32_t OH;
     float scaleX;
     float scaleY;
   };
-  ConstBlock cb{safe_downcast<int32_t>(IW),
-                safe_downcast<int32_t>(IH),
-                safe_downcast<int32_t>(OW),
-                safe_downcast<int32_t>(OH),
-                scaleW,
+  ConstBlock cb{scaleW,
                 scaleH};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
@@ -584,13 +576,9 @@ void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
 
   auto device = context().device();
   struct ConstBlock {
-    int32_t inputSize[3];
     float s;
   };
-  ConstBlock cb{{safe_downcast<int32_t>(W),
-                 safe_downcast<int32_t>(H),
-                 safe_downcast<int32_t>(C_4)},
-                s};
+  ConstBlock cb{s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
