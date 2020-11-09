@@ -191,7 +191,7 @@ class OutputLogger(Logger):
 
 
     def forward(self, x):
-        self.stats["tensor_val"].append(x.detach())
+        self.stats["tensor_val"].append(x)
         return x
 
 
