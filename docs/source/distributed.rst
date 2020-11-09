@@ -428,7 +428,7 @@ you need to ensure that all the processes that participated in the collective op
 will do the backward pass for the backward communication to effectively happen and
 don't cause a deadlock. 
 
-Please notice that currently the only backend where all the functions are currently guaranteed to work is ``gloo``.
+Please notice that currently the only backend where all the functions are guaranteed to work is ``gloo``.
 .. autofunction:: torch.distributed.nn.broadcast
 .. autofunction:: torch.distributed.nn.gather
 .. autofunction:: torch.distributed.nn.scatter
