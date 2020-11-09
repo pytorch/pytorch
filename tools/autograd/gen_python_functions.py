@@ -41,7 +41,7 @@ from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, with_native_function
 from tools.codegen.model import *
 
-from typing import Dict, Optional, List, Any, Tuple, Set
+from typing import Dict, Optional, List, Any, Tuple, Set, Sequence
 
 #
 # declarations blocklist

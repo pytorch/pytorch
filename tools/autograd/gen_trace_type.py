@@ -18,7 +18,7 @@ DONT_RECORD_TRACE = {
     'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
     'rnn_tanh_cell', 'rnn_relu_cell', 'linear',
     # FIXME: figure out a better way when we support sparse tensors in jit
-    '_coalesced_',
+    '_coalesced',
 }
 
 def should_trace(f: NativeFunction) -> bool:
@@ -29,11 +29,7 @@ def should_trace(f: NativeFunction) -> bool:
     # We can't trace functions which don't have any Tensor or TensorList returns
     if not any(r.type.is_tensor_like() for r in f.func.returns):
         return False
-    name = cpp.name(f.func)
-    base_name = f.func.name.name.base
-    if base_name in DONT_RECORD_TRACE or name in DONT_RECORD_TRACE:
-        return False
-    return True
+    return f.func.name.name.base not in DONT_RECORD_TRACE
 
 SELECT = CodeTemplate("""\
 
@@ -99,7 +95,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
 
     args: List[Union[Argument, TensorOptionsArguments]] = []
     if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        args = f.func.schema_order_arguments()
+        args = list(f.func.schema_order_arguments())
     else:
         sig_group = CppSignatureGroup.from_schema(f.func, method=False)
         args = [cpp_args.argument for cpp_args in sig_group.signature.arguments()]
@@ -127,7 +123,11 @@ def format_trace_inputs(f: NativeFunction) -> str:
                                    for a in itertools.chain(f.func.arguments, f.func.kwarg_only_arguments))
         is_factory_method = f.category_override == 'factory' or (has_tensor_return and not has_tensor_input_arg)
 
-        # HACK: preserve old codegen behavior
+        # HACK: preserve old codegen behavior - the old codegen set the `is_factory_method`
+        # flag for the whole family of ops with the same basename if any of them is a
+        # factory method. For most cases the whole family of ops are indeed all factory
+        # method - 'normal' is the only exception. So we handle it specially here to avoid
+        # cloning the old logic.
         if f.func.name.name.base == 'normal':
             is_factory_method = True
 
