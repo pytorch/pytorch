@@ -24,7 +24,7 @@ Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   return tensor_;
 }
 
-Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
+Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
   Tensor tensor_;
   int fast_dim = transpose_result ? 2 : 1;
@@ -145,7 +145,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -165,7 +165,6 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
 
   if (!result.is_same(self)) {
     result.resize_as_(self);
-    bool is_beta_complex = beta.isComplex();
     if (beta.to<c10::complex<double>>() != 0.0) {
       result.copy_(self);
     }
@@ -266,7 +265,6 @@ Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
 
 Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   Tensor self_;
-  // std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm_out");
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   } else {
@@ -274,7 +272,7 @@ Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch
   }
   {
     at::NoNamesGuard guard;
-    baddmm_out_cuda_impl(result, self_, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(result, self_, batch1, batch2, beta, alpha);
   }
   namedinference::propagate_names_if_nonempty(
        result,
@@ -297,7 +295,7 @@ Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2)
   Scalar alpha(1.0);
   {
     NoNamesGuard guard;
-    baddmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
   }
   namedinference::propagate_names_if_nonempty(
       result,

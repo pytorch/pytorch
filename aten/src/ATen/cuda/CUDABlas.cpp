@@ -193,22 +193,26 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
     CUDABLAS_POSINT_CHECK(gemm<Dtype>, ldc);  \
   } while (0)
 
-void bgemmCheckBound(int64_t m , int64_t n, int64_t k, int64_t lda, int64_t ldb, int64_t ldc, int64_t num_batches) {
-    TORCH_CHECK((m < INT_MAX) && (n < INT_MAX) && (k < INT_MAX) && (lda < INT_MAX) && (ldc < INT_MAX) && (num_batches < INT_MAX),
-    "Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, num_batches ",
-    "with the bound [val] <= ", INT_MAX);
-}
+#define BGEMM_CHECK_ARGVALUES(Dtype)           \
+  do {                                        \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, m); \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, n); \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, k); \
+    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, lda);  \
+    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldb);  \
+    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldc);  \
+    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, num_batches);  \
+  } while (0)
 
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
-  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  GEMM_CHECK_ARGVALUES(double);
+  BGEMM_CHECK_ARGVALUES(double);
   TORCH_CUDABLAS_CHECK(cublasDgemmStridedBatched(
       handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
 }
@@ -217,60 +221,54 @@ template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
-  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  GEMM_CHECK_ARGVALUES(float);
+  BGEMM_CHECK_ARGVALUES(float);
   TORCH_CUDABLAS_CHECK(cublasSgemmStridedBatched(
       handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
 }
 
-#ifndef __HIP_PLATFORM_HCC__
-  template <>
-  void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-    bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
-    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-    cublasOperation_t opa = _cublasOpFromChar(transa);
-    cublasOperation_t opb = _cublasOpFromChar(transb);
-    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-    GEMM_CHECK_ARGVALUES(c10::complex<double>);
-    TORCH_CUDABLAS_CHECK(cublasZgemmStridedBatched(
-        handle, opa, opb, m, n, k, reinterpret_cast<const cuDoubleComplex*>(&alpha), reinterpret_cast<const cuDoubleComplex*>(a),
-        lda, stridea, reinterpret_cast<const cuDoubleComplex*>(b), ldb, strideb, reinterpret_cast<const cuDoubleComplex*>(&beta),
-        reinterpret_cast<cuDoubleComplex*>(c), ldc, stridec, num_batches));
-  }
+template <>
+void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  BGEMM_CHECK_ARGVALUES(c10::complex<double>);
+  TORCH_CUDABLAS_CHECK(cublasZgemmStridedBatched(
+      handle, opa, opb, m, n, k, reinterpret_cast<const cuDoubleComplex*>(&alpha), reinterpret_cast<const cuDoubleComplex*>(a),
+      lda, stridea, reinterpret_cast<const cuDoubleComplex*>(b), ldb, strideb, reinterpret_cast<const cuDoubleComplex*>(&beta),
+      reinterpret_cast<cuDoubleComplex*>(c), ldc, stridec, num_batches));
+}
 
-  template <>
-  void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-    bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
-    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-    cublasOperation_t opa = _cublasOpFromChar(transa);
-    cublasOperation_t opb = _cublasOpFromChar(transb);
-    _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-    GEMM_CHECK_ARGVALUES(c10::complex<float>);
-    TORCH_CUDABLAS_CHECK(cublasCgemm3mStridedBatched(
-        handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
-        lda, stridea, reinterpret_cast<const cuComplex*>(b), ldb, strideb, reinterpret_cast<const cuComplex*>(&beta),
-        reinterpret_cast<cuComplex*>(c), ldc, stridec, num_batches));
-  }
-#endif
+template <>
+void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  BGEMM_CHECK_ARGVALUES(c10::complex<float>);
+  TORCH_CUDABLAS_CHECK(cublasCgemm3mStridedBatched(
+      handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
+      lda, stridea, reinterpret_cast<const cuComplex*>(b), ldb, strideb, reinterpret_cast<const cuComplex*>(&beta),
+      reinterpret_cast<cuComplex*>(c), ldc, stridec, num_batches));
+}
 
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
-  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
-  GEMM_CHECK_ARGVALUES(at::Half);
+  BGEMM_CHECK_ARGVALUES(at::Half);
   float falpha = alpha;
   float fbeta = beta;
 #ifdef __HIP_PLATFORM_HCC__
@@ -319,7 +317,7 @@ template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
-  bgemmCheckBound(m, n, k, lda, ldb, ldc, num_batches);
+  BGEMM_CHECK_ARGVALUES(at::BFloat16);
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -329,9 +327,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    if (prop->major < 8) {
-      TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
-    }
+    TORCH_CHECK(prop->major >= 8, "BFloat16 gemm in CUDA requires Ampere or later GPU");
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
                                     opa, opb, (int)m, (int)n, (int)k,
                                     (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
@@ -347,7 +343,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
   #else
-    TORCH_CHECK(false, "THCudaBlas_BgemmStridedBatched is only available on CUDA_VERSION >= 11");
+    TORCH_CHECK(false, " is only available on CUDA_VERSION >= 11");
   #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
 #endif // __HIP_PLATFORM_HCC__
