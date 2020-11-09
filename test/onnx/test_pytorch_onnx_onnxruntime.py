@@ -52,11 +52,6 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
     ort_sess = onnxruntime.InferenceSession(f.getvalue())
     return ort_sess
 
-def inline_flatten_list(inputs, res_list):
-    for i in inputs:
-        res_list.append(i) if not isinstance(i, (list, tuple)) else inline_flatten_list(i, res_list)
-    return res_list
-
 
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
@@ -66,7 +61,7 @@ def run_ort(ort_sess, input):
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
 
-    return inline_flatten_list(ort_outs, [])
+    return ort_outs
 
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
@@ -108,7 +103,6 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    onnx_shape_inference=self.onnx_shape_inference,
                                    use_new_jit_passes=self.use_new_jit_passes)
 
-        # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
@@ -1767,6 +1761,26 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_listunpack(self):
+        class ListUnpack(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3)
+        self.run_test(ListUnpack(), x)
+
+        class ListUnpackSlice(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape[2:]
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3, 4, 5)
+        self.run_test(ListUnpackSlice(), x)
+
     def test_pow(self):
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
@@ -1852,6 +1866,15 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.var(input, unbiased=True)
 
         model = VarianceUnbiased()
+        self.run_test(model, x)
+
+        class VarianceSqrt(torch.nn.Module):
+            def forward(self, input):
+                y = torch.var(input, 1)
+                return torch.sqrt(y + 1e-8)
+
+        x = torch.randn(1, 2, 3, 300, 300)
+        model = VarianceSqrt()
         self.run_test(model, x)
 
     def test_var_along_dims(self):
