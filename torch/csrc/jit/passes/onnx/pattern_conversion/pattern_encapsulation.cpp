@@ -42,7 +42,7 @@ void EncapsulateInplaceIndexPutForONNX(Node* index_put_node) {
     auto n = *it;
     auto cloned_n = subblock->appendNode(graph->createClone(
         n, [&](Value* v) { return env.find(v) != env.end() ? env[v] : v; }));
-    for (auto i = 0; i < cloned_n->outputs().size(); ++i) {
+    for (size_t i = 0; i < cloned_n->outputs().size(); ++i) {
       env[n->outputs().at(i)] = cloned_n->outputs().at(i);
     }
   }

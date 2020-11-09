@@ -58,7 +58,6 @@ Value* ConvertSelectToIndex(Value* index, Node* insertBefore) {
 
 Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
   // Create index tensor based on aten::slice node.
-  const int64_t int_max = std::numeric_limits<int>::max();
   auto graph = slice->owningGraph();
   WithInsertPoint guard(insertBefore);
   TORCH_INTERNAL_ASSERT((slice->inputs()).size() == 5);
@@ -108,12 +107,12 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     // select does not keep dims,
     // this creates offset for latter slice and select nodes.
     // NOTE: Cannot rely on get(attr::dim), because op no longer match schema.
-    int dim = node->inputs().at(1)->node()->t(attr::value).item().toInt();
+    int64_t dim = node->inputs().at(1)->node()->t(attr::value).item().toLong();
 
     if (dim < 0) {
       auto input_type = env.at(orig_data)->type()->expect<TensorType>();
       if (input_type->dim().has_value()) {
-        auto rank = input_type->dim().value();
+        auto rank = static_cast<int64_t>(input_type->dim().value());
         // Rank of original tensor to index on.
         // Minus the offset created by select operators.
         dim = dim + rank - dim_offset;
@@ -131,7 +130,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
       // aten::select node with dim == 2. Tensor indices will be handled later.
       // Ellipsis(...) are treated as a complete slice over the axes, thus we
       // create index tensors here accordingly.
-      if (cur_dim - dim_offset >= orig_tensor_indices.size() ||
+      if (cur_dim - dim_offset >= (int64_t)orig_tensor_indices.size() ||
           index_put_node->input(1)
               ->node()
               ->input(cur_dim - dim_offset)
@@ -145,7 +144,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
             std::piecewise_construct,
             std::forward_as_tuple(cur_dim),
             std::forward_as_tuple(index_tensor, aten::slice));
-      } else if (cur_dim - dim_offset < orig_tensor_indices.size()) {
+      } else if (cur_dim - dim_offset < (int64_t)orig_tensor_indices.size()) {
         dim_index_map.emplace(
             std::piecewise_construct,
             std::forward_as_tuple(cur_dim),
@@ -180,7 +179,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     cur_dim++;
   }
 
-  while (cur_dim - dim_offset < orig_tensor_indices.size()) {
+  while (cur_dim - dim_offset < (int64_t)orig_tensor_indices.size()) {
     dim_index_map.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(cur_dim),
@@ -190,7 +189,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   }
 
   // Each dimension should have its associated index tensor.
-  AT_ASSERT(dim_index_map.size() == cur_dim);
+  AT_ASSERT((int64_t)dim_index_map.size() == cur_dim);
   return dim_index_map;
 }
 
@@ -306,7 +305,6 @@ std::vector<Value*> ConvertIndexPutToONNX(
   }
 
   TORCH_INTERNAL_ASSERT(old_node->blocks().size() == 1);
-  auto new_graph = new_block->owningGraph();
   auto old_graph = old_node->owningGraph();
   auto subblock = old_node->blocks()[0];
   auto index_put_node = subblock->nodes().back()->prev();
