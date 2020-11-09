@@ -290,8 +290,8 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   if (prop->major >= 5){
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(
       handle, opa, opb, m, n, k,
-      (void*)(&alpha), a, CUDA_R_16F, lda, stridea,
-      b, CUDA_R_16F, ldb, strideb, (void*)(&beta),
+      (void*)(&falpha), a, CUDA_R_16F, lda, stridea,
+      b, CUDA_R_16F, ldb, strideb, (void*)(&fbeta),
       c, CUDA_R_16F, ldc, stridec,
       num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
@@ -327,7 +327,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    TORCH_CHECK(prop->major >= 8, "BFloat16 gemm in CUDA requires Ampere or later GPU");
+    TORCH_CHECK(prop->major >= 8, "BFloat16 bgemm in CUDA requires Ampere or later GPU");
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(handle,
                                     opa, opb, (int)m, (int)n, (int)k,
                                     (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea,
@@ -343,7 +343,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
   #else
-    TORCH_CHECK(false, " is only available on CUDA_VERSION >= 11");
+    TORCH_CHECK(false, "BFloat16 bgemm in CUDA requires Ampere or later GPU");
   #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
 #endif // __HIP_PLATFORM_HCC__
