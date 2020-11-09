@@ -400,7 +400,8 @@ UNBOXED_TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${return_type} (${arg_types})>();
-${assign_return_values}c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
+${assign_return_values}c10::Dispatcher::singleton()
+    .redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
 """)
 TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
