@@ -315,6 +315,36 @@ namespace jit {
   _(MergeAdjacentBounds)                            \
   _(MergeSymbolicBounds)                            \
   _(MergeSymbolicAdjacent)                          \
+  _(BoundOverlap)                                   \
+  _(BoundOverlapSymbolic)                           \
+  _(BoundOverlapMultiDim)                           \
+  _(BoundSubtract)                                  \
+  _(BoundSubtractSymbolic)                          \
+  _(BoundSubtractMultiDim)                          \
+  _(BoundSubtractMultiDimSymbolic)                  \
+  _(MemDependencyCheckerSimple)                     \
+  _(MemDependencyCheckerMultiStmt)                  \
+  _(MemDependencyCheckerOverlap)                    \
+  _(MemDependencyCheckerLoop)                       \
+  _(MemDependencyCheckerLoopReduce)                 \
+  _(MemDependencyCheckerLoopReduceExpanded)         \
+  _(MemDependencyCheckerInputsOutputs)              \
+  _(MemDependencyCheckerOutputDoesntDepend)         \
+  _(MemDependencyCheckerLoopBounds)                 \
+  _(MemDependencyCheckerLoopBoundsIndexShift)       \
+  _(MemDependencyCheckerLoopSelfDependency)         \
+  _(MemDependencyCheckerLoopDistinctStrides)        \
+  _(MemDependencyCheckerLoopBoundsCond)             \
+  _(MemDependencyCheckerIfThenElse)                 \
+  _(MemDependencyCheckerCutLoop)                    \
+  _(MemDependencyCheckerDynamicShapes)              \
+  _(MemDependencyCheckerMultiDim)                   \
+  _(MemDependencyCheckerComputeAPI)                 \
+  _(MemDependencyCheckerComputeInline)              \
+  _(MemDependencyCheckerComputeSplit)               \
+  _(MemDependencyCheckerComputeReorder)             \
+  _(MemDependencyCheckerComputeReduce)              \
+  _(MemDependencyCheckerComputeGEMM)                \
   _(LoopNestComputeAt_1)                            \
   _(LoopNestComputeAt_2)                            \
   _(LoopNestComputeAt_3)                            \
@@ -506,6 +536,9 @@ namespace jit {
   _(LLVMEmptyStmt)                         \
   _(LLVMEliminatedStmt)                    \
   _(LLVMIfThenElseTest)                    \
+  _(LLVMCondNoFalseBlockTest)              \
+  _(LLVMCondTest)                          \
+  _(LLVMCondNestedTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
   _(LLVMRFactorReduction)
