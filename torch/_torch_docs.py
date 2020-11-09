@@ -2610,11 +2610,21 @@ Alias for :func:`torch.div`.
 
 add_docstr(torch.dot,
            r"""
-dot(input, tensor) -> Tensor
+dot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors.
+Computes the dot product of two 1D tensors.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note::
+
+    Unlike NumPy's dot, torch.dot intentionally only supports computing the dot product
+    of two 1D tensors with the same number of elements.
+
+Args:
+    input (Tensor): first tensor in the dot product, must be 1D.
+    other (Tensor): second tensor in the dot product, must be 1D.
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -2626,15 +2636,18 @@ add_docstr(torch.vdot,
            r"""
 vdot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors. The vdot(a, b) function
-handles complex numbers differently than dot(a, b). If the first argument is complex,
-the complex conjugate of the first argument is used for the calculation of the dot product.
+Computes the dot product of two 1D tensors. The vdot(a, b) function handles complex numbers
+differently than dot(a, b). If the first argument is complex, the complex conjugate of the
+first argument is used for the calculation of the dot product.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note:: 
+
+    Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
+    of two 1D tensors with the same number of elements.
 
 Args:
-    input (Tensor): first tensor in the dot product. Its conjugate is used if it's complex.
-    other (Tensor): second tensor in the dot product.
+    input (Tensor): first tensor in the dot product, must be 1D. Its conjugate is used if it's complex.
+    other (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -3163,8 +3176,8 @@ Keyword args:
 add_docstr(torch.inner, r"""
 inner(input, other, *, out=None) -> Tensor
 
-Computes the vector inner product for 1D tensors. For higher dimensions, computes
-a contraction of :attr:`input` and :attr:`other` over their last dimension.
+Computes the dot product for 1D tensors. For higher dimensions, sums the product
+of elements from :attr:`input` and :attr:`other` along their last dimension.
 
 .. note::
 
@@ -3172,7 +3185,7 @@ a contraction of :attr:`input` and :attr:`other` over their last dimension.
     to `torch.mul(input, other)`.
 
     If both :attr:`input` and :attr:`other` are non-scalars, the size of their last
-    dimensions must match and the result is equivalent to `torch.tensordot(input,
+    dimension must match and the result is equivalent to `torch.tensordot(input,
     other, dims=([-1], [-1]))`
 
 Args:
@@ -3185,26 +3198,37 @@ Keyword args:
 
 Example::
 
-    # Vector inner product
+    # Dot product
     >>> torch.inner(torch.tensor([1, 2, 3]), torch.tensor([0, 2, 1]))
     tensor(7)
 
     # Multidimensional input tensors
-    >>> torch.inner(torch.randn(2, 3), torch.randn(2, 4, 3))
-    tensor([[[ 1.7520,  0.1591,  2.3142,  0.0494],
-         [-1.0180,  1.6137,  1.7597, -0.4789]],
-
-        [[-0.0667, -0.9676,  1.5111, -1.9444],
-         [-2.9197, -0.2519, -0.2990, -0.7924]]])
-
-    # Scalar input
     >>> a = torch.randn(2, 3)
     >>> a
-    tensor([[-0.1931,  1.2435,  0.3856],
-            [-0.7399,  0.0622, -0.5785]])
+    tensor([[0.8173, 1.0874, 1.1784],
+            [0.3279, 0.1234, 2.7894]])
+    >>> b = torch.randn(2, 4, 3)
+    >>> b
+    tensor([[[-0.4682, -0.7159,  0.1506],
+            [ 0.4034, -0.3657,  1.0387],
+            [ 0.9892, -0.6684,  0.1774],
+            [ 0.9482,  1.3261,  0.3917]],
+
+            [[ 0.4537,  0.7493,  1.1724],
+            [ 0.2291,  0.5749, -0.2267],
+            [-0.7920,  0.3607, -0.3701],
+            [ 1.3666, -0.5850, -1.7242]]])
+    >>> torch.inner(a, b)
+    tensor([[[-0.9837,  1.1560,  0.2907,  2.6785],
+            [ 2.5671,  0.5452, -0.6912, -1.5509]],
+
+            [[ 0.1782,  2.9843,  0.7366,  1.5672],
+            [ 3.5115, -0.4864, -1.2476, -4.4337]]])
+
+    # Scalar input
     >>> torch.inner(a, torch.tensor(2))
-    tensor([[-0.3863,  2.4870,  0.7713],
-            [-1.4798,  0.1244, -1.1571]])
+    tensor([[1.6347, 2.1748, 2.3567],
+            [0.6558, 0.2469, 5.5787]])
 """)
 
 add_docstr(torch.outer, r"""

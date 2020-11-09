@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
-     onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+     onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -19,9 +19,9 @@ if TEST_NUMPY:
 class TestLinalg(TestCase):
     exact_dtype = True
 
-    @dtypes(torch.float)
-    @precisionOverride({torch.float: 1e-06})
-    def test_inner(self, device, dtype):        
+    @dtypes(torch.float, torch.cfloat)
+    @precisionOverride({torch.float: 1e-06, torch.cfloat: 1e-06})
+    def test_inner(self, device, dtype):
         def check(a_sizes_, b_sizes_):
             for a_sizes, b_sizes in ((a_sizes_, b_sizes_), (b_sizes_, a_sizes_)):
                 a = torch.randn(a_sizes, dtype=dtype, device=device)
@@ -29,7 +29,9 @@ class TestLinalg(TestCase):
                 res = torch.inner(a, b)
                 ref = np.inner(a.cpu().numpy(), b.cpu().numpy())
                 self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
-                self.assertEqual(res, torch.inner(a, b, out=torch.zeros_like(res)))
+                out = torch.zeros_like(res)
+                torch.inner(a, b, out=out)
+                self.assertEqual(res, out)
 
         check([], [])                       # scalar x scalar
         check([], [0])                      # scalar x empty
@@ -46,11 +48,6 @@ class TestLinalg(TestCase):
         check([1, 2], [3, 2])               # 2D x 2D
         check([1, 2], [3, 4, 2])            # 2D x 3D
         check([2, 1, 3, 2], [1, 3, 2, 2])   # 4D x 4D
-
-        # Test complex numbers
-        a = torch.tensor([2 + 1j, 3 - 2j])
-        b = torch.tensor([4 - 2j, 2 + 3j])
-        self.assertEqual(a.inner(b).cpu().numpy(), np.inner(a.cpu().numpy(), b.cpu().numpy()))
 
         # Test discontiguous input
         a = torch.randn(3, 2, device=device, dtype=dtype).transpose_(0, 1)
@@ -206,7 +203,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_det(self, device, dtype):
         tensors = (
             torch.randn((2, 2), device=device, dtype=dtype),
@@ -222,6 +219,7 @@ class TestLinalg(TestCase):
             for op in ops:
                 actual = op(t)
                 self.assertEqual(actual, expected)
+                self.compare_with_numpy(op, np.linalg.det, t)
 
         # NOTE: det requires a 2D+ tensor
         t = torch.randn(1, device=device, dtype=dtype)
@@ -1182,6 +1180,75 @@ class TestLinalg(TestCase):
         out = torch.empty_like(a).to(torch.int)
         with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
             torch.linalg.tensorsolve(a, b, out=out)
+
+    def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
+        def check(x, y):
+            # Compare with numpy
+            res = torch_fn(x, y)
+            ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
+            self.assertEqual(res.cpu(), ref)
+
+            # Test out variant
+            out = torch.empty_like(res)
+            torch_fn(x, y, out=out)
+            self.assertEqual(out, res)
+
+        # Empty
+        x = torch.tensor([], dtype=dtype, device=device)
+        y = torch.tensor([], dtype=dtype, device=device)
+        check(x, y)
+
+        # Contiguous
+        x = torch.randn(10, dtype=dtype, device=device)
+        y = torch.randn(10, dtype=dtype, device=device)
+        check(x, y)
+
+        # 0 strided
+        y = torch.randn(1, dtype=dtype, device=device).expand(10)
+        check(x, y)
+
+        # 2 strided
+        check(x[::2], y[::2])
+
+    @dtypes(torch.float, torch.cfloat)
+    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
+    def test_dot_vs_numpy(self, device, dtype):
+        self._test_dot_vdot_vs_numpy(device, dtype, torch.dot, np.dot)
+
+    @dtypes(torch.float, torch.cfloat)
+    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
+    def test_vdot_vs_numpy(self, device, dtype):
+        self._test_dot_vdot_vs_numpy(device, dtype, torch.vdot, np.vdot)
+
+    def _test_dot_vdot_invalid_args(self, device, torch_fn, complex_dtypes=False):
+        def check(x, y, regex):
+            with self.assertRaisesRegex(RuntimeError, regex):
+                torch_fn(x, y)
+
+        if complex_dtypes:
+            x = torch.randn(1, dtype=torch.cfloat, device=device)
+            y = torch.randn(3, dtype=torch.cdouble, device=device)
+        else:
+            x = torch.randn(1, dtype=torch.float, device=device)
+            y = torch.randn(3, dtype=torch.double, device=device)
+
+        check(x, y, 'dot : expected both vectors to have same dtype')
+        check(x.reshape(1, 1), y, '1D tensors expected')
+        check(x.expand(9), y.to(x.dtype), 'inconsistent tensor size')
+
+        if self.device_type != 'cpu':
+            x_cpu = x.expand(3).cpu()
+            check(x_cpu, y.to(x.dtype), 'expected all tensors to be on the same device')
+
+    @onlyOnCPUAndCUDA
+    def test_vdot_invalid_args(self, device):
+        self._test_dot_vdot_invalid_args(device, torch.vdot)
+        self._test_dot_vdot_invalid_args(device, torch.vdot, complex_dtypes=True)
+
+    @onlyOnCPUAndCUDA
+    def test_dot_invalid_args(self, device):
+        self._test_dot_vdot_invalid_args(device, torch.dot)
+        self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

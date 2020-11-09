@@ -29,10 +29,9 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
-  auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
-  // NB: the `.contiguous()` call is added due to the bug in `.prod()` as reported in
-  // issue #https://github.com/pytorch/pytorch/issues/34061
-  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).contiguous();
+  auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs)
+    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
+  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
   return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
@@ -191,7 +190,6 @@ Tensor& inner_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
   // If either self or other is a scalar just multiply them
   if (self.dim() == 0 || other.dim() == 0) {
-    resize_output(out, self.dim() == 0 ? other.sizes() : self.sizes());
     at::mul_out(out, self, other);
     return out;
   }
@@ -378,7 +376,7 @@ static void addbmm_impl_cpu_(
 
   result.resize_as_(self);
 
-  if (beta.to<double>() != 0.0 && !self.is_same(result)) {
+  if (beta.to<c10::complex<double>>() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
   }
 
