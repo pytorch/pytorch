@@ -81,7 +81,9 @@ class Context final : public torch::jit::CustomClassHolder {
 inline bool is_depthwise(
     const IntArrayRef filter,
     const int64_t groups) {
-  return filter[Layout::Filter::output] == groups;
+  return (filter[Layout::Filter::output] == groups) &&
+         // Only K == 1 supported.
+         (filter[Layout::Filter::input] == 1);
 }
 
 inline bool is_pointwise(const IntArrayRef filter) {
@@ -98,6 +100,7 @@ vTensor pack_weights(
   }
 
   /* Source */
+
   const Tensor weight = weight_arg.contiguous();
   const IntArrayRef src_filter = weight.sizes();
   const float* const src_weight_ptr = weight.data_ptr<float>();
@@ -137,7 +140,7 @@ vTensor pack_weights(
     &pool,
     {
       div_up(src_filter[Layout::Filter::output], 4),
-      4 * src_filter[Layout::Filter::input],
+      4 * align_up(src_filter[Layout::Filter::input], 4),
       src_filter[Layout::Filter::height],
       src_filter[Layout::Filter::width],
     },
@@ -149,31 +152,23 @@ vTensor pack_weights(
   Future::Payload v_weight_payload = v_weight_future.wait();
 
   /* Source */
-
-  const int64_t src_kernel =
-      src_filter[Layout::Filter::height] *
-      src_filter[Layout::Filter::width];
-
+  const int64_t src_kernel = src_filter[Layout::Filter::height] * src_filter[Layout::Filter::width];
   const int64_t src_block = src_kernel * src_filter[Layout::Filter::input];
 
   /* Destination */
-
   const IntArrayRef dst_filter = v_weight.sizes();
   const int64_t dst_kernel = dst_filter[Layout::Filter::height] * dst_filter[Layout::Filter::width];
   const int64_t dst_block = dst_kernel * dst_filter[Layout::Filter::input];
   TORCH_INTERNAL_ASSERT(src_kernel == dst_kernel, "Internal error!");
 
   float* const dst_weight_ptr = v_weight_payload.get();
-
-  /*
-    Bulk
-  */
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
 
   for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
-    // Src
+    /* Source */
     const float *const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block;
 
-    // Dst
+    /* Destination */
     const int64_t dst_oc = src_oc / 4;
     const int64_t dst_oc_offset = src_oc % 4;
 
@@ -191,31 +186,6 @@ vTensor pack_weights(
           sizeof(float) * dst_kernel);
     }
   }
-
-  /*
-    Remainder
-  */
-
-  // const int64_t rem_ic = src_filter[Layout::Filter::input] % 4;
-
-  // if (rem_ic > 0) {
-  //   const int64_t rem_block = 4 * dst_kernel;
-
-  //   float *const rem_weight_ptr =
-  //       dst_weight_ptr +
-  //       (dst_filter[Layout::Filter::output] - 1) * dst_block +
-  //       rem_ic * dst_kernel;
-
-  //   for (int64_t rem_oc = 0; rem_oc < 4; ++rem_oc) {
-  //     memset(
-  //         rem_weight_ptr + rem_oc * rem_block,
-  //         // 2's complement integers and IEEE-754 floating point numbers both
-  //         // have identical bit representations for 0, so can use memset which
-  //         // only accepts uint8_t parameter.
-  //         0,
-  //         sizeof(float) * (4 - rem_ic));
-  //   }
-  // }
 
   return v_weight;
 }
@@ -274,7 +244,7 @@ std::array<int64_t, 4> pack_filter(
 
   return {
     api::utils::align_up(filter[Layout::Filter::output], 4),
-    filter[Layout::Filter::input],
+    api::utils::align_up(filter[Layout::Filter::input], 4),
     effective(
         filter[Layout::Filter::height],
         dilation[Layout::Parameter::height]),
@@ -516,6 +486,7 @@ void conv2d_pointwise(
     const vTensor& v_input,
     const vTensor& v_weight,
     const vTensor& v_bias,
+    const IntArrayRef filter,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const float output_min,
@@ -524,10 +495,13 @@ void conv2d_pointwise(
 
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
+      int32_t kernel_ic, kernel_oc;
       int32_t stride_x, stride_y;
       int32_t padding_x, padding_y;
       float clamp_x, clamp_y;
     } block {
+      safe_downcast<int32_t>(filter[Layout::Filter::input]),
+      safe_downcast<int32_t>(filter[Layout::Filter::output]),
       safe_downcast<int32_t>(stride[Layout::Parameter::width]),
       safe_downcast<int32_t>(stride[Layout::Parameter::height]),
       safe_downcast<int32_t>(padding[Layout::Parameter::width]),
@@ -536,32 +510,32 @@ void conv2d_pointwise(
       output_max,
     };
 
-//     context->dispatch(
-//         command_buffer,
-//         {
-//           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-//           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-//           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-//           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-//           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-//         },
-//         VK_KERNEL(conv2d_pw),
-//         v_output.extents(),
-//         // Write-only access bypasses synchronization but inserts appropriate
-//         // barriers if necessary.
-//         v_output.image(command_buffer, vTensor::Access::Write),
-//         // Read-only access is implied on const tensors and triggers an async
-//         // synchronization if necessary.
-//         v_input.image(command_buffer),
-//         // Read-only access is implied on const tensors and triggers an async
-//         // synchronization if necessary.
-//         v_weight.image(command_buffer),
-//         // Read-only access is implied on const tensors and triggers an async
-//         // synchronization if necessary.
-//         v_bias.buffer(command_buffer),
-//         // Object lifetime is managed by the resource pool.
-//         // It is OK not to keep track of the handle.
-//         context->resource().pool.uniform(block).object);
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(conv2d_pw),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(command_buffer, vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_input.image(command_buffer),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_weight.image(command_buffer),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_bias.buffer(command_buffer),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
   }
   else {
     TORCH_CHECK(false, "Not implemented!");
@@ -585,8 +559,7 @@ void conv2d(
 
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
-      int32_t kernel_x, kernel_y;
-      int32_t ic4, oc4;
+      int32_t kernel_x, kernel_y, kernel_ic, kernel_oc;
       int32_t stride_x, stride_y;
       int32_t padding_x, padding_y;
       int32_t dilate_x, dilate_y;
@@ -663,7 +636,7 @@ Tensor Context::run(const Tensor& input_arg) const {
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (is_depthwise(unpacked_.filter, packed_.groups)) {
+    if (is_depthwise(unpacked_.filter, unpacked_.groups)) {
       conv2d_depthwise(
           context,
           command_buffer,
@@ -686,6 +659,7 @@ Tensor Context::run(const Tensor& input_arg) const {
           v_input,
           packed_.v_weight,
           packed_.v_bias,
+          packed_.filter,
           packed_.stride,
           packed_.padding,
           packed_.output_min,

@@ -234,9 +234,9 @@ TEST(VulkanAPITest, conv2d) {
   }
 
   constexpr int64_t groups = 1;
-  constexpr std::array<int64_t, 2u> stride{1, 1};
-  constexpr std::array<int64_t, 2u> padding{0, 0};
-  constexpr std::array<int64_t, 2u> dilation{1, 1};
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{3, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 3};
 
   constexpr struct {
     uint32_t batches;
@@ -252,7 +252,7 @@ TEST(VulkanAPITest, conv2d) {
         height,
       };
     }
-  } input {1, 73, 3, 3};
+  } input {1, 37, 223, 227};
 
   constexpr struct {
     uint32_t output_channels;
@@ -268,11 +268,11 @@ TEST(VulkanAPITest, conv2d) {
         height,
       };
     }
-  } weights {4, input.channels, 3, 3};
+  } weights {83, input.channels, 13, 2};
 
-  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::ones(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::ones(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,
@@ -301,15 +301,15 @@ TEST(VulkanAPITest, conv2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, conv2d_depthwise) {
+TEST(VulkanAPITest, conv2d_dw) {
   if (!at::is_vulkan_available()) {
     return;
   }
 
   constexpr int64_t groups = 7;
-  constexpr std::array<int64_t, 2u> stride{1, 3};
-  constexpr std::array<int64_t, 2u> padding{2, 0};
-  constexpr std::array<int64_t, 2u> dilation{1, 2};
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{3, 1};
 
   constexpr struct {
     uint32_t batches;
@@ -346,6 +346,79 @@ TEST(VulkanAPITest, conv2d_depthwise) {
   const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
   const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
   const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv2d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const auto output_vulkan = at::conv2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const bool check = almostEqual(output_cpu, output_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << output_cpu << std::endl;
+    std::cout << "Got:\n" << output_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, conv2d_pw) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 1};
+  constexpr std::array<int64_t, 2u> padding{0, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        batches,
+        channels,
+        width,
+        height,
+      };
+    }
+  } input {1, 17, 127, 397};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        output_channels,
+        input_channels,
+        width,
+        height,
+      };
+    }
+  } weights {29, input.channels, 1, 1};
+
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,
