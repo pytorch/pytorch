@@ -1,6 +1,7 @@
 #include <torch/library.h>
 #include <ATen/VmapTransforms.h>
 #include <ATen/BatchedFallback.h>
+#include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
 
 namespace at {
@@ -590,6 +591,63 @@ Tensor new_empty_batching_rule(
   return physical_view.newLogicalFromPhysical(result);
 }
 
+Tensor new_empty_strided_batching_rule(
+    const Tensor& self,
+    IntArrayRef size,
+    IntArrayRef stride,
+    const TensorOptions& options) {
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_size = physical_view.getPhysicalShape(size);
+
+  // Let [B0, B1, B2] be the shape of the batch dims. We're going to create
+  // the batch dimensions at the front of the tensor (in memory layout),
+  // irrespective of whether or not they are actually at the front (in memory layout)
+  // in the original `self` tensor. This is because when a user calls
+  // `new_empty_strided` in general, the `strides` they provide are for a new
+  // tensor and have no relation to the strides of the original tensor.
+  //
+  // So, the physical shape of the result should be ([B0, B1, B2] + size),
+  // but what about the physical strides?
+  //
+  // We're actually free to pick whatever stride we want:
+  // e.g., for size=[5, 3], stride=[0, 1], we could decide to
+  // use
+  // - physical size: [B0, B1, B2, 5, 3]
+  // - physical stride: [9999*B1*B2, 9999*B2, 9999, 0, 1]
+  //
+  // Let's select some reasonable strides such that:
+  // - The batch dims are "contiguous" with respect to each other
+  // - if empty_strided(size, stride) would have created a contiguous Tensor,
+  // then this new physical Tensor (with batch dims) is also contiguous
+  //
+  // Let S be the size of the storage if one were to construct a tensor
+  // with `size` and `stride` via empty_strided(size, stride).
+  // Then the physical sizes/strides should be:
+  // - physical size: [B0, B1, B2, 5, 3]
+  // - physical stride: [B1 * B2 * S, B2 * S, S, 0, 1]
+  auto batch_shape = IntArrayRef(
+      physical_view.tensor().sizes().begin(), physical_view.numBatchDims());
+
+  // physical_strides = [B1 * B2 * S, B2 * S, S]
+  auto physical_strides = at::detail::defaultStrides(batch_shape);
+  TORCH_CHECK(size.size() == stride.size(),
+        "new_empty_strided(sizes, strides): dimensionality of sizes (",
+        size.size(), ") must match dimensionality of strides (",
+        stride.size(), ")");
+  auto storage_size = native::storage_size_for(size, stride);
+  for (int64_t idx = 0; idx < physical_strides.size(); ++idx) {
+    physical_strides[idx] *= storage_size;
+  }
+
+  // physical_strides = [B1 * B2 * S, B2 * S, S] + strides
+  physical_strides.insert(physical_strides.end(), stride.begin(), stride.end());
+
+  auto result = physical_view.tensor().new_empty_strided(
+      physical_size, physical_strides, options);
+  return physical_view.newLogicalFromPhysical(result);
+}
+
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -749,6 +807,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   // Tensor.new_* operators
   m.impl_UNBOXED("new_empty", new_empty_batching_rule);
+  m.impl_UNBOXED("new_empty_strided", new_empty_strided_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
 }
 

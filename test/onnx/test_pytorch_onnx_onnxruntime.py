@@ -1866,6 +1866,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+        class VarianceSqrt(torch.nn.Module):
+            def forward(self, input):
+                y = torch.var(input, 1)
+                return torch.sqrt(y + 1e-8)
+
+        x = torch.randn(1, 2, 3, 300, 300)
+        model = VarianceSqrt()
+        self.run_test(model, x)
+
     def test_var_along_dims(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
