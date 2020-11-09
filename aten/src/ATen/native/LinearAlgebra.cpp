@@ -1648,9 +1648,12 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
     self_inverse = at::inverse(self);
   } catch (const std::exception& e) {
     if (strstr(e.what(), "singular")) {
-    result = at::empty_like(at::linalg_norm(self, ord, dim));
-    at::fill_(result, INFINITY);
-    return result;
+      auto result_shape = self.sizes().vec();
+      result_shape.pop_back();
+      result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
+      result = at::empty(result_shape, self.options());
+      at::fill_(result, INFINITY);
+      return result;
     } else {
       TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
     }
@@ -1699,11 +1702,13 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
     self_inverse = at::inverse(self);
   } catch (const std::exception& e) {
     if (strstr(e.what(), "singular")) {
-    result = at::empty_like(at::linalg_norm(self, ord, dim));
-    at::fill_(result, INFINITY);
-    return result;
-    }
-    else {
+      auto result_shape = self.sizes().vec();
+      result_shape.pop_back();
+      result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
+      result = at::empty(result_shape, self.options());
+      at::fill_(result, INFINITY);
+      return result;
+    } else {
       TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
     }
   }
