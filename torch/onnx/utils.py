@@ -964,8 +964,21 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 for b in n.blocks():
                     new_block = new_node.addBlock()
                     # Copy input metadata to subblock
-                    # This is for Loop only, since If only has a single input.
+                    #
+                    # If format:
+                    #   prim::If(cond)
+                    #     block0()
+                    #     block1()
+                    #
+                    # Loop format:
+                    #   prim::Loop(iter, cond, input_1, ..., input_n)
+                    #     block0(iter, input_1, ..., input_n)
+                    #
+                    # For `If` node, there is nothing to copy.
+                    # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
                     for i, b_in in enumerate(b.inputs()):
+                        # if i == 0 and i < len(inputs):
+                        #     b_in.setType(inputs[i].type())
                         if i > 0 and (i + 1) < len(inputs):
                             b_in.setType(inputs[i + 1].type())
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
