@@ -215,7 +215,7 @@ Tensor& addbmm_out_cuda(Tensor& out, const Tensor& self,
 
   if (&out != &self) {
     at::native::resize_as_(out, self_);
-    if (beta.to<double>() != 0.0) {
+    if (beta.to<c10::complex<double>>() != 0.0) {
       at::native::copy_(out, self_);
     }
   }
