@@ -8,8 +8,8 @@ CUDA_VERSIONS = [
 ]
 
 ROCM_VERSIONS = [
-    "3.7",
     "3.8",
+    "3.9",
 ]
 
 ROCM_VERSION_LABELS = ["rocm" + v for v in ROCM_VERSIONS]

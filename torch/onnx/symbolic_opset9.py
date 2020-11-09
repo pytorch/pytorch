@@ -2193,6 +2193,8 @@ def log2(g, self):
 def prim_shape(g, self):
     return g.op('Shape', self)
 
+def prim_data(g, self):
+    return self
 
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):
@@ -2217,20 +2219,19 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args('v', 'is', 'b', 'i')
 def _var_mean(g, input, dim, unbiased, keepdim):
-    sqrd = g.op("Mul", input, input)
     if dim is None:
-        sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
         mean = g.op("ReduceMean", input, keepdims_i=0)
         num_elements = numel(g, input)
     else:
-        sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
         redudced_dims = g.op("Shape", input)
         # dim could contain one or multiple dimensions
         redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
         num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
-    meansqrd = g.op("Mul", mean, mean)
-    var = g.op("Sub", sqrdmean, meansqrd)
+    sub_v = g.op("Sub", input, mean)
+    sqr_sub = g.op("Mul", sub_v, sub_v)
+    keepdim_mean = 0 if dim is None else keepdim
+    var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
     # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
     if unbiased:
         num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
