@@ -47,7 +47,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
 # TODO: There's an issue with current Python 3.9 builds that only occurs during
 #       windows builds, let's just not build 3.9 for windows and figure out how
 #       to resolve afterwards
-PYTHON_VERSIONS_NO_39=[
+PYTHON_VERSIONS_NO_39 = [
     v for v in dimensions.STANDARD_PYTHON_VERSIONS if v not in ['3.9']
 ]
 
