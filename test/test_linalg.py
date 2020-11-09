@@ -782,11 +782,12 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.double, torch.float)
     def test_eig_basic(self, device, dtype):
-        a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
-                          (-6.49, 3.80, 0.00, 0.00, 0.00),
-                          (-0.47, -6.39, 4.17, 0.00, 0.00),
-                          (-7.20, 1.50, -1.51, 5.70, 0.00),
-                          (-0.65, -6.34, 2.67, 1.80, -7.10))).t().contiguous().to(dtype=dtype, device=device)
+        a = torch.tensor([[1.96, 0.00, 0.00, 0.00, 0.00],
+                          [-6.49, 3.80, 0.00, 0.00, 0.00],
+                          [-0.47, -6.39, 4.17, 0.00, 0.00],
+                          [-7.20, 1.50, -1.51, 5.70, 0.00],
+                          [-0.65, -6.34, 2.67, 1.80, -7.10]],
+                         dtype=dtype, device=device).t()
         e = torch.eig(a)[0]
         ee, vv = torch.eig(a, True)
         te = torch.tensor((), dtype=dtype, device=device)
