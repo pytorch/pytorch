@@ -10,13 +10,13 @@ import shutil
 import textwrap
 import threading
 from types import ModuleType
-from typing import cast, List, Optional, Union
+from typing import cast, List, Optional, Union, TYPE_CHECKING
 import uuid
 
-try:
+if TYPE_CHECKING:
     from typing import Protocol
-except ImportError:
-    from typing_extensions import Protocol
+else:
+    Protocol = object
 
 import torch
 from torch.utils import cpp_extension
@@ -74,7 +74,7 @@ def get_compat_bindings() -> CallgrindModuleType:
     if _COMPAT_CALLGRIND_BINDINGS is None:
         _COMPAT_CALLGRIND_BINDINGS = cpp_extension.load(
             name="callgrind_bindings",
-            sources=os.path.join(SOURCE_ROOT, "compat_bindings.cpp"),
+            sources=[os.path.join(SOURCE_ROOT, "compat_bindings.cpp")],
             extra_cflags=CXX_FLAGS,
             extra_include_paths=extra_include_paths,
         )
@@ -115,7 +115,7 @@ def compile_template(
 
     output = cpp_extension.load(
         name=name,
-        sources=src_path,
+        sources=[src_path],
         build_directory=build_dir,
         extra_cflags=CXX_FLAGS,
         extra_include_paths=extra_include_paths,

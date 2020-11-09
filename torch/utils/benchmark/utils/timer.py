@@ -2,12 +2,12 @@
 
 import timeit
 import textwrap
-from typing import cast, Any, Callable, Dict, List, NoReturn, Optional, Type
+from typing import cast, Any, Callable, Dict, List, NoReturn, Optional, Type, TYPE_CHECKING
 
-try:
+if TYPE_CHECKING:
     from typing import Protocol
-except ImportError:
-    from typing_extensions import Protocol
+else:
+    Protocol = object
 
 import numpy as np
 import torch
