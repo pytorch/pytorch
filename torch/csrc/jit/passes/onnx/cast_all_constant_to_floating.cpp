@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
-#include <onnx/onnx_pb.h>
 #include <torch/csrc/jit/passes/utils/onnx_utils.h>
 
 namespace torch {
