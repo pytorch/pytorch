@@ -474,6 +474,8 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
   return result;
 }
 
+// NOTE: this could be implemented via diag and sum, but this has perf problems,
+// see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
   Tensor result;
   ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
