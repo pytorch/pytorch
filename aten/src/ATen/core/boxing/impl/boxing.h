@@ -231,9 +231,8 @@ struct BoxedKernelWrapper<
 };
 
 //
-// 4. an out of place op takes one or more non-const Tensor ref arguments at the
-// end of the arg list, and also returns it/them. This specialization supports
-// those that take and return a single out argument.
+// 4. out of place ops that take a single non-const Tensor reference as their
+// final argument, and also return it.
 //
 // Note: all signatures matching this pattern are are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
@@ -270,9 +269,8 @@ struct BoxedKernelWrapper<
 };
 
 //
-// 5. an out of place op takes one or more non-const Tensor ref arguments at the
-// end of the arg list, and also returns it/them. This specialization supports
-// those that take and return multiple out arguments.
+// 5. out of place ops that take multiple non-const Tensor references as their
+// final arguments, and return them in a std::tuple.
 //
 // Note: all signatures matching this pattern are are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
@@ -283,11 +281,12 @@ struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
     can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value
-    // this abomination just skips over legacy kernels with out args at the front, so they can trigger
+    // this test skips over legacy kernels with out args at the front, so they can trigger
     // the specialization that follows.
-    // note: this test is extra terrible because boolean value expressions in templates don't shortcut.
-    // so without the ternary, a result tuple that's wider than the arg list will cause a compile error
-    // even with a length check preceding it in the conjunction. template metaprogramming ftw
+    // note: this test is complicated by the fact that boolean value expressions in templates
+    // don't shortcut. some signatures have a result tuple that's wider than the arg list, and
+    // these will cause a template evaluation error on this test, even if a length check precedes
+    // it in the conjunction.
     // TODO remove when hacky_wrapper reorders legacy kernel out args
     && !std::is_same<
         Result,
@@ -339,6 +338,11 @@ struct BoxedKernelWrapper<
   Result(Args...),
   std::enable_if_t<
     can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value
+    // this test fires passes for legacy kernels with out args at the front.
+    // note: this test is complicated by the fact that boolean value expressions in templates
+    // don't shortcut. some signatures have a result tuple that's wider than the arg list, and
+    // these will cause a template evaluation error on this test, even if a length check precedes
+    // it in the conjunction.
     && std::is_same<
         Result,
         guts::typelist::to_tuple_t<
