@@ -639,27 +639,27 @@ class optional : private OptionalBase<T> {
         : detail_::convert<T>(constexpr_forward<V>(v));
   }
 
-  template <class F>
-  constexpr T value_or_else(F&& func) const& {
-    static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
-      "func parameters must be a callable that returns a type convertible to the value stored in the optional");
-    return has_value() ? **this : detail_::convert<T>(std::forward<F>(func)());
-  }
-
-  template <class F>
-  constexpr T value_or_else(F&& func) && {
-    static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
-      "func parameters must be a callable that returns a type convertible to the value stored in the optional");
-    return has_value()
-      ? constexpr_move(const_cast<optional<T>&>(*this).contained_val())
-      : detail_::convert<T>(std::forward<F>(func)());
-  }
-
   // 20.6.3.6, modifiers
   void reset() noexcept {
     clear();
   }
 };
+
+template <class T, class F>
+constexpr T value_or_else(const optional<T>& v, F&& func) {
+  static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
+    "func parameters must be a callable that returns a type convertible to the value stored in the optional");
+  return v.has_value() ? *v : detail_::convert<T>(std::forward<F>(func)());
+}
+
+template <class T, class F>
+constexpr T value_or_else(optional<T>&& v, F&& func) {
+  static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
+    "func parameters must be a callable that returns a type convertible to the value stored in the optional");
+  return v.has_value()
+    ? constexpr_move(std::move(v).contained_val())
+    : detail_::convert<T>(std::forward<F>(func)());
+}
 
 
 // XXX: please refrain from using optional<T&>, since it is being against with

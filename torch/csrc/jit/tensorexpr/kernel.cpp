@@ -1083,12 +1083,44 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
              const ExprHandle& weight) { return a + weight * (end - a); });
     } break;
     case aten::remainder: {
-      return computeTwoOperand(
-          "aten_remainder",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return fmod((rhs + fmod(lhs, rhs)), rhs);
-          });
+      auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return Mod::make(lhs, rhs);
+      };
+      auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return fmod((rhs + fmod(lhs, rhs)), rhs);
+      };
+      {
+        auto const& n = v->node();
+        auto const& shape = broadcastShapes(
+            valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
+        return Compute(
+            "aten_remainder",
+            c10::fmap<DimArg>(shape),
+            [&](const std::vector<VarHandle>& axes) {
+              auto const& n = v->node();
+              std::vector<ExprHandle> indices(axes.begin(), axes.end());
+              std::vector<ExprHandle> inputs = {
+                  tensorOrConstant(n->inputs()[0], indices),
+                  tensorOrConstant(n->inputs()[1], indices),
+              };
+
+              promoteInputs(inputs);
+              bool allInt = true;
+              for (auto& e : inputs) {
+                if (e.dtype().is_floating_point()) {
+                  allInt = false;
+                  break;
+                }
+              }
+              if (allInt) {
+                return demoteOutput(
+                    imodImpl(inputs[0], inputs[1]), n->output());
+              } else {
+                return demoteOutput(
+                    fmodImpl(inputs[0], inputs[1]), n->output());
+              }
+            });
+      }
 
     } break;
 
