@@ -590,7 +590,7 @@
   index: non_differentiable
 
 - name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
+  self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
