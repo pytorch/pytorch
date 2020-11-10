@@ -5671,8 +5671,8 @@ TEST(NVFuserTest, FusionSumTo_CUDA) {
   std::vector<int64_t> tensor_shape{2, 3, 4, 5, 6};
   std::vector<int64_t> sum_to_shape{1, 5, 6};
 
-  c10::IntArrayRef tensor_shape_ref{2, 3, 4, 5, 6};
-  c10::IntArrayRef sum_to_shape_ref{1, 5, 6};
+  std::vector<int64_t> tensor_shape_ref{2, 3, 4, 5, 6};
+  std::vector<int64_t> sum_to_shape_ref{1, 5, 6};
 
   std::vector<Int*> sum_to_symb;
   std::transform(
