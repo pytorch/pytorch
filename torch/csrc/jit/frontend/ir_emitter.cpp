@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -484,7 +485,7 @@ struct Environment {
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"list", SpecialFormValue::create(prim::list)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -859,9 +860,12 @@ struct to_ir {
     return emitStatements(statements.begin(), statements.end());
   }
 
-  // XXX - right now closures are used _only_ for defining gradients internally
+  // XXX: Right now closures are not generically implemented and are only used
+  // as an intermediate form for special tasks, like defining gradients or
+  // forked functions.
+  //
   // There are several unfinished aspects that make them unusable generally
-  // 1. We do not have a type, ivalue, operator to represent prim::Function, so
+  // 1. We do not have a type, ivalue, operator to represent prim::Closure, so
   // closure_node has type None
   // 2. There is no export logic for it yet, so it cannot be
   // exported/python_printed
@@ -870,9 +874,19 @@ struct to_ir {
   //    the changes to those variables will just get forgotten.
   // 4. There is no parsing support in frontend.py, this is intentional since it
   //    prevents people from accidentally using this feature.
+  //
+  // This function leaves in the graph something like:
+  //
+  //   %2 : None = prim::Closure()
+  //     block0():
+  //       %1 : Tensor = prim::DoSomething(%0)
+  //       -> (%1)
+  //
+  // A separate pass is required to erase this closure and replace it with
+  // something actually executable (see liftClosure and inlineForkedClosure).
   std::shared_ptr<ClosureValue> emitClosure(
       const std::function<void(Block*)>& emit_body) {
-    Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
+    Node* closure_node = graph->insertNode(graph->create(prim::Closure, 1));
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
@@ -1196,6 +1210,14 @@ struct to_ir {
               return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
             }
           }
+          auto sv = emitSugaredExpr(apply.callee(), 1);
+          auto loc = apply.callee().range();
+          if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+            if (special_form->form() == prim::isinstance) {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+          }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
@@ -1254,7 +1276,7 @@ struct to_ir {
     // comprehension introduces it's own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
+        graph->insertNode(create(prim::ListComprehensionScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -2086,8 +2108,8 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhs->type()),
-          /*inputs=*/{lhs, rhs},
-          /*attributes=*/{},
+          /*args=*/{lhs, rhs},
+          /*kwargs=*/{},
           /*self=*/c10::nullopt);
     }
   }
@@ -2657,9 +2679,9 @@ struct to_ir {
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
       return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
-    auto inputs = getNamedValues(apply.inputs(), true);
-    auto attributes = emitAttributes(apply.attributes());
-    return sv->call(loc, method, inputs, attributes, n_binders);
+    auto args = getNamedValues(apply.inputs(), true);
+    auto kwargs = emitAttributes(apply.attributes());
+    return sv->call(loc, method, args, kwargs, n_binders);
   }
 
   // this function handles expressions that look like apply statements
@@ -2680,9 +2702,9 @@ struct to_ir {
         }
         auto forked = emitSugaredExpr(Expr(trees[0]), 1);
         TreeList sliced_trees(trees.begin() + 1, trees.end());
-        auto inputs = getNamedValues(sliced_trees, true);
-        auto attributes = emitAttributes(apply.attributes());
-        return emitForkExpr(apply.range(), forked, inputs, attributes);
+        auto args = getNamedValues(sliced_trees, true);
+        auto kwargs = emitAttributes(apply.attributes());
+        return emitForkExpr(apply.range(), forked, args, kwargs);
       }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
@@ -2702,7 +2724,7 @@ struct to_ir {
               << why_not.str();
         }
 
-        // None is a subtype of Optional[T], but we want to remember what T is,
+        // None is a subtype of Optional[T], but we want to remember what T is
         // after annotation so that variables assigned to this None will still
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
@@ -2874,6 +2896,49 @@ struct to_ir {
         }
         return iterable_tree;
       }
+      case prim::list: {
+        if (apply.inputs().size() == 0) {
+          TypePtr type = type_hint ? type_hint : ListType::ofTensors();
+          if (!type->cast<ListType>()) {
+            throw ErrorReport(apply.range())
+                << "Expected list type annotation for list(), found "
+                << type_hint->repr_str();
+          }
+          return std::make_shared<SimpleValue>(
+              graph
+                  ->insertNode(graph->createList(
+                      type->expect<ListType>()->getElementType(), {}))
+                  ->output());
+        }
+        // list(iter) desugars to [_elem for _elem in iter]
+        checkApplyNumInputs(apply, 1);
+        auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
+        // aten::list builtin op is registered for List and Str input
+        // dispatch to the builtin op to avoid perf slowdown on existing uses
+        if (auto simple = asSimple(iter_input)) {
+          if (simple->type()->cast<ListType>() ||
+              simple->type()->cast<StringType>()) {
+            return std::make_shared<SimpleValue>(emitBuiltinCall(
+                apply.range(), *method.graph(), aten::list, {simple}, {}));
+          }
+        }
+        const std::string& iter_name = createTempName("$_iter");
+        environment_stack->setSugaredVar(
+            apply.range(),
+            iter_name,
+            iter_input,
+            /*annotated_type=*/nullptr);
+
+        const std::string& elem_name = createTempName("$_elem");
+        auto ident =
+            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+        auto iter =
+            Var::create(apply.range(), Ident::create(apply.range(), iter_name));
+        auto lc = ListComp::create(apply.range(), ident, ident, iter);
+        return std::make_shared<SimpleValue>(
+            emitListComprehension(lc, type_hint));
+      }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
@@ -2924,7 +2989,7 @@ struct to_ir {
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       case TK_SUBSCRIPT: {
-        return emitSubscript(Subscript(tree));
+        return emitSubscript(Subscript(tree), type_hint);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
@@ -2957,11 +3022,15 @@ struct to_ir {
     return graph->insertConstant(maybe_out_stack->at(0), tree->range());
   }
 
+  /**
+   * Emit a fork expression, of the form:
+   *   torch.jit.fork(forked, *args, **kwargs)
+   */
   std::shared_ptr<SugaredValue> emitForkExpr(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& forked,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes) {
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
     Node* fork_node;
     TypePtr out_type;
@@ -2981,8 +3050,7 @@ struct to_ir {
         fork_node->addInput(closure_output);
       } else {
         auto emit_closure_body = [&](Block* closure_block) {
-          auto fn_sugared_output =
-              forked->call(loc, method, inputs, attributes, 1);
+          auto fn_sugared_output = forked->call(loc, method, args, kwargs, 1);
           auto fn_simple_output = fn_sugared_output->asValue(loc, method);
           closure_block->registerOutput(fn_simple_output);
           out_type = fn_simple_output->type();
@@ -3124,6 +3192,22 @@ struct to_ir {
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
+  Value* emitBinaryOp(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto kind = getNodeKind(tree->kind(), inputs.size());
+    auto overload = getOperatorOverload(tree->kind(), inputs.size());
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+    if (tree->kind() == TK_IN) {
+      // For `in` the arguments are in reverse order (the object being
+      // checked is second)
+      std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+    }
+    return asSimple(
+        makeMagic(
+            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            ->call(tree->range(), method, named_values, {}, 0));
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3135,6 +3219,21 @@ struct to_ir {
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
             tree->range(), *method.graph(), kind, named_values, {});
+      }
+      case '%': {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto const& lhs_type = lhs->type();
+        if (lhs_type == StringType::get()) {
+          auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
+          auto node = graph->create(aten::percentFormat, values, 1)
+                          ->setSourceRange(tree->range());
+          Value* output = graph->insertNode(node)->output();
+          output->setType(StringType::get());
+          return output;
+        } else {
+          return emitBinaryOp(tree);
+        }
       }
       case TK_IN:
       case TK_POW:
@@ -3148,28 +3247,12 @@ struct to_ir {
       case '/':
       case '+':
       case '-':
-      case '%':
       case '&':
       case '|':
       case '^':
       case TK_LSHIFT:
-      case TK_RSHIFT: {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto overload = getOperatorOverload(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-        if (tree->kind() == TK_IN) {
-          // For `in` the arguments are in reverse order (the object being
-          // checked is second)
-          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
-        }
-
-        return asSimple(
-            makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
-                ->call(tree->range(), method, named_values, {}, 0));
-      }
+      case TK_RSHIFT:
+        return emitBinaryOp(tree);
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:
@@ -3765,7 +3848,9 @@ struct to_ir {
         ->output();
   }
 
-  std::shared_ptr<SugaredValue> emitSubscript(const Subscript& subscript) {
+  std::shared_ptr<SugaredValue> emitSubscript(
+      const Subscript& subscript,
+      TypePtr type_hint = nullptr) {
     const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
     const SourceRange& range = subscript.range();
@@ -3835,7 +3920,7 @@ struct to_ir {
         return std::make_shared<SimpleValue>(
             emitMultidimSlicing(range, sliceable, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx);
+        return sv->getitem(range, method, idx, std::move(type_hint));
       }
     }
   }

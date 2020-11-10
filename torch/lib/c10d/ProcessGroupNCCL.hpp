@@ -12,7 +12,10 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace c10d {
 
@@ -65,7 +68,7 @@ class ProcessGroupNCCL : public ProcessGroup {
                    public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -299,6 +302,32 @@ class ProcessGroupNCCL : public ProcessGroup {
       auto fut = c10::make_intrusive<FutureNCCL>(
           deviceIndex_, thenFutCudaEvents, futureNCCLCallbackStream_);
 
+      // Do not free the underlying data storage of value_ before its
+      // usage on futureNCCLCallbackStream_ finish.
+      if (record_stream_cb_ != nullptr) {
+        // If a Python communication hook is used, record_stream_cb_ will be
+        // set in torch/csrc/jit/python/pybind_utils.h, which allows Python
+        // dependency to be imported.
+        record_stream_cb_(value_, futureNCCLCallbackStream_->unwrap());
+      } else {
+        // If a C++ communication hook is used, create and set a record stream
+        // callback.
+        TORCH_INTERNAL_ASSERT(
+            value_.isTensorList() || value_.isTensor(),
+            "the future value must be either a tensor list or a tensor.");
+        at::Tensor tensor;
+        if (value_.isTensorList()) {
+          const auto tensors = value_.toTensorVector();
+          TORCH_INTERNAL_ASSERT(
+              tensors.size() == 1, "expected exactly 1 tensor");
+          tensor = tensors[0];
+        } else {
+          tensor = value_.toTensor();
+        }
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensor.storage().data_ptr(), *futureNCCLCallbackStream_);
+      }
+
       // Use the dedicated callback stream to run callback.
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
@@ -333,11 +362,19 @@ class ProcessGroupNCCL : public ProcessGroup {
       return !value_.isNone();
     }
 
+    void setRecordStreamCallback(
+        std::function<void(const at::IValue&, const c10::Stream&)>
+            record_stream_cb) override {
+      record_stream_cb_ = std::move(record_stream_cb);
+    }
+
    private:
     at::IValue value_;
     c10::DeviceIndex deviceIndex_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream_;
+    std::function<void(const at::IValue&, const c10::Stream&)>
+        record_stream_cb_;
     c10::optional<FutureError> error_;
   };
 
@@ -481,7 +518,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   virtual std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
       int rank,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle=nullptr);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -495,7 +533,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
   template <typename Fn, typename PreProcess, typename PostProcess>
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
@@ -503,7 +542,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       Fn fn,
       PreProcess pre,
       PostProcess post,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
@@ -541,13 +581,11 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   void ncclCommWatchdogInternal();
 
-  // Reads the NCCL_BLOCKING_WAIT environment variable and sets blockingWait_
-  // accordingly.
-  void parseNcclBlockingWait();
-
-  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets
-  // asyncErrorHandling_ accordingly.
-  void parseNcclAsyncErrorHandling();
+  // This function iterates through the list of WorkNCCL objects in the
+  // workList_ corresponding to incomplete collectives and then aborts NCCL
+  // communicators associated with timed out collectives.
+  void abortTimedOutCollectives(
+      std::unordered_set<std::string>& abortedCommIds);
 
   void workCleanupLoop();
 
@@ -587,10 +625,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   //
   // For point-to-point operations:
   // The key is a string of my current rank and the peer process rank.
-  // e.g. If process 1 and process 2 are involved in a point-to-point communication,
-  // the key will be "1:2" on both processes.
-  // Note: this is for the scenario where there is only 1 GPU per process.
-  // When it comes to multiple GPUs per process, this part may need to redesigned.
+  // e.g. If process 1 and process 2 are involved in a point-to-point
+  // communication, the key will be "1:2" on both processes. Note: this is for
+  // the scenario where there is only 1 GPU per process. When it comes to
+  // multiple GPUs per process, this part may need to redesigned.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
 

@@ -27,7 +27,8 @@ import os
 import yaml
 import re
 from collections import defaultdict
-from .utils import YamlLoader, split_name_params, op_name_without_overload
+from .utils import YamlLoader, split_name_params, op_name_with_overload
+from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -218,15 +219,17 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
     return declarations
 
 
-def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_op_list=None):
+def gen_autograd(aten_path, native_functions_path, out, autograd_dir, operator_selector: SelectiveBuilder, disable_autograd=False):
     full_aten_decls = load_aten_declarations(aten_path)
 
-    def filter_decls(aten_decls, selected_op_list):
-        if selected_op_list is None:
-            return aten_decls
-        return [decl for decl in aten_decls if op_name_without_overload(decl) in selected_op_list]
+    def filter_decls(aten_decls, operator_selector):
+        def is_operator_selected_for_training(decl):
+            op_name = op_name_with_overload(decl)
+            return operator_selector.is_operator_selected_for_training(op_name)
 
-    aten_decls = filter_decls(full_aten_decls, selected_op_list)
+        return [decl for decl in aten_decls if is_operator_selected_for_training(decl)]
+
+    aten_decls = filter_decls(full_aten_decls, operator_selector)
 
     # Parse and load derivatives.yaml
     from .load_derivatives import load_derivatives
@@ -240,6 +243,10 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
         from .gen_variable_type import gen_variable_type
         gen_variable_type(out, aten_decls, template_path)
 
+        from . import gen_trace_type
+        # operator filter not applied as tracing sources are excluded in selective build
+        gen_trace_type.gen_trace_type(out, native_functions_path, template_path)
+
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
     gen_autograd_functions_lib(
@@ -251,8 +258,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
     gen_variable_factories(out, full_aten_decls, template_path)
 
 
-def gen_autograd_python(aten_path, out, autograd_dir):
-
+def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
     # TODO Deduplicate these four variable assignments
 
     aten_decls = load_aten_declarations(aten_path)
@@ -275,6 +281,9 @@ def gen_autograd_python(aten_path, out, autograd_dir):
 
     # Generate Python bindings
     from . import gen_python_functions
+    # TODO: change gen_python_functions to process native functions directly.
+    gen_python_functions.init(native_functions_path)
+
     gen_python_functions.gen_py_variable_methods(
         out, aten_decls + deprecated, template_path)
     gen_python_functions.gen_py_torch_functions(
@@ -292,12 +301,16 @@ def main():
         description='Generate autograd C++ files script')
     parser.add_argument('declarations', metavar='DECL',
                         help='path to Declarations.yaml')
+    parser.add_argument('native_functions', metavar='NATIVE',
+                        help='path to native_functions.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
     parser.add_argument('autograd', metavar='AUTOGRAD',
                         help='path to autograd directory')
     args = parser.parse_args()
-    gen_autograd(args.declarations, args.out, args.autograd)
+    gen_autograd(args.declarations, args.native_functions,
+                 args.out, args.autograd,
+                 SelectiveBuilder.get_nop_selector())
 
 
 if __name__ == '__main__':
