@@ -214,10 +214,10 @@ class _RemoteModule(nn.Module):
     ) -> None:  # type: ignore[return]
         _raise_not_supported(self.register_buffer.__name__)
 
-    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:  # type: ignore[return]
+    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         _raise_not_supported(self.register_parameter.__name__)
 
-    def add_module(self, name: str, module: Optional[Module]) -> None:  # type: ignore[return]
+    def add_module(self, name: str, module: Optional[Module]) -> None:
         _raise_not_supported(self.add_module.__name__)
 
     def apply(self: T, fn: Callable[[Module], None]) -> T:  # type: ignore[return]
@@ -247,9 +247,9 @@ class _RemoteModule(nn.Module):
     def to(self, *args, **kwargs) -> T:  # type: ignore[return]
         _raise_not_supported(self.to.__name__)
 
-    def register_backward_hook(
+    def register_backward_hook(  # type: ignore[return]
         self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, Tensor]]
-    ) -> RemovableHandle:  # type: ignore[return]
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
     def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
@@ -273,17 +273,17 @@ class _RemoteModule(nn.Module):
             "Method ``parameters`` not supported for RemoteModule. Please use ``remote_parameters`` instead."
         )
 
-    def named_parameters(
+    def named_parameters(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:  # type: ignore[return]
+    ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_parameters.__name__)
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
         _raise_not_supported(self.buffers.__name__)
 
-    def named_buffers(
+    def named_buffers(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:  # type: ignore[return]
+    ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
     def children(self) -> Iterator[Module]:  # type: ignore[return]
