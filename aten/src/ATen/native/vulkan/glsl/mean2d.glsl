@@ -2,7 +2,7 @@
 #define PRECISION $precision
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D   uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
 layout(set = 0, binding = 2)          uniform PRECISION restrict                     Block {
   int W;
