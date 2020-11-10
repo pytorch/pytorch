@@ -5772,10 +5772,10 @@ class TestNN(NNTestCase):
             self.assertEqual(weight_data, all_vars[4].data)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    # TODO (igor): Add projections test
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
+            nn.LSTM(10, 20, batch_first=True, bidirectional=True, proj_size=10),
             nn.GRU(10, 20, batch_first=True, bidirectional=True),
             nn.RNN(10, 20, batch_first=True, bidirectional=True)
         ]
@@ -5788,6 +5788,10 @@ class TestNN(NNTestCase):
             opt = torch.optim.SGD(rnn.parameters(), lr=0.1)
             opt.zero_grad()
             if isinstance(rnn, nn.LSTM):
+                # LSTM with projections has different hx size
+                if rnn.proj_size > 0:
+                    hx = torch.randn(2, 5, 10, requires_grad=True, device="cuda")
+                    all_vars[1] = hx
                 cx = torch.randn(2, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
