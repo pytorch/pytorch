@@ -537,8 +537,7 @@ def _new_process_group_helper(world_size,
         # If this is a subgroup (which means group_ranks is specified),
         # we check if the current process is a member of the new group.
         if not is_default_group:
-            assert _default_pg is not None
-            global_rank = _default_pg.rank()
+            global_rank = _check_default_pg().rank()
             if global_rank not in group_ranks:
                 return GroupMember.NON_GROUP_MEMBER
 
@@ -623,7 +622,6 @@ def destroy_process_group(group=group.WORLD):
         # process group is in good state, we aren't dealing with failures.
         _group_count = 0
     else:
-        assert pg is not None
         del _pg_map[pg]
         del _pg_names[pg]
         del _pg_group_ranks[pg]
