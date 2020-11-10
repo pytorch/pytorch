@@ -877,8 +877,15 @@ auto Engine::execute(const edge_list& roots,
   }
 
   if (skip_dummy_node) {
-    auto inputs_ = std::vector<Variable>(graph_root->num_inputs() - 1);
-    inputs_.emplace(inputs_.begin() + roots.at(0).input_nr, inputs.at(0));
+    auto inputs_ = std::vector<Variable>();
+    inputs_.reserve(graph_root->num_inputs());
+    for (size_t i = 0; i < graph_root->num_inputs(); ++i) {
+      if (i == roots.at(0).input_nr) {
+        inputs_.emplace_back(inputs.at(0));
+      } else {
+        inputs_.emplace_back();
+      }
+    }
     execute_with_graph_task(graph_task, graph_root, std::move(inputs_));
   } else {
     execute_with_graph_task(graph_task, graph_root);
