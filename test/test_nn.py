@@ -6081,7 +6081,6 @@ class TestNN(NNTestCase):
                                             "Input and hidden tensors are not at the same device"):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
-# TODO (igor): Add projections test
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
         for mode in rnn_modes:
@@ -6095,6 +6094,28 @@ class TestNN(NNTestCase):
             output2, hidden2 = rnn(input)
             self.assertEqual(output1, output2)
             self.assertEqual(hidden1, hidden2)
+
+    # TODO (igor): remove this
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    def test_projections_lstm_initial_hidden_state(self):
+        for bidir in [False, True]:
+            rnn = nn.LSTM(30, 20, 2, bidirectional=bidir, proj_size=10)
+            rnn.cuda()
+            num_dirs = 2 if bidir else 1
+            input = torch.randn(10, 32, 30, device="cuda")
+            hidden_h = torch.zeros(2 * num_dirs, 32, 10, device="cuda")
+            hidden_c = torch.zeros(2 * num_dirs, 32, 20, device="cuda")
+            hidden = (hidden_h, hidden_c)
+            output1, hidden1 = rnn(input, hidden)
+            output2, hidden2 = rnn(input)
+            self.assertEqual(output1, output2)
+            self.assertEqual(hidden1, hidden2)
+
+    def test_projections_errors_on_gru_and_rnn(self):
+        error_msg = "proj_size argument is only supported for LSTM, not RNN or GRU"
+        for mode in  ['RNN', 'GRU']:
+            with self.assertRaisesRegex(ValueError, error_msg):
+                rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
 
 # TODO (igor): Add projections test (probably just that CPU is disabled)
     def _test_RNN_cpu_vs_cudnn(self, dropout, dtype=torch.double):

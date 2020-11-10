@@ -432,6 +432,8 @@ class RNN(RNNBase):
     """
 
     def __init__(self, *args, **kwargs):
+        if 'proj_size' in kwargs:
+            raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
         self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
@@ -750,6 +752,8 @@ class GRU(RNNBase):
     """
 
     def __init__(self, *args, **kwargs):
+        if 'proj_size' in kwargs:
+            raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
     @overload
