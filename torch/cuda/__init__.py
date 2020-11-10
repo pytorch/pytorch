@@ -14,7 +14,7 @@ import torch
 import traceback
 import warnings
 import threading
-from typing import List, Optional, Tuple, Union, Protocol
+from typing import List, Optional, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
 from .. import device as _device
