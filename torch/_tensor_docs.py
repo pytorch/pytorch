@@ -1083,6 +1083,13 @@ cumsum(dim, dtype=None) -> Tensor
 See :func:`torch.cumsum`
 """)
 
+add_docstr_all('cumsum_',
+               r"""
+cumsum_(dim, dtype=None) -> Tensor
+
+In-place version of :meth:`~Tensor.cumsum`
+""")
+
 add_docstr_all('data_ptr',
                r"""
 data_ptr() -> int
