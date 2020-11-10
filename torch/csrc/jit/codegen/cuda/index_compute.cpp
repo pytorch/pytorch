@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -657,11 +658,16 @@ generateIndexAndExtentMap(
           p_tv->name(),
           " is not computed at T",
           c_tv->name());
-      c2p_root_map = ca_root_map.mapBestEffort(
-          c_tv->domain(),
-          c_tv->getRootDomain(),
-          p_tv->domain(),
-          p_tv->getMaybeRFactorDomain());
+      std::unordered_set<Val*> consumer_CA_root_vals =
+          IterVisitor::getInputsTo(std::vector<Val*>(
+              c_tv->domain()->domain().begin(),
+              c_tv->domain()->domain().begin() +
+                  p_tv->getRelativeComputeAtAxis()));
+      std::unordered_set<IterDomain*> consumer_CA_root_ids(
+          ir_utils::filterByType<IterDomain>(consumer_CA_root_vals).begin(),
+          ir_utils::filterByType<IterDomain>(consumer_CA_root_vals).end());
+      c2p_root_map = ca_root_map.mapConsumerToProducer(
+          c_tv->domain(), p_tv->domain(), consumer_CA_root_ids);
     }
 
     // Look for matching ID transformations in producer and consumer...

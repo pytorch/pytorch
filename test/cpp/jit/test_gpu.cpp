@@ -9275,6 +9275,51 @@ TEST(NVFuserTest, Issue329_CUDA) {
   TORCH_CHECK(at_t3.allclose(outputs[1]));
 }
 
+TEST(NVFuserTest, FusionIssue382_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Float(1));
+  auto tv2 = broadcast(tv1, {false, false, true});
+  auto tv3 = makeSymbolicTensor(3);
+  fusion.addInput(tv3);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv2->merge(1);
+  tv4->merge(1);
+
+  tv1->computeAt(tv4, 1);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv1->setMemoryType(MemoryType::Global);
+  tv2->setMemoryType(MemoryType::Global);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int numel_x = 12;
+  const int numel_y = 34;
+  const int numel_z = 56;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({numel_x, numel_y}, options);
+  auto t3 = at::randn({numel_x, numel_y, numel_z}, options);
+
+  auto outputs = fe.runFusion({t0, t3});
+
+  auto aten_output = (t0 + 1).unsqueeze(-1) + t3;
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0]),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
 TEST(NVFuserTest, Issue507_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
