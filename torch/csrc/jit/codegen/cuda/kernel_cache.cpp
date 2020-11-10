@@ -242,17 +242,12 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
     }
     encoding_.push_back(';');
   }
-  auto& id_iter_pair = encoding_lookup_[encoding_];
 
-  // short-cut to leave LRU entry as is;
-  if (id_iter_pair.lru_iter == used_entry_.begin()) {
-    ret.id = id_iter_pair.id;
-    return ret;
-  }
+  auto& entry = encoding_lookup_[encoding_];
 
-  if (id_iter_pair.id == 0) {
+  if (entry.id == 0) {
     // no entry existed for given input set, set id for given entry
-    id_iter_pair.id = current_id_++;
+    entry.id = current_id_++;
     if (used_entry_.size() == max_cache_size_) {
       // pop least recently used cache;
       const auto& remove_iter = encoding_lookup_.find(used_entry_.back());
@@ -262,11 +257,17 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
       encoding_lookup_.erase(remove_iter);
     }
   } else {
-    used_entry_.erase(id_iter_pair.lru_iter);
+    // short-cut to leave LRU entry as is
+    if (entry.lru_iter == used_entry_.begin()) {
+      ret.id = entry.id;
+      return ret;
+    }
+
+    used_entry_.erase(entry.lru_iter);
   }
 
-  ret.id = id_iter_pair.id;
-  id_iter_pair.lru_iter = used_entry_.insert(used_entry_.begin(), encoding_);
+  ret.id = entry.id;
+  entry.lru_iter = used_entry_.insert(used_entry_.begin(), encoding_);
   return ret;
 }
 

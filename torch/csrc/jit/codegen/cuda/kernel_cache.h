@@ -62,7 +62,7 @@ class TORCH_CUDA_API InputsIdLookup : public NonCopyable {
 
   //! entry stored in `encoding_lookup_` to implement LRU
   struct EncodingEntry {
-    size_t id;
+    size_t id = 0;
     std::list<std::string>::iterator lru_iter;
   };
 
