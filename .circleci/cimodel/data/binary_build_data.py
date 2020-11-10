@@ -47,8 +47,8 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
 CONFIG_TREE_DATA = OrderedDict(
     # linux=(dimensions.GPU_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
-        wheel=["3.8", "3.9"],
-        conda=["3.8", "3.9"],
+        wheel=["3.9"],
+        conda=["3.9"],
         # libtorch=[
         #     "3.7",
         # ],
@@ -57,8 +57,8 @@ CONFIG_TREE_DATA = OrderedDict(
     windows=(
         [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92'] + dimensions.ROCM_VERSION_LABELS],
         OrderedDict(
-            wheel=["3.8", "3.9"],
-            conda=["3.8", "3.9"],
+            wheel=["3.9"],
+            conda=["3.9"],
             # libtorch=[
             #     "3.7",
             # ],

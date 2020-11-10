@@ -1953,28 +1953,8 @@ workflows:
   binary_builds:
     jobs:
       - binary_mac_build:
-          name: binary_macos_wheel_3_8_cpu_nightly_build
-          build_environment: "wheel 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
           name: binary_macos_wheel_3_9_cpu_nightly_build
           build_environment: "wheel 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_mac_build:
-          name: binary_macos_conda_3_8_cpu_nightly_build
-          build_environment: "conda 3.8 cpu"
           filters:
             branches:
               only:
@@ -1993,28 +1973,8 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_8_cpu_nightly_build
-          build_environment: "wheel 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
           name: binary_windows_wheel_3_9_cpu_nightly_build
           build_environment: "wheel 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu101_nightly_build
-          build_environment: "wheel 3.8 cu101"
           filters:
             branches:
               only:
@@ -2033,28 +1993,8 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu102_nightly_build
-          build_environment: "wheel 3.8 cu102"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
           name: binary_windows_wheel_3_9_cu102_nightly_build
           build_environment: "wheel 3.9 cu102"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_wheel_3_8_cu110_nightly_build
-          build_environment: "wheel 3.8 cu110"
           filters:
             branches:
               only:
@@ -2073,28 +2013,8 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_8_cpu_nightly_build
-          build_environment: "conda 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
           name: binary_windows_conda_3_9_cpu_nightly_build
           build_environment: "conda 3.9 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_8_cu101_nightly_build
-          build_environment: "conda 3.8 cu101"
           filters:
             branches:
               only:
@@ -2113,28 +2033,8 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_build:
-          name: binary_windows_conda_3_8_cu102_nightly_build
-          build_environment: "conda 3.8 cu102"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
           name: binary_windows_conda_3_9_cu102_nightly_build
           build_environment: "conda 3.9 cu102"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-      - binary_windows_build:
-          name: binary_windows_conda_3_8_cu110_nightly_build
-          build_environment: "conda 3.8 cu110"
           filters:
             branches:
               only:
@@ -2153,18 +2053,6 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_windows_test:
-          name: binary_windows_wheel_3_8_cpu_nightly_test
-          build_environment: "wheel 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_8_cpu_nightly_build
-      - binary_windows_test:
           name: binary_windows_wheel_3_9_cpu_nightly_test
           build_environment: "wheel 3.9 cpu"
           filters:
@@ -2177,19 +2065,6 @@ workflows:
           requires:
             - binary_windows_wheel_3_9_cpu_nightly_build
       - binary_windows_test:
-          name: binary_windows_wheel_3_8_cu101_nightly_test
-          build_environment: "wheel 3.8 cu101"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_8_cu101_nightly_build
-          executor: windows-with-nvidia-gpu
-      - binary_windows_test:
           name: binary_windows_wheel_3_9_cu101_nightly_test
           build_environment: "wheel 3.9 cu101"
           filters:
@@ -2201,19 +2076,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_windows_wheel_3_9_cu101_nightly_build
-          executor: windows-with-nvidia-gpu
-      - binary_windows_test:
-          name: binary_windows_wheel_3_8_cu102_nightly_test
-          build_environment: "wheel 3.8 cu102"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_8_cu102_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
           name: binary_windows_wheel_3_9_cu102_nightly_test
@@ -2229,19 +2091,6 @@ workflows:
             - binary_windows_wheel_3_9_cu102_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
-          name: binary_windows_wheel_3_8_cu110_nightly_test
-          build_environment: "wheel 3.8 cu110"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_wheel_3_8_cu110_nightly_build
-          executor: windows-with-nvidia-gpu
-      - binary_windows_test:
           name: binary_windows_wheel_3_9_cu110_nightly_test
           build_environment: "wheel 3.9 cu110"
           filters:
@@ -2255,18 +2104,6 @@ workflows:
             - binary_windows_wheel_3_9_cu110_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
-          name: binary_windows_conda_3_8_cpu_nightly_test
-          build_environment: "conda 3.8 cpu"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_conda_3_8_cpu_nightly_build
-      - binary_windows_test:
           name: binary_windows_conda_3_9_cpu_nightly_test
           build_environment: "conda 3.9 cpu"
           filters:
@@ -2279,19 +2116,6 @@ workflows:
           requires:
             - binary_windows_conda_3_9_cpu_nightly_build
       - binary_windows_test:
-          name: binary_windows_conda_3_8_cu101_nightly_test
-          build_environment: "conda 3.8 cu101"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_conda_3_8_cu101_nightly_build
-          executor: windows-with-nvidia-gpu
-      - binary_windows_test:
           name: binary_windows_conda_3_9_cu101_nightly_test
           build_environment: "conda 3.9 cu101"
           filters:
@@ -2303,19 +2127,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_windows_conda_3_9_cu101_nightly_build
-          executor: windows-with-nvidia-gpu
-      - binary_windows_test:
-          name: binary_windows_conda_3_8_cu102_nightly_test
-          build_environment: "conda 3.8 cu102"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_conda_3_8_cu102_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
           name: binary_windows_conda_3_9_cu102_nightly_test
@@ -2331,19 +2142,6 @@ workflows:
             - binary_windows_conda_3_9_cu102_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_windows_test:
-          name: binary_windows_conda_3_8_cu110_nightly_test
-          build_environment: "conda 3.8 cu110"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_windows_conda_3_8_cu110_nightly_build
-          executor: windows-with-nvidia-gpu
-      - binary_windows_test:
           name: binary_windows_conda_3_9_cu110_nightly_test
           build_environment: "conda 3.9 cu110"
           filters:
@@ -2357,20 +2155,6 @@ workflows:
             - binary_windows_conda_3_9_cu110_nightly_build
           executor: windows-with-nvidia-gpu
       - binary_upload:
-          name: binary_macos_wheel_3_8_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_macos_wheel_3_8_cpu_nightly_build
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
           name: binary_macos_wheel_3_9_cpu_nightly_upload
           context: org-member
           requires:
@@ -2383,20 +2167,6 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
-          name: binary_macos_conda_3_8_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_macos_conda_3_8_cpu_nightly_build
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
           upload_subfolder: cpu
       - binary_upload:
           name: binary_macos_conda_3_9_cpu_nightly_upload
@@ -2413,20 +2183,6 @@ workflows:
           package_type: conda
           upload_subfolder: cpu
       - binary_upload:
-          name: binary_windows_wheel_3_8_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_8_cpu_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cpu
-      - binary_upload:
           name: binary_windows_wheel_3_9_cpu_nightly_upload
           context: org-member
           requires:
@@ -2440,20 +2196,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: wheel
           upload_subfolder: cpu
-      - binary_upload:
-          name: binary_windows_wheel_3_8_cu101_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_8_cu101_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cu101
       - binary_upload:
           name: binary_windows_wheel_3_9_cu101_nightly_upload
           context: org-member
@@ -2469,20 +2211,6 @@ workflows:
           package_type: wheel
           upload_subfolder: cu101
       - binary_upload:
-          name: binary_windows_wheel_3_8_cu102_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_8_cu102_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cu102
-      - binary_upload:
           name: binary_windows_wheel_3_9_cu102_nightly_upload
           context: org-member
           requires:
@@ -2496,20 +2224,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: wheel
           upload_subfolder: cu102
-      - binary_upload:
-          name: binary_windows_wheel_3_8_cu110_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_wheel_3_8_cu110_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: wheel
-          upload_subfolder: cu110
       - binary_upload:
           name: binary_windows_wheel_3_9_cu110_nightly_upload
           context: org-member
@@ -2525,20 +2239,6 @@ workflows:
           package_type: wheel
           upload_subfolder: cu110
       - binary_upload:
-          name: binary_windows_conda_3_8_cpu_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_conda_3_8_cpu_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: cpu
-      - binary_upload:
           name: binary_windows_conda_3_9_cpu_nightly_upload
           context: org-member
           requires:
@@ -2552,20 +2252,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: conda
           upload_subfolder: cpu
-      - binary_upload:
-          name: binary_windows_conda_3_8_cu101_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_conda_3_8_cu101_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: cu101
       - binary_upload:
           name: binary_windows_conda_3_9_cu101_nightly_upload
           context: org-member
@@ -2581,20 +2267,6 @@ workflows:
           package_type: conda
           upload_subfolder: cu101
       - binary_upload:
-          name: binary_windows_conda_3_8_cu102_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_conda_3_8_cu102_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: cu102
-      - binary_upload:
           name: binary_windows_conda_3_9_cu102_nightly_upload
           context: org-member
           requires:
@@ -2608,20 +2280,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: conda
           upload_subfolder: cu102
-      - binary_upload:
-          name: binary_windows_conda_3_8_cu110_nightly_upload
-          context: org-member
-          requires:
-            - binary_windows_conda_3_8_cu110_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: cu110
       - binary_upload:
           name: binary_windows_conda_3_9_cu110_nightly_upload
           context: org-member
