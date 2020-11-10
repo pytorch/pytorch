@@ -131,11 +131,10 @@ void remainder_kernel(TensorIterator& iter) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
-          scalar_t mod = a - floor_impl (a / b) * b;
-          const scalar_t zero = scalar_t(0); 
-          if ((mod != zero) && ((std::real(b) < std::real(zero)) != (std::real(mod) < std::real(zero)))) 
-            mod += b;
-          return mod;
+          auto q = std::trunc(a.real() / b.real());
+          auto r = std::fmod(a.real(), b.real()); 
+          auto arg = (a - q * b) / std::abs(a - q * b);
+          return arg * r;
         });
     });
   } else {
