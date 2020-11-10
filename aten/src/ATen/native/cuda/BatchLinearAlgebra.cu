@@ -1139,7 +1139,7 @@ AT_ERROR("cholesky: MAGMA library not found in "
 
   auto self_data = self.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
-  auto lda = std::max(magma_int_t{1}, n);
+  auto lda = std::max<magma_int_t>(1, n);
 
   if (self.dim() == 2) {
     magma_int_t info = 0;

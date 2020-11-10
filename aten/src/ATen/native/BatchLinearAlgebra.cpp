@@ -536,7 +536,7 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
-  auto lda = std::max(int64_t{1}, n);
+  auto lda = std::max<int64_t>(1, n);
 
   int info;
   for (int64_t i = 0; i < batch_size; i++) {
