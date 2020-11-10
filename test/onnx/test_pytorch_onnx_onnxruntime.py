@@ -3364,7 +3364,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Zero_(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # resolved by https://github.com/pytorch/pytorch/pull/45793
     def test_list_pass(self):
         class Slice(torch.nn.Module):
             def forward(self, x, y):
