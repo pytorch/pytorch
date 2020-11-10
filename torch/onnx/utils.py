@@ -911,9 +911,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             ns_op_name = n.kind()
         ns, op_name = ns_op_name.split("::")
         if ns == "onnx":
-            # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
-            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
+            # Use the original node directly
+            return None
 
         elif ns == "aten":
             is_exportable_aten_op = sym_registry.is_registered_op(op_name, '', opset_version)

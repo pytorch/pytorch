@@ -635,7 +635,7 @@ void testKernelSoftmax2D() {
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
         %2 : int = prim::Constant[value=7]()
-        %3 : Tensor = aten::${op}(%0, %1, %2)
+        %3 : Tensor = aten::softmax(%0, %1, %2)
         return (%3))IR";
 
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -652,43 +652,39 @@ void testKernelSoftmax2D() {
         # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 3
         # CHECK-NEXT: aten_softmax)IR";
 
-  for (auto log_softmax : {false, true}) {
-    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
-      auto softmax_dim_size = a.sizes()[softmax_dim];
-      auto other_dim = (softmax_dim + 1) % a.dim();
+  for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    auto softmax_dim_size = a.sizes()[softmax_dim];
+    auto other_dim = (softmax_dim + 1) % a.dim();
 
-      KernelScope kernel_scope;
-      TemplateEnv env;
-      env.d("dim", softmax_dim);
-      env.s("op", log_softmax ? "log_softmax" : "softmax");
-      const auto graph_string = format(graph_template, env);
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.d("dim", softmax_dim);
+    const auto graph_string = format(graph_template, env);
 
-      auto graph = std::make_shared<Graph>();
-      parseIR(graph_string, &*graph);
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
 
-      TensorExprKernel k(graph);
-      std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a};
+    Stmt* s = k.getCodeGenStmt();
 
-      std::ostringstream oss;
-      oss << *s;
+    std::ostringstream oss;
+    oss << *s;
 
-      TemplateEnv ver_env;
-      ver_env.d("other_dim", other_dim);
-      ver_env.d("other_dim_size", a.sizes()[other_dim]);
-      ver_env.d("softmax_dim", softmax_dim);
-      ver_env.d("softmax_dim_size", softmax_dim_size);
-      const auto verification_pattern = format(verification_template, ver_env);
-      torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+    TemplateEnv ver_env;
+    ver_env.d("other_dim", other_dim);
+    ver_env.d("other_dim_size", a.sizes()[other_dim]);
+    ver_env.d("softmax_dim", softmax_dim);
+    ver_env.d("softmax_dim_size", softmax_dim_size);
+    const auto verification_pattern = format(verification_template, ver_env);
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-      std::vector<IValue> stack = fmap<IValue>(inputs);
-      k.run(stack);
-      auto output = stack[0].toTensor();
-      auto ref =
-          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-      ASSERT_EQ(output.sizes(), ref.sizes());
-      ASSERT_TRUE(at::allclose(output, ref));
-    }
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto output = stack[0].toTensor();
+    auto ref = a.softmax(softmax_dim);
+    ASSERT_EQ(output.sizes(), ref.sizes());
+    ASSERT_TRUE(at::allclose(output, ref));
   }
 }
 
@@ -697,7 +693,7 @@ void testKernelSoftmax3D() {
       graph(%0 : Float(3, 4, 5, strides=[20, 5, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
         %2 : int = prim::Constant[value=7]()
-        %3 : Tensor = aten::${op}(%0, %1, %2)
+        %3 : Tensor = aten::softmax(%0, %1, %2)
         return (%3))IR";
 
   auto a = at::rand({3, 4, 5}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -717,51 +713,47 @@ void testKernelSoftmax3D() {
         # CHECK-NEXT: for (int i2_2 = 0; i2_2 < 5
         # CHECK-NEXT: aten_softmax)IR";
 
-  for (auto log_softmax : {false, true}) {
-    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
-      auto softmax_dim_size = a.sizes()[softmax_dim];
-      std::vector<int> other_dims;
-      for (int i = 0; i < a.dim(); ++i) {
-        if (i != softmax_dim) {
-          other_dims.push_back(i);
-        }
+  for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    auto softmax_dim_size = a.sizes()[softmax_dim];
+    std::vector<int> other_dims;
+    for (int i = 0; i < a.dim(); ++i) {
+      if (i != softmax_dim) {
+        other_dims.push_back(i);
       }
-
-      KernelScope kernel_scope;
-      TemplateEnv env;
-      env.d("dim", softmax_dim);
-      env.s("op", log_softmax ? "log_softmax" : "softmax");
-      const auto graph_string = format(graph_template, env);
-
-      auto graph = std::make_shared<Graph>();
-      parseIR(graph_string, &*graph);
-
-      TensorExprKernel k(graph);
-      std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
-
-      std::ostringstream oss;
-      oss << *s;
-
-      TemplateEnv ver_env;
-      ver_env.d("dim1", other_dims[0]);
-      ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
-      ver_env.d("dim2", other_dims[1]);
-      ver_env.d("dim2_size", a.sizes()[other_dims[1]]);
-      ver_env.d("softmax_dim", softmax_dim);
-      ver_env.d("softmax_dim_size", softmax_dim_size);
-      const auto verification_pattern = format(verification_template, ver_env);
-      torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
-      std::vector<IValue> stack = fmap<IValue>(inputs);
-      k.run(stack);
-      auto output = stack[0].toTensor();
-
-      auto ref =
-          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-      ASSERT_EQ(output.sizes(), ref.sizes());
-      ASSERT_TRUE(at::allclose(output, ref));
     }
+
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.d("dim", softmax_dim);
+    const auto graph_string = format(graph_template, env);
+
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    TemplateEnv ver_env;
+    ver_env.d("dim1", other_dims[0]);
+    ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
+    ver_env.d("dim2", other_dims[1]);
+    ver_env.d("dim2_size", a.sizes()[other_dims[1]]);
+    ver_env.d("softmax_dim", softmax_dim);
+    ver_env.d("softmax_dim_size", softmax_dim_size);
+    const auto verification_pattern = format(verification_template, ver_env);
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto output = stack[0].toTensor();
+
+    auto ref = a.softmax(softmax_dim);
+    ASSERT_EQ(output.sizes(), ref.sizes());
+    ASSERT_TRUE(at::allclose(output, ref));
   }
 }
 
@@ -770,7 +762,7 @@ void testKernelSoftmax4D() {
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
         %2 : int = prim::Constant[value=7]()
-        %3 : Tensor = aten::${op}(%0, %1, %2)
+        %3 : Tensor = aten::softmax(%0, %1, %2)
         return (%3))IR";
 
   auto a = at::rand({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -793,52 +785,48 @@ void testKernelSoftmax4D() {
         # CHECK-NEXT: for (int i3_2 = 0; i3_2 < 3
         # CHECK-NEXT: aten_softmax)IR";
 
-  for (auto log_softmax : {false, true}) {
-    for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
-      auto softmax_dim_size = a.sizes()[softmax_dim];
-      std::vector<int> other_dims;
-      for (int i = 0; i < a.dim(); ++i) {
-        if (i != softmax_dim) {
-          other_dims.push_back(i);
-        }
+  for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    auto softmax_dim_size = a.sizes()[softmax_dim];
+    std::vector<int> other_dims;
+    for (int i = 0; i < a.dim(); ++i) {
+      if (i != softmax_dim) {
+        other_dims.push_back(i);
       }
-
-      KernelScope kernel_scope;
-      TemplateEnv env;
-      env.d("dim", softmax_dim);
-      env.s("op", log_softmax ? "log_softmax" : "softmax");
-      const auto graph_string = format(graph_template, env);
-
-      auto graph = std::make_shared<Graph>();
-      parseIR(graph_string, &*graph);
-
-      TensorExprKernel k(graph);
-      std::vector<at::Tensor> inputs = {a};
-      Stmt* s = k.getCodeGenStmt();
-
-      std::ostringstream oss;
-      oss << *s;
-
-      TemplateEnv ver_env;
-      ver_env.d("dim1", other_dims[0]);
-      ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
-      ver_env.d("dim2", other_dims[1]);
-      ver_env.d("dim2_size", a.sizes()[other_dims[1]]);
-      ver_env.d("dim3", other_dims[2]);
-      ver_env.d("dim3_size", a.sizes()[other_dims[2]]);
-      ver_env.d("softmax_dim", softmax_dim);
-      ver_env.d("softmax_dim_size", softmax_dim_size);
-      const auto verification_pattern = format(verification_template, ver_env);
-      torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
-      std::vector<IValue> stack = fmap<IValue>(inputs);
-      k.run(stack);
-      auto output = stack[0].toTensor();
-      auto ref =
-          log_softmax ? a.log_softmax(softmax_dim) : a.softmax(softmax_dim);
-      ASSERT_EQ(output.sizes(), ref.sizes());
-      ASSERT_TRUE(at::allclose(output, ref));
     }
+
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.d("dim", softmax_dim);
+    const auto graph_string = format(graph_template, env);
+
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    TemplateEnv ver_env;
+    ver_env.d("dim1", other_dims[0]);
+    ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
+    ver_env.d("dim2", other_dims[1]);
+    ver_env.d("dim2_size", a.sizes()[other_dims[1]]);
+    ver_env.d("dim3", other_dims[2]);
+    ver_env.d("dim3_size", a.sizes()[other_dims[2]]);
+    ver_env.d("softmax_dim", softmax_dim);
+    ver_env.d("softmax_dim_size", softmax_dim_size);
+    const auto verification_pattern = format(verification_template, ver_env);
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto output = stack[0].toTensor();
+    auto ref = a.softmax(softmax_dim);
+    ASSERT_EQ(output.sizes(), ref.sizes());
+    ASSERT_TRUE(at::allclose(output, ref));
   }
 }
 

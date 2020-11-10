@@ -42,7 +42,6 @@ python -m tools.pyi.gen_pyi \
 # autograd codegen (called by torch codegen but can run independently)
 python -m tools.autograd.gen_autograd \
   "$OUT"/torch/share/ATen/Declarations.yaml \
-  aten/src/ATen/native/native_functions.yaml \
   "$OUT"/autograd \
   tools/autograd
 
