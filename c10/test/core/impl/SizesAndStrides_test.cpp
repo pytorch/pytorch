@@ -17,6 +17,7 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
     EXPECT_EQ(*(sz.sizes_begin() + idx), x) << "index: " << idx;
     idx++;
   }
+  EXPECT_EQ(sz.sizes_arrayref(), sizes);
 
   idx = 0;
   for (auto x: strides) {
@@ -27,12 +28,19 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
 
     idx++;
   }
+  EXPECT_EQ(sz.strides_arrayref(), strides);
 }
 
 TEST(SizesAndStridesTest, DefaultConstructor) {
   SizesAndStrides sz;
   checkData(sz, {0}, {1});
   // Can't test size_at() out of bounds because it just asserts for now.
+}
+
+TEST(SizesAndStridesTest, SetSizes) {
+  SizesAndStrides sz;
+  sz.set_sizes({5, 6, 7, 8});
+  checkData(sz, {5, 6, 7, 8}, {1, 0, 0, 0});
 }
 
 TEST(SizesAndStridesTest, Resize) {

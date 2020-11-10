@@ -82,11 +82,11 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
 }
 
 IntArrayRef TensorImpl::sizes() const {
-  return IntArrayRef{sizes_and_strides_.sizes_data(), sizes_and_strides_.size()};
+  return sizes_and_strides_.sizes_arrayref();
 }
 
 IntArrayRef TensorImpl::strides() const {
-  return IntArrayRef{sizes_and_strides_.strides_data(), sizes_and_strides_.size()};
+  return sizes_and_strides_.strides_arrayref();
 }
 
 bool TensorImpl::compute_contiguous() const {
@@ -161,11 +161,11 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last_2d() const {
-  return is_channels_last_strides_2d(sizes(), strides());
+  return is_channels_last_strides_2d(TensorImpl::sizes(), TensorImpl::strides());
 }
 
 bool TensorImpl::compute_strides_like_channels_last_3d() const {
-  return is_channels_last_strides_3d(sizes(), strides());
+  return is_channels_last_strides_3d(TensorImpl::sizes(), TensorImpl::strides());
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {

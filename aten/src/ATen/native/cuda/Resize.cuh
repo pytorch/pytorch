@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <THC/THCTensor.hpp>
+#include <ATen/native/ResizeCommon.h>
 
 #include <c10/cuda/CUDAGuard.h>
 
@@ -51,15 +52,7 @@ inline TensorImpl* resize_impl_cuda_(
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
     // NB: storage size can be different from numel.
-    for (size_t dim = 0; dim < size.size(); ++dim) {
-      // FIXME: Don't rely on storage_size being negative because this
-      // may not be true for some edge cases.
-      if (size[dim] == 0) {
-        storage_size = 0;
-        break;
-      }
-      storage_size += (size[dim] - 1) * stride.value()[dim];
-    }
+    storage_size = storage_size_for(size, *stride);
   } else {
     self->set_sizes_contiguous(size);
     storage_size = self->numel();

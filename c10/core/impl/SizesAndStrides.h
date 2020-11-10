@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 
 #include <c10/macros/Macros.h>
@@ -90,14 +91,11 @@ class C10_API SizesAndStrides {
       }
       copyFromInline(rhs);
     } else {
-      if (isInline()) {
-        // Steal their vector.
-        taggedStorageOrSize_ = rhs.taggedStorageOrSize_;
-      } else {
-        // Both out of line. Move their storage into ours.
-        *outOfLineStorage() = std::move(*rhs.outOfLineStorage());
-        delete rhs.outOfLineStorage();
+      // They're outline. We're going to steal their vector.
+      if (!isInline()) {
+        delete outOfLineStorage();
       }
+      taggedStorageOrSize_ = rhs.taggedStorageOrSize_;
     }
     rhs.setInlineSize(0);
 
@@ -152,6 +150,15 @@ class C10_API SizesAndStrides {
     return sizes_begin() + size();
   }
 
+  IntArrayRef sizes_arrayref() const {
+    return IntArrayRef{sizes_data(), size()};
+  }
+
+  void set_sizes(IntArrayRef newSizes) {
+    resize(newSizes.size());
+    std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
+  }
+
   const int64_t* strides_data() const {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
@@ -190,6 +197,10 @@ class C10_API SizesAndStrides {
 
   strides_iterator strides_end() {
     return strides_begin() + size();
+  }
+
+  IntArrayRef strides_arrayref() const {
+    return IntArrayRef{strides_data(), size()};
   }
 
   // Size accessors.
@@ -289,10 +300,6 @@ class C10_API SizesAndStrides {
   std::vector<int64_t>* outOfLineStorage() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     return reinterpret_cast<std::vector<int64_t>*>(taggedStorageOrSize_);
-  }
-
-  void resetToInlineStorage() {
-    setInlineSize(1);
   }
 
   void setInlineSize(size_t sz) {
