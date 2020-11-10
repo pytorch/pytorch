@@ -32,18 +32,10 @@ void upsample_nearest2d(
   auto physicalDevice = context().physicalDevice();
   int64_t C = IN * IC;
   struct ConstBlock {
-    int32_t IW;
-    int32_t IH;
-    int32_t OW;
-    int32_t OH;
     float scaleX;
     float scaleY;
   };
-  ConstBlock cb{safe_downcast<int32_t>(IW),
-                safe_downcast<int32_t>(IH),
-                safe_downcast<int32_t>(OW),
-                safe_downcast<int32_t>(OH),
-                scaleW,
+  ConstBlock cb{scaleW,
                 scaleH};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
@@ -113,17 +105,6 @@ void adaptive_avg_pool2d(
     const int64_t IC) {
   auto device = context().device();
   int64_t C = IN * IC;
-  struct ConstBlock {
-    int32_t IW;
-    int32_t IH;
-    int32_t OW;
-    int32_t OH;
-  };
-  ConstBlock cb{safe_downcast<int32_t>(IW),
-                safe_downcast<int32_t>(IH),
-                safe_downcast<int32_t>(OW),
-                safe_downcast<int32_t>(OH)};
-  VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
   VkDescriptorPool descriptorPool{};
@@ -141,7 +122,6 @@ void adaptive_avg_pool2d(
 
   output.image()->bindStorageImage(descriptorSet, 0);
   input.image()->bindShaderRead(descriptorSet, 1);
-  constBuffer.bind(descriptorSet, 2);
 
   WorkGroupSize workGroupSize{8, 8, 1};
   auto& computeUnit = context().computeUnitFactory().get(
@@ -240,20 +220,14 @@ void avg_pool2d(
   auto device = context().device();
   const auto c = _n * _c;
   struct ConstBlock {
-    int32_t inputSize[4];
-    int32_t outputSize[4];
     int32_t kernelSize[2];
     int32_t stride[2];
     int32_t padding[2];
-    int32_t dilate[2];
   };
   ConstBlock cb{
-      {iW, iH, c, 0},
-      {oW, oH, c, 0},
       {kW, kH},
       {dW, dH},
       {padW, padH},
-      {1, 1},
   };
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
@@ -505,15 +479,9 @@ void add(
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
-    int32_t W;
-    int32_t H;
-    int32_t C;
     float alpha;
   };
-  ConstBlock cb{safe_downcast<int32_t>(W),
-                safe_downcast<int32_t>(H),
-                safe_downcast<int32_t>(C),
-                alpha};
+  ConstBlock cb{alpha};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -561,13 +529,9 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
 
   auto device = context().device();
   struct ConstBlock {
-    int32_t inputSize[3];
     float s;
   };
-  ConstBlock cb{{safe_downcast<int32_t>(W),
-                 safe_downcast<int32_t>(H),
-                 safe_downcast<int32_t>(C_4)},
-                s};
+  ConstBlock cb{s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -612,13 +576,9 @@ void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
 
   auto device = context().device();
   struct ConstBlock {
-    int32_t inputSize[3];
     float s;
   };
-  ConstBlock cb{{safe_downcast<int32_t>(W),
-                 safe_downcast<int32_t>(H),
-                 safe_downcast<int32_t>(C_4)},
-                s};
+  ConstBlock cb{s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -1160,19 +1120,10 @@ void clamp(
   auto device = context().device();
   auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
-    int32_t W;
-    int32_t H;
-    int32_t C_4;
-    //int32_t C;
     float min;
     float max;
   };
-  ConstBlock cb{safe_downcast<int32_t>(W),
-                safe_downcast<int32_t>(H),
-                safe_downcast<int32_t>(C_4),
-                //safe_downcast<int32_t>(C),
-                min,
-                max};
+  ConstBlock cb{min, max};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
@@ -1240,19 +1191,10 @@ void addmm(
   auto device = context().device();
 
   struct ConstBlock {
-    int32_t OW;
-    int32_t OH;
-    int32_t C_4;
-    float beta;
     float alpha;
-    int32_t K;
+    float beta;
   };
-  ConstBlock cb{safe_downcast<int32_t>(OW),
-                safe_downcast<int32_t>(OH),
-                safe_downcast<int32_t>(C_4),
-                beta,
-                alpha,
-                safe_downcast<int32_t>(K)};
+  ConstBlock cb{alpha, beta};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
   VkDescriptorSetLayout descriptorSetLayout{};
