@@ -892,9 +892,9 @@ class Quantizer:
                 match_map[node.name] = (
                     node, [node], None, CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
 
-        def is_standalone_module(module_path):
-            return module_path in standalone_module_names or \
-                type(self.modules[node.target]) in standalone_module_classes
+        def is_standalone_module(node_target):
+            return node_target in standalone_module_names or \
+                type(self.modules[node_target]) in standalone_module_classes
 
         # add standalone modules to the match
         for node in graph.nodes:
