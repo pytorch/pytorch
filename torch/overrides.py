@@ -172,6 +172,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.new,
         Tensor.new_tensor,
         Tensor.new_empty,
+        Tensor.new_empty_strided,
         Tensor.new_zeros,
         Tensor.new_ones,
         Tensor.new_full,
@@ -283,6 +284,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.clone: lambda input: -1,
         torch.combinations: lambda input, r=2, with_replacement=False: -1,
         torch.complex: lambda real, imag: -1,
+        torch.copysign: lambda input, other, out=None: -1,
         torch.polar: lambda abs, ang: -1,
         torch.conj: lambda input, out=None: -1,
         torch.constant_pad_nd: lambda input, pad, value=0: -1,
@@ -320,7 +322,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.dist: lambda input, other, p=2: -1,
         torch.div: lambda input, other, out=None: -1,
         torch.divide: lambda input, other, out=None: -1,
-        torch.dot: lambda mat1, mat2: -1,
+        torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2: -1,
         torch.hsmm: lambda mat1, mat2: -1,
@@ -679,7 +681,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
-        torch.vdot: lambda mat1, mat2: -1,
+        torch.vdot: lambda input, other, out=None: -1,
         torch.view_as_real: lambda input: -1,
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
@@ -932,6 +934,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
+        torch.linalg.norm: lambda self: -1
     }
 
     ret2 = {}
@@ -1112,7 +1115,9 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
         (torch.functional, torch.functional.__all__),
         (torch.nn.functional, dir(torch.nn.functional)),
-        (torch.Tensor, dir(torch.Tensor))
+        (torch.Tensor, dir(torch.Tensor)),
+        (torch.linalg, dir(torch.linalg)),
+        (torch.fft, dir(torch.fft)),
     ]
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
