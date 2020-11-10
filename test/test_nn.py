@@ -2592,40 +2592,42 @@ class TestNN(NNTestCase):
         assert dict(l.named_parameters())['weight_ih_l0'] is not None
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
 
-
-# TODO (igor): Add projections test
     def test_rnn_weight_norm(self):
-        l = torch.nn.LSTM(32, 32)
-        # This Module has 4 parameters called:
-        # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0'
+        def check_weight_norm(l, name, num_params):
+            # This Module has 4 or 5 parameters called:
+            # 'weight_ih_l0', 'weight_hh_l0', 'bias_ih_l0', 'bias_hh_l0', weight_hr_l0
 
-        # Applying weight norm on one of them causes it to become a tensor
-        l = torch.nn.utils.weight_norm(l, name='weight_ih_l0')
-        assert (
-            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
-            == 3
-        )
+            # Applying weight norm on one of them causes it to become a tensor
+            l = torch.nn.utils.weight_norm(l, name=name)
+            self.assertEqual(
+                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                num_params - 1,
+            )
 
-        # Removing the weight norm reparametrization restores the Parameter
-        l = torch.nn.utils.remove_weight_norm(l, name='weight_ih_l0')
-        assert (
-            sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights])
-            == 4
-        )
+            # Removing the weight norm reparametrization restores the Parameter
+            l = torch.nn.utils.remove_weight_norm(l, name=name)
+            self.assertEqual(
+                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                num_params,
+            )
 
-        # Make sure that, upon removal of the reparametrization, the
-        # `._parameters` and `.named_parameters` contain the right params.
-        # Specifically, the original weight ('weight_ih_l0') should be placed
-        # back in the parameters, while the reparametrization components
-        # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
-        assert 'weight_ih_l0' in l._parameters
-        assert l._parameters['weight_ih_l0'] is not None
-        assert 'weight_ih_l0_v' not in l._parameters
-        assert 'weight_ih_l0_g' not in l._parameters
-        assert 'weight_ih_l0' in dict(l.named_parameters())
-        assert dict(l.named_parameters())['weight_ih_l0'] is not None
-        assert 'weight_ih_l0_v' not in dict(l.named_parameters())
-        assert 'weight_ih_l0_g' not in dict(l.named_parameters())
+            # Make sure that, upon removal of the reparametrization, the
+            # `._parameters` and `.named_parameters` contain the right params.
+            # Specifically, the original weight ('weight_ih_l0') should be placed
+            # back in the parameters, while the reparametrization components
+            # ('weight_ih_l0_v' and 'weight_ih_l0_g') should be removed.
+            self.assertTrue(name in l._parameters)
+            self.assertIsNotNone(l._parameters[name])
+            self.assertTrue(name + '_v' not in l._parameters)
+            self.assertTrue(name + '_g' not in l._parameters)
+            self.assertTrue(name in dict(l.named_parameters()))
+            self.assertIsNotNone(dict(l.named_parameters())[name])
+            self.assertTrue(name + '_v' not in dict(l.named_parameters()))
+            self.assertTrue(name + '_g' not in dict(l.named_parameters()))
+
+        check_weight_norm(torch.nn.LSTM(32, 32), 'weight_ih_l0', 4)
+        check_weight_norm(torch.nn.LSTM(32, 32, proj_size=16), 'weight_hr_l0', 5)
+
 
     def test_weight_norm(self):
         input = torch.randn(3, 5)
