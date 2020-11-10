@@ -1031,10 +1031,7 @@
 - name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
-# NOTE: currently apply_conj is ignored, but it if used only when operating on
-# complex, which are not supported by svd_backward so far. When we add support
-# for complex, we need to remember to consider it.
-- name: _svd_helper(Tensor self, bool some, bool compute_uv, bool apply_conj) -> (Tensor U, Tensor S, Tensor V)
+- name: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor U, Tensor S, Tensor V)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)

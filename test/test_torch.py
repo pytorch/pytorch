@@ -10128,7 +10128,11 @@ class TestTorchDeviceType(TestCase):
     def test_svd_complex(self, device, dtype):
         t = torch.randn((10, 10), dtype=dtype, device=device)
         U, S, V = torch.svd(t, some=False)
-        t2 = U @ torch.diag(S).type(dtype) @ V.T.conj()
+        # note: from the math point of view, it is weird that we need to use
+        # V.T instead of V.T.conj(): torch.svd has a buggy behavior for
+        # complex numbers and it's deprecated. You should use torch.linalg.svd
+        # instead.
+        t2 = U @ torch.diag(S).type(dtype) @ V.T
         self.assertEqual(t, t2)
 
     def test_lerp(self, device):

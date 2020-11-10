@@ -1777,10 +1777,6 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 // This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
-  /* NOTE: currently this function does not support complex numbers. When we
-   * add support for it, we need to consider "bool apply_conj", which
-   * currently is ignored. See the corresponding comment in derivatives.yaml.
-   */
   TORCH_CHECK(compute_uv,
            "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
            "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");

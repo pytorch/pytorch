@@ -7643,15 +7643,21 @@ svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
-:math:`input = U \times diag(S) \times V^H`, where :math:`V^H` is the conjugate transpose
+:math:`input = U \times diag(S) \times V^T`, where :math:`V^T` is the transpose
 of ``V``.
 
-In Python, :math:`V^H` is computed by ``v.T.conj()``. Note that for
-non-complex types, ``.conj()`` is a no-op and can be omittted. To summarize,
-the original Tensor can be reconstructed by::
+The original tensor can be reconstructed by::
 
-    U @ diag(S) @ V.T.conj() # for real and complex numbers
-    U @ diag(S) @ V.T        # only for real numbers
+    U @ diag(S) @ V.T
+
+
+.. note:: It is worth noting that that the code above works unmodified even
+          for complex numbers, i.e. the returned matrix ``V`` is already
+          conjugated.  This behavior is probably unexpected from the
+          mathematical point of view, but it is not possible to change it
+          without breaking existing code.  New code is encouraged to use
+          ``torch.linalg.svd`` instead, which returns :math:`V^H` instead.
+
 
 The dtype of ``U`` and ``V`` is the same as the ``input`` matrix. The dtype of
 ``S`` is always real numbers, even if ``input`` is complex.
