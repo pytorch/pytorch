@@ -263,15 +263,15 @@ def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
-    based on Einstein summation convention.
+    based on the Einstein summation convention.
 
-    Einsum allows computing many common multi-dimensional, linear algebraic array operations by representing them
-    in a short-hand format based on the Eintein summation, given by :attr:`equation`. The details of this format are
-    described in the section below, but the general idea is to label every dimension of the input :attr:`operands`
-    with some subscript and define which subscripts are part of the output. The output is then computed by summing the
-    product of the elements of the :attr:`operands` along the dimensions whose subscripts are not part of the output.
-    For example, matrix multiplication can be computed using einsum as `torch.einsum("ij,jk->ik", A, B)`. Here, j is
-    the summation subscript and i and k the output subscripts (see section below for more details on why).
+    Einsum allows computing many common multi-dimensional linear algebraic array operations by representing them
+    in a short-hand format based on the Einstein summation convention, given by :attr:`equation`. The details of 
+    this format are described below, but the general idea is to label every dimension of the input :attr:`operands`
+    with some subscript and define which subscripts are part of the output. The output is then computed by summing
+    the product of the elements of the :attr:`operands` along the dimensions whose subscripts are not part of the
+    output. For example, matrix multiplication can be computed using einsum as `torch.einsum("ij,jk->ik", A, B)`.
+    Here, j is the summation subscript and i and k the output subscripts (see section below for more details on why).
 
     Equation:
 
@@ -283,7 +283,7 @@ def einsum(equation, *operands):
         must match in size and the operand will be replaced by its diagonal along these dimensions. The subscripts that
         appear exactly once in the :attr:`equation` will be part of the output, sorted in increasing alphabetical order.
         The output is computed by multiplying the input :attr:`operands` element-wise, with their dimensions aligned based
-        on the subscripts, and then summing out the dimensions for which their subscripts are not part of the output.
+        on the subscripts, and then summing out the dimensions whose subscripts are not part of the output.
 
         Optionally, the output subscripts can be explictly defined by adding an arrow ('->') at the end of the equation
         followed by the subscripts for the output. For instance, the following equation computes the transpose of a
