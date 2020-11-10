@@ -1602,6 +1602,25 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
+Tensor _linalg_cond_exception_helper(const Tensor& self) {
+  // For batched input if at least one matrix in the batch is not invertible,
+  // then the result for all other (possibly) invertible matrices will be infinity as well
+  // since there is currently no way to use at::inverse with silent errors
+
+  auto result_shape = self.sizes().vec();
+  result_shape.pop_back();
+  result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
+  Tensor result = at::empty(result_shape, self.options());
+  at::fill_(result, INFINITY);
+  if (self.dim() > 2) {
+    // Should this be the not-implemented-error?
+    TORCH_WARN(
+      "linalg_cond for the batched input returns infinity for all (possibly invertible) matrices in the batch, "
+      "if at least one matrix in the batch is not invertible.");
+  }
+  return result;
+}
+
 // Numerical or None norms
 Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
@@ -1650,31 +1669,27 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   TORCH_CHECK(self.size(-1) == self.size(-2),
               "linalg_cond only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
-  std::array<int64_t, 2> dim_arr = {-2, -1};
-  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
+
   // Ignore errors if not invertible, result is INFINITY in this case
   // Currently checking for error in at::inverse causes cross-device data movement
   // For batched input if at least one matrix in the batch is not invertible,
   // then the result for all other (possibly) invertible matrices will be infinity as well
   // since there is currently no way to use at::inverse with silent errors
-  Tensor self_inverse, result;
+  Tensor self_inverse;
   try {
     self_inverse = at::inverse(self);
   } catch (const std::exception& e) {
     if (strstr(e.what(), "singular")) {
-      auto result_shape = self.sizes().vec();
-      result_shape.pop_back();
-      result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
-      result = at::empty(result_shape, self.options());
-      at::fill_(result, INFINITY);
-      return result;
+      return _linalg_cond_exception_helper(self);
     } else {
       TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
     }
   }
+  std::array<int64_t, 2> dim_arr = {-2, -1};
+  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
   Tensor norm_self = at::linalg_norm(self, ord, dim);
   Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
-  result = norm_self * norm_inverse;
+  Tensor result = norm_self * norm_inverse;
   return result;
 }
 
@@ -1704,31 +1719,26 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
               "linalg_cond only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
 
-  Tensor self_inverse, result;
-  std::array<int64_t, 2> dim_arr = {-2, -1};
-  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
   // Ignore errors if not invertible, result is INFINITY in this case
   // Currently checking for error in at::inverse causes cross-device data movement
   // For batched input if at least one matrix in the batch is not invertible,
   // then the result for all other (possibly) invertible matrices will be infinity as well
   // since there is currently no way to use at::inverse with silent errors
+  Tensor self_inverse;
   try {
     self_inverse = at::inverse(self);
   } catch (const std::exception& e) {
     if (strstr(e.what(), "singular")) {
-      auto result_shape = self.sizes().vec();
-      result_shape.pop_back();
-      result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
-      result = at::empty(result_shape, self.options());
-      at::fill_(result, INFINITY);
-      return result;
+      return _linalg_cond_exception_helper(self);
     } else {
       TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
     }
   }
+  std::array<int64_t, 2> dim_arr = {-2, -1};
+  optional<IntArrayRef> dim = IntArrayRef(dim_arr);
   Tensor norm_self = at::linalg_norm(self, ord, dim);
   Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
-  result = norm_self * norm_inverse;
+  Tensor result = norm_self * norm_inverse;
   return result;
 }
 

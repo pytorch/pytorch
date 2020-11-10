@@ -434,6 +434,8 @@ class TestLinalg(TestCase):
             for ord in norm_types:
                 # frobenius norm not supported for complex tensors
                 if dtype.is_complex and ord == 'fro':
+                    with self.assertRaisesRegex(RuntimeError, "frobenius norm not supported for complex tensors"):
+                        torch.linalg.cond(input, ord)
                     continue
                 run_test_case(input, ord)
 
@@ -441,28 +443,12 @@ class TestLinalg(TestCase):
         a = torch.eye(3, dtype=dtype, device=device)
         a[-1, -1] = 0  # make 'a' singular
         for ord in norm_types:
-            # frobenius norm not supported for complex tensors
-            if dtype.is_complex and ord == 'fro':
-                continue
             run_test_case(a, ord)
-
-    # TODO: once "inverse_cuda" supports complex dtypes, they shall be added to above tests
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    @precisionOverride({torch.float32: 1e-3})
-    def test_cond_xfailed(self, device, dtype):
-        input_size = (3, 3)
-        ord = 1
-        torch.randn(*input_size, dtype=dtype, device=device)
-        result = torch.linalg.cond(input, ord)
-        result_numpy = np.linalg.cond(input.cpu().numpy(), ord)
-        self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     @precisionOverride({torch.float32: 1e-3})
     def test_cond_errors_and_warnings(self, device, dtype):
         norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
@@ -489,10 +475,7 @@ class TestLinalg(TestCase):
         # if non-empty out tensor with wrong shape is passed a warning is given
         a = torch.ones((2, 2), dtype=dtype, device=device)
         for ord in ['fro', 2]:
-            # frobenius norm not supported for complex tensors
-            if dtype.is_complex and ord == 'fro':
-                continue
-            real_dtype = a.real.dtype if dtype.is_complex else dtype
+            real_dtype = a.real.dtype if dtype.is_complex and ord == 2 else dtype
             out = torch.empty(a.shape, dtype=real_dtype, device=device)
             with warnings.catch_warnings(record=True) as w:
                 # Trigger warning
@@ -506,6 +489,36 @@ class TestLinalg(TestCase):
         for ord in ['fro', 2]:
             with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match"):
                 torch.linalg.cond(a, ord, out=out)
+
+        # for batched input if at least one matrix in the batch is not invertible,
+        # then the result for all other (possibly) invertible matrices will be infinity as well
+        # since there is currently no way to use torch.inverse with silent errors
+        batch_dim = 3
+        a = torch.eye(3, 3, dtype=dtype, device=device)
+        a = a.reshape((1, 3, 3))
+        a = a.repeat(batch_dim, 1, 1)
+        a[0, -1, -1] = 0  # now a[0] is singular
+        for ord in [1, -1, inf, -inf, 'fro', 'nuc']:
+            with warnings.catch_warnings(record=True) as w:
+                # Trigger warning
+                torch.linalg.cond(a, ord)
+                # Check warning occurs
+                self.assertEqual(len(w), 1)
+                self.assertTrue("for the batched input returns infinity for all" in str(w[-1].message))
+
+    # TODO: once "inverse_cuda" supports complex dtypes, they shall be added to above tests
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3})
+    def test_cond_xfailed(self, device, dtype):
+        input_size = (3, 3)
+        ord = 1
+        torch.randn(*input_size, dtype=dtype, device=device)
+        result = torch.linalg.cond(input, ord)
+        result_numpy = np.linalg.cond(input.cpu().numpy(), ord)
+        self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
 
     # Test autograd and jit functionality for linalg functions.
     # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,
