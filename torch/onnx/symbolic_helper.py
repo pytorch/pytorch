@@ -635,4 +635,4 @@ scalar_type_to_onnx = [
 
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.
-_quantized_ops: Set[Any] = set()
+_quantized_ops: Set[int] = set()
