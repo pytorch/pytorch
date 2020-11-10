@@ -76,7 +76,7 @@ std::string torchLibPath() {
   //  although that's currently not available to us (in the PyTorch codebase)
   const char* last_path_sep = std::strrchr(lib_filename, kPathSep);
   TORCH_INTERNAL_ASSERT(last_path_sep != nullptr);
-  
+
   return std::string(lib_filename, last_path_sep);
 }
 
