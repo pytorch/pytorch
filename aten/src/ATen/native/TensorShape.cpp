@@ -1868,7 +1868,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;
@@ -1983,31 +1983,6 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
 
 Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
-}
-
-Tensor trace_cpu(const Tensor& self) {
-  Tensor result = at::empty({}, self.options());
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    accscalar_t sum = 0;
-    const auto* t_data = self.data_ptr<scalar_t>();
-
-    int64_t t_stride_0, t_stride_1, t_diag_size;
-
-    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
-
-    t_stride_0 = self.stride(0);
-    t_stride_1 = self.stride(1);
-
-    t_diag_size = std::min(self.size(0), self.size(1));
-    for (int64_t i = 0; i < t_diag_size; i++) {
-      sum += t_data[i * (t_stride_0 + t_stride_1)];
-    }
-
-    *result.data_ptr<scalar_t>() = sum;
-  });
-
-  return result;
 }
 
 }} // at::native

@@ -75,6 +75,11 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+  vTensor(
+      api::Context* context,
+      api::Resource::Pool* pool,
+      IntArrayRef sizes,
+      const TensorOptions& options);
 
   /*
     Types
@@ -145,7 +150,7 @@ class vTensor final {
   /*
     Host access - these functions will be expensive if they trigger a GPU -> CPU
     sync due to pending writes.  A call to host() will trigger an async copy in
-    such scenarios, which is then explictly waited on as part of Future::wait().
+    such scenarios, which is then explicitly waited on as part of Future::wait().
     Consequently, for optimal performance, put as much time and distance between
     the place where this function is called, and the location where the future is
     waited on.
@@ -192,6 +197,7 @@ class vTensor final {
   const TensorOptions& options() const;
   IntArrayRef sizes() const;
   IntArrayRef strides() const;
+  size_t nbytes() const;
 
  private:
   // Some overloads below are intentionally disabled to enforce a usage pattern
@@ -233,6 +239,7 @@ class vTensor final {
     View();
     View(
         api::Context* context,
+        api::Resource::Pool* pool,
         IntArrayRef sizes,
         const TensorOptions& options);
     View(const View&) = delete;
@@ -263,7 +270,7 @@ class vTensor final {
     class State final {
      public:
       State();
-      State(api::Context*, IntArrayRef);
+      State(const api::Adapter*, IntArrayRef);
 
       struct Bundle final {
         struct Buffer final {
@@ -338,6 +345,7 @@ class vTensor final {
 
     // Context
     api::Context* context_;
+    api::Resource::Pool* pool_;
 
     // State
     mutable State state_;
@@ -488,6 +496,11 @@ inline const TensorOptions& vTensor::options() const {
 
 inline IntArrayRef vTensor::sizes() const {
   return view_->sizes();
+}
+
+inline size_t vTensor::nbytes() const {
+  return c10::elementSize(c10::typeMetaToScalarType(options().dtype())) *
+         prod_intlist(sizes());
 }
 
 inline IntArrayRef vTensor::strides() const {
