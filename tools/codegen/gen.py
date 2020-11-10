@@ -263,9 +263,16 @@ def compute_type_method(
     // DeviceGuard omitted
 """
 
+            increment_version = []
+            for arg in f.func.schema_order_arguments():
+                if arg.is_write and arg.type.is_tensor_like and not arg.type.is_list_like():
+                    increment_version.append(f'''\
+    torch::autograd::increment_version({arg.name});
+''')
+
             return f"""\
 {returns_type} {name}({args_str}) {{
-{cuda_guard}{return_kw}{impl_name}({args_exprs_str});
+{cuda_guard}{''.join(increment_version)}{return_kw}{impl_name}({args_exprs_str});
 }}
 """
 

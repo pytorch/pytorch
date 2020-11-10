@@ -15,6 +15,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <torch/library.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
 
 namespace at {
 namespace TypeDefault {
