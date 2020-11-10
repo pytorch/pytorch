@@ -791,6 +791,9 @@ struct CodeImpl {
     } else if (node->cast<ProfileOptionalOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileOptionalOp>()->getCallback());
+    } else if (node->cast<ProfileIValueOp>()) {
+      profile_function_table_.push_back(
+          node->cast<ProfileIValueOp>()->getCallback());
     } else {
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -945,6 +948,7 @@ struct CodeImpl {
       case prim::BailOut:
         emitBailOut(node);
         break;
+      case prim::profile_ivalue:
       case prim::profile_optional:
       case prim::profile:
         emitProfile(node);

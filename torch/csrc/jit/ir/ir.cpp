@@ -2026,6 +2026,16 @@ Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
   return new ProfileOptionalOp(g, {nullptr});
 }
 
+void ProfileIValueOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileIValueOp>();
+  this->callback_ = other->getCallback();
+}
+
+Node* ProfileIValueOp::allocNewInstance(Graph* g) {
+  return new ProfileIValueOp(g, {nullptr});
+}
+
 TypePtr NamedValue::type() const {
   if (value_) {
     return value_->type();
@@ -2036,6 +2046,7 @@ TypePtr NamedValue::type() const {
 
 constexpr Symbol ProfileOp::Kind;
 constexpr Symbol ProfileOptionalOp::Kind;
+constexpr Symbol ProfileIValueOp::Kind;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {
