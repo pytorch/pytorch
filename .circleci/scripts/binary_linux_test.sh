@@ -38,7 +38,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
     retry conda install \${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
   fi
-  retry conda install -yq future numpy protobuf six
+  retry conda install \${EXTRA_CONDA_FLAGS} -yq future numpy protobuf six
   if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
     # DESIRED_CUDA is in format cu90 or cu102
     if [[ "${#DESIRED_CUDA}" == 4 ]]; then
