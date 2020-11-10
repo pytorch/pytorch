@@ -831,6 +831,21 @@ class TestDataParallel(TestCase):
                 r"nn\.ParameterDict is being used with DataParallel but this"):
             model(input)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_strip_prefix_from_state_dict_if_exists(self):
+        model = torch.nn.Sequential(nn.Linear(32, 32),
+                                    nn.ReLU(),
+                                    nn.Linear(32, 16),
+                                    nn.ReLU())
+        dp_model = nn.DataParallel(deepcopy(model).cuda())
+
+        model_copy = deepcopy(model)
+        model_copy.load_state_dict(dp_model.state_dict(), is_parallel=True)
+        self.assertEqual(model.state_dict().keys(), model_copy.state_dict.keys())
+        self.assertEqual(model.state_dict()._metadata.keys(), model_copy.state_dict._metadata.keys())
+
 
 if __name__ == '__main__':
     run_tests()
