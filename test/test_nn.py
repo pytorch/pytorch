@@ -12435,7 +12435,6 @@ class TestNNDeviceType(NNTestCase):
         out = torch.nn.functional.dropout(x)
         self.assertEqual(out.size(), x.size())
 
-# TODO (igor): Add projections test
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     def test_variable_sequence(self, device, dtype):
@@ -12450,7 +12449,7 @@ class TestNNDeviceType(NNTestCase):
             return tuple(maybe_tuple_of_tensors[j][:, index:index + 1, :].contiguous()
                          for j in range(2))
 
-        def check_lengths(lengths, enforce_sorted, use_default_hiddens):
+        def check_lengths(lengths, enforce_sorted, use_default_hiddens, proj_size):
             input_size = 3
             hidden_size = 4
             num_layers = 2
@@ -12461,15 +12460,17 @@ class TestNNDeviceType(NNTestCase):
                                  dtype=dtype, requires_grad=True)
             num_directions = 2 if bidirectional else 1
             lstm = nn.LSTM(input_size, hidden_size, bidirectional=bidirectional,
-                           num_layers=num_layers).to(device, dtype)
+                           num_layers=num_layers, proj_size=proj_size).to(device, dtype)
             lstm2 = deepcopy(lstm).to(device, dtype)
             x = x_leaf
 
             hidden0 = None
             if not use_default_hiddens:
-                hidden0 = tuple(torch.randn(num_directions * num_layers, len(lengths), hidden_size,
-                                            device=device, dtype=dtype)
-                                for _ in range(2))
+                real_hid_size = hidden_size if proj_size == 0 else proj_size
+                hidden0 = (torch.randn(num_directions * num_layers, len(lengths), real_hid_size,
+                                       device=device, dtype=dtype),
+                           torch.randn(num_directions * num_layers, len(lengths), hidden_size,
+                                       device=device, dtype=dtype))
 
             # Compute sequences separately
             seq_outs = []
@@ -12518,7 +12519,8 @@ class TestNNDeviceType(NNTestCase):
 
         for enforce_sorted, seq_lens, in tests:
             for use_default_hiddens in (True, False):
-                check_lengths(seq_lens, enforce_sorted, use_default_hiddens)
+                for proj_size in [0, 2]:
+                    check_lengths(seq_lens, enforce_sorted, use_default_hiddens, proj_size)
 
     def _test_batchnorm_update_stats(self, device, dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
