@@ -1086,7 +1086,8 @@ Arguments:
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def("get_future",
+      .def(
+          "get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());

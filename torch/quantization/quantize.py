@@ -5,8 +5,9 @@ import warnings
 
 import torch
 import torch.nn as nn
+import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
-from torch.nn.intrinsic import _FusedModule
+import torch.nn.intrinsic.qat as nniqat
 
 from .quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
@@ -486,10 +487,26 @@ def _convert(
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}
+    # TODO(jerryzh): remove after deciding on the impl of intrinsic modules
+    # This is required because intrinsic modules right now are implemented as
+    # nn.Sequential and we don't want to swap their constituents
+    SWAPPABLE_MODULES = (nni.ConvBn2d,
+                         nni.ConvBnReLU2d,
+                         nni.LinearReLU,
+                         nni.BNReLU2d,
+                         nni.BNReLU3d,
+                         nni.ConvBn1d,
+                         nni.ConvReLU1d,
+                         nni.ConvBnReLU1d,
+                         nni.ConvReLU2d,
+                         nni.ConvReLU3d,
+                         nniqat.ConvBn2d,
+                         nniqat.ConvBnReLU2d)
+
     for name, mod in module.named_children():
-        # both fused modules and observed custom modules are
+        # both swappable modules and observed custom modules are
         # swapped as one unit
-        if not isinstance(mod, _FusedModule) and \
+        if type(mod) not in SWAPPABLE_MODULES and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
                      custom_module_class_mapping)

@@ -1250,7 +1250,7 @@ class TestEagerModeOps(QuantizationTestCase):
 
 
 class TestEagerModeQATOps(QuantizationTestCase):
-    def _test_activation_convert_numerics_impl(self, Act, data):
+    def _test_activation_impl(self, Act, data):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1320,10 +1320,6 @@ class TestEagerModeQATOps(QuantizationTestCase):
         checkNoFQModule(m)
         m = convert(m)
         checkNoFQModule(m)
-
-    def test_leaky_relu(self):
-        data = torch.randn(1, 3, 2, 4)
-        self._test_activation_convert_numerics_impl(nn.LeakyReLU, data)
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out

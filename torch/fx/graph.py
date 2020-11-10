@@ -330,14 +330,7 @@ class Graph:
 
         def type_repr(o : Any):
             typename = _type_repr(o)
-            if all(x.isidentifier() for x in typename.split('.')):
-                register_modules_used(typename)
-            else:
-                # this is a constructor type, e.g. typing.List[torch.Tensor]
-                modules_used.add(o.__module__)
-                for sub_type in o.__args__:
-                    # make sure we have torch.Tensor
-                    type_repr(sub_type)
+            register_modules_used(typename)
             return typename
 
         for node in self.nodes:
