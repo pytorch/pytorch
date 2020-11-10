@@ -201,7 +201,7 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
     CUDABLAS_POSINT_CHECK(bgemm<Dtype>, lda);  \
     CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldb);  \
     CUDABLAS_POSINT_CHECK(bgemm<Dtype>, ldc);  \
-    CUDABLAS_POSINT_CHECK(bgemm<Dtype>, num_batches);  \
+    CUDABLAS_NONNEGINT_CHECK(bgemm<Dtype>, num_batches);  \
   } while (0)
 
 template <>
@@ -254,7 +254,7 @@ void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   BGEMM_CHECK_ARGVALUES(c10::complex<float>);
-  TORCH_CUDABLAS_CHECK(cublasCgemm3mStridedBatched(
+  TORCH_CUDABLAS_CHECK(cublasCgemmStridedBatched(
       handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
       lda, stridea, reinterpret_cast<const cuComplex*>(b), ldb, strideb, reinterpret_cast<const cuComplex*>(&beta),
       reinterpret_cast<cuComplex*>(c), ldc, stridec, num_batches));
