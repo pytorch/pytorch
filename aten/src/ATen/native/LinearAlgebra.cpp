@@ -6,6 +6,8 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
@@ -18,6 +20,8 @@
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(addr_stub);
 
 // Helper function for det methods.
 // For pivoted LU factorization A = P * L * U. Since we always have det(L) = 1,
@@ -143,34 +147,85 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
  TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
 
-Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  TORCH_WARN(
-    "torch.addr is deprecated and may be removed in a future PyTorch release. "
-    "This function can be implemented using torch.outer as "
-    "alpha * torch.outer(vec1, vec2) + beta * input when beta is not zero, "
-    "alpha * torch.outer(vec1, vec2) when beta is zero.");
-
-  Tensor outer_result = at::outer(vec1, vec2) * alpha;
-  if (beta.to<double>() == 0.0) {
-    return outer_result;
-  }
-  return outer_result + (self * beta);
+static void check_addr_scalar(const ScalarType dtype,
+                              const Scalar scalar,
+                              const std::string& scalar_name) {
+  TORCH_CHECK(
+    !scalar.isBoolean() || dtype == ScalarType::Bool,
+    "Boolean ", scalar_name, " only supported for Boolean results.");
+  TORCH_CHECK(
+    isFloatingType(dtype) || isComplexType(dtype) || scalar.isIntegral(true),
+    "For integral input tensors, "
+    "argument ", scalar_name ," must not be a floating point number.");
 }
 
-Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+static TensorIterator build_addr_iter(Tensor& result,
+                                      const Tensor& self,
+                                      const Tensor& vec1,
+                                      const Tensor& vec2) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
+
+  Tensor self_;
+  if (&result != &self) {
+    std::tie(self_) = expand_size(self, {vec1.size(0), vec2.size(0)}, "addr");
+  } else {
+    self_ = self;
+  }
+  TORCH_CHECK(
+    self_.dim() == 2,
+    "2D tensor expected, got ", self_.dim(), "D tensor for input"
+  );
+  TORCH_CHECK(
+    self_.size(0) == vec1.size(0) && self_.size(1) == vec2.size(0),
+    "size mismatch, input: ", self_.sizes(),
+    ", v1: ", vec1.sizes(),
+    ", v2: ", vec2.sizes()
+  );
+
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self_)
+    .add_input(vec1.reshape({vec1.size(0), 1}))
+    .add_input(vec2)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
+  return iter;
+}
+
+Tensor addr(const Tensor& self,
+            const Tensor& vec1, const Tensor& vec2,
+            Scalar beta, Scalar alpha) {
+  Tensor result;
+  auto iter = build_addr_iter(result, self, vec1, vec2);
+
+  check_addr_scalar(iter.dtype(), beta, "beta");
+  check_addr_scalar(iter.dtype(), alpha, "alpha");
+
+  addr_stub(iter.device_type(), iter, beta, alpha);
+  return iter.output();
+}
+
+Tensor& addr_(Tensor& self,
+              const Tensor& vec1, const Tensor& vec2,
+              Scalar beta, Scalar alpha) {
   return at::addr_out(self, self, vec1, vec2, beta, alpha);
 }
 
-Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
-  auto addr_result = at::addr(self, vec1, vec2, beta, alpha);
-  // Validates safe casting
-  const auto result_dtype = addr_result.scalar_type();
-  TORCH_CHECK(canCast(result_dtype, result.scalar_type()),
-              "result type ", result_dtype,
-              " can't be cast to the desired output type ", result.scalar_type());
+Tensor& addr_out(Tensor &result,
+                 const Tensor& self,
+                 const Tensor& vec1, const Tensor& vec2,
+                 Scalar beta, Scalar alpha) {
+  auto iter = build_addr_iter(result, self, vec1, vec2);
 
-  at::native::resize_output(result, addr_result.sizes().vec());
-  result.copy_(addr_result);
+  check_addr_scalar(iter.dtype(), beta, "beta");
+  check_addr_scalar(iter.dtype(), alpha, "alpha");
+
+  addr_stub(iter.device_type(), iter, beta, alpha);
   return result;
 }
 

@@ -2,6 +2,11 @@
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/Dispatch.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 namespace at { namespace native {
 
@@ -350,4 +355,23 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     return result;
   });
 }
-} }
+
+void addr_kernel_cuda(TensorIterator &iter, Scalar beta, Scalar alpha) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16,
+    iter.dtype(), "addr_cuda", [&] {
+      scalar_t beta_val = beta.to<scalar_t>();
+      scalar_t alpha_val = alpha.to<scalar_t>();
+      gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (scalar_t self_val,
+                        scalar_t vec1_val, scalar_t vec2_val) -> scalar_t {
+          return beta_val * self_val + alpha_val * vec1_val * vec2_val;
+        }
+      );
+    }
+  );
+}
+
+REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
+
+}}

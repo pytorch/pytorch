@@ -57,11 +57,8 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @precisionOverride({torch.bfloat16: 1e-1})
-    @dtypes(*(torch.testing.get_all_dtypes()))
-    def test_addr(self, device, dtype):
-        def run_test_case(m, a, b, beta=1, alpha=1):
+    def _test_addr_vs_numpy(self, device, dtype, beta=1, alpha=1):
+        def check(m, a, b, beta, alpha):
             if dtype == torch.bfloat16:
                 a_np = a.to(torch.double).cpu().numpy()
                 b_np = b.to(torch.double).cpu().numpy()
@@ -70,41 +67,84 @@ class TestLinalg(TestCase):
                 a_np = a.cpu().numpy()
                 b_np = b.cpu().numpy()
                 m_np = m.cpu().numpy()
-
             if beta == 0:
                 expected = alpha * np.outer(a_np, b_np)
             else:
                 expected = beta * m_np + alpha * np.outer(a_np, b_np)
 
-            self.assertEqual(torch.addr(m, a, b, beta=beta, alpha=alpha), expected)
-            self.assertEqual(torch.Tensor.addr(m, a, b, beta=beta, alpha=alpha), expected)
+            res = torch.addr(m, a, b, beta=beta, alpha=alpha)
+            self.assertEqual(res, expected)
 
-            result_dtype = torch.addr(m, a, b, beta=beta, alpha=alpha).dtype
-            out = torch.empty_like(m, dtype=result_dtype)
+            # Test out variant
+            out = torch.empty_like(res)
             torch.addr(m, a, b, beta=beta, alpha=alpha, out=out)
             self.assertEqual(out, expected)
 
-        a = torch.randn(50).to(device=device, dtype=dtype)
-        b = torch.randn(50).to(device=device, dtype=dtype)
-        m = torch.randn(50, 50).to(device=device, dtype=dtype)
+        m = make_tensor((50, 50), device=device, dtype=dtype, low=-2, high=2)
+        a = make_tensor((50,), device=device, dtype=dtype, low=-2, high=2)
+        b = make_tensor((50,), device=device, dtype=dtype, low=-2, high=2)
 
-        # when beta is zero
-        run_test_case(m, a, b, beta=0., alpha=2)
-
-        # when beta is not zero
-        run_test_case(m, a, b, beta=0.5, alpha=2)
+        check(m, a, b, beta, alpha)
 
         # test transpose
         m_transpose = torch.transpose(m, 0, 1)
-        run_test_case(m_transpose, a, b, beta=0.5, alpha=2)
+        check(m_transpose, a, b, beta, alpha)
 
         # test 0 strided tensor
-        zero_strided = torch.randn(1).to(device=device, dtype=dtype).expand(50)
-        run_test_case(m, zero_strided, b, beta=0.5, alpha=2)
+        zero_strided = make_tensor((1,), device=device, dtype=dtype, low=-2, high=2).expand(50)
+        check(m, zero_strided, b, beta, alpha)
 
         # test scalar
         m_scalar = torch.tensor(1, device=device, dtype=dtype)
-        run_test_case(m_scalar, a, b)
+        check(m_scalar, a, b, beta, alpha)
+
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.bool)
+    def test_addr_bool(self, device, dtype):
+        self._test_addr_vs_numpy(device, dtype, beta=True, alpha=False)
+        self._test_addr_vs_numpy(device, dtype, beta=False, alpha=True)
+        self._test_addr_vs_numpy(device, dtype, beta=False, alpha=False)
+        self._test_addr_vs_numpy(device, dtype, beta=True, alpha=True)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes()))
+    def test_addr_integral(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'argument beta must not be a floating point number.'):
+            self._test_addr_vs_numpy(device, dtype, beta=2., alpha=1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'argument alpha must not be a floating point number.'):
+            self._test_addr_vs_numpy(device, dtype, beta=2, alpha=1.)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Boolean beta only supported for Boolean results.'):
+            self._test_addr_vs_numpy(device, dtype, beta=True, alpha=1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Boolean alpha only supported for Boolean results.'):
+            self._test_addr_vs_numpy(device, dtype, beta=2, alpha=True)
+
+        # when beta is zero
+        self._test_addr_vs_numpy(device, dtype, beta=0, alpha=2)
+        # when beta is not zero
+        self._test_addr_vs_numpy(device, dtype, beta=2, alpha=2)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.bfloat16: 1e-1})
+    @dtypes(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
+    def test_addr_float_and_complex(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Boolean beta only supported for Boolean results.'):
+            self._test_addr_vs_numpy(device, dtype, beta=True, alpha=1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Boolean alpha only supported for Boolean results.'):
+            self._test_addr_vs_numpy(device, dtype, beta=2, alpha=True)
+
+        # when beta is zero
+        self._test_addr_vs_numpy(device, dtype, beta=0., alpha=2)
+        # when beta is not zero
+        self._test_addr_vs_numpy(device, dtype, beta=0.5, alpha=2)
+        if dtype in torch.testing.get_all_complex_dtypes():
+            self._test_addr_vs_numpy(device, dtype, beta=(0 + 0.1j), alpha=(0.2 - 0.2j))
 
     @dtypes(*itertools.product(torch.testing.get_all_dtypes(),
                                torch.testing.get_all_dtypes()))
@@ -116,21 +156,17 @@ class TestLinalg(TestCase):
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
     @dtypes(*itertools.product(torch.testing.get_all_dtypes(),
+                               torch.testing.get_all_dtypes(),
                                torch.testing.get_all_dtypes()))
     def test_addr_type_promotion(self, device, dtypes):
-        a = torch.randn(5).to(device=device, dtype=dtypes[0])
-        b = torch.randn(5).to(device=device, dtype=dtypes[1])
-        m = torch.randn(5, 5).to(device=device,
-                                 dtype=torch.result_type(a, b))
-        for op in (torch.addr, torch.Tensor.addr):
-            # pass the integer 1 to the torch.result_type as both
-            # the default values of alpha and beta are integers (alpha=1, beta=1)
-            desired_dtype = torch.result_type(m, 1)
-            result = op(m, a, b)
-            self.assertEqual(result.dtype, desired_dtype)
+        a = make_tensor((5,), device=device, dtype=dtypes[0], low=-2, high=2)
+        b = make_tensor((5,), device=device, dtype=dtypes[1], low=-2, high=2)
+        m = make_tensor((5, 5), device=device, dtype=dtypes[2], low=-2, high=2)
 
-            desired_dtype = torch.result_type(m, 2.)
-            result = op(m, a, b, beta=0, alpha=2.)
+        desired_dtype = torch.promote_types(torch.promote_types(dtypes[0], dtypes[1]),
+                                            dtypes[2])
+        for op in (torch.addr, torch.Tensor.addr):
+            result = op(m, a, b)
             self.assertEqual(result.dtype, desired_dtype)
 
     # Tests migrated from test_torch.py
