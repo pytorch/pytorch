@@ -17977,6 +17977,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
                 b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
                 yield b1, b2
+            for z1, z2, z3, z4 in product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = torch.randn(shape1, dtype=dtype, device=device)
+                b2 = torch.randn(shape2, dtype=dtype, device=device)
+                yield b1, b2
 
         for (b1, b2), perm3 in product(generate_inputs(), permutations((0, 1, 2))):
             res1 = torch.bmm(b1, b2)
@@ -18157,6 +18163,17 @@ else:
                 ).to(device=device, dtype=dtype).sum(0)
                 out_tensor = torch.zeros_like(ref)
                 yield b1, b2, ref, out_tensor
+            # zero-sized tensors
+            for z1, z2, z3, z4 in product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1)
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1)
+                ref = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
+                ).to(device=device, dtype=dtype).sum(0)
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
 
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
@@ -18204,6 +18221,16 @@ else:
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
                 b1 = make_tensor(shape1, device, dtype, low=-2, high=2).expand(num_batches, M, N)
                 b2 = make_tensor(shape2, device, dtype, low=-2, high=2).expand(num_batches, N, O)
+                ref = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
+                out_tensor = torch.zeros_like(ref)
+                yield b1, b2, ref, out_tensor
+            # zero-sized tensors
+            for z1, z2, z3, z4 in product((True, False), repeat=4):
+                shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
+                shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
+                b1 = make_tensor(shape1, device, dtype, low=-2, high=2)
+                b2 = make_tensor(shape2, device, dtype, low=-2, high=2)
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)
