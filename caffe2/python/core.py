@@ -1476,12 +1476,13 @@ class Net(object):
             self._external_input_map.update(list(self._net.external_input))
 
             # Set the next name index properly.
-            existing_names = set()
-            for op in self._net.op:
-                existing_names.update(list(op.input))
-            for output in existing_outputs:
-                existing_names.update(output)
-
+            existing_names = set(
+                sum(
+                    [list(op.input) for op in self._net.op], []
+                ) + sum(
+                    existing_outputs, []
+                )
+            )
             for outs in existing_outputs:
                 self._op_outputs.update(outs)
 
@@ -2025,14 +2026,10 @@ class Net(object):
     def AddExternalInput(self, *inputs):
         assert len(inputs) > 0
         refs = []
-        input_name_set = set()
         for input in inputs:
             input_name = str(input)
-            assert (
-                input_name not in self._external_input_map
-                and input_name not in input_name_set
-            ), ("Net already contains an input named %s" % input_name)
-            input_name_set.add(input_name)
+            assert str(input) not in self._external_input_map, (
+                'Net already contains an input named %s' % input_name)
         for input in inputs:
             input_name = str(input)
             self._net.external_input.extend([input_name])
@@ -2092,7 +2089,7 @@ class Net(object):
             self._input_record = input_record
 
         for blob in self._input_record.field_blobs():
-            if not self.is_external_input(blob):
+            if blob not in self.external_inputs:
                 self.AddExternalInput(blob)
         return self._input_record
 

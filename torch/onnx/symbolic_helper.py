@@ -358,14 +358,6 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     return scale_factor, mode
 
 
-def _unbind_helper(g, self, dim, _outputs):
-    if _export_onnx_opset_version <= 9:
-        from torch.onnx.symbolic_opset9 import unbind
-    else:
-        from torch.onnx.symbolic_opset11 import unbind
-    return unbind(g, self, dim, _outputs)
-
-
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter

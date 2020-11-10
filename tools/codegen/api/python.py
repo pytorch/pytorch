@@ -1,12 +1,11 @@
-import itertools
-from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Set, List, Tuple, Dict
-
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
 import tools.codegen.local as local
 from tools.codegen.gen import pythonify_default
 from tools.codegen.model import *
+
+from dataclasses import dataclass
+from typing import Optional, Union, Sequence, Set, List, Tuple
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -287,12 +286,6 @@ class PythonSignature:
             result.extend(self.tensor_options_args)
         return tuple(result)
 
-    def arguments_count(self) -> int:
-        return len(self.arguments())
-
-    def output_idx(self) -> int:
-        return len(self.input_args) + len(self.input_kwargs)
-
     # [old codegen] Compute the Python function signature for argument parsing,
     # as specified in torch/csrc/utils/python_arg_parser.h.  WARNING:
     # this is NOT the same type signature as specified by PEP 484
@@ -322,7 +315,7 @@ class PythonSignatureDeprecated(PythonSignature):
     #   addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
     # When generating lambda function signature we need follow the exact order (even for method=True):
     #   [](Scalar beta, const Tensor & self, const Tensor & mat1, const Tensor & mat2) -> Tensor
-    deprecated_args_names: Tuple[str, ...]
+    deprecated_args_names: Tuple[str]
 
     # The deprecated signature might miss some arguments that the corresponding
     # C++ signature expects. We need store the constant default values to pass in.
@@ -331,7 +324,7 @@ class PythonSignatureDeprecated(PythonSignature):
     #   [func schema]: aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
     #   [func call]: self.addmm(mat1, mat2, beta, 1)
     # We store ['self', 'mat1', 'mat2', 'beta', '1'] in this case.
-    deprecated_args_exprs: Tuple[str, ...]
+    deprecated_args_exprs: Tuple[str]
 
     @property
     def deprecated(self) -> bool:
@@ -339,36 +332,6 @@ class PythonSignatureDeprecated(PythonSignature):
 
     def signature_str(self, *, skip_outputs: bool = False) -> str:
         return PythonSignature.signature_str(self, skip_outputs=skip_outputs) + '|deprecated'
-
-# This struct is used to hold the PythonSignature and its corresponding
-# NativeFunction BEFORE grouping base and out-variant functions.
-# Why not store NativeFunction in PythonSignature or construct PythonSignature
-# from NativeFunction? Because they are not 1-1 mapped.
-# One native function could have both deprecated and non-deprecated python
-# signatures - NativeFunction doesn't contain information to construct the
-# deprecated python signature.
-# One python signature is used to handle both the base and the out-variant
-# function - see 'PythonSignatureGroup'.
-@dataclass(frozen=True)
-class PythonSignatureNativeFunctionPair:
-    signature: PythonSignature
-    function: NativeFunction
-
-# We merge pairs of functions with signatures that are equivalent mod
-# output arguments, and use a single entry in the python_arg_parser sig
-# list for both (output arguments become optional).
-@dataclass(frozen=True)
-class PythonSignatureGroup:
-    # The signature used for Python argument parsing. The outplace signature
-    # is preferred if exists, because it can be used to parse inputs for both
-    # the out-place variant and the base version (with output omitted).
-    signature: PythonSignature
-
-    # The regular ATen declaration (e.g. conv2d)
-    base: NativeFunction
-
-    # The out variant (e.g. conv2d_out)
-    outplace: Optional[NativeFunction]
 
 # C++ function dispatch is wrapped in a lambda function. The lambda function
 # has almost the same signature as the C++ function, only with some small
@@ -434,7 +397,7 @@ class DispatchLambdaArgumentExprs:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def _cpp_signature(f: NativeFunction, *, method: bool = False) -> CppSignature:
+def _cpp_signature(f: NativeFunction, *, method: bool = False) -> cpp.CppSignature:
     return CppSignatureGroup.from_schema(f.func, method=method).signature
 
 def has_tensor_options(f: NativeFunction) -> bool:
@@ -636,7 +599,8 @@ def _dtype_default_type_hack(name: str) -> str:
 # For deprecated python signature, it should follow deprecated python arg order.
 # TODO: This is to keep same byte-for-byte result as the old codegen - maybe unnecessary?
 
-def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[DispatchLambdaArgument, ...]:
+def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction, *, method: bool,
+                         ) -> Tuple[DispatchLambdaArgument, ...]:
     # Start with cpp arguments - dispatch lambda signature always include 'self'
     cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).arguments()
 
@@ -655,7 +619,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
     def dispatch_lambda_arg(cpp_arg: CppArgument) -> DispatchLambdaArgument:
         type_str = cpp_arg.type
         is_out_arg = cpp_arg.name in out_args
-        if ps.method and cpp_arg.name == 'self':
+        if method and cpp_arg.name == 'self':
             # For method's 'self', we can use 'Tensor &' and simply ignore mutability!
             type_str = 'Tensor &'
         else:
@@ -735,7 +699,7 @@ def cpp_dispatch_target(f: NativeFunction) -> str:
         return f'{namespace}::{name}'
     raise RuntimeError(f'could not dispatch, neither function nor method: {f.func}')
 
-def cpp_dispatch_exprs(f: NativeFunction, *,
+def cpp_dispatch_exprs(f: NativeFunction, method: bool, *,
                        python_signature: Optional[PythonSignature] = None,
                        ) -> Tuple[str, ...]:
     cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).arguments()
@@ -855,7 +819,7 @@ def arg_parser_output_expr(
 
 # Returns a map with key = arg_name and value = PythonArgParserOutputExpr.
 def arg_parser_output_exprs(
-    ps: PythonSignature, f: NativeFunction
+    ps: PythonSignature, f: NativeFunction, *, method: bool
 ) -> Dict[str, PythonArgParserOutputExpr]:
     return {e.name: e for i, a in enumerate(ps.arguments())
             for e in (arg_parser_output_expr(i, a), )}
@@ -871,13 +835,13 @@ TENSOR_OPTIONS_FIELDS = {
 
 # bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
 def dispatch_lambda_exprs(
-    ps: PythonSignature, f: NativeFunction
+    ps: PythonSignature, f: NativeFunction, *, method: bool
 ) -> DispatchLambdaArgumentExprs:
     # This method is to bind 'arg_parser_outputs' and 'lambda_args' by producing
     # 'inits' and 'lambda_args_exprs' for each lambda argument using arg parser
     # outputs.
-    arg_parser_outputs = arg_parser_output_exprs(ps, f)
-    lambda_args = dispatch_lambda_args(ps, f)
+    arg_parser_outputs = arg_parser_output_exprs(ps, f, method=method)
+    lambda_args = dispatch_lambda_args(ps, f, method=method)
     inits: List[str] = []
     lambda_args_exprs: Dict[str, str] = dict()
 
@@ -916,7 +880,7 @@ def dispatch_lambda_exprs(
             lambda_args_exprs[name] = arg_parser_expr
 
     # method's self is passed directly to python binding, rather than parsed
-    if ps.method:
+    if method:
         lambda_args_exprs['self'] = 'self'
 
     # 2. special packing/checking for TensorOptions.

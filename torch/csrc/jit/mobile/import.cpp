@@ -226,9 +226,7 @@ void parseMethods(
 class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
-  mobile::Module deserialize(
-      c10::optional<at::Device> device,
-      ExtraFilesMap& extra_files);
+  mobile::Module deserialize(c10::optional<at::Device> device);
   std::unordered_map<std::string, std::string> deserializeMetadata(
       c10::optional<at::Device> device);
 
@@ -257,19 +255,8 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
 }
 
 mobile::Module BytecodeDeserializer::deserialize(
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    c10::optional<at::Device> device) {
   device_ = device;
-  for (const auto& kv : extra_files) {
-    const std::string& key = "extra/" + kv.first;
-    if (reader_->hasRecord(key)) {
-      at::DataPtr meta_ptr;
-      size_t meta_size = 0;
-      std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
-      extra_files[kv.first] =
-          std::string(static_cast<char*>(meta_ptr.get()), meta_size);
-    }
-  }
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
@@ -397,26 +384,23 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 mobile::Module _load_for_mobile(
     std::istream& in,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
-    c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files) {
+    c10::optional<at::Device> device) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }
 
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device,
-    ExtraFilesMap& extra_files) {
+    c10::optional<c10::Device> device) {
   auto observer = torch::observerConfig().getModuleObserver();
   auto instance_key = std::rand();
   if (observer) {
@@ -425,7 +409,7 @@ mobile::Module _load_for_mobile(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader));
   try {
-    mobile::Module result = deserializer.deserialize(device, extra_files);
+    mobile::Module result = deserializer.deserialize(std::move(device));
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
     if (result.metadata().find("model_name") == result.metadata().end()) {

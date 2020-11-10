@@ -797,11 +797,6 @@ class TestFX(JitTestCase):
         fxed_scripted = torch.jit.script(fxed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
-    def test_fn_type_annotation_empty(self):
-        def forward(a : List[torch.Tensor]):
-            return a[0]
-        torch.jit.script(symbolic_trace(forward))
-
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
             @functools.wraps(fn)

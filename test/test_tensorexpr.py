@@ -1226,29 +1226,21 @@ class TestTensorExprFuser(BaseTestClass):
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     def _test_softmax(self, device):
-        def test_softmax(x, y):
+        def test(x, y):
             a = F.softmax(x, dim=0, dtype=torch.float32)
             b = F.softmax(y, dim=0, dtype=torch.float32)
             c = F.softmax(x, dim=1, dtype=torch.float32)
             d = F.softmax(y, dim=1, dtype=torch.float32)
             return a + b + c + d
 
-        def test_log_softmax(x, y):
-            a = F.log_softmax(x, dim=0, dtype=torch.float32)
-            b = F.log_softmax(y, dim=0, dtype=torch.float32)
-            c = F.log_softmax(x, dim=1, dtype=torch.float32)
-            d = F.log_softmax(y, dim=1, dtype=torch.float32)
-            return a + b + c + d
-
-        for test in (test_softmax, test_log_softmax):
-            old = torch._C._jit_set_texpr_reductions_enabled(True)
-            traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
-            inp = torch.randn(2, 3, device=device)
-            res = traced(inp, inp)
-            # Use eager mode as reference.
-            ref = test(inp, inp)
-            np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
-            torch._C._jit_set_texpr_reductions_enabled(old)
+        old = torch._C._jit_set_texpr_reductions_enabled(True)
+        traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
+        inp = torch.randn(2, 3, device=device)
+        res = traced(inp, inp)
+        # Use eager mode as reference.
+        ref = test(inp, inp)
+        np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
+        torch._C._jit_set_texpr_reductions_enabled(old)
 
     def test_softmax_cpu(self):
         llvm = LLVMCodeGenExecuted()

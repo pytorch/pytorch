@@ -172,7 +172,6 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.new,
         Tensor.new_tensor,
         Tensor.new_empty,
-        Tensor.new_empty_strided,
         Tensor.new_zeros,
         Tensor.new_ones,
         Tensor.new_full,
