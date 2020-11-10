@@ -564,7 +564,11 @@ namespace {
     int64_t num_dir_layers = rnn.num_directions() * rnn.num_layers;
     const auto cudnn_methods = { cudnnGetRNNLinLayerMatrixParams, cudnnGetRNNLinLayerBiasParams };
     std::vector<void*> data_ptrs;
-    data_ptrs.reserve(num_dir_layers * 2 * 2);
+    if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+      data_ptrs.reserve(num_dir_layers * (2 * 2 + 1));
+    } else {
+      data_ptrs.reserve(num_dir_layers * 2 * 2);
+    }
     for (int64_t layer = 0; layer < num_dir_layers; layer++) {
       for (auto cudnn_method : cudnn_methods) {
         // This API returns a separate pointer for weight of every gate,
@@ -610,6 +614,21 @@ namespace {
     return data_ptrs;
   }
 
+  void _vewOrCopyOneParam(const Tensor& param_from, const Tensor& param_to,
+                          bool copy, bool allow_type_change=false) {
+    // if copying, allow_type_change may be true or false.
+    // if viewing, allow_type_change must be false.
+    TORCH_INTERNAL_ASSERT(copy || !allow_type_change,
+                          "if viewing, type change is not allowed.");
+    TORCH_INTERNAL_ASSERT(allow_type_change || (param_from.scalar_type() == param_to.scalar_type()),
+                          "parameter types mismatch");
+    if (copy) {
+        param_to.copy_(param_from.view_as(param_to));
+    } else {
+        param_from.resize_as_(param_to);
+    }
+  }
+
   void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to,
                          bool copy, bool allow_type_change=false) {
     AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
@@ -619,21 +638,30 @@ namespace {
       // NOTE: these lists have all weights before all biases, so if the layer
       // doesn't use biases, iteration will terminate once layer_params_from ends
       // and ignore them.
+
+      // NOTE: there is an exception from the above statement. If LSTMs with projections
+      // are used, weights layout will be w_ih, w_hh, b_ih, b_hh, w_hr. So need to handle no-bias
+      // case specially, because will need to copy 0->0, 1->1, 2->4. This case can be uniquely
+      // identified by checking if number of defined parameters for each layer is 3.
+
+      // TODO (igor): need to check bidirectional case
+
+      if (layer_params_from.size() == 3) {
+        _vewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
+        _vewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
+        _vewOrCopyOneParam(layer_params_from[2], layer_params_to[4], copy, allow_type_change);
+        continue;
+      }
+      if (layer_params_to.size() == 3) {
+        _vewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
+        _vewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
+        _vewOrCopyOneParam(layer_params_from[4], layer_params_to[2], copy, allow_type_change);
+        continue;
+      }
       for (auto a = layer_params_from.begin(), b = layer_params_to.begin();
-           a != layer_params_from.end() && b != layer_params_to.end();
-           ++a, ++b) {
-        auto param_from = *a, param_to = *b;
-        // if copying, allow_type_change may be true or false.
-        // if viewing, allow_type_change must be false.
-        TORCH_INTERNAL_ASSERT(copy || !allow_type_change,
-                              "if viewing, type change is not allowed.");
-        TORCH_INTERNAL_ASSERT(allow_type_change || (param_from.scalar_type() == param_to.scalar_type()),
-                              "parameter types mismatch");
-        if (copy) {
-            param_to.copy_(param_from.view_as(param_to));
-        } else {
-            param_from.resize_as_(param_to);
-        }
+            a != layer_params_from.end() && b != layer_params_to.end();
+            ++a, ++b) {
+        _vewOrCopyOneParam(*a, *b, copy, allow_type_change);
       }
     }
   }
@@ -801,17 +829,24 @@ namespace cudnn_rnn {
                       params{params_arr, params_stride0};
 
 
-    // TODO (igor): this will probably break if projections + no biases are used
     // Copy weights
     _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
     if (set_orig_weights_to_flat_buf) {
       // Update the storage
       for (size_t i = 0; i < weight.size(0); i++) {
-        for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
-             orig_param_it != weight[i].end() && new_param_it != params[i].end();
-             orig_param_it++, new_param_it++) {
-          auto orig_param = *orig_param_it, new_param = *new_param_it;
-          orig_param.set_(new_param.view_as(orig_param));
+        // There is a special case for LSTM with projections and no bias, 
+        // where weight copy is done in 0->0, 1->1, 2->4 layout
+        if (weight[i].size() == 3) {
+          weight[i][0].set_(params[i][0].view_as(weight[i][0]));
+          weight[i][1].set_(params[i][1].view_as(weight[i][1]));
+          weight[i][2].set_(params[i][4].view_as(weight[i][2]));
+        } else {
+          for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
+              orig_param_it != weight[i].end() && new_param_it != params[i].end();
+              orig_param_it++, new_param_it++) {
+            auto orig_param = *orig_param_it, new_param = *new_param_it;
+            orig_param.set_(new_param.view_as(orig_param));
+          }
         }
       }
     }
@@ -864,7 +899,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
-
   check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
   auto weight_buf = weight_buf_r;
@@ -1135,7 +1169,6 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
     ) {
 
   MatrixRef<Tensor> weight{ weight_arr, static_cast<size_t>(weight_stride0) };
-
   auto input = input_r;
   auto output = output_r;
 
@@ -1400,30 +1433,27 @@ Tensor try_get_weight_buf(
   int64_t num_ptrs = expected_data_ptrs.size();
   // TODO (igor): can probably make this with less duplication
   if (proj_size != 0 && proj_size != hidden_size) {
-    AT_ASSERT(num_ptrs % (has_biases ? 5 : 3) == 0);
+    AT_ASSERT(num_parameters % (has_biases ? 5 : 3) == 0);
+    AT_ASSERT(num_ptrs % 5 == 0);
     if (has_biases) {
       AT_ASSERT(num_ptrs == num_parameters);
       for (int64_t i = 0; i < num_parameters; i++) {
-        if (expected_data_ptrs[i] != parameters[i].data_ptr()) {
-          return {};
-        }
+        if (expected_data_ptrs[i] != parameters[i].data_ptr()) return {};
       }
     } else {
       AT_ASSERT(num_parameters % 3 == 0);
       AT_ASSERT(num_ptrs == num_parameters * 5 / 3);
-      // TODO (igor): this one is not implemented at the moment, since no bias is not going to work anyway
-      // for (int64_t param_i = 0, ptr_i = 0;
-      //     ptr_i < num_ptrs;
-      //     ptr_i += (has_biases ? 3 : 5), param_i += 2) {
-      //   if (expected_data_ptrs[ptr_i] != parameters[param_i].data_ptr()) return {};
-      //   if (expected_data_ptrs[ptr_i + 1] != parameters[param_i + 1].data_ptr()) return {};
-      // }
-      return {};
-
+      for (int64_t param_i = 0, ptr_i = 0;
+          ptr_i < num_ptrs;
+          ptr_i += 5, param_i += 3) {
+        if (expected_data_ptrs[ptr_i] != parameters[param_i].data_ptr()) return {};
+        if (expected_data_ptrs[ptr_i + 1] != parameters[param_i + 1].data_ptr()) return {};
+        if (expected_data_ptrs[ptr_i + 4] != parameters[param_i + 2].data_ptr()) return {};
+      }
     }
   } else {
     AT_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
-    AT_ASSERT(num_ptrs % (has_biases ? 4 : 2) == 0);
+    AT_ASSERT(num_parameters % (has_biases ? 4 : 2) == 0);
     for (int64_t param_i = 0, ptr_i = 0;
         ptr_i < num_ptrs;
         ptr_i += (has_biases ? 2 : 4), param_i += 2) {
@@ -1445,7 +1475,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   int64_t hidden_size = hx.size(2);
   // For LSTM models with projections hidden size could be different
   if (cx.defined()) {
-    int64_t hidden_size = cx.size(2);
+    hidden_size = cx.size(2);
   }
   int64_t proj_size = hx.size(2);
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
@@ -1459,9 +1489,13 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
+  int64_t num_params = has_biases ? 4 : 2;
+  if (proj_size != hidden_size) {
+    ++num_params;
+  }
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = at::_cudnn_rnn(
-      input, params, has_biases ? 4 : 2, weight_buf,
+      input, params, num_params, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, proj_size, num_layers, /*batch_first=*/false,
       dropout_p, train, bidirectional, batch_sizes, dropout_state.buffer);
 
@@ -1479,19 +1513,18 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   int64_t hidden_size = hx.size(2);
   // For LSTM models with projections hidden size could be different
   if (cx.defined()) {
-    int64_t hidden_size = cx.size(2);
+    hidden_size = cx.size(2);
   }
   int64_t proj_size = hx.size(2);
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, proj_size, num_layers, bidirectional);
-
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
-  // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   int64_t num_params = has_biases ? 4 : 2;
   if (proj_size != hidden_size) {
     ++num_params;
   }
+  // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = at::_cudnn_rnn(
       input, params, num_params, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, proj_size, num_layers, batch_first, dropout_p,

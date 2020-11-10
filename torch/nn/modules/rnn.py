@@ -91,10 +91,16 @@ class RNNBase(Module):
                 # bias vector is needed in standard definition.
                 b_hh = Parameter(torch.Tensor(gate_size))
                 if self.proj_size == 0:
-                    layer_params = (w_ih, w_hh, b_ih, b_hh)
+                    if bias:
+                        layer_params = (w_ih, w_hh, b_ih, b_hh)
+                    else:
+                        layer_params = (w_ih, w_hh)
                 else:
                     w_hr = Parameter(torch.Tensor(proj_size, hidden_size))
-                    layer_params = (w_ih, w_hh, b_ih, b_hh, w_hr)
+                    if bias:
+                        layer_params = (w_ih, w_hh, b_ih, b_hh, w_hr)
+                    else:
+                        layer_params = (w_ih, w_hh, w_hr)
 
                 suffix = '_reverse' if direction == 1 else ''
                 param_names = ['weight_ih_l{}{}', 'weight_hh_l{}{}']
