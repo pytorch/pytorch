@@ -330,7 +330,7 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& samplingProb(double sampling_prob) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
+    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
         "Invalid sampling probability");
     sampling_prob_ = sampling_prob;
     return *this;

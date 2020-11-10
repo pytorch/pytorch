@@ -93,6 +93,7 @@ fi
   # See comments on
   # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
   $MAYBE_SUDO pip -q uninstall -y hypothesis
+  $MAYBE_SUDO pip -q uninstall -y coverage
   # "pip install hypothesis==3.44.6" from official server is unreliable on
   # CircleCI, so we host a copy on S3 instead
   $MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
