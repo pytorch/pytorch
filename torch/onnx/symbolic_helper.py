@@ -2,7 +2,7 @@
 import torch
 import warnings
 from sys import maxsize as maxsize
-from typing import Set, Any
+from typing import Set
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
