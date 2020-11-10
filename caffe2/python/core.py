@@ -2025,10 +2025,14 @@ class Net(object):
     def AddExternalInput(self, *inputs):
         assert len(inputs) > 0
         refs = []
+        input_name_set = set()
         for input in inputs:
             input_name = str(input)
-            assert str(input) not in self._external_input_map, (
-                'Net already contains an input named %s' % input_name)
+            assert (
+                input_name not in self._external_input_map
+                and input_name not in input_name_set
+            ), ("Net already contains an input named %s" % input_name)
+            input_name_set.add(input_name)
         for input in inputs:
             input_name = str(input)
             self._net.external_input.extend([input_name])

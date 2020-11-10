@@ -136,6 +136,8 @@ class GraphModule(torch.nn.Module):
         """
         super().__init__()
         if isinstance(root, torch.nn.Module):
+            for i, buf in enumerate(root.buffers()):
+                self.register_buffer(f"_buffer_{i}", buf)
             if hasattr(root, 'training'):
                 self.training = root.training
             for node in graph.nodes:
