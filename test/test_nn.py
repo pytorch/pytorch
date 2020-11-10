@@ -2560,7 +2560,6 @@ class TestNN(NNTestCase):
         pruned_tensor = p.prune(t, default_mask)
         self.assertEqual(t * expected_mask, pruned_tensor)
 
-# TODO (igor): Add projections test (do I need to support that?)
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
         # This Module has 4 parameters called:
@@ -4542,7 +4541,6 @@ class TestNN(NNTestCase):
         self.assertEqual(g1, g2, atol=1e-4, rtol=0)
         self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
 
-# TODO (igor): Add projections test (support in cells?)
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
@@ -6465,25 +6463,27 @@ class TestNN(NNTestCase):
         batch = 6
 
         # runs on CPU to acquire expected output
-        m = nn.LSTM(input_size, hidden_size, num_layers)
-        input = torch.randn(seq_length, batch, input_size)
-        expected_output = m(input)
+        def check_weight_norm(m, name):
+            input = torch.randn(seq_length, batch, input_size)
+            expected_output = m(input)
 
-        # adds weight normalization
-        name = 'weight_hh_l0'
-        m = torch.nn.utils.weight_norm(m, name=name)
+            # adds weight normalization
+            m = torch.nn.utils.weight_norm(m, name=name)
 
-        # moves to CUDA
-        m = m.cuda()
-        input = input.cuda()
+            # moves to CUDA
+            m = m.cuda()
+            input = input.cuda()
 
-        # otherwise, subsequent warnings will be hidden, and further tests rely on them
-        warnings.simplefilter("always")
-        self.assertEqual(m(input), expected_output)
+            # otherwise, subsequent warnings will be hidden, and further tests rely on them
+            warnings.simplefilter("always")
+            self.assertEqual(m(input), expected_output)
 
-        # remove weight norm
-        m = torch.nn.utils.remove_weight_norm(m, name=name)
-        self.assertEqual(m(input), expected_output)
+            # remove weight norm
+            m = torch.nn.utils.remove_weight_norm(m, name=name)
+            self.assertEqual(m(input), expected_output)
+
+        check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers), 'weight_hh_l0')
+        check_weight_norm(nn.LSTM(input_size, hidden_size, num_layers, proj_size=3), 'weight_hr_l0')
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_partial_flat_weights(self):
