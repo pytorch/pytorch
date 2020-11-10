@@ -5988,7 +5988,6 @@ class TestNN(NNTestCase):
                 model = getattr(nn, model_name)(d_model, nhead, dim_feedforward,
                                                 dropout, wrong_activation)
 
-# TODO (igor): Add projections test
     def test_rnn_args_check(self):
         input_size = 3
         hidden_size = 5
@@ -6052,6 +6051,82 @@ class TestNN(NNTestCase):
             input_shape = correct_input_shape
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
+
+    def test_projections_lstm_args_check(self):
+        input_size = 3
+        hidden_size = 5
+        proj_size = 2
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+        bad_size = 7  # prime number so that no size can divide it.
+
+        def test(input_shape, hidden_h_shape, hidden_c_shape):
+            for input, hidden in get_inputs(input_shape, hidden_h_shape, hidden_c_shape):
+                model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
+                self.assertRaises(RuntimeError, lambda: model(input, hidden))
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
+        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        def update_shape(shape, dim, new_dim_size):
+            new_shape = list(shape)
+            new_shape[dim] = new_dim_size
+            return tuple(new_shape)
+
+        def get_inputs(input_shape, hidden_h_shape, hidden_c_shape):
+            '''returns list( tuple(input, hidden) )
+            where input, hidden are inputs to a model'''
+            input = torch.randn(input_shape)
+            hidden_h = torch.randn(hidden_h_shape)
+            hidden_c = torch.randn(hidden_c_shape)
+            return [(input, (hidden_h, hidden_c))]
+
+        # Incorrect input batch size
+        input_shape = update_shape(correct_input_shape, 1, bad_size)
+        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape)
+
+        # Incorrect hidden batch size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 1, bad_size)
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 1, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect input size
+        input_shape = update_shape(correct_input_shape, 2, bad_size)
+        test(input_shape, correct_hidden_h_shape, correct_hidden_c_shape)
+
+        # Incorrect hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 2, bad_size)
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 2, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect hidden[0]
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 0, bad_size)
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect proj size = hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 0, hidden_size)
+        hidden_c_shape = correct_hidden_c_shape
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect proj size != hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = update_shape(correct_hidden_h_shape, 0, bad_size)
+        hidden_c_shape = correct_hidden_c_shape
+        test(input_shape, hidden_h_shape, hidden_c_shape)
+
+        # Incorrect cell size != hidden size
+        input_shape = correct_input_shape
+        hidden_h_shape = correct_hidden_h_shape
+        hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
+        test(input_shape, hidden_h_shape, hidden_c_shape)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     # TODO (igor): Add projections test
