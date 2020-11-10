@@ -91,10 +91,9 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) 
 }
 
 Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
           !dtype.has_value() || (self.scalar_type() == dtype.value()),
-          "provided dtype must match dtype of result in cumsum. Got ",
+          "provided dtype must match the dtype of self tensor in cumsum. Got ",
           toString(self.scalar_type()),
           " and ",
           toString(dtype.value()),
@@ -141,10 +140,9 @@ Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype)
 }
 
 Tensor& cumprod_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-    // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
     TORCH_CHECK(
             !dtype.has_value() || (self.scalar_type() == dtype.value()),
-            "provided dtype must match dtype of result in cumsum. Got ",
+            "provided dtype must match the dtype of self tensor in cumprod. Got ",
             toString(self.scalar_type()),
             " and ",
             toString(dtype.value()),
