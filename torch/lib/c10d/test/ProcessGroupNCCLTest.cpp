@@ -9,6 +9,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <torch/csrc/autograd/profiler.h>
 #include <gtest/gtest.h>
 
 using namespace c10d::test;
@@ -172,7 +173,14 @@ class AllreduceNCCLTest : public NCCLTest {
     launchDeviceSleep();
     valueInitialization();
 
-    return pg_->allreduce(tensors_);
+    using namespace torch::autograd::profiler;
+    // Make sure enabling profile does not make any issue. Note, in single
+    // process multi-device mode we do not expect any events be populated for
+    // collective operations, since profiling for that mode is not supported.
+    enableProfiler({ProfilerState::CPU});
+    auto results = pg_->allreduce(tensors_);
+    disableProfiler();
+    return results;
   }
 };
 

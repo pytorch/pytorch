@@ -59,7 +59,8 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
       int rank,
-      c10d::OpType opType) override {
+      c10d::OpType opType,
+      const char* profilingTitle) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
         devices, simulate_error_, rank, opType);
   }
@@ -115,7 +116,8 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
       int rank,
-      c10d::OpType opType) override {
+      c10d::OpType opType,
+      const char* profilingTitle) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
         devices, set_timedout_error_, rank, opType);
   }
