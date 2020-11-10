@@ -681,7 +681,7 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(is_expandable_to(size, self.sizes()),
            "size {", size, "} is not expandable to size {", self.sizes(), "}.");
 
-  return sum_to(self, size);
+  return at::native::sum_to(self, size);
 }
 
 // We currently do not support per-channel quant for unfold, diagonal, expand, permute.

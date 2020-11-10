@@ -3741,6 +3741,8 @@
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+- func: sum_to(Tensor self, int[1] dim) -> Tensor
+
 - func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

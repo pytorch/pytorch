@@ -154,29 +154,6 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
-// Sums `tensor` repeatedly to produce a tensor of shape `shape`.
-// Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
-  if (shape.size() == 0) {
-    return tensor.sum();
-  }
-  c10::SmallVector<int64_t, 8> reduce_dims;
-  const at::IntArrayRef sizes = tensor.sizes();
-  const int64_t leading_dims = sizes.size() - shape.size();
-  for (int64_t i = 0; i < leading_dims; ++i) {
-    reduce_dims.push_back(i);
-  }
-  for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (shape[i - leading_dims] == 1 && sizes[i] != 1) {
-      reduce_dims.push_back(i);
-    }
-  }
-  if (!reduce_dims.empty()) {
-    tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
-  }
-  return leading_dims > 0 ? tensor.view(shape) : tensor;
-}
-
 // True if `shape` can be broadcasted to `desired`
 static inline bool is_expandable_to(IntArrayRef shape, IntArrayRef desired) {
   size_t ndim = shape.size();
