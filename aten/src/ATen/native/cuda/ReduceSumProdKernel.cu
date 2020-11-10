@@ -88,7 +88,7 @@ static void nansum_kernel_cuda(TensorIterator& iter) {
 
 static void prod_kernel_cuda(TensorIterator& iter) {
   auto general_dispatcher = [](TensorIterator& iter) {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "prod_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "prod_cuda", [&]() {
       prod_functor<scalar_t>{}(iter);
     });
   };
