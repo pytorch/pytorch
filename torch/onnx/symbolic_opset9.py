@@ -1195,17 +1195,7 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
-    # If track_running_stats is set to False batch statistics are instead used during evaluation time    
-    if running_mean is None or sym_help._is_none(running_mean) or running_var is None or sym_help._is_none(running_var):
-        assert len(input_sizes) > 1
-        reshape_in = g.op("Reshape", input, 
-                          g.op("Constant", value_t=torch.tensor([input_sizes[0], input_sizes[1], -1], dtype=torch.int64)))
-        trans_in = g.op('Transpose', reshape_in, perm_i=[1, 0, 2])
-        reshape_in = g.op("Reshape", trans_in, 
-                          g.op("Constant", value_t=torch.tensor([input_sizes[1], -1], dtype=torch.int64)))
-        running_var, running_mean = _var_mean(g, reshape_in, 
-                                              g.op("Constant", value_t=torch.tensor([1], dtype=torch.int64)), 
-                                              False, False)
+
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
@@ -1655,10 +1645,22 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
-def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
-    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
-    tensor = zeros(g, shape, dtype, layout, device)
-    return g.op("EyeLike", tensor)
+def eye(g, *args):
+    if len(args) == 5:
+        # aten::eye(n, dtype, layout, device, pin_memory)
+        n, dtype, layout, device, pin_memory = args
+        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        shape = g.op("Concat", dim_size, dim_size, axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    elif len(args) == 6:
+        # aten::eye(n, m, dtype, layout, device, pin_memory)
+        n, m, dtype, layout, device, pin_memory = args
+        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    else:
+        raise NotImplementedError("Unknown aten::eye signature")
 
 
 def slice(g, self, *args):
