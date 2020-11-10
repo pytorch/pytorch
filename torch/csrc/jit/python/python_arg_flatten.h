@@ -117,13 +117,6 @@ PyObject* unflatten(
     at::ArrayRef<autograd::Variable> vars,
     const IODescriptor& structure);
 
-py::object unflatten_rec(
-    ArrayRef<autograd::Variable>::iterator& var_it,
-    ArrayRef<autograd::Variable>::iterator& var_it_end,
-    std::string::const_iterator& desc_it,
-    std::vector<string>::const_iterator& str_it,
-    std::vector<string>::const_iterator& str_it_end);
-
 } // namespace python
 } // namespace jit
 } // namespace torch
