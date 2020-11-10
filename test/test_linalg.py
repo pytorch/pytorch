@@ -1021,7 +1021,6 @@ class TestLinalg(TestCase):
     # Tests torch.linalg.svd, vs. NumPy
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_svd(self, device, dtype):
         t = torch.randn((10, 11), device=device, dtype=dtype)
