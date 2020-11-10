@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from .constants import default_pg_timeout
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
-from . import (
+from torch._C._distributed_c10d import (
     AllreduceOptions,
     AllreduceCoalescedOptions,
     AllToAllOptions,
@@ -19,9 +19,9 @@ from . import (
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    ReduceOp,
+    PrefixStore,
 )
-from . import ReduceOp
-from . import PrefixStore
 
 
 _MPI_AVAILABLE = True
@@ -30,17 +30,17 @@ _GLOO_AVAILABLE = True
 
 
 try:
-    from. import ProcessGroupMPI
+    from torch._C._distributed_c10d import ProcessGroupMPI
 except ImportError:
     _MPI_AVAILABLE = False
 
 try:
-    from. import ProcessGroupNCCL
+    from torch._C._distributed_c10d import ProcessGroupNCCL
 except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    from. import ProcessGroupGloo
+    from torch._C._distributed_c10d import ProcessGroupGloo
 except ImportError:
     _GLOO_AVAILABLE = False
 
