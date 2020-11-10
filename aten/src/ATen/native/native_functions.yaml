@@ -5568,20 +5568,17 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CPU: addbmm_cpu_
-    CUDA: addbmm__cuda
+    CPU, CUDA: addbmm_
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: addbmm_cpu_out
-    CUDA: addbmm_out_cuda
+    CPU, CUDA: addbmm_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: addbmm_cpu
-    CUDA: addbmm_cuda
+    CPU, CUDA: addbmm
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   use_c10_dispatcher: full
