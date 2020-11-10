@@ -205,9 +205,9 @@ void fractional_max_pool2d_out_cuda_template(
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,
           poolSizeH, poolSizeW);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
        }
      );
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void fractional_max_pool2d_backward_out_cuda_template(
@@ -272,9 +272,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
       fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         devGradInput, devGradOutput, devIndices);
+      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 }// namespace
