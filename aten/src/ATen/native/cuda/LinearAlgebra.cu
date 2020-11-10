@@ -220,6 +220,15 @@ Tensor& addbmm_out_cuda(Tensor& out, const Tensor& self,
     }
   }
 
+  if (batchnum == 0) {
+    if (beta.to<c10::complex<double>>() != 0.0) {
+      out.mul_(beta);
+    } else {
+      out.zero_();
+    }
+    return out;
+  }
+
   for (int64_t i=0; i<batchnum; i++) {
     addmm_out_cuda(out, out, batch1[i], batch2[i], beta, alpha);
     beta = 1;
