@@ -131,10 +131,8 @@ void remainder_kernel(TensorIterator& iter) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
-          auto q = std::trunc(a.real() / b.real());
-          auto r = std::fmod(a.real(), b.real()); 
-          auto arg = (a - q * b) / std::abs(a - q * b);
-          return arg * r;
+          auto q = std::trunc(std::abs(a) / std::abs(b));
+          return a - q * b;
         });
     });
   } else {
