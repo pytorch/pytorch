@@ -160,6 +160,8 @@ class Tracer(TracerBase):
             for k, v in m.__dict__.items():
                 if isinstance(v, torch.Tensor):
                     self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
+            for k, v in m.named_buffers():
+                self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
             for k, v in m.named_children():
                 collect_tensor_attrs(v, prefix_atoms + [k])
 
