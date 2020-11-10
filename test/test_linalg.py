@@ -6,7 +6,7 @@ from math import inf, nan, isnan
 from random import randrange
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
+    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, slowTest, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
      onlyCUDA, onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -1224,11 +1224,10 @@ class TestLinalg(TestCase):
                 self.assertFalse(A.is_contiguous())
             expected_L = np.linalg.cholesky(A.cpu().numpy())
             actual_L = torch.linalg.cholesky(A)
-            matrices_are_equal = torch.allclose(actual_L, torch.from_numpy(expected_L).to(device))
 
             # For fp32 individual entries in matrices can differ between PyTorch and NumPy
             # Let's compare the norms of matrices instead
-            if A.numel() > 0 and not matrices_are_equal:
+            if A.numel() > 0 and dtype in [torch.float32, torch.complex64]:
                 # axis is specified to calculate matrix norm for batched input
                 expected_norm = np.linalg.norm(expected_L, ord=1, axis=(-2, -1))
                 actual_norm = torch.linalg.norm(actual_L, ord=1, axis=(-2, -1))
@@ -1237,7 +1236,7 @@ class TestLinalg(TestCase):
                 # and individual values with a higher tolerance
                 self.assertEqual(actual_L, expected_L, atol=1e-2, rtol=1e-5)
             else:
-                self.assertTrue(matrices_are_equal)
+                self.assertEqual(actual_L, expected_L)
 
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
