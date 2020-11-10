@@ -86,9 +86,10 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
             input = (input,)
         # In-place operators will update input tensor data as well.
         # Thus inputs are replicated before every forward call.
+        if isinstance(input, dict):
+            input = (input,)
         input_args = copy.deepcopy(input)
         input_kwargs = {}
-        print(input_args)
         if isinstance(input_args[-1], dict):
             input_kwargs = input_args[-1]
             input_args = input_args[:-1]
@@ -499,6 +500,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
+        # Without optional arguments dictionary
+        self.run_test(MixedModel(), (x, y, None))
+        # With optional arguments dictionary
         self.run_test(MixedModel(), (x, {'y': y, 'z': None}))
 
     def test_optional_inputs_with_all_optionals(self):
@@ -510,7 +514,10 @@ class TestONNXRuntime(unittest.TestCase):
                     return z
 
         y = torch.randn(2, 3)
-        self.run_test(AllOptionalModel(), ((), {'y': y, 'z': None}))
+        # Without optional arguments dictionary
+        self.run_test(AllOptionalModel(), (y, None))
+        # With optional arguments dictionary
+        self.run_test(AllOptionalModel(), {'y': y, 'z': None})
 
     def test_none_as_input(self):
         class Model(torch.nn.Module):
