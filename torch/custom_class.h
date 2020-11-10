@@ -29,7 +29,10 @@ detail::types<void, Types...> init() {
 
 template <class... Types, class Func>
 detail::types<void, Types...> init(Func f) {
-  using ParameterTypes = typename Func::parameter_types;
+  // return detail::types<void, typename
+  // c10::guts::infer_function_traits_t<Func>::parameter_types>{};
+  using ParameterTypes =
+      typename c10::guts::infer_function_traits_t<Func>::parameter_types;
   return detail::types<void, ParameterTypes>{};
 }
 
