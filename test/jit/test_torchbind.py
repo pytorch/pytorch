@@ -143,6 +143,23 @@ class TestTorchbind(JitTestCase):
         scripted = torch.jit.script(foo)
         self.assertEqual(scripted(), "mom")
 
+    def test_torchbind_class_attr_recursive(self):
+        class FooBar(torch.nn.Module):
+            def __init__(self, foo_model):
+                super(FooBar, self).__init__()
+                self.foo_mod = foo_model
+
+            def forward(self) -> int:
+                return self.foo_mod.info()
+
+            def to_ivalue(self):
+                torchbind_model = torch.classes._TorchScriptTesting._Foo(self.foo_mod.info(), 1)
+                return FooBar(torchbind_model)
+
+        inst = FooBar(torch.classes._TorchScriptTesting._Foo(2, 3))
+        scripted = torch.jit.script(inst.to_ivalue())
+        self.assertEqual(scripted(), 6)
+
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
