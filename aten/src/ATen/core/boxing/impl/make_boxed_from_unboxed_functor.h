@@ -323,8 +323,6 @@ namespace impl {
   call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
-    constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
-
     /*
      * For ops that take "Tensor&" as an argument, ivalue_to_arg would still return a "Tensor" by value
      * and C++ doesn't allow us to call (*functor) with a temporary "Tensor" when it expects "Tensor&".
@@ -335,7 +333,7 @@ namespace impl {
     using ArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
     return (*functor)(reference_cast<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>(
       ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>, AllowDeprecatedTypes>::call(
-        std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
+        std::move(torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices)))
     ))...);
   }
 

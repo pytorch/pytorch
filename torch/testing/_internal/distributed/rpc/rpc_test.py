@@ -2601,7 +2601,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_disable_gil_profiling(self):
-        # test that rpc.enable_gil_profilig(false) will result in
+        # test that rpc.enable_gil_profiling(false) will result in
         # GIL wait time not being recorded.
 
         # GIL profiling should be disabled by default.
@@ -3701,7 +3701,7 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     @dist_init
-    def test_local_rref_backward(self):
+    def test_owner_rref_backward(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         t1 = torch.rand(10, 10, requires_grad=True)
         rref = rpc.RRef(t1.sum() + t1.sum())
@@ -3735,6 +3735,32 @@ class RpcTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
             rpc.RRef("foo").backward()
+
+    @staticmethod
+    def _sum(x):
+        return x.sum()
+
+    @staticmethod
+    def _identity(x):
+        return x
+
+    @dist_init
+    def test_user_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t = torch.rand(10, requires_grad=True)
+        with dist_autograd.context() as context_id:
+            rref = rpc.remote(dst, RpcTest._sum, args=(t,))
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(torch.ones_like(t) * 2, dist_autograd.get_gradients(context_id)[t])
+
+        with dist_autograd.context() as context_id:
+            rref = rpc.remote(dst, RpcTest._identity, args=("foo",))
+            with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+                rref.backward(context_id)
+
+            with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):
+                rref.backward()
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
