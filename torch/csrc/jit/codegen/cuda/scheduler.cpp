@@ -331,6 +331,22 @@ TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
   return reductionHeuristic(red_elements, red_outputs, red_on_fastest_dim);
 }
 
+namespace {
+
+void scheduleReductionComputeAt(
+    TensorView* red_tv,
+    TensorView* red_tv_rf,
+    const std::vector<TensorView*>& outs_of_red) {
+  if (!outs_of_red.empty()) {
+    red_tv->computeAt(outs_of_red[0], -1);
+  }
+  if (red_tv_rf != nullptr) {
+    red_tv_rf->computeAt(red_tv, -1);
+  }
+}
+
+} // namespace
+
 // fusion is the input IR that will be modified by this function
 void scheduleReduction(
     Fusion* fusion,
@@ -381,21 +397,7 @@ void scheduleReduction(
 
       auto red_tv_rf = red_tv->rFactor({-3, -1});
 
-      // WARNING: computeAt will coalesce the rFactored dimensions
-      // rFactored Reduction Tensor after computeAt():
-      //      [<output dims>, | rF-Leftover, X-Warp, rF-Unroll|]
-      // Idx:      0 -- 1     |    2(-3)      3(-2)     4(-1)  |
-      //                      ---------------------------------
-      //                      Reduction Dimensions
-      red_tv_rf->computeAt(red_tv, -1);
-
-      // After the Reduction Tensor has rFactoring applied
-      // Reduction Output Tensor:
-      //      [Out-Leftover, Out-PerBlock, X-Warp]
-      // Idx:       0              1       2(-1)
-      if (!outs_of_red.empty()) {
-        red_tv->computeAt(outs_of_red[0], -1);
-      }
+      scheduleReductionComputeAt(red_tv, red_tv_rf, outs_of_red);
 
       red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
@@ -431,22 +433,7 @@ void scheduleReduction(
         auto red_tv_rf = red_tv->rFactor(
             {-5, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
-        // WARNING: computeAt will coalesce the rFactored dimensions
-        // rFactored Reduction Tensor after computeAt():
-        //      [Outputs, |X-Grid, X-Block, X-Warp, rF-Leftover, rF-Unroll|]
-        // Idx:     0     | 1(-5)    2(-4)   3(-3)      4(-2)      5(-1)  |
-        //                -------------------------------------------------
-        //                Reduction Dimensions
-        red_tv_rf->computeAt(red_tv, -1);
-
-        // After the Reduction Tensor has rFactoring applied
-        // Reduction Output Tensor:
-        //      [Outputs, X-Grid, X-Block, X-Warp]
-        // Idx:     0      1(-3)   2(-2)    3(-1)
-
-        if (!outs_of_red.empty()) {
-          red_tv->computeAt(outs_of_red[0], -1);
-        }
+        scheduleReductionComputeAt(red_tv, red_tv_rf, outs_of_red);
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
@@ -476,22 +463,7 @@ void scheduleReduction(
 
         auto red_tv_rf = red_tv->rFactor({-4, -1});
 
-        // WARNING: computeAt will coalesce the rFactored dimensions
-        // rFactored Reduction Tensor after computeAt():
-        //      [Outputs, |X-Block, X-Warp, rF-Leftover, rF-Unroll|]
-        // Idx:     0     | 1(-4)   2(-3)      3(-2)       4(-1)  |
-        //                -----------------------------------------
-        //                Reduction Dimensions
-        red_tv_rf->computeAt(red_tv, -1);
-
-        // After the Reduction Tensor has rFactoring applied
-        // Reduction Output Tensor:
-        //      [Outputs, X-Block, X-Warp]
-        // Idx:     0      1(-2)    2(-1)
-
-        if (!outs_of_red.empty()) {
-          red_tv->computeAt(outs_of_red[0], -1);
-        }
+        scheduleReductionComputeAt(red_tv, red_tv_rf, outs_of_red);
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
@@ -544,22 +516,7 @@ void scheduleReduction(
 
         auto red_tv_rf = red_tv->rFactor({-4, -1});
 
-        // WARNING: computeAt will coalesce the rFactored dimensions
-        // rFactored Reduction Tensor after computeAt():
-        //      [<output dims>, |X-Block, X-Grid, rF-Leftover, rF-Unroll|]
-        // Idx:      0 -- 1     | 2(-4)   3(-3)      4(-2)       5(-1)  |
-        //                      -----------------------------------------
-        //                      Reduction Dimensions
-        red_tv_rf->computeAt(red_tv, -1);
-
-        // After the Reduction Tensor has rFactoring applied
-        // Reduction Output Tensor:
-        //      [Out-Leftover, Out-PerBlock, X-Block, X-Grid]
-        // Idx:       0              1        2(-2)   3(-1)
-
-        if (!outs_of_red.empty()) {
-          red_tv->computeAt(outs_of_red[0], -1);
-        }
+        scheduleReductionComputeAt(red_tv, red_tv_rf, outs_of_red);
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
@@ -610,22 +567,7 @@ void scheduleReduction(
 
         auto red_tv_rf = red_tv->rFactor({-3, -1});
 
-        // WARNING: computeAt will coalesce the rFactored dimensions
-        // rFactored Reduction Tensor after computeAt():
-        //      [<output dims>, |X-Block, rF-Leftover, rF-Unroll|]
-        // Idx:      0 -- 1     | 2(-3)      3(-2)       4(-1)  |
-        //                      ---------------------------------
-        //                      Reduction Dimensions
-        red_tv_rf->computeAt(red_tv, -1);
-
-        // After the Reduction Tensor has rFactoring applied
-        // Reduction Output Tensor:
-        //      [Out-Leftover, Out-PerBlock, X-Block]
-        // Idx:       0              1        2(-1)
-
-        if (!outs_of_red.empty()) {
-          red_tv->computeAt(outs_of_red[0], -1);
-        }
+        scheduleReductionComputeAt(red_tv, red_tv_rf, outs_of_red);
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
@@ -650,9 +592,7 @@ void scheduleReduction(
         iter_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
       }
 
-      if (!outs_of_red.empty()) {
-        red_tv->computeAt(outs_of_red[0], -1);
-      }
+      scheduleReductionComputeAt(red_tv, nullptr, outs_of_red);
 
       red_tv->axis(0)->parallelize(ParallelType::BIDx);
       red_tv->axis(1)->parallelize(ParallelType::TIDx);
