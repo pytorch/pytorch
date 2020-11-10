@@ -492,7 +492,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   if (self_or_result.numel() == 0) {
     return self_or_result;
   } else if (contraction_size == 0) {
-    if (is_bmm_out) {
+    if (is_bmm_out || (beta.to<c10::complex<double>>() == 0.0)) {
       return self_or_result.zero_();
     } else {
       return self_or_result.mul_(beta);
