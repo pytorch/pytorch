@@ -2196,6 +2196,12 @@ def prim_shape(g, self):
 def prim_data(g, self):
     return self
 
+def is_floating_point(g, self):
+    if sym_help._is_fp(self):
+        return g.op("Constant", value_t=torch.BoolTensor([1]))
+    return g.op("Constant", value_t=torch.BoolTensor([0]))
+
+
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))

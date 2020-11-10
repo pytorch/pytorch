@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Dict, Optional, List, Callable, Union, Tuple
+from typing import Any, Dict, Optional, List, Callable, Union
 import torch
 
 from .node import Argument
