@@ -234,9 +234,9 @@ TEST(VulkanAPITest, conv2d) {
   }
 
   constexpr int64_t groups = 1;
-  constexpr std::array<int64_t, 2u> stride{1, 1};
-  constexpr std::array<int64_t, 2u> padding{0, 0};
-  constexpr std::array<int64_t, 2u> dilation{1, 1};
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{3, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 3};
 
   constexpr struct {
     uint32_t batches;
@@ -270,9 +270,9 @@ TEST(VulkanAPITest, conv2d) {
     }
   } weights {83, input.channels, 13, 2};
 
-  const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::ones(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::ones({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,
@@ -380,9 +380,9 @@ TEST(VulkanAPITest, conv2d_pw) {
   }
 
   constexpr int64_t groups = 1;
-  constexpr std::array<int64_t, 2u> stride{2, 3};
-  constexpr std::array<int64_t, 2u> padding{0, 4};
-  constexpr std::array<int64_t, 2u> dilation{2, 2};
+  constexpr std::array<int64_t, 2u> stride{1, 1};
+  constexpr std::array<int64_t, 2u> padding{0, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
 
   constexpr struct {
     uint32_t batches;
@@ -416,9 +416,9 @@ TEST(VulkanAPITest, conv2d_pw) {
     }
   } weights {29, input.channels, 1, 1};
 
-  const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,
@@ -819,61 +819,61 @@ class MobileNetV2 final : public OpsList {
     ops_.emplace_back(new Conv2d({192, 1, 3, 3}, 192, 2, 1));
     ops_.emplace_back(new Hardtanh_());
     ops_.emplace_back(new Conv2d({64, 192, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({96, 384, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 2, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({160, 576, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Conv2d({320, 960, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Conv2d({1280, 320, 1, 1}, 1, 1, 0));
-    // ops_.emplace_back(new Hardtanh_());
-    // ops_.emplace_back(new Mean());
-    // ops_.emplace_back(new Addmm(1, 1280, 1000, 0, 1));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 384, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({96, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({576, 96, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({576, 1, 3, 3}, 576, 2, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 576, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({160, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({960, 160, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({960, 1, 3, 3}, 960, 1, 1));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Conv2d({320, 960, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Conv2d({1280, 320, 1, 1}, 1, 1, 0));
+    ops_.emplace_back(new Hardtanh_());
+    ops_.emplace_back(new Mean());
+    ops_.emplace_back(new Addmm(1, 1280, 1000, 0, 1));
   }
 };
 
@@ -883,7 +883,8 @@ TEST(VulkanAPITest, mobilenetv2) {
   }
 
   MobileNetV2 mn2;
-  const auto input = at::rand({1, 3, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto input = at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
   const auto output = mn2.run(input, input.vulkan());
 
   const auto check = almostEqual(output.first, output.second.cpu());
