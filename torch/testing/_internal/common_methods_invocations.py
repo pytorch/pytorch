@@ -867,11 +867,9 @@ def method_tests():
         ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
         ('kthvalue', (S,), (2, 0,), 'dim_1d', (), [1]),
         ('kthvalue', (S,), (2, 0, True,), 'keepdim_dim_1d', (), [1]),
-        # TODO: https://github.com/pytorch/pytorch/issues/30818
-        ('kthvalue', (), (1,), 'scalar', (), (), [expectedFailureCUDA]),
-        ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1], [expectedFailureCUDA]),
-        ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1], [expectedFailureCUDA]),
-        # END TODO
+        ('kthvalue', (), (1,), 'scalar', (), ()),
+        ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1]),
+        ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1]),
         ('quantile', (S, S, S), (0.5,)),
         ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
         ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
@@ -962,6 +960,8 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('repeat', (S, S), (1, 1), 'keepdim0'),
+        ('repeat', (S, S), (3, 1, 1), 'keepdim1'),
         ('repeat', (S,), (0, ), 'zero_dim'),
         ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
