@@ -170,6 +170,8 @@ class Graph:
         Erases the node `to_erase` from the `Graph`. Throws an exception if
         there are still users of that node in the `Graph`.
         """
+        for arg in to_erase.args:
+            del arg.users[to_erase]
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
