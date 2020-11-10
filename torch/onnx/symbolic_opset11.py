@@ -57,6 +57,9 @@ def clamp_max(g, self, max):
 # Opset 11 gather accepts negative indices
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
+    index_scalar_type = index.type().scalarType()
+    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
+        index = g.op("Cast", index, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     return g.op("Gather", self, index, axis_i=dim)
 
 

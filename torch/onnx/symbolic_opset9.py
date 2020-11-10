@@ -1302,6 +1302,9 @@ def index_select(g, self, dim, index):
         if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor.
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
+    index_scalar_type = index.type().scalarType()
+    if index_scalar_type is None or index_scalar_type not in ['Long', 'Int']:
+        index = g.op("Cast", index, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     return g.op("Gather", self, index, axis_i=dim)
 
 

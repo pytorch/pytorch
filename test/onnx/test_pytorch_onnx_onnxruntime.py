@@ -2295,6 +2295,22 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(GatherModel(), input=(input, indices))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_gather_float_index(self):
+        class GatherFloatIndexModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, mask):
+                seq_length, batch_size = mask.shape
+                result = input[0][0][0]
+                for i in torch.arange(2, seq_length):
+                    result = input[0][i][0]
+                return result
+
+        model = GatherFloatIndexModel()
+        x = torch.randint(0, 5, (8, 8, 17), dtype=torch.long)
+        y = torch.ones(8, 1, dtype=torch.uint8)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
             def forward(self, input):
