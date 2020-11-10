@@ -1359,6 +1359,9 @@ class TestVmapOperators(Namespace.TestVmapBase):
         noncontig = torch.randn(2, B0, 7)
         self.assertEqual(vmap(foo, in_dims=1)(noncontig), torch.zeros(B0))
 
+        noncontig = torch.randn(2, B0, 7).movedim(1, 0)
+        self.assertEqual(vmap(foo)(noncontig), torch.zeros(B0))
+
         noncontig = torch.randn(2, 7, B0)
         self.assertEqual(vmap(foo, in_dims=2)(noncontig), torch.zeros(B0))
 
@@ -1368,6 +1371,9 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         contig = torch.randn(B1, B0, 3)
         self.assertEqual(vmap(vmap(foo), in_dims=1)(contig), torch.ones(B0, B1))
+
+        contig = torch.randn(B1, B0, 3).movedim(0, 1)
+        self.assertEqual(vmap(vmap(foo))(contig), torch.ones(B0, B1))
 
         noncontig = torch.randn(B0, 3, B1)
         self.assertEqual(vmap(vmap(foo, in_dims=1))(noncontig), torch.zeros(B0, B1))
@@ -1379,6 +1385,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         vmap(bar)(torch.randn(B0, 0, 3))
         vmap(bar, in_dims=1)(torch.randn(0, B0, 3))
+        vmap(bar)(torch.randn(B0, 0, 3).transpose(-1, -2))
 
         # is_contiguous with other memory formats
         def baz(x, memory_format):
