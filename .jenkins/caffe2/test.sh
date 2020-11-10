@@ -93,6 +93,7 @@ fi
   # See comments on
   # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
   $MAYBE_SUDO pip -q uninstall -y hypothesis
+  $MAYBE_SUDO pip -q uninstall -y coverage
   # "pip install hypothesis==3.44.6" from official server is unreliable on
   # CircleCI, so we host a copy on S3 instead
   $MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
@@ -168,10 +169,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
-    # Fix the pip error: Couldn't find a version that satisfies the requirement
-    pip install --upgrade pip
-    pip install -q --user ort-nightly==1.5.0.dev202009182
+    pip install -q --user onnxruntime==1.5.2
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

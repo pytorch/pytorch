@@ -840,12 +840,13 @@ AT_ERROR("solve: MAGMA library not found in "
   auto b_data = b.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
+  magma_int_t lda = std::max(magma_int_t{1}, n);
 
   if (b.dim() == 2) {
     auto ipiv = at::empty({n}, at::kInt);
     magma_int_t info = 0;
-    magmaSolve<scalar_t>(n, nrhs, A_data, n, ipiv.data_ptr<magma_int_t>(),
-                        b_data, n, &info);
+    magmaSolve<scalar_t>(n, nrhs, A_data, lda, ipiv.data_ptr<magma_int_t>(),
+                        b_data, lda, &info);
     infos[0] = info;
   } else {
     auto A_mat_stride = matrixStride(A);
@@ -885,7 +886,7 @@ AT_ERROR("solve: MAGMA library not found in "
       magma_int_t* info_array_cur = &info_array[mini_idx];
 
       magmaSolveBatched<scalar_t>(
-          n, nrhs, A_array_cur, n, ipiv_array_cur, b_array_cur, n,
+          n, nrhs, A_array_cur, lda, ipiv_array_cur, b_array_cur, lda,
           info_array_cur, batch_limit, magma_queue);
     }
 
@@ -893,7 +894,7 @@ AT_ERROR("solve: MAGMA library not found in "
     // which concisely is equal to batch_size % batch_limit
     if (batch_size % batch_limit != 0) {
       magmaSolveBatched<scalar_t>(
-          n, nrhs, &A_array[mini_idx], n, &ipiv_array[mini_idx], &b_array[mini_idx], n,
+          n, nrhs, &A_array[mini_idx], lda, &ipiv_array[mini_idx], &b_array[mini_idx], lda,
           &info_array[mini_idx], batch_size % batch_limit, magma_queue);
     }
 

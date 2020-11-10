@@ -156,11 +156,12 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   auto first_physical_view_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(
       first_physical_view_sizes.begin(), first_physical_view_sizes.begin() + num_batch_dims);
-  auto num_batches = std::accumulate(
-      batch_sizes.begin(),
-      batch_sizes.end(),
-      1,
-      std::multiplies<int64_t>());
+  const auto num_batches = prod_intlist(batch_sizes);
+  // Without a shape-checking API, we're unable to compute the correct shape of
+  // the output so we just error out.
+  TORCH_CHECK(num_batches > 0,
+      "Batching rule not implemented for ", schema.operator_name(), ". ",
+      "The fallback path does not support vmap over dims of size 0.");
 
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, and call `op`.
@@ -288,11 +289,12 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   auto num_batch_dims = input_physical_views.front().numBatchDims();
   auto some_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(some_sizes.begin(), some_sizes.begin() + num_batch_dims);
-  auto num_batches = std::accumulate(
-      batch_sizes.begin(),
-      batch_sizes.end(),
-      1,
-      std::multiplies<int64_t>());
+  const auto num_batches = prod_intlist(batch_sizes);
+  // Without a shape-checking API, we're unable to compute the correct shape of
+  // the output so we just error out.
+  TORCH_CHECK(num_batches > 0,
+      "Batching rule not implemented for ", schema.operator_name(), ". ",
+      "The fallback path does not support vmap over dims of size 0.");
 
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, call `op`, and store the result in
