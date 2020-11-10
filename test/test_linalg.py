@@ -1243,7 +1243,6 @@ class TestLinalg(TestCase):
     def test_dot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.dot)
         self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
->>>>>>> upstream/master
 
 instantiate_device_type_tests(TestLinalg, globals())
 
