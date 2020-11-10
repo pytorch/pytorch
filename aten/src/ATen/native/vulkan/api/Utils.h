@@ -8,10 +8,22 @@ namespace vulkan {
 namespace api {
 namespace utils {
 
-inline uint32_t div_up(
-    const uint32_t numerator,
-    const uint32_t denominator) {
-  return (numerator + denominator - 1u) / denominator;
+inline int64_t align_down(
+    const int64_t number,
+    const int64_t multiple) {
+  return (number / multiple) * multiple;
+}
+
+inline int64_t align_up(
+    const int64_t number,
+    const int64_t multiple) {
+  return align_down(number + multiple - 1, multiple);
+}
+
+inline int64_t div_up(
+    const int64_t numerator,
+    const int64_t denominator) {
+  return (numerator + denominator - 1) / denominator;
 }
 
 inline VkFormat convert(const caffe2::TypeMeta dtype) {

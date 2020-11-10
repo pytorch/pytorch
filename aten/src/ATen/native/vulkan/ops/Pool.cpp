@@ -140,18 +140,20 @@ Tensor avg_pool2d(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
+    using namespace api::utils;
+
     if (v_self.has_image()) {
       const struct {
         int32_t kernel_width, kernel_height;
         int32_t stride_x, stride_y;
         int32_t padding_x, padding_y;
       } block {
-        api::utils::safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-        api::utils::safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
-        api::utils::safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-        api::utils::safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        api::utils::safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-        api::utils::safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+        safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+        safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
       };
 
       context->dispatch(

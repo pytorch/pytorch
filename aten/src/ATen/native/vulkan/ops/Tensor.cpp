@@ -151,7 +151,7 @@ VkExtent3D image_extents(const IntArrayRef sizes) {
   return {
     width,
     height,
-    api::utils::div_up(depth, 4u),
+    api::utils::div_up(depth, 4),
   };
 }
 
