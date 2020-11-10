@@ -905,6 +905,60 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_floating_point(self):
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.is_floating_point():
+                    return x.new_zeros(x.shape)
+                return x.new_zeros(x.shape)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloatingPoint(), x)
+
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.size(0) > 1:
+                    a = x + 2
+                    if a.is_floating_point():
+                        return x + 1
+                    return x + 1
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloatingPoint(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfONNXShapeInference(False)
+    def test_floating_point_infer_dtype(self):
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.size(0) > 1:
+                    a = x + 2
+                    if a.is_floating_point():
+                        return x.new_zeros(x.shape[1:])
+                    return x.new_zeros(x.shape)
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloatingPoint(), x)
+
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.size(0) > 1:
+                    a = x + 2
+                    if a.is_floating_point():
+                        return x + 1
+                    return x
+                return x
+
+        x = torch.randn(2, 3, 4).to(torch.int32)
+        self.run_test(FloatingPoint(), x)
+
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x):
