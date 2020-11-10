@@ -6129,7 +6129,6 @@ class TestNN(NNTestCase):
         test(input_shape, hidden_h_shape, hidden_c_shape)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    # TODO (igor): Add projections test
     def test_rnn_check_device(self):
         input_size = 3
         hidden_size = 5
@@ -6166,6 +6165,40 @@ class TestNN(NNTestCase):
                                             "Input and hidden tensors are not at the same device"):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_projections_lstm_check_device(self):
+        input_size = 3
+        hidden_size = 5
+        proj_size = 2
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_h_shape = (num_layers * num_directions, batch_size, proj_size)
+        correct_hidden_c_shape = (num_layers * num_directions, batch_size, hidden_size)
+
+        model = nn.LSTM(input_size, hidden_size, num_layers, proj_size=proj_size)
+        input = torch.randn(correct_input_shape)
+        hidden_h = torch.randn(correct_hidden_h_shape)
+        hidden_c = torch.randn(correct_hidden_c_shape)
+
+        # input and weights are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and parameter tensors are not at the same device"):
+            model(input.to('cuda:0'))
+
+        # input and hiddens are not at the same device
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Input and hidden tensors are not at the same device"):
+            model(input, (hidden_h.to('cuda:0'), hidden_c.to('cuda:0')))
+
+        # hidden tensors are not at the same CUDA device
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Input and hidden tensors are not at the same device"):
+            model(input.to('cuda:0'), (hidden_h.to('cuda:0'), hidden_c.to('cuda:1')))
+
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
         for mode in rnn_modes:
@@ -6180,8 +6213,6 @@ class TestNN(NNTestCase):
             self.assertEqual(output1, output2)
             self.assertEqual(hidden1, hidden2)
 
-    # TODO (igor): remove this
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_projections_lstm_initial_hidden_state(self):
         for bidir in [False, True]:
             rnn = nn.LSTM(30, 20, 2, bidirectional=bidir, proj_size=10)
