@@ -472,7 +472,18 @@ void ONNXAssignOutputShape(
     bool onnx_shape_inference) {
   size_t outputs_index = 0;
 
-  auto py_obj = unflatten(outputs, desc);
+  auto vars_it = outputs.begin();
+  auto vars_it_end = outputs.end();
+  auto desc_it = desc.structure.begin();
+  std::vector<std::string>::const_iterator str_it = desc.strings.begin();
+  std::vector<std::string>::const_iterator str_end = desc.strings.end();
+  py::object output =
+      python::unflatten_rec(vars_it, vars_it_end, desc_it, str_it, str_end);
+
+  if (vars_it != vars_it_end)
+    throw std::runtime_error("Too many Variables given to unflatten");
+
+  PyObject* py_obj = output.release().ptr();
 
   TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
 
@@ -517,14 +528,18 @@ void ONNXAssignOutputShape(
       // ONNX.
       // Dictionary values are unrolled and keys are not preserved.
       TORCH_INTERNAL_ASSERT(PyDict_Check(elem));
-      auto dict_items = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
-      for (size_t j = 0; j < dict_items.size(); ++j) {
-        ONNXUpdateTypeFromTensor(
-            graph->outputs()[outputs_index + j],
-            outputs[outputs_index],
-            onnx_shape_inference);
-        outputs_index++;
+      auto unrolled_dict = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
+      TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
+      for (size_t j = 0; j < unrolled_dict.size(); ++j) {
+        PyObject* tuple_elem = PyList_GET_ITEM(unrolled_dict.ptr(), j);
+        TORCH_INTERNAL_ASSERT(PyTuple_Check(tuple_elem));
+        TORCH_INTERNAL_ASSERT(PyTuple_GET_SIZE(tuple_elem) == 2);
+        auto& var =
+            reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(tuple_elem, 1))
+                ->cdata;
+        graph->outputs()[outputs_index + j]->setType(TensorType::create(var));
       }
+      outputs_index += unrolled_dict.size();
     }
   }
 
