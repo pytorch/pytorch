@@ -308,11 +308,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 output_activation_post_process = None
 
             if output_activation_post_process:
-                if type(self.linear) == torch.nn.intrinsic.LinearReLU:
-                    float_linear_module = self.linear[1]
-                else:
-                    float_linear_module = self.linear
-                float_linear_module.activation_post_process = output_activation_post_process
+                self.linear.activation_post_process = output_activation_post_process
 
             # 2. select corresponding quantized linear class for the float linear class
             if type(self.linear) in [torch.nn.Linear, torch.nn.qat.Linear]:
