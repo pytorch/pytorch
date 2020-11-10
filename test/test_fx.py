@@ -722,11 +722,10 @@ class TestFX(JitTestCase):
         self.assertEqual(out, ref_out)
 
     def test_symbolic_trace_assert(self):
-        message = "assert_foobar"
 
         class AssertsTensorShape(torch.nn.Module):
             def forward(self, x):
-                torch.Assert(x.shape[1] > 4, message)
+                torch.Assert(x.shape[1] > 4, "assert_foobar")
                 return x
 
         m = AssertsTensorShape()
@@ -734,8 +733,10 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(m)
         # verify assertion on traced model works correctly at runtime
         traced(torch.rand(4, 5))
-        with self.assertRaisesRegex(AssertionError, message):
+        with self.assertRaisesRegex(AssertionError, "assert_foobar"):
             traced(torch.rand(4, 3))
+        # verify the symbolically traced module is scriptable
+        ms = torch.jit.script(m)
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())

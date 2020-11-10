@@ -618,12 +618,3 @@ from ._vmap_internals import vmap
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
-
-# TODO(before land): clean up
-#def Assert(condition, message):
-#    r"""A wrapper around Python's assert which is symbolically traceable.
-#    """
-#
-#    if type(condition) is not torch.Tensor and torch.overrides.has_torch_function((condition,)):
-#        return torch.overrides.handle_torch_function(Assert, (condition,), condition, message)
-#    assert condition, message
