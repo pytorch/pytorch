@@ -401,7 +401,7 @@ def init_process_group(backend,
             asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
             will provide errors to the user which can be caught and handled,
             but due to its blocking nature, it has a performance overhead. On
-            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has  very little
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
             performance overhead, but crashes the process on errors. This is
             done since CUDA execution is async and it is no longer safe to
             continue executing user code since failed async NCCL operations
