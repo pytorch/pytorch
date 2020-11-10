@@ -33,7 +33,7 @@
 from collections import defaultdict
 import itertools
 import re
-from .gen_variable_type import DONT_RECORD_TRACE
+from .gen_trace_type import should_trace
 from .utils import write, is_tensor_method
 
 from tools.codegen.code_template import CodeTemplate
@@ -41,7 +41,7 @@ from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, with_native_function
 from tools.codegen.model import *
 
-from typing import Dict, Optional, List, Any, Tuple, Set
+from typing import Dict, Optional, List, Any, Tuple, Set, Sequence
 
 #
 # declarations blocklist
@@ -574,23 +574,6 @@ def emit_dispatch_case(
         # no-output version only
         return emit_single_dispatch(
             overload.signature, overload.base, namedtuple_typenames)
-
-# Copied from 'gen_variable_type.should_trace()'.
-# TODO: consolidate after migrating autograd codegen.
-@with_native_function
-def should_trace(f: NativeFunction) -> bool:
-    # Operations involving Storage or Type are not traceable at the moment
-    if any(str(arg.type) in {'Storage', 'Type', 'ConstQuantizerPtr'}
-           for arg in f.func.schema_order_arguments()):
-        return False
-    # We can't trace functions which don't have any Tensor or TensorList returns
-    if not any(r.type.is_tensor_like() for r in f.func.returns):
-        return False
-    name = cpp.name(f.func)
-    base_name = f.func.name.name.base
-    if base_name in DONT_RECORD_TRACE or name in DONT_RECORD_TRACE:
-        return False
-    return True
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
