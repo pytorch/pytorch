@@ -9275,6 +9275,39 @@ TEST(NVFuserTest, Issue329_CUDA) {
   TORCH_CHECK(at_t3.allclose(outputs[1]));
 }
 
+TEST(NVFuserTest, Issue507_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Float(1));
+  auto tv2 = add(tv1, new Float(1));
+  fusion.addOutput(tv2);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  c10::IntArrayRef t0_shape{17, 19};
+  auto at_t0 = at::randn(t0_shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto outputs = fe.runFusion({at_t0});
+
+  auto at_t1 = (at_t0 + 1);
+  auto at_t2 = (at_t1 + 1);
+
+  TORCH_CHECK(at_t2.allclose(outputs[0]));
+}
+
 } // namespace jit
 } // namespace torch
 

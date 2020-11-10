@@ -318,10 +318,12 @@ void LoopNestGenerator::handle(const Expr* expr) {
     shared_memory_sync |= isModifiedSharedMemory(in);
   }
   if (shared_memory_sync) {
-    TORCH_INTERNAL_ASSERT(!for_loops_.empty(), "Attempted to add SyncThreads");
-
     // Push "sync" to the back of the last for loop
-    for_loops_.back()->body().push_back(ir_builder_.create<kir::Sync>());
+    if (!for_loops_.empty()) {
+      for_loops_.back()->body().push_back(ir_builder_.create<kir::Sync>());
+    } else {
+      lowered_exprs_.push_back(ir_builder_.create<kir::Sync>());
+    }
     cleanSharedMemory();
   }
 
