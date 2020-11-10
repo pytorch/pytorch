@@ -472,7 +472,7 @@ void ONNXAssignOutputShape(
     bool onnx_shape_inference) {
   size_t outputs_index = 0;
 
-  auto py_obj = unflatten(outputs, desc);
+  PyObject* py_obj = unflatten(outputs, desc);
 
   TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
 
@@ -517,20 +517,26 @@ void ONNXAssignOutputShape(
       // ONNX.
       // Dictionary values are unrolled and keys are not preserved.
       TORCH_INTERNAL_ASSERT(PyDict_Check(elem));
-      auto dict_items = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
-      for (size_t j = 0; j < dict_items.size(); ++j) {
-        ONNXUpdateTypeFromTensor(
-            graph->outputs()[outputs_index + j],
-            outputs[outputs_index],
-            onnx_shape_inference);
-        outputs_index++;
+      auto unrolled_dict = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
+      TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
+      for (size_t j = 0; j < unrolled_dict.size(); ++j) {
+        PyObject* tuple_elem = PyList_GET_ITEM(unrolled_dict.ptr(), j);
+        TORCH_INTERNAL_ASSERT(PyTuple_Check(tuple_elem));
+        TORCH_INTERNAL_ASSERT(PyTuple_GET_SIZE(tuple_elem) == 2);
+        auto& var =
+            reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(tuple_elem, 1))
+                ->cdata;
+        graph->outputs()[outputs_index + j]->setType(TensorType::create(var));
       }
+      outputs_index += unrolled_dict.size();
     }
   }
 
   TORCH_INTERNAL_ASSERT(
       outputs_index == graph->outputs().size(),
       "Incorrect number of elements provided as example outputs.");
+
+  Py_DECREF(py_obj);
 }
 
 void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
