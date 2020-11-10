@@ -1,11 +1,6 @@
-
-
-
-
-
 import numpy as np
 
-from caffe2.python import workspace, memonger, core, model_helper, brew
+from caffe2.python import workspace, memonger, core, model_helper, brew, dyndep
 from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 from future.utils import viewvalues
@@ -455,6 +450,179 @@ class MemongerTest(hu.HypothesisTestCase):
         optimized_loss2 = workspace.FetchBlob("name_x/loss2")
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(loss2, optimized_loss2)
+
+    # This test reproduces scenario where dag traversal for finding
+    # shared blobs was not always starting from ops with in degree of 0
+    @settings(deadline=10000)
+    def test_forward_optim_tree_dag_traversal(self):
+        input_dim = 4
+        output_dim = 4
+        batch_size = 4
+
+        m = model_helper.ModelHelper()
+        m.Proto().type = "dag"
+        m.Proto().num_workers = 4
+
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+
+            # Branch
+            fc3b = brew.fc(m, fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
+            fc4b = brew.fc(m, fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
+            fc5b = brew.fc(m, fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
+
+            fc5sum = brew.sum(m, [fc5, fc5b], "fc5sum")
+
+            fc5.Relu([], fc5sum) \
+               .Softmax([], "pred1") \
+               .LabelCrossEntropy(["label"], ["xent1"]) \
+               .AveragedLoss([], "loss1")
+            fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6.Relu([], fc6) \
+               .Softmax([], "pred2") \
+               .LabelCrossEntropy(["label"], ["xent2"]) \
+               .AveragedLoss([], "loss2")
+
+        blobs_before = count_blobs(m.net.Proto())
+        # adding name_x/fc5_w as heads (which belongs to non-root op)
+        # to make sure that dag traversal always starts from root ops
+        optim_proto = memonger.optimize_inference_for_dag(
+            m.net, ["name_x/fc5_w", "name_x/data"], "name_x"
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
+    @settings(deadline=10000)
+    def test_forward_optim_tree_asyncif_op(self):
+        dyndep.InitOpsLibrary("//caffe2/caffe2/fb/operators:async_if_op")
+        input_dim = 4
+        output_dim = 4
+        batch_size = 4
+        has_elements_blob = "name_x/has_element_output"
+        m = model_helper.ModelHelper()
+        m.Proto().type = "async_scheduling"
+        m.Proto().num_workers = 4
+
+        with core.NameScope("name_x"):
+            fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
+            fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
+
+            fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
+            fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
+            fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
+
+            # Branch
+            fc3b = brew.fc(m, fc2, "fc3b", dim_in=output_dim, dim_out=output_dim)
+            fc4b = brew.fc(m, fc3b, "fc4b", dim_in=output_dim, dim_out=output_dim)
+            fc5b = brew.fc(m, fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
+
+            # Replace fc sum with async if op
+            m.net.Proto().op.extend(self.creat_async_if_op(
+                has_elements_blob,
+                ["fc5", "fc5b"],
+                "fc5sum",
+                "name_x"))
+
+            fc5.Relu([], "fc5sum") \
+               .Softmax([], "pred1") \
+               .LabelCrossEntropy(["label"], ["xent1"]) \
+               .AveragedLoss([], "loss1")
+            fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
+            fc6.Relu([], fc6) \
+               .Softmax([], "pred2") \
+               .LabelCrossEntropy(["label"], ["xent2"]) \
+               .AveragedLoss([], "loss2")
+
+        m.net.Proto().external_input.extend([has_elements_blob])
+
+        blobs_before = count_blobs(m.net.Proto())
+        optim_proto = memonger.optimize_inference_for_dag(
+            m.net, ["name_x/data"], "name_x"
+        )
+        blobs_after = count_blobs(optim_proto)
+        self.assertLess(blobs_after, blobs_before)
+
+        # get AsyncIf op and make sure that its inputs and outputs are shared. Verify internal nets also
+        for op in optim_proto.op:
+            if op.type == "AsyncIf":
+                for blob in op.input:
+                    if has_elements_blob not in blob:
+                        self.assertIn("__m", blob, "Expected shared blob: " + blob)
+                for blob in op.output:
+                    self.assertIn("__m", blob, "Expected shared blob: " + blob)
+                for arg in op.arg:
+                    if arg.name in ["then_net", "else_net"]:
+                        for blob in arg.n.external_input:
+                            self.assertIn("__m", blob, "Expected shared blob: " + blob)
+                        for blob in arg.n.external_output:
+                            self.assertIn("__m", blob, "Expected shared blob: " + blob)
+                        for blob in arg.n.op[0].input:
+                            self.assertIn("__m", blob, "Expected shared blob: " + blob)
+                        for blob in arg.n.op[0].output:
+                            self.assertIn("__m", blob, "Expected shared blob: " + blob)
+
+        # Test networks produce exactly same results
+        data = np.random.randn(batch_size, input_dim).astype(np.float32)
+        label = np.random.randint(
+            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        workspace.RunNetOnce(m.param_init_net)
+        workspace.FeedBlob("name_x/data", data)
+        workspace.FeedBlob("name_x/label", label)
+
+        # check for then_net
+        workspace.FeedBlob(has_elements_blob, np.array(True, dtype='bool'))
+        workspace.RunNetOnce(m.net)
+        loss1 = workspace.FetchBlob("name_x/loss1")
+        loss2 = workspace.FetchBlob("name_x/loss2")
+        workspace.RunNetOnce(optim_proto)
+        optimized_loss1 = workspace.FetchBlob("name_x/loss1")
+        optimized_loss2 = workspace.FetchBlob("name_x/loss2")
+        np.testing.assert_almost_equal(loss1, optimized_loss1)
+        np.testing.assert_almost_equal(loss2, optimized_loss2)
+
+        # check for else_net
+        workspace.FeedBlob(has_elements_blob, np.array(False, dtype='bool'))
+        workspace.RunNetOnce(m.net)
+        loss1 = workspace.FetchBlob("name_x/loss1")
+        loss2 = workspace.FetchBlob("name_x/loss2")
+        workspace.RunNetOnce(optim_proto)
+        optimized_loss1 = workspace.FetchBlob("name_x/loss1")
+        optimized_loss2 = workspace.FetchBlob("name_x/loss2")
+        np.testing.assert_almost_equal(loss1, optimized_loss1)
+        np.testing.assert_almost_equal(loss2, optimized_loss2)
+
+    def creat_async_if_op(self, has_elements_output, input_blobs, output_blob, namescope):
+        then_net = core.Net("then_net")
+        then_net.Proto().type = "async_scheduling"
+        then_net.Sum(input_blobs, output_blob)
+
+        else_net = core.Net("else_net")
+        else_net.Proto().type = "async_scheduling"
+        else_net.Sum(input_blobs, output_blob)
+
+        then_net.Proto().external_output.extend([namescope + "/" + output_blob])
+        else_net.Proto().external_output.extend([namescope + "/" + output_blob])
+
+        async_if = caffe2_pb2.OperatorDef()
+        async_if.type = "AsyncIf"
+        then_net_arg = async_if.arg.add()
+        then_net_arg.name = "then_net"
+        then_net_arg.n.CopyFrom(then_net.Proto())
+
+        else_net_arg = async_if.arg.add()
+        else_net_arg.name = "else_net"
+        else_net_arg.n.CopyFrom(else_net.Proto())
+
+        input_blobs_with_namescope = [namescope + "/" + input_blob for input_blob in input_blobs]
+        async_if.input.extend([has_elements_output])
+        async_if.input.extend(input_blobs_with_namescope)
+        async_if.output.extend([namescope + "/" + output_blob])
+        return [async_if]
 
     def test_rnn(self):
         from caffe2.python import rnn_cell
