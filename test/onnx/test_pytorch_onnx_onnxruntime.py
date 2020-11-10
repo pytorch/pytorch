@@ -905,6 +905,60 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_floating_point(self):
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.is_floating_point():
+                    return x.new_zeros(x.shape)
+                return x.new_zeros(x.shape)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloatingPoint(), x)
+
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.size(0) > 1:
+                    a = x + 2
+                    if a.is_floating_point():
+                        return x + 1
+                    return x + 1
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloatingPoint(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfONNXShapeInference(False)
+    def test_floating_point_infer_dtype(self):
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.size(0) > 1:
+                    a = x + 2
+                    if a.is_floating_point():
+                        return x.new_zeros(x.shape[1:])
+                    return x.new_zeros(x.shape)
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloatingPoint(), x)
+
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.size(0) > 1:
+                    a = x + 2
+                    if a.is_floating_point():
+                        return x + 1
+                    return x
+                return x
+
+        x = torch.randn(2, 3, 4).to(torch.int32)
+        self.run_test(FloatingPoint(), x)
+
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x):
@@ -1471,7 +1525,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CopyModel(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Missing input size (with ellipsis indexing)
+    # TODO: Limited scripting support with ellipsis indexing.
+    #       Due to dependency on input tensor rank being known.
     def test_copy_ellipsis_tracing(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, update):
@@ -1508,7 +1563,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Rand(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # symbolic update for randn
     def test_random_dynamic_size(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
@@ -1866,6 +1920,15 @@ class TestONNXRuntime(unittest.TestCase):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+        class VarianceSqrt(torch.nn.Module):
+            def forward(self, input):
+                y = torch.var(input, 1)
+                return torch.sqrt(y + 1e-8)
+
+        x = torch.randn(1, 2, 3, 300, 300)
+        model = VarianceSqrt()
+        self.run_test(model, x)
+
     def test_var_along_dims(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -2179,6 +2242,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    def test_batchnorm1d_norunningstats(self):
+        x = torch.randn(10, 10)
+        model = torch.nn.BatchNorm1d(10, track_running_stats=False)
+        self.run_test(model, x)
+
+        x = torch.randn(10, 10, 128)
+        self.run_test(model, x)  
+
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
@@ -2187,6 +2258,11 @@ class TestONNXRuntime(unittest.TestCase):
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
+        self.run_test(model, x)
+
+    def test_batchnorm2d_norunningstats(self):
+        x = torch.randn(10, 3, 128, 128)
+        model = torch.nn.BatchNorm2d(3, track_running_stats=False)
         self.run_test(model, x)
 
     def test_batchnorm3d(self):
@@ -4591,7 +4667,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()   # symbolic update needed for unbind: ONNX export of unbind with dynamic number of outputs
     def test_where_condition(self):
         class Model1(torch.nn.Module):
             def forward(self, input):

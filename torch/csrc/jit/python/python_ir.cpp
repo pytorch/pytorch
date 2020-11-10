@@ -735,8 +735,14 @@ void initPythonIRBindings(PyObject* module_) {
             }
             return self->isSubtypeOf(other);
           })
-      .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
-        return self->cast<InterfaceType>() != nullptr;
+      .def(
+          "is_interface_type",
+          [](const std::shared_ptr<Type>& self) {
+            return self->cast<InterfaceType>() != nullptr;
+          })
+      .def("is_class_type", [](const std::shared_ptr<Type>& self) {
+        auto cls = self->cast<ClassType>();
+        return cls != nullptr && !cls->is_module();
       });
 
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
