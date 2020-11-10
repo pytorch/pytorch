@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
@@ -47,6 +49,15 @@ class C10_API SizesAndStrides {
     return sizes_begin() + size();
   }
 
+  IntArrayRef sizes_arrayref() const {
+    return IntArrayRef{sizes_data(), size()};
+  }
+
+  void set_sizes(IntArrayRef newSizes) {
+    resize(newSizes.size());
+    std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
+  }
+
   const int64_t* strides_data() const {
     return strides_.data();
   }
@@ -69,6 +80,10 @@ class C10_API SizesAndStrides {
 
   strides_iterator strides_end() {
     return strides_begin() + size();
+  }
+
+  IntArrayRef strides_arrayref() const {
+    return IntArrayRef{strides_data(), size()};
   }
 
   // Size accessors.

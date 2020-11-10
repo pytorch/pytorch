@@ -56,8 +56,7 @@ public:
   // respect to indices and values
   void raw_resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "raw_resize_ ", err_msg_tensor_metadata_change_not_allowed);
-    sizes_and_strides_.resize(size.size());
-    std::copy(size.begin(), size.end(), sizes_and_strides_.sizes_begin());
+    sizes_and_strides_.set_sizes(size);
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
     refresh_numel();
@@ -127,7 +126,7 @@ public:
         "shrinking the size of dense dimensions (from ", dense_size_original, " to ", dense_size_new, ") on a non-empty sparse tensor is not supported.\n", alt_options_msg);
     }
 
-    const bool size_equals_sizes = size.size() == sizes_and_strides_.size() && memcmp(size.data(), sizes_and_strides_.sizes_data(), sizes_and_strides_.size() * sizeof(*size.data())) == 0;
+    const bool size_equals_sizes = std::equal(size.begin(), size.end(), sizes_and_strides_.size_begin(), sizes_and_strides_.size_end());
     if ((!size_equals_sizes) || (sparse_dim != sparse_dim_) || (dense_dim != dense_dim_)) {
       auto nnz = values().size(0);
       std::vector<int64_t> values_size = {nnz};
@@ -138,8 +137,7 @@ public:
     }
 
     if (!size_equals_sizes) {
-      sizes_and_strides_.resize(size.size());
-      std::copy(size.begin(), size.end(), sizes_and_strides_.sizes_begin());
+      sizes_and_strides_.set_sizes(size);
     }
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
@@ -151,8 +149,7 @@ public:
     TORCH_CHECK(allow_tensor_metadata_change(), "resize_and_clear_ ", err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
 
-    sizes_and_strides_.resize(size.size());
-    std::copy(size.begin(), size.end(), sizes_and_strides_.sizes_begin());
+    sizes_and_strides_.set_sizes(size);
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
 
