@@ -143,22 +143,29 @@ Using the :attr:`dim` argument to compute matrix norms::
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.norm(input, p=None, *, out=None) -> Tensor
 
-Returns the condition number of a matrix.
-The condition number of :attr:`input` is defined as the norm of
-:attr:`input` times the norm of the inverse of :attr:`input`.
+Computes the condition number of a matrix :attr:`input`,
+or of each matrix in a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
+The condition number is defined as the matrix norm of
+:attr:`input` times the matrix norm of the inverse of :attr:`input`.
 
 This function supports real-valued, and only on CPU, complex-valued input.
 
-Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                    batch dimensions.
+.. note:: For `p = {None, 2, -2}` :attr:`input` can be non-square. For other norm types :attr:`input` must be
+          a square matrix or a batch of square matrices. If :attr:`input` does not satisfy the requirement
+          then a RuntimeError will be thrown.
 
-    p (int, float, inf, -inf, 'fro', optional): The order of norm.
-        inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
-        The following norms can be used:
+.. note:: For the batched input if at least one matrix in the batch is not invertible,
+          then the result for all other (possibly) invertible matrices will be erroneously infinity as well.
+
+Args:
+    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+                    where `*` is one or more batch dimensions.
+
+    p (int, float, inf, -inf, 'fro', 'nuc', optional): the type of the matrix norm to use in the computations.
+        The following norms are supported:
 
         =====  ============================
-        ord    norm for matrices
+        p      norm for matrices
         =====  ============================
         None   2-norm, computed directly using the SVD
         'fro'  Frobenius norm
