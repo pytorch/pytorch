@@ -1,11 +1,44 @@
 #include <c10d/frontend.hpp>
 
+#include <ATen/core/Tensor.h>
+#include <ATen/Functions.h>
 #include <c10/util/Exception.h>
 
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace c10d {
+
+namespace {
+
+void maybePreprocessComplexTensor(at::Tensor& tensor) {
+  if(!tensor.is_complex()) {
+    continue;
+  }
+
+  tensor = at::view_as_real(tensor);
+}
+
+void maybePreprocessComplexTensor(std::vector<at::Tensor>& tensors) {
+  for(at::Tensor& t : tensors) {
+    maybePreprocessComplexTensor(tensor);
+  }
+}
+
+void maybePreprocessComplexTensor(std::vector<std::vector<at::Tensor>>& tensors_lists) {
+  for(std::vector<at::Tensor>& t : tensors) {
+    maybePreprocessComplexTensor(tensor);
+  }
+}
+
+bool assertReduceOpSupportsComplexTensor(ReduceOp op) {
+  const static std::unordered_set<ReduceOp> deny_list({ReduceOp::MAX, ReduceOp::MIN, ReduceOp::PRODUCT});
+  TORCH_CHECK(deny_list.count(op) == 0,
+    "all_reduce does not support ", op, "on complex tensors")
+}
+
+}  // namespace anonymous
 
 // Note: We assume that group.WORLD equates default_pg_. Otherwise,
 // we need many additional conditionals to check whether group is WORLD and
@@ -269,6 +302,9 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allReduceMultiGPU(
   AllreduceOptions opts;
   opts.reduceOp = op;
 
+  assertReduceOpSupportsComplexTensor(op);
+  maybePreprocessComplexTensor(tensor_list);
+
   auto work = group->allreduce(tensor_list, opts);
   if (async_op) {
     return work;
@@ -288,6 +324,9 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allReduce(
 
   AllreduceOptions opts;
   opts.reduceOp = op;
+
+  assertReduceOpSupportsComplexTensor(op);
+  maybePreprocessComplexTensor(tensor);
 
   std::vector<at::Tensor> tensors = {std::move(tensor)};
   auto work = group->allreduce(tensors, opts);
@@ -309,6 +348,9 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allReduceCoalesced(
 
   AllreduceCoalescedOptions opts;
   opts.reduceOp = op;
+
+  assertReduceOpSupportsComplexTensor(op);
+  maybePreprocessComplexTensor(tensor);
 
   auto work = group->allreduce_coalesced(tensors, opts);
   if (async_op) {
@@ -393,6 +435,9 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGatherMultiGPU(
     return nullptr;
   }
 
+  maybePreprocessComplexTensor(output_tensor_lists);
+  maybePreprocessComplexTensor(input_tensor_list);
+
   auto work = group->allgather(output_tensor_lists, input_tensor_list);
 
   if (async_op) {
@@ -410,6 +455,9 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGather(
   if (rankNotInGroup(group)) {
     return nullptr;
   }
+
+  maybePreprocessComplexTensor(tensor_list);
+  maybePreprocessComplexTensor(tensor);
 
   std::vector<std::vector<at::Tensor>> output_tensor_lists = {std::move(tensor_list)};
   std::vector<at::Tensor> input_tensor_list = {std::move(tensor)};
@@ -430,6 +478,9 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGatherCoalesced(
   if (rankNotInGroup(group)) {
     return nullptr;
   }
+
+  maybePreprocessComplexTensor(output_tensor_lists);
+  maybePreprocessComplexTensor(input_tensor_lists);
 
   auto work =
       group->allgather_coalesced(output_tensor_lists, input_tensor_list);
