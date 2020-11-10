@@ -330,14 +330,21 @@ class Graph:
 
         def type_repr(o : Any):
             typename = _type_repr(o)
-            register_modules_used(typename)
+            if all(x.isidentifier() for x in typename.split('.')):
+                register_modules_used(typename)
+            else:
+                # this is a constructor type, e.g. typing.List[torch.Tensor]
+                modules_used.add(o.__module__)
+                for sub_type in o.__args__:
+                    # make sure we have torch.Tensor
+                    type_repr(sub_type)
             return typename
 
         for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
-                maybe_default_arg = '' if not node.args else f' = {node.args[0]}'
+                maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:

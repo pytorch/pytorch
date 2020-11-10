@@ -128,8 +128,11 @@ class Tracer(TracerBase):
         sig = inspect.signature(fn_for_analysis)
 
         def proxy_placeholder(name: str):
-            param = sig.parameters[name]
-            default = () if param.default is inspect.Parameter.empty else (param.default,)
+            if name[0] == '*':
+                default = ()
+            else:
+                param = sig.parameters[name]
+                default = () if param.default is inspect.Parameter.empty else (param.default,)
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
 
