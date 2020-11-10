@@ -72,7 +72,7 @@ void FuseWithListUnpack(Node* n) {
       Symbol::fromQualString("attr::_outputs"),
       static_cast<int64_t>(listUnpack_node->outputs().size()));
 
-  for (int64_t i = 0; i < listUnpack_node->outputs().size(); ++i) {
+  for (size_t i = 0; i < listUnpack_node->outputs().size(); ++i) {
     auto new_output = n->addOutput();
     new_output->copyMetadata(listUnpack_node->output(i));
   }
