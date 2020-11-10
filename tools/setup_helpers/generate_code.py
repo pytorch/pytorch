@@ -64,6 +64,7 @@ def generate_code(ninja_global=None,
 
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
