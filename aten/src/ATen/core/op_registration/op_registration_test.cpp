@@ -971,7 +971,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCpp
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int _0) -> ()");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
@@ -980,7 +980,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismat
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int _0) -> ()");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingCppSignatures_thenFails) {
@@ -999,7 +999,7 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCpp
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int a) -> ()");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
@@ -1008,7 +1008,7 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismat
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int a) -> ()");
 }
 
 /**

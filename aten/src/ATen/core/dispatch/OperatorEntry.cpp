@@ -87,7 +87,7 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   // that would also invalidate the old TypedOperatorHandles.
   if (cpp_signature.has_value()) {
     if (cpp_signature_.has_value()) {
-      TORCH_INTERNAL_ASSERT(*cpp_signature == cpp_signature_->signature,
+      TORCH_CHECK(*cpp_signature == cpp_signature_->signature,
         "\nMismatch in kernel C++ signatures\n",
         "  operator: ", (this->schema_.has_value() ? toString(this->schema_->schema) : toString(name_)), "\n",
         "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
