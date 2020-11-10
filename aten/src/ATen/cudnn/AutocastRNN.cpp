@@ -94,7 +94,6 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
             /*allow_type_change=*/true,
             /*include_bias=*/include_bias);
   }
-
   return at::_cudnn_rnn(
       cached_cast(at::kHalf, input),
       needs_cast_and_flatten ? TensorList(redispatch_weight) : weight,

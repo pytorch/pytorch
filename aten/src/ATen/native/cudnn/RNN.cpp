@@ -646,13 +646,15 @@ namespace {
 
       // TODO (igor): need to check bidirectional case
 
-      if (layer_params_from.size() == 3) {
+      // TODO (igor): change projection weight posisiton, otherwise too many edge cases
+
+      if (layer_params_from.size() == 3 && layer_params_to.size() != 3) {
         _vewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
         _vewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
         _vewOrCopyOneParam(layer_params_from[2], layer_params_to[4], copy, allow_type_change);
         continue;
       }
-      if (layer_params_to.size() == 3) {
+      if (layer_params_to.size() == 3 && layer_params_from.size() != 3) {
         _vewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
         _vewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
         _vewOrCopyOneParam(layer_params_from[4], layer_params_to[2], copy, allow_type_change);
@@ -828,7 +830,6 @@ namespace cudnn_rnn {
     MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
                       params{params_arr, params_stride0};
 
-
     // Copy weights
     _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
     if (set_orig_weights_to_flat_buf) {
@@ -850,6 +851,7 @@ namespace cudnn_rnn {
         }
       }
     }
+
     return std::make_tuple(weight_buf, params_arr);
   }
 
