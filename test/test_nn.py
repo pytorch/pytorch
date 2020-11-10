@@ -6627,7 +6627,6 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(output1.data, prev_output)
                         self.assertNotEqual(output2.data, prev_output)
                 prev_output = output1.data
-# TOOD (igor): all up to here from last TODO
 
     def _verify_pixel_shuffle(self, input, output, upscale_factor):
         for c in range(output.size(1)):
@@ -12651,8 +12650,8 @@ class TestNNDeviceType(NNTestCase):
 
             hidden0 = None
             if not use_default_hiddens:
-                real_hid_size = hidden_size if proj_size == 0 else proj_size
-                hidden0 = (torch.randn(num_directions * num_layers, len(lengths), real_hid_size,
+                real_hidden_size = hidden_size if proj_size == 0 else proj_size
+                hidden0 = (torch.randn(num_directions * num_layers, len(lengths), real_hidden_size,
                                        device=device, dtype=dtype),
                            torch.randn(num_directions * num_layers, len(lengths), hidden_size,
                                        device=device, dtype=dtype))

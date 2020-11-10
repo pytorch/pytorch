@@ -614,7 +614,7 @@ namespace {
     return data_ptrs;
   }
 
-  void _vewOrCopyOneParam(const Tensor& param_from, const Tensor& param_to,
+  void _viewOrCopyOneParam(const Tensor& param_from, const Tensor& param_to,
                           bool copy, bool allow_type_change=false) {
     // if copying, allow_type_change may be true or false.
     // if viewing, allow_type_change must be false.
@@ -644,21 +644,21 @@ namespace {
       // case specially, because will need to copy 0->0, 1->1, 2->4. This case can be uniquely
       // identified by checking if number of defined parameters for each layer is 3.
       if (layer_params_from.size() == 3 && layer_params_to.size() != 3) {
-        _vewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
-        _vewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
-        _vewOrCopyOneParam(layer_params_from[2], layer_params_to[4], copy, allow_type_change);
+        _viewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
+        _viewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
+        _viewOrCopyOneParam(layer_params_from[2], layer_params_to[4], copy, allow_type_change);
         continue;
       }
       if (layer_params_to.size() == 3 && layer_params_from.size() != 3) {
-        _vewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
-        _vewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
-        _vewOrCopyOneParam(layer_params_from[4], layer_params_to[2], copy, allow_type_change);
+        _viewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
+        _viewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
+        _viewOrCopyOneParam(layer_params_from[4], layer_params_to[2], copy, allow_type_change);
         continue;
       }
       for (auto a = layer_params_from.begin(), b = layer_params_to.begin();
             a != layer_params_from.end() && b != layer_params_to.end();
             ++a, ++b) {
-        _vewOrCopyOneParam(*a, *b, copy, allow_type_change);
+        _viewOrCopyOneParam(*a, *b, copy, allow_type_change);
       }
     }
   }
@@ -681,7 +681,7 @@ namespace {
   }
 
   std::vector<int64_t> _hidden_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
-    if (rnn.proj_size != 0) {
+    if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
       return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.proj_size};
     } else {
       return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.hidden_size};
@@ -1557,8 +1557,7 @@ ONE_HIDDEN_RNN(rnn_relu, CUDNN_RNN_RELU)
 void lstm_cudnn(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train,
-      bool bidirectional, bool batch_first) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   auto result = _cudnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       CUDNN_LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
   output = result.first;

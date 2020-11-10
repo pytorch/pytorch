@@ -44,10 +44,11 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
   // weight_stride0 is the number of weight tensors per layer and direction, as seen by model.parameters().
   // If bias is enabled, there are 4 such tensors (ih and hh weights, ih and hh biases).
   // If bias is not enabled, there are 2 (ih and hh weights).
-  // This organization holds for all rnn types (RNN, GRU, and LSTM).
+  // This organization holds for all rnn types (RNN, GRU, and LSTM). If LSTM with projections is
+  // used, additional hr weight is added.
   if (proj_size > 0 && proj_size != hidden_size) {
     TORCH_INTERNAL_ASSERT((weight_stride0 == 3) || (weight_stride0 == 5),
-                          "weight_stride0 must be 3 (if no bias) or 5 (if bias) for RNNs with projections.  Received ",
+                          "weight_stride0 must be 3 (if no bias) or 5 (if bias) for LSTM with projections.  Received ",
                           weight_stride0);
   } else {
     TORCH_INTERNAL_ASSERT((weight_stride0 == 2) || (weight_stride0 == 4),
