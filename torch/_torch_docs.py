@@ -2640,7 +2640,7 @@ Computes the dot product of two 1D tensors. The vdot(a, b) function handles comp
 differently than dot(a, b). If the first argument is complex, the complex conjugate of the
 first argument is used for the calculation of the dot product.
 
-.. note::
+.. note:: 
 
     Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
     of two 1D tensors with the same number of elements.
@@ -2672,7 +2672,7 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 
 .. note::
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-    if eigenvalues and eigenvectors are all real valued.
+    for :func:`torch.symeig`
 
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors

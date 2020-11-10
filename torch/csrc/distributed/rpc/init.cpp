@@ -433,9 +433,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   :meth:`~torch.distributed.autograd.get_gradients` should be
                   used to retrieve the gradients. If ``dist_autograd_ctx_id``
                   is ``None``, it is assumed that this is a local autograd graph
-                  and we only perform a local backward pass. In the local case,
-                  the node calling this API has to be the owner of the RRef.
-                  The value of the RRef is expected to be a scalar Tensor.
+                  and we only perform a local backward pass. The value of the
+                  RRef is expected to be a scalar Tensor.
 
                 Arguments:
                     dist_autograd_ctx_id (int, optional): The distributed
