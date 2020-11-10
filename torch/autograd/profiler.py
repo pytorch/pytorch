@@ -1183,19 +1183,20 @@ def build_table(
     name_column_width = max([len(evt.key) for evt in events]) + 4
 
     DEFAULT_COLUMN_WIDTH = 12
+    DEFAULT_WIDE_COLUMN_WIDTH = 55
 
-    shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
-    shapes_column_width = min(shapes_column_width, 45)
+    SHAPES_COLUMN_WIDTH = max([len(str(evt.input_shapes)) for evt in events]) + 4
+    SHAPES_COLUMN_WIDTH = min(SHAPES_COLUMN_WIDTH, DEFAULT_WIDE_COLUMN_WIDTH)
 
-    src_column_width = None
+    SRC_COLUMN_WIDTH = None
     stacks = []
     for evt in events:
         if evt.stack is not None and len(evt.stack) > 0:
             stacks.append(evt.stack)
     has_stack = len(stacks) > 0
     if has_stack:
-        src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
-        src_column_width = min(src_column_width, 75)
+        SRC_COLUMN_WIDTH = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+        SRC_COLUMN_WIDTH = min(SRC_COLUMN_WIDTH, DEFAULT_WIDE_COLUMN_WIDTH)
 
     headers = [
         'Name',
@@ -1235,7 +1236,7 @@ def build_table(
     row_format_lst = [""]
     header_sep_lst = [""]
     line_length_lst = [-SPACING_SIZE]
-    MAX_STACK_ENTRY = 5
+    MAX_STACK_ENTRY = 10
 
     def add_column(padding, text_dir='>'):
         row_format_lst[0] += '{: ' + text_dir + str(padding) + '}' + (' ' * SPACING_SIZE)
@@ -1248,11 +1249,11 @@ def build_table(
 
     if has_input_shapes:
         headers.append('Input Shapes')
-        add_column(shapes_column_width)
+        add_column(SHAPES_COLUMN_WIDTH)
 
     if has_stack:
         headers.append('Source Location')
-        add_column(src_column_width, text_dir='<')
+        add_column(SRC_COLUMN_WIDTH, text_dir='<')
 
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
@@ -1279,6 +1280,12 @@ def build_table(
     append(row_format.format(*headers))
 
     append(header_sep)
+
+    def trim_path(path):
+        if len(path) > SRC_COLUMN_WIDTH:
+            return "..." + path[len(path) - SRC_COLUMN_WIDTH + 3:]
+        else:
+            return path
 
     event_limit = 0
     for evt in events:
@@ -1328,18 +1335,18 @@ def build_table(
         if append_node_id:
             row_values.append(evt.node_id)
         if has_input_shapes:
-            row_values.append(str(evt.input_shapes)[:shapes_column_width])
+            row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
+
+        evt_has_stack = evt.stack is not None and len(evt.stack) > 0
         if has_stack:
-            src_field = ""
-            if len(evt.stack) > 0:
-                src_field = evt.stack[0][:src_column_width]
+            src_field = trim_path(evt.stack[0]) if evt_has_stack else ""
             row_values.append(src_field)
         append(row_format.format(*row_values))
 
-        if has_stack:
+        if has_stack and evt_has_stack:
             empty_headers = [""] * (len(headers) - 1)
-            for entry in evt.stack[1:MAX_STACK_ENTRY]:
-                append(row_format.format(*(empty_headers + [entry[:src_column_width]])))
+            for path in evt.stack[1:MAX_STACK_ENTRY]:
+                append(row_format.format(*(empty_headers + [trim_path(path)])))
             empty_headers.append("")
             append(row_format.format(*empty_headers))
 
