@@ -217,10 +217,10 @@ class _RemoteModule(nn.Module):
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:  # type: ignore[return]
         _raise_not_supported(self.register_parameter.__name__)
 
-    def add_module(self, name: str, module: Optional["Module"]) -> None:  # type: ignore[return]
+    def add_module(self, name: str, module: Optional[Module]) -> None:  # type: ignore[return]
         _raise_not_supported(self.add_module.__name__)
 
-    def apply(self: T, fn: Callable[["Module"], None]) -> T:  # type: ignore[return]
+    def apply(self: T, fn: Callable[[Module], None]) -> T:  # type: ignore[return]
         _raise_not_supported(self.apply.__name__)
 
     def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
@@ -244,12 +244,12 @@ class _RemoteModule(nn.Module):
     def bfloat16(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.bfloat16.__name__)
 
-    def to(self, *args, **kwargs):  # type: ignore[return]
+    def to(self, *args, **kwargs) -> T:  # type: ignore[return]
         _raise_not_supported(self.to.__name__)
 
-    def register_backward_hook(  # type: ignore[return]
-        self, hook: Callable[["Module", _grad_t, _grad_t], Union[None, Tensor]]
-    ) -> RemovableHandle:
+    def register_backward_hook(
+        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, Tensor]]
+    ) -> RemovableHandle:  # type: ignore[return]
         _raise_not_supported(self.register_backward_hook.__name__)
 
     def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
@@ -258,7 +258,7 @@ class _RemoteModule(nn.Module):
     def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
         _raise_not_supported(self.register_forward_hook.__name__)
 
-    def state_dict(self, destination=None, prefix="", keep_vars=False):  # type: ignore[return]
+    def state_dict(self, destination=None, prefix="", keep_vars=False):
         _raise_not_supported(self.state_dict.__name__)
 
     def load_state_dict(
@@ -273,29 +273,29 @@ class _RemoteModule(nn.Module):
             "Method ``parameters`` not supported for RemoteModule. Please use ``remote_parameters`` instead."
         )
 
-    def named_parameters(  # type: ignore[return]
+    def named_parameters(
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+    ) -> Iterator[Tuple[str, Tensor]]:  # type: ignore[return]
         _raise_not_supported(self.named_parameters.__name__)
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
         _raise_not_supported(self.buffers.__name__)
 
-    def named_buffers(  # type: ignore[return]
+    def named_buffers(
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+    ) -> Iterator[Tuple[str, Tensor]]:  # type: ignore[return]
         _raise_not_supported(self.named_buffers.__name__)
 
-    def children(self) -> Iterator["Module"]:  # type: ignore[return]
+    def children(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.children.__name__)
 
-    def named_children(self) -> Iterator[Tuple[str, "Module"]]:  # type: ignore[return]
+    def named_children(self) -> Iterator[Tuple[str, Module]]:  # type: ignore[return]
         _raise_not_supported(self.named_children.__name__)
 
-    def modules(self) -> Iterator["Module"]:  # type: ignore[return]
+    def modules(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.modules.__name__)
 
-    def named_modules(self, memo: Optional[Set["Module"]] = None, prefix: str = ""):  # type: ignore[return]
+    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = ""):  # type: ignore[return]
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
