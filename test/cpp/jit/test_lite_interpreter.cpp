@@ -714,31 +714,6 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   AT_ASSERT(resd == refd);
 }
 
-TEST(LiteInterpreterTest, ExtraFiles) {
-  const auto script = R"JIT(
-    def forward(self):
-        x = torch.rand(5, 5)
-        x = x.mm(x)
-        return x
-  )JIT";
-
-  auto module =
-      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
-  module->define(script);
-  std::ostringstream oss;
-  std::unordered_map<std::string, std::string> extra_files;
-  extra_files["metadata.json"] = "abc";
-  module->_save_for_mobile(oss, extra_files);
-
-  std::istringstream iss(oss.str());
-  caffe2::serialize::IStreamAdapter adapter{&iss};
-  std::unordered_map<std::string, std::string> loaded_extra_files;
-  loaded_extra_files["metadata.json"] = "";
-  auto loaded_module =
-      torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
-  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
-}
-
 namespace {
 static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(

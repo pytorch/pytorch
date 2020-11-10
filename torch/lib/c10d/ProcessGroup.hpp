@@ -77,7 +77,9 @@ class ProcessGroup {
   // this will be bound using pybind.
   class Work {
    public:
-    Work(int rank = -1, OpType opType = OpType::UNKNOWN, const char* profilingTitle = nullptr);
+    Work();
+
+    Work(int rank, OpType opType);
 
     virtual ~Work();
 
@@ -154,10 +156,6 @@ class ProcessGroup {
 
     // Operation type that this work object refers to.
     OpType opType_;
-
-    // When profiling, the callback to record end of operation event. This
-    // callback needs to be called when collective operation is complete.
-    std::function<void()> recordFunctionEndCallback_;
   };
 
   explicit ProcessGroup(int rank, int size);

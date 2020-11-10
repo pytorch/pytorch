@@ -6,7 +6,7 @@ layout(std430) uniform;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, rgba32f) uniform PRECISION          image3D   uOutput;
+layout(set = 0, binding = 0, rgba16f) uniform PRECISION          image3D   uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION          sampler3D uInput0;
 layout(set = 0, binding = 2)          uniform PRECISION restrict Block {
   float alpha;

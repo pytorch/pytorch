@@ -135,11 +135,11 @@ Tensor& hardtanh_(
 }
 
 Tensor relu(const Tensor& self) {
-  return ops::clamp(self, 0, c10::nullopt);
+  return ops::clamp(self, 0, nullopt);
 }
 
 Tensor& relu_(Tensor& self) {
-  return ops::clamp_(self, 0, c10::nullopt);
+  return ops::clamp_(self, 0, nullopt);
 }
 
 #ifdef USE_VULKAN_API
