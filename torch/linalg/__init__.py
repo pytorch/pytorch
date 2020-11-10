@@ -210,7 +210,9 @@ Args:
                     batch dimensions consisting of :math:`m \times n` matrices.
     full_matrices (bool, optional): controls the shape of returned `U` and `V`
     compute_uv (bool, optional): option whether to compute `U` and `V` or not
-    out (tuple, optional): the output tuple of tensors
+    out (tuple, optional): the output tuple of tensors. If compute_uv==False, only the 2nd item is used.
+                           The 1st and 3rd argument must be tensors, but they are ignored. E.g. you can
+                           pass `(torch.Tensor(), out_S, torch.Tensor())`
 
 Example::
 
@@ -249,19 +251,13 @@ Example::
         return _linalg.linalg_svd(a, full_matrices, compute_uv, out=out)
 
     # harder case: C++ returns (0-tensor, S, 0-tensor) but we want to return
-    # (None, S, None) instead
-    if out is not None:
-        if type(out) != torch.Tensor:
-            raise TypeError("linalg.svd: argument 'out' must be a Tensor when "
-                            "compute_uv==False, not %s" % type(out).__name__)
-        out = (torch.Tensor(), out, torch.Tensor())
+    # (None, S, None) instead. Moreover, we want to return a value of type
+    # torch.return_types.linalg_svd (which is a PyStructSequence). However,
+    # this type is not directly exposed by pytorch, so we get a reference to
+    # it by calling type() on USV.
     USV = _linalg.linalg_svd(a, full_matrices, compute_uv, out=out)
-    # we want to return a value of type torch.return_types.linalg_svd
-    # (which is a PyStructSequence). However, this type is not directly
-    # exposed by pytorch, so we get a reference to it by calling type() on
-    # USV.
-    USV_TYPE = type(USV)
-    return USV_TYPE((None, USV.S, None))
+    USV_type = type(USV)
+    return USV_type((None, USV.S, None))
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor

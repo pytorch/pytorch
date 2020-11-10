@@ -1048,7 +1048,8 @@ class TestLinalg(TestCase):
             assert USV.V is None
             # check linalg.svd agains linalg.svd(out=...)
             out_S = torch.empty_like(USV.S)
-            USV = torch.linalg.svd(t, full_matrices, compute_uv=False, out=out_S)
+            out = (torch.Tensor(), out_S, torch.Tensor())
+            USV = torch.linalg.svd(t, full_matrices, compute_uv=False, out=out)
             assert USV.U is None
             assert USV.S is out_S
             self.assertEqual(USV.S, np_s)
