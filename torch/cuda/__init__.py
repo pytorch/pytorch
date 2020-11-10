@@ -462,16 +462,15 @@ def _lazy_new(cls, *args, **kwargs):
     return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
-class GetDeviceProtocol(Protocol):
-    def get_device(self) -> int:
-        ...
-
 class _CudaBase(object):
     is_cuda = True
     is_sparse = False
 
-    def type(self: GetDeviceProtocol, *args, **kwargs):
-        with device(self.get_device()):
+    def type(self, *args, **kwargs):
+        # We could use a Protocol here to tell mypy that self has `get_device` method
+        # but it is only available on Python >= 3.8 on typing or mypy_extensions on
+        # Python >= 3.6
+        with device(self.get_device()):  # type: ignore
             return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new
