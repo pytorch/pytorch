@@ -1622,12 +1622,26 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
     } else {
       result = s_max / s_min;
     }
-    // a trick to convert FLT_MAX or DBL_MAX to INFINITY
-    // result might also contains infs already then inf + inf - inf = nan
-    // this will get replaced by inf
-    result = result + result - result;
-    result = at::nan_to_num(result, INFINITY);
-    return result;
+    // convert FLT_MAX or DBL_MAX to INFINITY for NumPy compatibility
+    switch (result.scalar_type()) {
+      case ScalarType::Double: {
+        Scalar dbl_max = std::numeric_limits<double>::max();  // DBL_MAX
+        Scalar inf = std::numeric_limits<double>::infinity();  // HUGE_VAL
+        return at::where(result == dbl_max, inf, result);
+      }
+      case ScalarType::Float: {
+        Scalar flt_max = std::numeric_limits<float>::max();  // FLT_MAX
+        float inf = std::numeric_limits<float>::infinity();  // HUGE_VALF
+        // Scalar.dtype() is always ScalarType::Double for isFloatingPoint() = true
+        // and at::where doesn't allow arguments with different dtype
+        // so let's use 0-dim tensor filled with inf
+        Tensor inf_tensor = at::empty({}, result.options());
+        at::fill_(inf_tensor, inf);
+        return at::where(result == flt_max, inf_tensor, result);
+      }
+      default:
+        TORCH_CHECK(false, "linalg_cond got an unexpected result type ", toString(result.scalar_type()));
+    }
   }
 
   // ord == ±1 ord == ±inf
