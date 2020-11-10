@@ -160,7 +160,8 @@ class TestForeach(TestCase):
     #
     # Pointwise ops
     #
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_addcmul(self, device, dtype):
         if self.device_type == 'cpu':
             if dtype == torch.half:
@@ -171,7 +172,7 @@ class TestForeach(TestCase):
 
         self._test_pointwise_op(device, dtype, torch._foreach_addcmul, torch._foreach_addcmul_, torch.addcmul)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_addcdiv(self, device, dtype):
         if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
             with self.assertRaisesRegex(RuntimeError,
@@ -262,7 +263,7 @@ class TestForeach(TestCase):
     # Ops with scalar
     #
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_int_scalar(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -304,7 +305,7 @@ class TestForeach(TestCase):
     # As optimizers work with float tensors, the result will always be torch.float32 for now.
     # Current schema is using 'float[]' as scalar list type.
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_int_scalarlist(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -350,7 +351,7 @@ class TestForeach(TestCase):
                     self.assertEqual(res, tensors)
 
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_float_scalar(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -394,7 +395,7 @@ class TestForeach(TestCase):
                     self.assertEqual(tensors, expected)
 
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_float_scalarlist(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -455,7 +456,7 @@ class TestForeach(TestCase):
                     self.assertEqual(tensors, expected)
 
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_complex_scalar(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -493,7 +494,7 @@ class TestForeach(TestCase):
                     foreach_bin_op_(tensors, scalar)
                     self.assertEqual(res, tensors)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_complex_scalarlist(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -519,7 +520,7 @@ class TestForeach(TestCase):
                     foreach_bin_op_(tensors, scalars)
 
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_bool_scalar(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -570,7 +571,7 @@ class TestForeach(TestCase):
                         self.assertEqual(tensors, expected)
 
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_bool_scalarlist(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
@@ -663,7 +664,7 @@ class TestForeach(TestCase):
                             foreach_bin_op_(tensors, scalars)
                             self.assertEqual(res, tensors)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_add_with_different_size_tensors(self, device, dtype):
         if dtype == torch.bool:
             return
@@ -673,7 +674,7 @@ class TestForeach(TestCase):
         torch._foreach_add_(tensors, 1)
         self.assertEqual(expected, tensors)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
         for tensors in [[torch.randn([0])]]:
@@ -683,7 +684,7 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors, 1)
             self.assertEqual(res, tensors)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_add_scalar_with_overlapping_tensors(self, device, dtype):
         tensors = [torch.ones(1, 1, device=device, dtype=dtype).expand(2, 1, 3)]
         expected = [torch.tensor([[[2, 2, 2]], [[2, 2, 2]]], dtype=dtype, device=device)]
@@ -755,12 +756,12 @@ class TestForeach(TestCase):
             with self.assertRaisesRegex(RuntimeError, r", got \[10, 10\] and \[11, 11\]"):
                 bin_op_(tensors1, tensors2)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_add_list(self, device, dtype):
         self._test_bin_op_list(device, dtype, torch._foreach_add, torch._foreach_add_, torch.add)
         self._test_bin_op_list_alpha(device, dtype, torch._foreach_add, torch._foreach_add_, torch.add)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_sub_list(self, device, dtype):
         if dtype == torch.bool:
             with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
@@ -772,11 +773,11 @@ class TestForeach(TestCase):
             self._test_bin_op_list(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
             self._test_bin_op_list_alpha(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_mul_list(self, device, dtype):
         self._test_bin_op_list(device, dtype, torch._foreach_mul, torch._foreach_mul_, torch.mul)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_div_list(self, device, dtype):
         if dtype in torch.testing.integral_types_and(torch.bool):
             if self.device_type == 'cpu':
@@ -800,7 +801,7 @@ class TestForeach(TestCase):
             self.assertEqual(res, tensors1)
             self.assertEqual(tensors1, res)
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_add_list_different_sizes(self, device, dtype):
         tensors1 = [torch.zeros(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
         tensors2 = [torch.ones(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
@@ -811,7 +812,7 @@ class TestForeach(TestCase):
         self.assertEqual(res, [torch.ones(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)])
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=True))
     def test_add_list_slow_path(self, device, dtype):
         # different strides
         tensor1 = torch.zeros(10, 10, device=device, dtype=dtype)
