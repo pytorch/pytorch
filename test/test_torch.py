@@ -12055,6 +12055,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumprod_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
