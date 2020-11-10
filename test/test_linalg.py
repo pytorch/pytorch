@@ -428,7 +428,7 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, result)
 
         norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
-        input_sizes = [(3, 3), (2, 3, 3, 3)]
+        input_sizes = [(32, 32), (2, 3, 3, 3)]
         for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
             for ord in norm_types:
@@ -437,6 +437,13 @@ class TestLinalg(TestCase):
                     with self.assertRaisesRegex(RuntimeError, "frobenius norm not supported for complex tensors"):
                         torch.linalg.cond(input, ord)
                     continue
+                run_test_case(input, ord)
+
+        # test non-square input
+        input_sizes = [(16, 32), (32, 16), (2, 3, 5, 3), (2, 3, 3, 5)]
+        for input_size in input_sizes:
+            input = torch.randn(*input_size, dtype=dtype, device=device)
+            for ord in [2, -2, None]:
                 run_test_case(input, ord)
 
         # test for singular input
