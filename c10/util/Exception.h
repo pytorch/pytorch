@@ -169,6 +169,12 @@ class C10_API ValueError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for assertions.  These turn into AssertionError
+// when they cross to Python.
+class C10_API AssertionError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for invalid types.  These turn into
 // TypeError when they cross to Python.
 class C10_API TypeError : public Error {
