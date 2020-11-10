@@ -32,6 +32,9 @@ Supports real and complex inputs. Backpropagation for complex inputs is only sup
           If :attr:`input` is a batch of matrices, then the error message will include the batch index
           of the first matrix that is not Hermitian positive-definite.
 
+.. warning:: This function always checks whether :attr:`input` is a Hermitian positive-definite matrix
+             using `info` argument to LAPACK/MAGMA call. For CUDA this causes cross-device memory synchronization.
+
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian positive-definite
                     :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
