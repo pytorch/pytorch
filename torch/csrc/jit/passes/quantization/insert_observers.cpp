@@ -499,8 +499,6 @@ class InsertObserversHelper {
   // want to add to the module instance that has the block
   std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
-  // Type of quantization for this pass.
-  QuantType quant_type_ = QuantType::STATIC;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.

@@ -73,7 +73,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight', 'quan
             raise ValueError("QConfigDynamic received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         if quant_type is None:
-          quant_type = QuantType.DYNAMIC
+            quant_type = QuantType.DYNAMIC
         return super(QConfigDynamic, cls).__new__(cls, activation, weight, quant_type)
 
 default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
