@@ -10205,6 +10205,11 @@ class TestTorchDeviceType(TestCase):
         expected = torch.diag(x.contiguous().view(-1))
         self.assertEqual(result, expected)
 
+        # Complex number support
+        result = torch.diagflat(torch.ones(4, dtype=torch.complex128))
+        expected = torch.eye(4, dtype=torch.complex128)
+        self.assertEqual(result, expected)
+
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
     @onlyOnCPUAndCUDA
     @skipCUDAIfNoMagma
