@@ -14,7 +14,7 @@ from torch.testing import \
      floating_types, floating_types_and, floating_and_complex_types,
      floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack,
      expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
