@@ -347,9 +347,10 @@ class Quantizer:
 
         # match the patterns that will get quantized
         standalone_module_names = prepare_custom_config_dict.get("standalone_module_name", None)
+        standalone_module_classes = prepare_custom_config_dict.get("standalone_module_class", None)
         custom_module_classes = get_custom_module_class_keys(prepare_custom_config_dict, "float_to_observed_custom_module_class")
         matches = self._find_matches(
-            model.graph, self.modules, self.patterns, standalone_module_names, custom_module_classes)
+            model.graph, self.modules, self.patterns, standalone_module_names, standalone_module_classes, custom_module_classes)
 
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
@@ -826,7 +827,9 @@ class Quantizer:
 
     def _find_matches(
             self, graph, modules, patterns,
-            standalone_module_names=None, custom_module_classes=None):
+            standalone_module_names=None,
+            standalone_module_classes=None,
+            custom_module_classes=None):
         """
         Matches the nodes in the input graph to quantization patterns, and
         outputs the information needed to quantize them in future steps.
@@ -849,6 +852,12 @@ class Quantizer:
         """
         if custom_module_classes is None:
             custom_module_classes = []
+
+        if standalone_module_classes is None:
+            standalone_module_classes = []
+
+        if standalone_module_names is None:
+            standalone_module_names = []
 
         match_map = {}
         all_matched = set()
@@ -884,9 +893,8 @@ class Quantizer:
                     node, [node], None, CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
 
         def is_standalone_module(module_path):
-            if standalone_module_names is None:
-                return False
-            return module_path in standalone_module_names
+            return module_path in standalone_module_names or \
+                type(self.modules[node.target]) in standalone_module_classes
 
         # add standalone modules to the match
         for node in graph.nodes:
