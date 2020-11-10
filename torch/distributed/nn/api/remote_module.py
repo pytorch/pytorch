@@ -211,7 +211,7 @@ class _RemoteModule(nn.Module):
 
     def register_buffer(
         self, name: str, tensor: Optional[Tensor], persistent: bool = True
-    ) -> None:  # type: ignore[return]
+    ) -> None:
         _raise_not_supported(self.register_buffer.__name__)
 
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
@@ -265,7 +265,7 @@ class _RemoteModule(nn.Module):
         self,
         state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
         strict: bool = True,
-    ):  # type: ignore[return]
+    ):
         _raise_not_supported(self.load_state_dict.__name__)
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
@@ -295,7 +295,7 @@ class _RemoteModule(nn.Module):
     def modules(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.modules.__name__)
 
-    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = ""):  # type: ignore[return]
+    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = ""):
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
@@ -307,7 +307,7 @@ class _RemoteModule(nn.Module):
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
 
-    def zero_grad(self, set_to_none: bool = False) -> None:  # type: ignore[return]
+    def zero_grad(self, set_to_none: bool = False) -> None:
         _raise_not_supported(self.zero_grad.__name__)
 
     def share_memory(self: T) -> T:  # type: ignore[return]
