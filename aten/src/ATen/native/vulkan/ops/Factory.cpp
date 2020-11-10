@@ -30,7 +30,7 @@ Tensor empty_strided(
     const IntArrayRef sizes,
     const IntArrayRef /* strides */,
     const optional<ScalarType> dtype,
-    const optional<Layout> layout,
+    const optional<c10::Layout> layout,
     const optional<Device> device,
     const optional<bool> pin_memory) {
   return empty_memory_format(
