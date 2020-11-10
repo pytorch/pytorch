@@ -133,6 +133,8 @@ Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
     const Shader::Descriptor& shader_descriptor) {
+  std::cout << "prologue start" << std::endl; 
+
   Context* const context = api::context();
   const GPU gpu = context->gpu();
   Descriptor& descriptor = context->descriptor();
@@ -153,6 +155,7 @@ Descriptor::Set dispatch_prologue(
         gpu.adapter->local_work_group_size(),
       }));
 
+  std::cout << "prologue fin" << std::endl; 
   return descriptor.pool.allocate(shader_layout);
 }
 
@@ -160,8 +163,11 @@ void dispatch_epilogue(
     Command::Buffer& command_buffer,
     const Descriptor::Set& descriptor_set,
     const Shader::WorkGroup& global_work_group) {
+  std::cout << "epilogue start" << std::endl; 
   command_buffer.bind(descriptor_set);
+  std::cout << "epilogue bounded" << std::endl; 
   command_buffer.dispatch(global_work_group);
+  std::cout << "epilogue fin" << std::endl; 
 }
 
 } // namespace api

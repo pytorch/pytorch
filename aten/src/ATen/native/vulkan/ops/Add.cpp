@@ -13,6 +13,8 @@ Tensor add_scalar(
     const Scalar alpha) {
   api::Context* const context = api::context();
 
+  std::cout << "Add scalar == " << std::endl;
+
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   const vTensor& v_self = convert(self);
 
@@ -67,6 +69,8 @@ Tensor& add_scalar_(
     const Scalar alpha) {
   api::Context* const context = api::context();
 
+  std::cout << "Add scalar == " << std::endl;
+
   TORCH_CHECK(
       self_arg.is_vulkan(),
       "Vulkan: In-place add is only supported on Vulkan tensors.");
@@ -114,17 +118,25 @@ Tensor add_tensor(
     const Scalar alpha) {
   api::Context* const context = api::context();
 
+  std::cout << "Add tensor1 == " << std::endl;
+
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   const vTensor& v_self = convert(self);
 
   const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
   const vTensor& v_other = convert(other);
 
+  std::cout << "Creating output ~ " << std::endl;
+  std::cout << "self:  " << self_arg.sizes() << std::endl;
+  std::cout << "other: " << other_arg.sizes() << std::endl;
+
   vTensor v_output{
     context,
     self.sizes(),
     self.options(),
   };
+
+  std::cout << "Creating command buffer ~ " << std::endl;
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
@@ -136,6 +148,7 @@ Tensor add_tensor(
         alpha.to<float>(),
       };
 
+      std::cout << "Dispatching ~ " << std::endl;
       context->dispatch(
           command_buffer,
           {
@@ -164,8 +177,10 @@ Tensor add_tensor(
     }
   }
   command_buffer.end();
+  std::cout << "Submitting command buffer ~ " << std::endl;
   command_buffer.submit(context->gpu().queue);
 
+  std::cout << "Fin ~ " << std::endl;
   return convert(v_output);
 }
 
@@ -174,6 +189,8 @@ Tensor& add_tensor_(
     const Tensor& other_arg,
     const Scalar alpha) {
   api::Context* const context = api::context();
+  
+  std::cout << "Add tensor2 == " << std::endl;
 
   TORCH_CHECK(
       self_arg.is_vulkan(),
