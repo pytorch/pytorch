@@ -1492,7 +1492,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
                          std::move(std::get<2>(result)));
 }
 
-// TODO (igor): add projections here?
 std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
     const Tensor& w_ih, const Tensor& w_hh,
@@ -1502,7 +1501,6 @@ std::tuple<Tensor, Tensor> lstm_cell(
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
-// TODO (igor): does this need projections?
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
 _thnn_differentiable_lstm_cell_backward(
     const Tensor& grad_hy,

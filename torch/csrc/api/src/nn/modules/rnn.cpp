@@ -186,7 +186,6 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.input_size(),
               static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
               options_base.hidden_size(),
-              // TODO (igor): probably not need to support projections here?
               0,
               options_base.num_layers(),
               options_base.batch_first(),
@@ -652,13 +651,13 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
   if (!nonlinearity_str.empty() && nonlinearity_str != "kTanh") {
     stream << ", nonlinearity=" << nonlinearity_str;
   }
-  stream << ")"; 
+  stream << ")";
 }
 
 template <typename Derived>
 void RNNCellImplBase<Derived>::check_forward_input(const Tensor& input) const {
   TORCH_CHECK(
-    input.size(1) == options_base.input_size(), 
+    input.size(1) == options_base.input_size(),
     "input has inconsistent input_size: got ", input.size(1), " expected ", options_base.input_size());
 }
 

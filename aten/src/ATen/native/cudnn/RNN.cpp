@@ -393,12 +393,12 @@ namespace {
     int64_t linear_id = 8;
     FilterDescriptor lin_layer_mat_desc;
     AT_CUDNN_CHECK(cudnnGetRNNLinLayerMatrixParams(
-        /*handle=*/handle, 
+        /*handle=*/handle,
         /*rnnDesc=*/rnn_desc.desc(),
-        /*layer=*/layer, 
+        /*layer=*/layer,
         /*xDesc=*/x_desc.desc(),
         /*wDesc=*/w_desc.desc(),
-        /*w=*/weight_buf.data_ptr(), 
+        /*w=*/weight_buf.data_ptr(),
         /*linLayerID=*/linear_id,
         /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
         /*linLayerMat=*/&matrix_pointer));
@@ -643,11 +643,6 @@ namespace {
       // are used, weights layout will be w_ih, w_hh, b_ih, b_hh, w_hr. So need to handle no-bias
       // case specially, because will need to copy 0->0, 1->1, 2->4. This case can be uniquely
       // identified by checking if number of defined parameters for each layer is 3.
-
-      // TODO (igor): need to check bidirectional case
-
-      // TODO (igor): change projection weight posisiton, otherwise too many edge cases
-
       if (layer_params_from.size() == 3 && layer_params_to.size() != 3) {
         _vewOrCopyOneParam(layer_params_from[0], layer_params_to[0], copy, allow_type_change);
         _vewOrCopyOneParam(layer_params_from[1], layer_params_to[1], copy, allow_type_change);
@@ -835,7 +830,7 @@ namespace cudnn_rnn {
     if (set_orig_weights_to_flat_buf) {
       // Update the storage
       for (size_t i = 0; i < weight.size(0); i++) {
-        // There is a special case for LSTM with projections and no bias, 
+        // There is a special case for LSTM with projections and no bias,
         // where weight copy is done in 0->0, 1->1, 2->4 layout
         if (weight[i].size() == 3) {
           weight[i][0].set_(params[i][0].view_as(weight[i][0]));
@@ -1433,7 +1428,6 @@ Tensor try_get_weight_buf(
 
   int64_t num_parameters = parameters.size();
   int64_t num_ptrs = expected_data_ptrs.size();
-  // TODO (igor): can probably make this with less duplication
   if (proj_size != 0 && proj_size != hidden_size) {
     AT_ASSERT(num_parameters % (has_biases ? 5 : 3) == 0);
     AT_ASSERT(num_ptrs % 5 == 0);
@@ -1563,7 +1557,7 @@ ONE_HIDDEN_RNN(rnn_relu, CUDNN_RNN_RELU)
 void lstm_cudnn(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, 
+      int64_t num_layers, double dropout_p, bool train,
       bool bidirectional, bool batch_first) {
   auto result = _cudnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       CUDNN_LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
