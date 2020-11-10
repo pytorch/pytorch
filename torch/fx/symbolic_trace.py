@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Dict, Optional, List, Callable, Union
+from typing import Any, Dict, Optional, List, Callable, Union, Tuple
 import torch
 
 from .node import Argument
@@ -129,10 +129,10 @@ class Tracer(TracerBase):
 
         def proxy_placeholder(name: str):
             if name[0] == '*':
-                default = ()
+                default = ()    # type: ignore
             else:
                 param = sig.parameters[name]
-                default = () if param.default is inspect.Parameter.empty else (param.default,)
+                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
             return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
 
