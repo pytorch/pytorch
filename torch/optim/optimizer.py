@@ -78,6 +78,7 @@ class Optimizer(object):
             'defaults': self.defaults,
             'state': self.state,
             'param_groups': self.param_groups,
+            'step': self.step # Make this bound method copied by deepcopy.
         }
 
     def __setstate__(self, state):
