@@ -148,8 +148,8 @@ py::object unflatten_rec(
     return py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
   }
 }
-} // anonymous namespace
 
+} // anonymous namespace
 
 PyObject* unflatten(ArrayRef<Variable> vars, const IODescriptor& desc) {
   // NB: We don't do correctness checking on descriptor.
