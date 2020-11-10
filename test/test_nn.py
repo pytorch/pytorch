@@ -5716,12 +5716,12 @@ class TestNN(NNTestCase):
         hx = torch.randn(2, 4, 20).cuda(device)
         output = rnn(input, hx)
 
-    # TODO (igor): Add projections test
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
+            nn.LSTM(10, 20, batch_first=True, proj_size=10),
             nn.GRU(10, 20, batch_first=True),
             nn.RNN(10, 20, batch_first=True)
         ]
@@ -5732,6 +5732,10 @@ class TestNN(NNTestCase):
             hx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
             all_vars = [input, hx] + list(rnn.parameters())
             if isinstance(rnn, nn.LSTM):
+                # LSTM with projections has different hx size
+                if rnn.proj_size > 0:
+                    hx = torch.randn(1, 5, 10, requires_grad=True, device="cuda")
+                    all_vars[1] = hx
                 cx = torch.randn(1, 5, 20, requires_grad=True, device="cuda")
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
