@@ -1,8 +1,9 @@
 
 import torch
-from .qconfig import QConfig
-from .quant_type import QuantType
 from torch.jit._recursive import wrap_cpp_module
+
+from .qconfig import QConfig
+from .quant_type import QuantType, quant_type_to_str
 
 def _check_is_script_module(model):
     if not isinstance(model, torch.jit.ScriptModule):
@@ -17,9 +18,12 @@ def script_qconfig(qconfig):
     them, these observer module instances will be deepcopied during
     prepare_jit step.
     """
+    # from collections import namedtuple
+    # QConfig = namedtuple('QConfig', ['activation', 'weight'])
     return QConfig(
         activation=torch.jit.script(qconfig.activation())._c,
-        weight=torch.jit.script(qconfig.weight())._c)
+        weight=torch.jit.script(qconfig.weight())._c,
+        quant_type=qconfig.quant_type)
 
 def script_qconfig_dict(qconfig_dict):
     r"""Helper function used by `prepare_jit`.
@@ -44,7 +48,7 @@ def fuse_conv_bn_jit(model, inplace=False):
         model = wrap_cpp_module(model_c)
     return model
 
-def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
+def _prepare_jit(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
     _check_forward_method(model)
     if not all(isinstance(x, str) for x in qconfig_dict.keys()):
@@ -54,8 +58,7 @@ def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC
     model_c = torch._C._jit_pass_insert_observers(model._c,
                                                   'forward',
                                                   scripted_qconfig_dict,
-                                                  inplace,
-                                                  quant_type)
+                                                  inplace)
     if inplace:
         model._reconstruct(model_c)
     else:
@@ -64,11 +67,25 @@ def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC
 
 def prepare_jit(model, qconfig_dict, inplace=False):
     torch._C._log_api_usage_once("quantization_api.quantize_jit.prepare_jit")
-    return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.STATIC)
+    for key, value in qconfig_dict.items():
+        if value is None:
+            # Skip quant
+            continue
+        assert value.quant_type == QuantType.STATIC, \
+               "Expecting the STATIC qconfig, for key " + key + " got " + \
+               quant_type_to_str(value.quant_type)
+    return _prepare_jit(model, qconfig_dict, inplace)
 
 def prepare_dynamic_jit(model, qconfig_dict, inplace=False):
     torch._C._log_api_usage_once("quantization_api.quantize_jit.prepare_dynamic_jit")
-    return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
+    for key, value in qconfig_dict.items():
+        if value is None:
+            # Skip quant
+            continue
+        assert value.quant_type == QuantType.DYNAMIC, \
+               "Expecting the DYNAMIC qconfig, for key " + key + "got " + \
+               quant_type_to_str(value.quant_type)
+    return _prepare_jit(model, qconfig_dict, inplace)
 
 def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC,
                  preserved_attrs=None):

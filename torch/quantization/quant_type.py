@@ -7,6 +7,7 @@ class QuantType(enum.IntEnum):
     STATIC = 1
     QAT = 2
     WEIGHT_ONLY = 3
+    ACTIVATION_ONLY = 4
 
 
 def quant_type_to_str(quant_type):
@@ -15,5 +16,6 @@ def quant_type_to_str(quant_type):
         QuantType.DYNAMIC: "dynamic",
         QuantType.QAT: "qat",
         QuantType.WEIGHT_ONLY: "weight_only",
+        QuantType.ACTIVATION_ONLY: "activation_only",
     }
     return m[quant_type]
