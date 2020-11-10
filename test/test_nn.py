@@ -6233,10 +6233,10 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(ValueError, error_msg):
                 rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
 
-# TODO (igor): Add projections test (probably just that CPU is disabled)
     def _test_RNN_cpu_vs_cudnn(self, dropout, dtype=torch.double):
 
-        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
+        def forward_backward(cuda, rnn, input_val, grad_output, weights_val, hx_val, grad_hy,
+                             cx_val=None, grad_cy=None):
             is_lstm = isinstance(rnn, nn.LSTM)
 
             for x_layer, y_layer in zip(rnn.all_weights, weights_val):
@@ -6251,8 +6251,12 @@ class TestNN(NNTestCase):
                 input = input_val.clone().requires_grad_(True)
                 input_var = input
             if is_lstm:
-                hx = (hx_val.clone().requires_grad_(True),
-                      hx_val.add(1).requires_grad_(True))
+                if cx_val is None:
+                    hx = (hx_val.clone().requires_grad_(True),
+                          hx_val.add(1).requires_grad_(True))
+                else:
+                    hx = (hx_val.clone().requires_grad_(True),
+                          cx_val.add(1).requires_grad_(True))
             else:
                 hx = hx_val.clone().requires_grad_(True)
 
@@ -6265,6 +6269,8 @@ class TestNN(NNTestCase):
                 else:
                     hx.data = hx.data.cuda()
                 grad_hy = grad_hy.cuda()
+                if grad_cy is not None:
+                    grad_cy = grad_cy.cuda()
                 grad_output = grad_output.cuda()
 
             output, hy = rnn(input, hx)
@@ -6273,7 +6279,10 @@ class TestNN(NNTestCase):
                 output = output.data
 
             if is_lstm:
-                torch.autograd.backward([output, hy[0], hy[1]], [grad_output, grad_hy, grad_hy + 1])
+                if grad_cy is None:
+                    torch.autograd.backward([output, hy[0], hy[1]], [grad_output, grad_hy, grad_hy + 1])
+                else:
+                    torch.autograd.backward([output, hy[0], hy[1]], [grad_output, grad_hy, grad_cy + 1])
             else:
                 torch.autograd.backward([output, hy], [grad_output, grad_hy])
 
@@ -6287,6 +6296,7 @@ class TestNN(NNTestCase):
 
         input_size = 10
         hidden_size = 6
+        proj_size = 3
         num_layers = 2
         seq_length = 7
         batch = 6
@@ -6318,14 +6328,14 @@ class TestNN(NNTestCase):
                     input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
                     grad_output = torch.randn(seq_length, batch, hidden_size * num_directions, dtype=dtype)
 
+                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+
                 if not contig:
                     grad_output = make_noncontig(grad_output)
                     grad_hy = make_noncontig(grad_hy)
                     input_var = make_noncontig(input_val)
                     hx_val = make_noncontig(hx_val)
-
-                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
-                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
 
                 if variable_len:
                     lengths = [7, 5, 5, 2, 1, 1]
@@ -6343,7 +6353,7 @@ class TestNN(NNTestCase):
                              batch_first=batch_first).to(dtype)
 
                 outputs_cpu = forward_backward(
-                    False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    False, rnn, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
 
                 rnn_gpu = module(input_size,
                                  hidden_size,
@@ -6354,7 +6364,7 @@ class TestNN(NNTestCase):
                                  batch_first=batch_first).to(dtype)
 
                 outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    True, rnn_gpu, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
 
                 compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
@@ -6367,10 +6377,69 @@ class TestNN(NNTestCase):
                 num_layers * num_directions, batch, hidden_size, dtype=dtype)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity).to(dtype)
-            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            outputs_cpu = forward_backward(False, rnn, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
 
             rnn_gpu = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity).to(dtype)
-            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            outputs_gpu = forward_backward(True, rnn_gpu, input_val, grad_output, rnn.all_weights, hx_val, grad_hy)
+
+            compare_cpu_gpu(outputs_cpu, outputs_gpu)
+
+        # checking LSTM with projections
+        for bias, bidirectional, batch_first, contig, variable_len, lens_as_tensor \
+                    in product((True, False), repeat=6):
+            num_directions = 2 if bidirectional else 1
+            if batch_first:
+                input_val = torch.randn(batch, seq_length, input_size, dtype=dtype)
+                grad_output = torch.randn(batch, seq_length, proj_size * num_directions, dtype=dtype)
+            else:
+                input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
+                grad_output = torch.randn(seq_length, batch, proj_size * num_directions, dtype=dtype)
+
+            hx_val = torch.randn(num_layers * num_directions, batch, proj_size, dtype=dtype)
+            cx_val = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+            grad_hy = torch.randn(num_layers * num_directions, batch, proj_size, dtype=dtype)
+            grad_cy = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+
+            if not contig:
+                grad_output = make_noncontig(grad_output)
+                grad_hy = make_noncontig(grad_hy)
+                grad_cy = make_noncontig(grad_cy)
+                input_var = make_noncontig(input_val)
+                hx_val = make_noncontig(hx_val)
+                cx_val = make_noncontig(cx_val)
+
+            if variable_len:
+                lengths = [7, 5, 5, 2, 1, 1]
+                if lens_as_tensor:
+                    lengths = torch.tensor(lengths, dtype=torch.long)
+                input_val = rnn_utils.pack_padded_sequence(input_val, lengths, batch_first=batch_first)
+                grad_output = rnn_utils.pack_padded_sequence(grad_output, lengths, batch_first=batch_first).data
+
+            rnn = nn.LSTM(input_size,
+                          hidden_size,
+                          num_layers,
+                          bias=bias,
+                          dropout=dropout,
+                          bidirectional=bidirectional,
+                          batch_first=batch_first,
+                          proj_size=proj_size).to(dtype)
+
+            outputs_cpu = forward_backward(
+                False, rnn, input_val, grad_output, rnn.all_weights,
+                hx_val, grad_hy, cx_val, grad_cy)
+
+            rnn_gpu = nn.LSTM(input_size,
+                              hidden_size,
+                              num_layers,
+                              bias=bias,
+                              dropout=dropout,
+                              bidirectional=bidirectional,
+                              batch_first=batch_first,
+                              proj_size=proj_size).to(dtype)
+
+            outputs_gpu = forward_backward(
+                True, rnn_gpu, input_val, grad_output, rnn.all_weights,
+                hx_val, grad_hy, cx_val, grad_cy)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
