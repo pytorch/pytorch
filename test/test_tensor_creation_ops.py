@@ -1148,6 +1148,7 @@ class TestTensorCreation(TestCase):
 
     # check that warning for numpy being not writable is suppressed
     # when a copy of it is being created.
+    # see issue #47160
     def test_tensor_from_non_writable_numpy(self, device):
         with warnings.catch_warnings(record=True) as w:
             a = np.arange(5.)
