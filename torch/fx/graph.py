@@ -377,10 +377,7 @@ class Graph:
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                ret = node.args[0]
-                if isinstance(ret, str):
-                    ret = '\'' + ret + '\''
-                body.append(f'return {ret}')
+                body.append(f'return {repr(node.args[0])}')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
