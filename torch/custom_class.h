@@ -29,7 +29,8 @@ detail::types<void, Types...> init() {
 
 template <class... Types, class Func>
 detail::types<void, Types...> init(Func f) {
-  return detail::types<void, Types...>{};
+  using ParameterTypes = typename Func::parameter_types;
+  return detail::types<void, ParameterTypes>{};
 }
 
 /// Entry point for custom C++ class registration. To register a C++ class

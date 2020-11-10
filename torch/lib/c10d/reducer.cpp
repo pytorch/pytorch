@@ -712,7 +712,13 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     if (comm_hook_ == nullptr) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
-      GradBucket grad_bucket(tensors);
+      GradBucket grad_bucket(
+          tensors,
+          // Since currently we do not support single-process multiple-device
+          // mode, we can assume only one replica in the bucket.
+          bucket.replicas[0].offsets,
+          bucket.replicas[0].lengths,
+          bucket.replicas[0].sizes_vec);
       bucket.future_work = comm_hook_->runHook(grad_bucket);
     }
   }
@@ -783,7 +789,16 @@ void Reducer::initialize_buckets(
         replica.variables = {variable};
       } else {
         at::TensorOptions options;
+        // The start index of the variable in the flattened tensor.
         size_t offset = 0;
+
+        // Reserve enough space for the per-variable fields stored in bucket
+        // replica for efficiency.
+        const size_t num_variables = bucket_indices[bucket_index].size();
+        replica.variables.reserve(num_variables);
+        replica.offsets.reserve(num_variables);
+        replica.lengths.reserve(num_variables);
+        replica.sizes_vec.reserve(num_variables);
 
         // Iterate over bucket variables.
         for (const auto variable_index : bucket_indices[bucket_index]) {
@@ -810,6 +825,7 @@ void Reducer::initialize_buckets(
           replica.variables.push_back(variable);
           replica.offsets.push_back(offset);
           replica.lengths.push_back(length);
+          replica.sizes_vec.push_back(variable.sizes());
           offset += length;
         }
 
