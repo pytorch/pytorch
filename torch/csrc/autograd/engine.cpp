@@ -592,8 +592,12 @@ void validate_outputs(
       // AT_ERROR(format_error(ss.str()));
       continue;
     }
-    if (!grad.sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grad.sizes())) {
+    if (metadata.is_nested_tensor()) {
+      TORCH_CHECK(at::is_nested_tensor_impl(grad), "Unexpected 1.");
+      TORCH_CHECK(grad.dim() == metadata.shape().size(), "Unexpected 2.");
+    }
+    if (!metadata.is_nested_tensor() && !grad.sizes().equals(metadata.shape())) {
+      if (!at::is_nested_tensor_impl(grad) && !at::is_expandable_to(metadata.shape(), grad.sizes())) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - got ";
         ss << grad.sizes() << " but expected shape compatible with ";

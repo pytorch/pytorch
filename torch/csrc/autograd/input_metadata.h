@@ -8,7 +8,8 @@
 
 #include <cstdint>
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 /**
  * Records type, shape, and device of tensor and, where applicable,
@@ -20,13 +21,24 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, at::Device device)
-  : options_{options}, shape_{shape}, device_{device} {
+  InputMetadata(
+      const at::TensorOptions options,
+      at::IntArrayRef shape,
+      at::Device device,
+      bool is_nested_tensor)
+      : options_{options},
+        shape_{shape},
+        device_{device},
+        is_nested_tensor_(is_nested_tensor) {
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.options(), t.sizes(), t.device()) { }
+      : InputMetadata(
+            t.options(),
+            t.sizes(),
+            t.device(),
+            at::is_nested_tensor_impl(t)) {}
 
   const at::TensorOptions options() const {
     return options_;
@@ -48,11 +60,17 @@ struct InputMetadata {
     return at::zeros(shape_, options_);
   }
 
-private:
+  bool is_nested_tensor() const {
+    return is_nested_tensor_;
+  }
+
+ private:
   const at::TensorOptions options_;
   at::DimVector shape_;
   at::Device device_ = at::kCPU;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);
+  bool is_nested_tensor_;
 };
 
-}} // torch::autograd
+} // namespace autograd
+} // namespace torch
