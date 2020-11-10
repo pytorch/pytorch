@@ -12,6 +12,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 #else
 #include <dlfcn.h>
 #endif
@@ -53,22 +54,30 @@ namespace {
 
 std::string torchLibPath() {
 #ifdef _WIN32
-// TODO $$$
+  constexpr char kPathSep = '\\';
+  char path_buffer[MAX_PATH] = {};
+  TORCH_INTERNAL_ASSERT(
+      ::GetModuleFileNameA(
+          reinterpret_cast<HMODULE>(&__ImageBase), path_buffer, MAX_PATH) <
+      MAX_PATH);
+  const char* lib_filename = path_buffer;
 #else
+  constexpr char kPathSep = '/';
+
   // Used to lookup our library using dladdr()
   static bool reference_symbol = false;
 
   Dl_info dl_info = {};
   TORCH_INTERNAL_ASSERT(dladdr(&reference_symbol, &dl_info));
   const char* lib_filename = dl_info.dli_fname;
+#endif
 
   // TODO: a much better solution would be to use C++17's std::filesystem::path,
   //  although that's currently not available to us (in the PyTorch codebase)
-  const char* last_path_sep = std::strrchr(lib_filename, '/');
+  const char* last_path_sep = std::strrchr(lib_filename, kPathSep);
   TORCH_INTERNAL_ASSERT(last_path_sep != nullptr);
-
+  
   return std::string(lib_filename, last_path_sep);
-#endif
 }
 
 // return false if arg's type, number of dimensions, and device, doesn't match
@@ -413,7 +422,7 @@ NvrtcFunction nvrtcCompile(
   }
 
   // --include-path
-  const std::string include_path = "--include-path=" + torchLibPath();
+  static const std::string include_path = "--include-path=" + torchLibPath();
   args.push_back(include_path.c_str());
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(

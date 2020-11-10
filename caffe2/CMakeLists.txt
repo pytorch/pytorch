@@ -786,10 +786,18 @@ if(USE_CUDA)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
   )
 
+  # NVFUSER runtime files build location
+  # (on Windows, shared libs are under 'bin', on ELF platforms under 'lib')
+  if(WIN32)
+    set(nvfuser_rt_dir "${CMAKE_BINARY_DIR}/bin/nvfuser_runtime")
+  else()
+    set(nvfuser_rt_dir "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime")
+  endif()  
+
   # Copy NVFUSER runtime sources
   foreach(src ${NVFUSER_RUNTIME_FILES})
     get_filename_component(filename ${src} NAME)
-    set(dst "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime/${filename}")
+    set(dst "${nvfuser_rt_dir}/${filename}")
     add_custom_command(
       COMMENT "Copying NVFUSER runtime files"
       OUTPUT ${dst}
@@ -801,7 +809,7 @@ if(USE_CUDA)
   endforeach()
 
   # Install NVFUSER runtime sources
-  install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime"
+  install(DIRECTORY "${nvfuser_rt_dir}"
     DESTINATION ${TORCH_INSTALL_LIB_DIR})
 endif()
 
