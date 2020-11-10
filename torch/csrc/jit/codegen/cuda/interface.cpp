@@ -46,6 +46,12 @@ bool canFuseNode(const Node* node) {
       getFuserInterface()->fn_can_fuse_n_(node);
 }
 
+void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr) {
+  if (getFuserInterface()->fn_insert_profile_inodes_) {
+    getFuserInterface()->fn_insert_profile_inodes_(pr);
+  }
+}
+
 //! [ Note -- type guard logic in CudaFusionGuard ]
 //!
 //! CudaFusionGuard is used to Guard input tensor to `CudaFusionGroup` so that

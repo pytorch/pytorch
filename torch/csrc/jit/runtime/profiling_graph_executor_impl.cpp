@@ -495,6 +495,9 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // InsertProfileNodesForCUDAFuser less sensitive to the presence
     // of other profiling nodes
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
+    if (RegisterCudaFuseGraph::isRegistered()) {
+      torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
+    }
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through

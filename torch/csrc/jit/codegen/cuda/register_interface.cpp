@@ -23,8 +23,7 @@ class RegisterInterface {
     ptr->fn_run_n_s_ = &runCudaFusionGroup;
     ptr->fn_fuse_graph_ = &CudaFuseGraph;
     ptr->fn_can_fuse_n_ = &isFusableCudaFusionGroup;
-
-    RegisterProfilingNode(canFuseNode);
+    ptr->fn_insert_profile_inodes_ = &InsertProfileNodes;
   }
 };
 

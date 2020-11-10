@@ -27,6 +27,9 @@ constexpr auto kNumLerpOps = 2;
 
 namespace {
 
+static const auto intListAttr = Symbol::attr("profiled_int_list");
+static const auto boolAttr = Symbol::attr("profiled_bool");
+
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
@@ -474,7 +477,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            // TODO: support cast of output types yet;
+            // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half and float;
@@ -614,6 +617,79 @@ std::unordered_map<
 std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
 bool IrParser::init_registry_ = true;
 
+ProfileIValueOp* insertProfileIValueOp(
+    Node* node,
+    size_t offset,
+    ProfilingRecord* pr) {
+  auto in_val = node->input(offset);
+  auto pn = pr->createProfileIValueNode(in_val);
+  pn->insertBefore(node);
+  node->replaceInput(offset, pn->output());
+  return pn;
+}
+
+void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  std::function<void(Stack&)> ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isIntList(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(intListAttr)) {
+      pn->is_(intListAttr, value.toIntVector());
+    } else {
+      auto profiled_ints = pn->is(intListAttr);
+      auto input_ints = value.toIntList();
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == input_ints.size() &&
+              std::equal(
+                  profiled_ints.begin(),
+                  profiled_ints.end(),
+                  input_ints.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  std::function<void(Stack&)> ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isBool(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(boolAttr)) {
+      pn->i_(boolAttr, value.toBool());
+    } else {
+      auto profiled_bool = pn->i(boolAttr);
+      auto input_bool = value.toBool();
+      TORCH_INTERNAL_ASSERT(
+          input_bool == profiled_bool,
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 } // namespace
 
 bool hasReductionNode(const Block* block) {
@@ -636,6 +712,52 @@ bool isReductionNode(const Node* node) {
 
 bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
+}
+
+// TODO: we should incorporate this to our parser as well;
+bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
+  // is skip constant necessary?
+  if (node->input(offset)->node()->kind() == prim::Constant) {
+    return false;
+  }
+
+  static auto reduction_operator_schema =
+      getOperatorForLiteral(
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
+          ->schema();
+  if (node->matches(reduction_operator_schema)) {
+    switch (offset) {
+      case 1:
+        profileIntList(pr, node, offset);
+        break;
+      case 2:
+        profileBool(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+void insertProfileNodesForCUDAFuser_(Block* block, ProfilingRecord* pr) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
+    auto n = *it;
+
+    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+      insertProfileIValue(pr, n, offset);
+    }
+
+    for (auto ib : n->blocks()) {
+      insertProfileNodesForCUDAFuser_(ib, pr);
+    }
+  }
+}
+
+void InsertProfileNodes(ProfilingRecord* pr) {
+  insertProfileNodesForCUDAFuser_(pr->profiled_graph_->block(), pr);
 }
 
 std::unique_ptr<Fusion> parseJitIR(const std::shared_ptr<Graph>& graph) {
