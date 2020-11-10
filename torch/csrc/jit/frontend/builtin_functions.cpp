@@ -63,6 +63,8 @@ def _assert_int_or_pair(vals: List[int], name: str, message: str):
 def list_with_default(out_size: List[int], defaults: List[int]):
   assert len(defaults) > len(out_size)
   return out_size
+def __contains__(self: str, key: str):
+    return self.find(key) != -1
 )SCRIPT";
 
 // Implementations of historic symbol behaviors are defined here

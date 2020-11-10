@@ -819,17 +819,6 @@ RegisterOperators reg(
          listContains<std::string>,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::__contains__.str_list(str s, str key) -> bool"),
-         [](Stack& stack) {
-           auto key = pop(stack).to<std::string>();
-           auto s = pop(stack).to<std::string>();
-           bool res = s.find(key) != -1;
-           push(stack, res);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::len.str(str s) -> int"),
          [](Stack& stack) {
            auto string = pop(stack).toStringRef();

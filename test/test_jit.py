@@ -82,7 +82,7 @@ from copy import deepcopy
 from itertools import product
 import itertools
 from textwrap import dedent
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, NamedTuple, Optional, Tuple, Union
 import inspect
 import math
 import functools
@@ -412,6 +412,15 @@ class TestJit(JitTestCase):
         self.assertEqual(origin_result, m2(input))
         self.assertEqual(origin_result, m3(input.cpu()))
         self.assertEqual(origin_result, m4(input.cuda(0)))
+
+    def test_trace_retains_train(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x
+        m = M()
+        m.eval()
+        tm = torch.jit.trace(m, (torch.rand(3)))
+        self.assertEqual(tm.training, m.training)
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_shared_storage_on_cuda(self):
@@ -6735,7 +6744,7 @@ a")
 
         self.checkScript(complicated_arithmetic_operation, ())
 
-    def test_str_in_operator(self):
+    def test_in_operator_with_two_strings(self):
         def fn() -> bool:
             return "a" in "abcd"
         self.checkScript(fn, ())
@@ -13801,6 +13810,23 @@ dedent """
         out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
         self.assertEqual(out, torch.tensor(6.0))
 
+    def test_namedtuple_type_inference(self):
+        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])
+        _UnannotatedNamedTuple = namedtuple('_NamedTupleUnAnnotated', ['value'])
+
+        def test_check_named_tuple_value():
+            named_tuple = _AnnotatedNamedTuple(1)
+            return named_tuple.value
+
+        self.checkScript(test_check_named_tuple_value, ())
+
+        def test_error():
+            return _UnannotatedNamedTuple(1)
+
+        with self.assertRaisesRegex(RuntimeError, r"Expected a value of type \'Tensor \(inferred\)\' "
+                                                  r"for argument \'value\' but instead found type \'int\'."):
+            torch.jit.script(test_error)
+
     def test_isinstance_dynamic(self):
         @torch.jit.script
         def foo(a):
@@ -15391,6 +15417,18 @@ dedent """
         test = torch._C._jit_interpret_graph(graph, (a, b))
         ref = a * b
         self.assertEqual(test, ref)
+
+    def test_signed_float_zero(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return torch.div(x, -0.)
+
+        inp = torch.ones(1)
+        self.checkModule(MyModule(), inp)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
