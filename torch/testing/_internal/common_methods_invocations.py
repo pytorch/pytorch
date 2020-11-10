@@ -63,6 +63,10 @@ class OpInfo(object):
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 is_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
+                 autodiff_nonfusible_nodes=None,  # ex: ['aten::add', 'aten::mm'], default is populated to be ['aten::name']
+                 autodiff_fusible_nodes=None, 
+                 output_func=lambda x: x,  # fn mapping output to part that should be gradcheck'ed 
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
@@ -91,6 +95,16 @@ class OpInfo(object):
 
         self.skips = skips
         self.decorators = decorators
+        self.output_func = output_func
+
+        self.is_autodiffed = is_autodiffed
+        self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
+        if autodiff_nonfusible_nodes is None:
+            self.autodiff_nonfusible_nodes = ['aten::' + self.name]
+        else:
+            self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
+
+
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -214,6 +228,7 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   is_autodiffed=True,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
@@ -247,6 +262,7 @@ op_db = [
                    ref=np.arcsin,
                    domain=(-1, 1),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   is_autodiffed=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -268,6 +284,7 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   is_autodiffed=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    promotes_integers_to_float=True,
                    skips=(
@@ -291,6 +308,7 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   is_autodiffed=True,
                    handles_large_floats=False,
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
@@ -305,6 +323,7 @@ op_db = [
     UnaryUfuncInfo('cosh',
                    ref=np.cosh,
                    dtypesIfCPU=floating_and_complex_types(),
+                   is_autodiffed=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
@@ -317,6 +336,7 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   is_autodiffed=True,
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    skips=(
@@ -334,6 +354,7 @@ op_db = [
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   is_autodiffed=True,
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    promotes_integers_to_float=True,
                    skips=(
@@ -348,6 +369,7 @@ op_db = [
                    domain=(-1, float('inf')),
                    dtypesIfCPU=floating_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   is_autodiffed=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),)),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
@@ -355,6 +377,7 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   is_autodiffed=True,
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    skips=(
@@ -367,12 +390,14 @@ op_db = [
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   is_autodiffed=True,),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   is_autodiffed=True,
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    promotes_integers_to_float=True,
@@ -386,6 +411,7 @@ op_db = [
     UnaryUfuncInfo('sinh',
                    ref=np.sinh,
                    dtypesIfCPU=floating_and_complex_types(),
+                   is_autodiffed=True,
                    decorators=(precisionOverride({torch.float16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -400,6 +426,7 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   is_autodiffed=True,
                    promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -419,6 +446,7 @@ op_db = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   is_autodiffed=True,
                    promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
