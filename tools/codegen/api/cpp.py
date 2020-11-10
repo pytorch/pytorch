@@ -23,9 +23,9 @@ from typing import Optional, Sequence, Union, Callable, List
 # BTW: policy on name collisions: we try not to have types with
 # collisions, but functions are fair game to collide
 
-def name(func: FunctionSchema) -> str:
+def name(func: FunctionSchema, *, use_suffix_for_out_overloads: bool = True) -> str:
     name = str(func.name.name)
-    if func.is_out_fn():
+    if use_suffix_for_out_overloads and func.is_out_fn():
         name += '_out'
     return name
 
@@ -252,16 +252,20 @@ def argument_not_this(
 
 def argument(
     a: Union[Argument, TensorOptionsArguments, ThisArgument],
+    is_out_argument: bool,
 ) -> Union[CppSingleArgumentPack, CppThisArgumentPack]:
     if isinstance(a, ThisArgument):
+        assert not is_out_argument
         return CppThisArgumentPack(argument=a, type=argument_type(a.argument))
     else:
-        return CppSingleArgumentPack(argument_not_this(a))
+        return CppSingleArgumentPack(argument_not_this(a), is_out_argument)
 
 def argument_faithful(
     a: Union[Argument, TensorOptionsArguments, ThisArgument],
+    is_out_argument: bool,
 ) -> CppArgumentPack:
     if isinstance(a, TensorOptionsArguments):
+        assert not is_out_argument
         return CppTensorOptionsArgumentPack(
             argument=a,
             dtype=argument_not_this(a.dtype),
@@ -270,15 +274,14 @@ def argument_faithful(
             pin_memory=argument_not_this(a.pin_memory),
         )
     else:
-        return argument(a)
+        return argument(a, is_out_argument)
 
 # NB: this unconditionally groups arguments
+# returns tuple(arguments, out_arguments)
 def group_arguments(
     func: FunctionSchema, *, method: bool
-) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
+) -> Tuple[Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]], Sequence[Argument]]:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
-
-    args.extend(func.out_arguments)
 
     if method:
         args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments)
@@ -314,4 +317,4 @@ def group_arguments(
         args.append(func.kwarg_only_arguments[i])
         i += 1
 
-    return args
+    return (args, func.out_arguments)

@@ -311,6 +311,9 @@ def compute_type_method(
 
     return func
 
+def partition(seq: Sequence[T], filter: Callable[[T], bool]) -> Tuple[List[T], List[T]]:
+    return [i for i in seq if filter(i)], [i for i in seq if not filter(i)]
+
 # Generates Function.cpp and Function.h.  These files provide the
 # functional public C++ API, and the scaffolding to call into
 # the dispatcher from these functions.  See also compute_tensor_method.
@@ -334,10 +337,39 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
 
         assert target is Target.DEFINITION
 
-        def generate_defn(sig: CppSignature) -> str:
+        def generate_defn(sig: CppSignature, faithful: bool) -> str:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-            dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
+            # Partitions a sequence of argument packs into (out_args, args)
+            def partition_argument_packs(args: Sequence[CppArgumentPack]) -> Tuple[List[CppArgumentPack], List[CppArgumentPack]]:
+                return partition(args, lambda arg: isinstance(arg, CppSingleArgumentPack) and arg.is_out_argument)
+
+            # We're generating the dispatcher expressions from the C++ API argument list
+            # but while the argument list was generated from the JIT schema, the arguments
+            # can have been reordered. We need to undo that and bring arguments back into
+            # the JIT schema order to call into the dispatcher.
+            # There are 4 cases:
+            # 1. faithful signature for c10-full ops
+            #    This doesn't need us to do anything since C++ API argument order and dispatcher argument order match
+            # 2. non-faithful signature for non-c10-full ops
+            #    This also doesn't need us to do anything since they match as well
+            # 3. faithful signature for non-c10-full ops
+            #    faithful signature has out arguments in the back, the dispatcher for non-c10-full ops takes them
+            #    in the front. We need to reorder them to the front.
+            # 4. non-faithful signature for c10-full ops
+            #    non-faithful signature has out arguments in the front, the dispatcher for c10-full ops takes them
+            #    in the back. We need to reorder them to the back.
+            # Cases 1, 2 don't need special handling and cases 3, 4 are detected and handled in the following code block.
+            # Note that cases 2, 3 will die as soon as all ops are c10-full but 1, 4 will remain.
+            argument_packs = sig.argument_packs()
+            if local.use_c10_dispatcher().dispatcher_uses_new_style() and not faithful:
+                (out_argument_packs, nonout_argument_packs) = partition_argument_packs(argument_packs)
+                argument_packs = nonout_argument_packs + out_argument_packs
+            elif not local.use_c10_dispatcher().dispatcher_uses_new_style() and faithful:
+                (out_argument_packs, nonout_argument_packs) = partition_argument_packs(argument_packs)
+                argument_packs = out_argument_packs + nonout_argument_packs
+
+            dispatcher_exprs = dispatcher.cpparguments_exprs(argument_packs)
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
@@ -350,9 +382,9 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
 }}
 """
 
-        result = generate_defn(sig_group.signature)
+        result = generate_defn(sig_group.signature, sig_group.faithful_signature is None)
         if sig_group.faithful_signature is not None:
-            result += generate_defn(sig_group.faithful_signature)
+            result += generate_defn(sig_group.faithful_signature, True)
 
         return result
 
@@ -711,7 +743,14 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         for a in schema_order_jit_arguments
     ]
 
-    cpp_schema_order_types = [cpp.argument(a).type for a in schema_order_jit_arguments]
+    cpp_schema_order_types = [
+        cpp.argument(a, is_out_argument=False).type for a in f.func.arguments
+    ] + [
+        cpp.argument(a, is_out_argument=False).type for a in f.func.kwarg_only_arguments
+    ] + [
+        cpp.argument(a, is_out_argument=True).type for a in f.func.out_arguments
+    ]
+
     cpp_returns = cpp.returns_type(f.func.returns)
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 

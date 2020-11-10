@@ -47,20 +47,22 @@ def returns_type(rs: Sequence[Return]) -> str:
     # At present, there is no difference. But there could be!
     return cpp.returns_type(rs)
 
-def argument(a: Argument) -> DispatcherArgument:
+def argument(a: Argument, is_out_argument: bool) -> DispatcherArgument:
     if local.use_c10_dispatcher().dispatcher_uses_new_style():
         return DispatcherArgument(
             type=argument_type(a),
             name=a.name,
             argument=a,
+            is_out_argument=is_out_argument,
         )
     else:
-        la = native.argument(a)
+        la = native.argument(a, is_out_argument)
         assert len(la) == 1, "Operators using the legacy signature in the dispatcher don't scatter TensorOptions."
         return DispatcherArgument(
             type=la[0].type,
             name=la[0].name,
             argument=la[0].argument,
+            is_out_argument=is_out_argument,
         )
 
 def name(func: FunctionSchema) -> str:
@@ -68,10 +70,11 @@ def name(func: FunctionSchema) -> str:
 
 def arguments(func: FunctionSchema) -> Tuple[DispatcherArgument, ...]:
     if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        return tuple(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
+        return tuple(argument(a, is_out_argument=False) for a in itertools.chain(func.arguments, func.kwarg_only_arguments)) + \
+            tuple(argument(a, is_out_argument=True) for a in func.out_arguments)
     else:
         return tuple(
-            DispatcherArgument(type=la.type, name=la.name, argument=la.argument)
+            DispatcherArgument(type=la.type, name=la.name, argument=la.argument, is_out_argument=la.is_out_argument)
             for la in native.arguments(func)
         )
 
@@ -120,7 +123,7 @@ def cppargument_exprs(
             return [
                 expr
                 for sub_a in a.explicit_arguments()  # NB: don't really care about explicitness here
-                for expr in cppargument_exprs(CppSingleArgumentPack(sub_a), tensor_options=tensor_options)
+                for expr in cppargument_exprs(CppSingleArgumentPack(sub_a, is_out_argument=False), tensor_options=tensor_options)
             ]
         else:
             # Gather
@@ -149,12 +152,12 @@ def cpparguments_exprs(args: Sequence[CppArgumentPack]) -> Sequence[DispatcherEx
 # close
 def nativearguments_exprs(args: Sequence[NativeArgument]) -> Sequence[DispatcherExpr]:
     return cpparguments_exprs([
-        CppSingleArgumentPack(CppArgument(type=a.type, name=a.name, default=None, argument=a.argument))
+        CppSingleArgumentPack(CppArgument(type=a.type, name=a.name, default=None, argument=a.argument), is_out_argument=a.is_out_argument)
         for a in args
     ])
 
 def exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
     return cpparguments_exprs([
-        CppSingleArgumentPack(CppArgument(type=a.type, name=a.name, default=None, argument=a.argument))
+        CppSingleArgumentPack(CppArgument(type=a.type, name=a.name, default=None, argument=a.argument), is_out_argument=a.is_out_argument)
         for a in args
     ])

@@ -88,9 +88,10 @@ class CppArgumentPackIface:
 @dataclass(frozen=True)
 class CppSingleArgumentPack(CppArgumentPackIface):
     this: CppArgument
+    is_out_argument: bool
 
     def no_default(self) -> 'CppSingleArgumentPack':
-        return CppSingleArgumentPack(self.this.no_default())
+        return CppSingleArgumentPack(this=self.this.no_default(), is_out_argument=self.is_out_argument)
 
     @property
     def type(self) -> str:
@@ -172,6 +173,9 @@ class CppSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
+    # The name of the C++ function, e.g. "abs" or "abs_out"
+    name: str
+
     # Enough information about the C++ types to generate a full
     # C++ type signature for this signature.  I'm not too sure
     # if these are the right representations, so for now this
@@ -194,14 +198,13 @@ class CppSignature:
     # Render the C++ declaration for this signature
     def decl(self) -> str:
         cpp_args_str = ', '.join(map(str, self.arguments()))
-        return f"{self._returns_type} {cpp.name(self.func)}({cpp_args_str})"
+        return f"{self._returns_type} {self.name}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
-    def defn(self, name: Optional[str] = None, *, prefix: str = "") -> str:
+    def defn(self, *, prefix: str = "") -> str:
         cpp_args_str = ', '.join(a.str_no_default() for a in self.arguments())
-        if name is None:
-            name = prefix + cpp.name(self.func)
+        name = prefix + self.name
         return f"{self._returns_type} {name}({cpp_args_str})"
 
     # NB: This constructor knows how to disambiguate defaults when
@@ -211,6 +214,7 @@ class CppSignature:
     def _from_grouped_arguments(
         func: FunctionSchema,
         arguments: Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]],
+        out_arguments: Sequence[Argument],
         *,
         faithful: bool
     ) -> 'CppSignature':
@@ -223,14 +227,20 @@ class CppSignature:
             # principle, we should be able to do this at some later
             # point in time with other overload disambiguation
             argument_packs = tuple(
-                cpp.argument_faithful(a).no_default() for a in arguments
+                cpp.argument_faithful(a, is_out_argument=False).no_default() for a in arguments
+            ) + tuple(
+                cpp.argument_faithful(a, is_out_argument=True).no_default() for a in out_arguments
             )
         else:
             argument_packs = tuple(
-                cpp.argument(a) for a in arguments
+                cpp.argument(a, is_out_argument=True) for a in out_arguments
+            ) + tuple(
+                cpp.argument(a, is_out_argument=False) for a in arguments
             )
+        name = cpp.name(func, use_suffix_for_out_overloads=not faithful)
         return CppSignature(
             func=func,
+            name=name,
             _argument_packs=argument_packs,
             _returns_type=cpp.returns_type(func.returns),
         )
@@ -247,13 +257,13 @@ class CppSignatureGroup:
 
     @staticmethod
     def from_schema(func: FunctionSchema, *, method: bool) -> 'CppSignatureGroup':
-        grouped_arguments = cpp.group_arguments(func, method=method)
+        (grouped_arguments, grouped_out_arguments) = cpp.group_arguments(func, method=method)
         faithful_signature: Optional[CppSignature]
-        if any(isinstance(a, TensorOptionsArguments) for a in grouped_arguments):
-            faithful_signature = CppSignature._from_grouped_arguments(func, grouped_arguments, faithful=True)
+        if any(isinstance(a, TensorOptionsArguments) for a in grouped_arguments) or len(func.out_arguments) > 0:
+            faithful_signature = CppSignature._from_grouped_arguments(func, grouped_arguments, grouped_out_arguments, faithful=True)
         else:
             faithful_signature = None
-        signature = CppSignature._from_grouped_arguments(func, grouped_arguments, faithful=False)
+        signature = CppSignature._from_grouped_arguments(func, grouped_arguments, grouped_out_arguments, faithful=False)
         return CppSignatureGroup(
             func=func,
             signature=signature,
@@ -278,6 +288,7 @@ class DispatcherArgument:
     # dispatcher NEVER has defaults
     argument: Union[Argument, TensorOptionsArguments]
     # TensorOptionsArguments can occur when not using full c10 dispatch
+    is_out_argument: bool
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
@@ -345,6 +356,7 @@ class NativeArgument:
     # easier to call them directly to bypass dispatch.
     default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
+    is_out_argument: bool
 
     # Convention here is swapped because arguably NativeFunctions.h
     # shouldn't have defaults (they should be handled during dispatching).

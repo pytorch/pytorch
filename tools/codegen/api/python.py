@@ -439,7 +439,7 @@ def _cpp_signature(f: NativeFunction, *, method: bool = False) -> CppSignature:
 
 def has_tensor_options(f: NativeFunction) -> bool:
     return any(filter(lambda a: isinstance(a, TensorOptionsArguments),
-                      cpp.group_arguments(f.func, method=False)))
+                      cpp.group_arguments(f.func, method=False)[0]))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
