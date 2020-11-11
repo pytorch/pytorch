@@ -89,7 +89,6 @@ class Partition:
                 if all([n not in self.nodes for n in input_node.users]):
                     self.nodes.remove(input_node)
 
-
 class PartitionResult(NamedTuple):
     """NameTuple used for returning DAG and a new graph module
     """
@@ -104,6 +103,8 @@ class Device(NamedTuple):
 class PartitionerConfig(NamedTuple):
     devices: List[Device]
     is_sparse_nn: bool = False
+
+"""Followings are some helper functions for partition manipulation"""
 
 def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
     """Given a node and a set of nodes,
@@ -132,12 +133,161 @@ def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
         raise RuntimeError('node has no size_bytes attr')
     return total_size_of_input_nodes
 
-def calculate_mem_bytes_needed(p1, p2):
-    nodes = p1.nodes.union(p2.nodes)
-    mem_bytes_needed = 0
-    for node in nodes:
-        mem_bytes_needed += get_extra_size_of(node, nodes)
-    return mem_bytes_needed
+def combine_two_partitions(
+    partition_0: Partition,
+    partition_1: Partition,
+    partitions: List[Partition]
+) -> None:
+    """Given a list of partitions and its two partitions,
+       combine these two partitions into a new one appending to the partitions
+       and remove the previous two partitions from the list of partitions
+    """
+    partition = Partition(len(partitions))
+    partition.nodes = partition_0.nodes.union(partition_1.nodes)
+    partition.recalculate_mem_size()
+    partitions.append(partition)
+    partitions.remove(partition_0)
+    partitions.remove(partition_1)
+    # reset parents and children for all partitions
+    for partition in partitions:
+        partition.parents = set()
+        partition.children = set()
+    reorganize_partitions(partitions)
+    return
+
+def set_parents_and_children(partitions: List[Partition]) -> None:
+    """Given a list of partitions, mark parents and children for each partition
+    """
+    # Go through all nodes in a partition.
+    # If a node's user is in other partition,
+    # then the other partition is this partition's children.
+    # This partition is the other partition's parent
+    for partition in partitions:
+        partition.children = set()
+        partition.parents = set()
+    for partition in partitions:
+        for node in partition.nodes:
+            # For each node in the current partition, find its users
+            users = node.users
+            for n in users:
+                # Find which the partition the user belongs to.
+                # Note that if the node itself is also belongs to that partition,
+                # that partition is not the child of the current partition
+                for p in partitions:
+                    if p != partition and n in p.nodes and node not in p.nodes:
+                        partition.children.add(p)
+                        p.parents.add(partition)
+    return
+
+def reorganize_partitions(partitions: List[Partition]) -> None:
+    """Given a list of partitions, reorganzie partiton id,
+    its parents and its children for each partition
+    """
+    # Rearrange partition ids
+    for i, partition in enumerate(partitions):
+        partition.partition_id = i
+    set_parents_and_children(partitions)
+    return
+
+def get_bfs_level_partition(partitions: List[Partition]) -> None:
+    """Given a list of partitions,
+       mark the bfs level for each partition
+    """
+    current_level: Set[Partition] = set()
+    visited: Set[Partition] = set()
+    for partition in partitions:
+        # If a partition has no parent, it should be in root level
+        if len(partition.parents) == 0:
+            current_level.add(partition)
+    next_level: Set[Partition] = set()
+    level = 0
+    # Start bfs
+    while current_level:
+        partition = current_level.pop()
+        partition.bfs_level = level
+        visited.add(partition)
+        children = partition.children
+        for child in children:
+            if child not in next_level:
+                next_level.add(child)
+        if not current_level:
+            current_level = next_level.copy()
+            next_level = set()
+            level += 1
+    return
+
+def get_node_to_partition_mapping(partitions: List[Partition]) -> Dict[Node, int]:
+    """Given a list of partitions,return node to partition mapping
+    """
+    node_to_partition: Dict[Node, int] = {}
+    for partition in partitions:
+        for node in partition.nodes:
+            node_to_partition[node] = partition.partition_id
+    return node_to_partition
+
+def get_device_to_partitions_mapping(partitions: List[Partition], devices: List[Device]):
+    """Given a list of partitions and a list of devices,
+        map each partition into a device.
+    """
+    def calculate_extra_mem_bytes_needed_for(partition: Partition, partitions: List[Partition]):
+        all_nodes: Set[Node] = set()
+        for p in partitions:
+            all_nodes = all_nodes.union(p.nodes)
+        extra_size_needed = 0
+        for node in partition.nodes:
+            if node in all_nodes or node.op in {'placeholder', 'get_attr'}:
+                continue
+            else:
+                extra_size_needed += get_extra_size_of(node, all_nodes)
+        return extra_size_needed
+
+    def find_device_for(partition: Partition):
+        """Given a partition, find a logical device for the partition
+            The algorithm is that:
+            #1. sort all the devices based on left mem size
+            #2. put the partition on the device that has just enought mem
+            for that partition
+        """
+        for d in device_to_left_mem_bytes:
+            extra_size_needed = calculate_extra_mem_bytes_needed_for(partition, device_to_partitions[d])
+            if extra_size_needed < device_to_left_mem_bytes[d]:
+                device_to_partitions[d].append(partition)
+                partition.logical_device_ids.append(d.logical_id)
+                device_to_left_mem_bytes[d] -= extra_size_needed
+                return True
+        return False
+    # logical id to device
+    logical_id_to_device: Dict[int, Device] = {}
+    # Track partitions on device
+    device_to_partitions: Dict[Device, List[Partition]] = {}
+    # Track device's left mem size
+    device_to_left_mem_bytes: Dict[Device, int] = {}
+    for d in devices:
+        logical_id_to_device[d.logical_id] = d
+        device_to_partitions[d] = []
+        device_to_left_mem_bytes[d] = d.available_mem_bytes
+    # Deal with the partitions that have a device
+    # Find all no device partitions
+    no_device_partitions = []
+    for partition in partitions:
+        if partition.logical_device_ids != []:
+            logical_id = partition.logical_device_ids[0]
+            device = logical_id_to_device[logical_id]
+            device_to_partitions[device] = [partition]
+            device_to_left_mem_bytes[device] = d.available_mem_bytes - partition.used_mem_bytes
+        else:
+            no_device_partitions.append(partition)
+    # Find device for each no device partition
+    found_device = True
+    for partition in no_device_partitions:
+        device_to_left_mem_bytes = {
+            d: left_mem_bytes for d, left_mem_bytes
+            in sorted(device_to_left_mem_bytes.items(), key=lambda item: item[1])
+        }
+        found_device = find_device_for(partition)
+        if not found_device:
+            break
+    return found_device
 
 class Partitioner:
     """A graph module may not fit into one device.
@@ -150,7 +300,7 @@ class Partitioner:
     """
     def __init__(self) -> None:
         self.partitions: List[Partition] = []
-        self.node_to_partitions: Dict[Node, int] = {}
+        self.node_to_partition: Dict[Node, int] = {}
         self.devices: List[Device] = []
 
     def partition_graph(
@@ -207,10 +357,11 @@ class Partitioner:
         for node in self.graph_module.graph.nodes:
             if node.op == 'output':
                 break
-            self.node_to_partitions[node] = partition_0.partition_id
             partition_0.nodes.add(node)
         partition_0.used_mem_bytes = total_size_of_graph
         partition_0.logical_device_ids = [0]
+        # Get the node to partition mapping
+        self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return
 
     def size_based_partition(self, available_mem_bytes: int) -> None:
@@ -225,8 +376,7 @@ class Partitioner:
            Repeat Step 1 until no device left
            Step 3:
            If some nodes are left, create a partition for each left node (single node partition).
-           and then try to map those partition into logical devices with non single node partitions,
-           Two partitions use the same logical device.
+           and then try to map those partitions into logical devices with non single node partitions.
         """
         def find_device_based_on_size(node) -> Device:
             """Given a node, this function is to find a logical device
@@ -285,10 +435,11 @@ class Partitioner:
                 # No device left, create single node partitions
                 else:
                     self.create_single_node_partition(node)
-        self.set_parents_and_children()
-        self.reorganize_partitions()
+        reorganize_partitions(self.partitions)
+        # Get the node to partition mapping
+        self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         # Mapping all partitions into device
-        found_partition_to_device_mapping = self.get_device_to_partitions_mapping()
+        found_partition_to_device_mapping = get_device_to_partitions_mapping(self.partitions, self.devices)
         if not found_partition_to_device_mapping:
             raise RuntimeError("Cannot Get a Valid Partition to Logical Device Mapping")
         return
@@ -298,7 +449,7 @@ class Partitioner:
         module_with_submodules = split_module(
             self.graph_module,
             self.torch_module,
-            lambda node: self.node_to_partitions[node]
+            lambda node: self.node_to_partition[node]
         )
         return module_with_submodules
 
@@ -339,145 +490,8 @@ class Partitioner:
         """Create a partition for a single node
         """
         partition = self.create_partition()
-        total_size_needed = get_extra_size_of(node, set())
         partition.add_node(node)
-        partition.used_mem_bytes = total_size_needed
-        return partition
-
-    def get_device_to_partitions_mapping(self):
-        """Given all the partitions and all the devices,
-           map each partition into a device.
-        """
-        def calculate_extra_mem_bytes_needed_for(partition: Partition, partitions: List[Partition]):
-            all_nodes: Set[Node] = set()
-            for p in partitions:
-                all_nodes = all_nodes.union(p.nodes)
-            extra_size_needed = 0
-            for node in partition.nodes:
-                if node in all_nodes or node.op in {'placeholder', 'get_attr'}:
-                    continue
-                else:
-                    extra_size_needed += get_extra_size_of(node, all_nodes)
-            return extra_size_needed
-
-        def find_device_for(partition: Partition):
-            """Given a partition, find a logical device for the partition
-               The algorithm is that:
-               #1. sort all the devices based on left mem size
-               #2. put the partition on the device that has just enought mem
-                   for that partition
-            """
-            for d in device_to_left_mem_bytes:
-                extra_size_needed = calculate_extra_mem_bytes_needed_for(partition, device_to_partitions[d])
-                if extra_size_needed < device_to_left_mem_bytes[d]:
-                    device_to_partitions[d].append(partition)
-                    partition.logical_device_ids.append(d.logical_id)
-                    device_to_left_mem_bytes[d] -= extra_size_needed
-                    return True
-            return False
-        # logical id to device
-        logical_id_to_device: Dict[int, Device] = {}
-        for d in self.devices:
-            logical_id_to_device[d.logical_id] = d
-        # Track partitions on device
-        device_to_partitions: Dict[Device, List[Partition]] = {}
-        # Track device's left mem size
-        device_to_left_mem_bytes: Dict[Device, int] = {}
-        # Deal with the partitions that have a device
-        # Find all no device partitions
-        no_device_partitions = []
-        for partition in self.partitions:
-            if partition.logical_device_ids != []:
-                logical_id = partition.logical_device_ids[0]
-                device = logical_id_to_device[logical_id]
-                device_to_partitions[device] = [partition]
-                device_to_left_mem_bytes[device] = d.available_mem_bytes - partition.used_mem_bytes
-            else:
-                no_device_partitions.append(partition)
-        # Find device for each no device partition
-        found_device = True
-        for partition in no_device_partitions:
-            device_to_left_mem_bytes = {
-                d: left_mem_bytes for d, left_mem_bytes
-                in sorted(device_to_left_mem_bytes.items(), key=lambda item: item[1])
-            }
-            found_device = find_device_for(partition)
-            if not found_device:
-                break
-        return found_device
-
-    def combine_two_partitions(
-        self,
-        partition_0: Partition,
-        partition_1: Partition,
-    ) -> Partition:
-        """Given two partitions, combine them into a new one
-        and remove the previous two partitions from self.partitions
-        """
-        partition = self.create_partition()
-        partition.nodes = partition_0.nodes.union(partition_1.nodes)
         partition.recalculate_mem_size()
-        self.partitions.remove(partition_0)
-        self.partitions.remove(partition_1)
-        # reset parents and children for all partitions
-        for partition in self.partitions:
-            partition.parents = set()
-            partition.children = set()
-        self.reorganize_partitions()
-        self.set_parents_and_children()
-        return partition
-
-    def set_parents_and_children(self) -> None:
-        # Go through all nodes in a partition.
-        # If a node's user is in other partition,
-        # then the other partition is this partition's children.
-        # This partition is the other partition's parent
-        for partition in self.partitions:
-            for node in partition.nodes:
-                # For each node in the current partition, find its users
-                users = node.users
-                for n in users:
-                    # Find which the partition the user belongs to.
-                    # Note that if the node itself is also belongs to that partition,
-                    # that partition is not the child of the current partition
-                    for p in self.partitions:
-                        if p != partition and n in p.nodes and node not in p.nodes:
-                            partition.children.add(p)
-                            p.parents.add(partition)
-        return
-
-    def reorganize_partitions(self) -> None:
-        # Rearrange partition ids
-        for i, partition in enumerate(self.partitions):
-            partition.partition_id = i
-        # Update self.node_to_partitions accordingly
-        for partition in self.partitions:
-            for node in partition.nodes:
-                self.node_to_partitions[node] = partition.partition_id
-        return
-
-    def get_bfs_level_partition(self) -> None:
-        current_level: Set[Partition] = set()
-        visited: Set[Partition] = set()
-        for partition in self.partitions:
-            # If a partition has no parent, it should be in root level
-            if len(partition.parents) == 0:
-                current_level.add(partition)
-        next_level: Set[Partition] = set()
-        level = 0
-        # Start bfs
-        while current_level:
-            partition = current_level.pop()
-            partition.bfs_level = level
-            visited.add(partition)
-            children = partition.children
-            for child in children:
-                if child not in next_level:
-                    next_level.add(child)
-            if not current_level:
-                current_level = next_level.copy()
-                next_level = set()
-                level += 1
         return
 
     def sparse_nn_partition(self, available_mem_bytes: int) -> None:
@@ -514,7 +528,7 @@ class Partitioner:
                 # Sort partitions based on memory size
                 sorted_partitions = sorted(partitions, key=lambda p: p.used_mem_bytes)
                 # Mark bfs level
-                self.get_bfs_level_partition()
+                get_bfs_level_partition(self.partitions)
                 find_combination, partitions = \
                     find_partition_to_combine_based_on_size(
                         sorted_partitions,
@@ -522,6 +536,16 @@ class Partitioner:
                         partitions
                     )
             return
+
+        def calculate_mem_bytes_needed(p1, p2):
+            """Given two partitions, calculate how many mem bytes
+               are needed if two partitions are combined
+            """
+            nodes = p1.nodes.union(p2.nodes)
+            mem_bytes_needed = 0
+            for node in nodes:
+                mem_bytes_needed += get_extra_size_of(node, nodes)
+            return mem_bytes_needed
 
         def find_partition_to_combine_based_on_size(
             sorted_partitions: List[Partition],
@@ -536,7 +560,7 @@ class Partitioner:
                     # Calculate how many bytes needed if combined
                     mem_bytes_needed = calculate_mem_bytes_needed(p, smallest_partition)
                     if mem_bytes_needed <= available_mem_bytes:
-                        self.combine_two_partitions(p, smallest_partition)
+                        combine_two_partitions(p, smallest_partition, self.partitions)
                         partitions.remove(smallest_partition)
                         partitions.remove(p)
                         partitions.append(self.partitions[-1])
@@ -593,7 +617,7 @@ class Partitioner:
                 partition.used_mem_bytes += total_size_of_input_nodes
         reset_partition_in_sparse_nn(partition, new_partition=False)
         # Set parents and children for partitions
-        self.set_parents_and_children()
+        set_parents_and_children(self.partitions)
         # Combining non-embedding partitions
         combine_partitions_based_on_size(non_embedding_partitions, available_mem_bytes)
         # Combining embedding partitions
@@ -622,4 +646,6 @@ class Partitioner:
         # Add logical devices to the non_embedding_partitions
         for partition in non_embedding_partitions:
             partition.logical_device_ids = occupied_devices
+        # Get the node to partition mapping
+        self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return
