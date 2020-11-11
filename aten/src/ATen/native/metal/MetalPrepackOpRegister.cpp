@@ -1,7 +1,6 @@
+#include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/metal/MetalPrepackOpContext.h>
-#include <ATen/ATen.h>
-
 
 #if (C10_IOS || TARGET_OS_MAC)
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
@@ -20,7 +19,10 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     c10::optional<Scalar> output_min,
     c10::optional<Scalar> output_max) {
-  const Tensor weightContig = weight.contiguous();
+  Tensor weightContig = weight.contiguous();
+  if (weightContig.is_quantized()) {
+    weightContig = weightContig.dequantize();
+  }
   const auto ws = weightContig.sizes();
   auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
   auto packedWeight = at::empty(ws);
@@ -80,6 +82,10 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     c10::optional<Scalar> output_min,
     c10::optional<Scalar> output_max) {
   TORCH_CHECK(weight.dim() == 4);
+  std::tuple<double, int64_t> qp =
+      at::_choose_qparams_per_tensor(std::move(weight), false);
+  weight = at::quantize_per_tensor(
+      std::move(weight), std::get<0>(qp), std::get<1>(qp), c10::kQUInt8);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(weight),
       std::move(bias),
