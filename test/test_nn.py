@@ -9739,7 +9739,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertEqual(inp_discontiguous, out)
 
-    def _test_dropout_mean_check(self, cls, device):
+    def _test_dropout_stride_mean_preserve(self, cls, device):
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
             return (d[0], d[1], d[2], d[3])
@@ -10202,7 +10202,7 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout, device)
         self._test_dropout_discontiguous(nn.Dropout, device, memory_format=torch.channels_last)
 
-        self._test_dropout_mean_check(nn.Dropout, device)
+        self._test_dropout_stride_mean_preserve(nn.Dropout, device)
 
         if self.device_type == 'cuda' and TEST_WITH_ROCM:
             input = input.bfloat16()
