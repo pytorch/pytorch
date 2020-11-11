@@ -2,6 +2,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import Tensor, vmap
 import functools
+import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
@@ -1710,12 +1711,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         # Single vmap, various in_dims / out_dims
         test(lambda x: x.sum(0), [torch.randn([B0])])
+        test(lambda x: x.sum(-1), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0, 3])])
         test(lambda x: x.sum(-1), [torch.randn([2, 5, B0, 3])], in_dims=2)
         test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
 
         # Doubly nested vmap
         test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
+        test(vmap(lambda x: x.sum(-1)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
         test(vmap(lambda x: x.sum(2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
              in_dims=2, out_dims=2)
@@ -1829,6 +1832,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
              in_dims=(2, None, None))
         test(vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+
+    def test_transpose(self):
+        op = torch.transpose
+        test = self._vmap_view_test
+
+        B0, B1, B2 = 7, 11, 13
+        test(lambda x: op(x, 0, 1), (torch.rand(B0, 2, 5),))
+        test(lambda x: op(x, -1, -2), (torch.rand(B0, 2, 5),))
+        test(lambda x: op(x, 3, 1), (torch.rand(B0, 2, 5, 4, 6),))
+        test(lambda x: op(x, 1, 0), (torch.rand(2, B0, 5),), in_dims=1)
+        test(vmap(lambda x: op(x, 0, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
+        test(vmap(vmap(lambda x: op(x, 0, 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 5, B2),), in_dims=2)
+
+        # Special case: scalar tensor
+        for dim1, dim2 in itertools.product([0, -1], [0, -1]):
+            x = torch.rand(B0)
+            result = vmap(lambda x: op(x, dim1, dim2))(x)
+            self.assertTrue(result is x)
 
     def test_t(self):
         op = torch.t
