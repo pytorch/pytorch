@@ -30,7 +30,8 @@ using namespace at::native::detail;
 template <typename index_t>
 struct HermitianSymmetryOffsetCalculator {
   using offset_type = at::detail::Array<index_t, 1>;
-  int64_t dims;
+  using dim_type = std::remove_cv_t<decltype(MAX_DIMS)>;
+  dim_type dims;
   IntDivider<index_t> sizes_[MAX_DIMS];
   index_t strides_[MAX_DIMS];
   uint32_t mirror_dim_;  // bit mask
@@ -39,11 +40,11 @@ struct HermitianSymmetryOffsetCalculator {
   HermitianSymmetryOffsetCalculator(
       IntArrayRef sizes, IntArrayRef strides, IntArrayRef dim,
       const int64_t element_size){
-    dims = sizes.size();
     TORCH_INTERNAL_ASSERT(sizes.size() == strides.size());
-    TORCH_INTERNAL_ASSERT(dims <= MAX_DIMS);
+    TORCH_INTERNAL_ASSERT(sizes.size() <= MAX_DIMS);
+    dims = sizes.size();
 
-    for (int i = 0; i < MAX_DIMS; ++i) {
+    for (dim_type i = 0; i < MAX_DIMS; ++i) {
       if (i < dims) {
         sizes_[i] = IntDivider<index_t>(sizes[i]);
         strides_[i] = strides[i] / element_size;
@@ -62,7 +63,7 @@ struct HermitianSymmetryOffsetCalculator {
   C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
     index_t offset = 0;
 
-    for (int dim = 0; dim < dims; ++dim) {
+    for (dim_type dim = 0; dim < dims; ++dim) {
       auto divmod = sizes_[dim].divmod(linear_idx);
       linear_idx = divmod.div;
 

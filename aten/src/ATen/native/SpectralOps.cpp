@@ -1025,22 +1025,24 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   const auto iter_sizes = iter.shape();
   const auto ndim = iter_strides.size() + dim.size();
   DimVector in_strides(ndim), signal_half_sizes(ndim);
+  // Take coalesced batch dimensions from TensorIterator
+  std::copy(iter_strides.begin(), iter_strides.end(), in_strides.begin());
+  std::copy(iter_sizes.begin(), iter_sizes.end(), signal_half_sizes.begin());
 
+  // Take transformed dimensions directly from the input
   const auto element_size = iter.element_size(0);
-  auto* data_ptr = static_cast<char*>(input.data_ptr());
-  for (int64_t i = 0; i < iter_strides.size(); ++i) {
-    in_strides[i] = iter_strides[i];
-    signal_half_sizes[i] = iter_sizes[i];
-  }
   for (int64_t i = 0; i < dim.size(); ++i) {
     // Convert to byte strides to match TensorIterator
     in_strides[iter_strides.size() + i] = input_strides[dim[i]] * element_size;
     signal_half_sizes[iter_strides.size() + i] = input_sizes[dim[i]];
   }
+
+  // For the last dimension, use negative strides to perform the mirroring
   signal_half_sizes.back() = (input_sizes[dim.back()] - 1) / 2;
   auto out_strides = in_strides;
   out_strides.back() *= -1;
 
+  auto* data_ptr = static_cast<char*>(input.data_ptr());
   const auto* in_data = data_ptr + input_strides[dim.back()] * element_size;
   auto* out_data = data_ptr + (
       input_strides[dim.back()] * (input_sizes[dim.back()] - 1) * element_size);
@@ -1054,28 +1056,30 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
       });
 
   DimVector temp(ndim);
-  for (int64_t i = 0; i < ndim; ++i) {
-    temp[i] = in_strides[dim_permute[i]];
-  }
-  in_strides = temp;
-  for (int64_t i = 0; i < ndim; ++i) {
-    temp[i] = out_strides[dim_permute[i]];
-  }
-  out_strides = temp;
-  for (int64_t i = 0; i < ndim; ++i) {
-    temp[i] = signal_half_sizes[dim_permute[i]];
-  }
-  signal_half_sizes = temp;
+  auto apply_permutation = [&] (DimVector & vec) {
+    // Do permuted index copy into a temporary, then copy back
+    for (int64_t i = 0; i < ndim; ++i) {
+      temp[i] = vec[dim_permute[i]];
+    }
+    vec = temp;
+  };
+  apply_permutation(in_strides);
+  apply_permutation(out_strides);
+  apply_permutation(signal_half_sizes);
 
+  // Find dims.slice(dims.size() - 1) in the new permuted order.
+  // These are the dimensions that need explicit Hermitian mirroring
   DimVector mirror_dims;
+  mirror_dims.reserve(dim.size() - 1);
   for (int64_t i = 0; i < ndim; ++i) {
-    if (dim_permute[i] >= iter_strides.size() && dim_permute[i] != ndim - 1) {
+    if (dim_permute[i] >= iter_strides.size() &&  // Not a batch dimension
+        dim_permute[i] != ndim - 1) {  // Not the last dim, which is mirrored separately with negative strides
       mirror_dims.push_back(i);
     }
   }
   TORCH_INTERNAL_ASSERT(mirror_dims.size() == dim.size() - 1);
 
-
+  // Dispatch to CPU or CUDA kernel to do the actual conjugate mirroring
   fft_fill_with_conjugate_symmetry_stub(
       input.device().type(), input.scalar_type(),
       mirror_dims, signal_half_sizes, in_strides, in_data, out_strides, out_data);

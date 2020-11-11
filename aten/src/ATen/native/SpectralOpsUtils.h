@@ -65,8 +65,8 @@ inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
 
 using fft_fill_with_conjugate_symmetry_fn =
     void (*)(ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef half_sizes,
-             IntArrayRef in_strides, const void * in_data,
-             IntArrayRef out_strides, void * out_data);
+             IntArrayRef in_strides, const void* in_data,
+             IntArrayRef out_strides, void* out_data);
 DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_symmetry_stub);
 
 // In real-to-complex transform, cuFFT and MKL only fill half of the values
