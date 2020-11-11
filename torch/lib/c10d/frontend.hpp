@@ -35,7 +35,7 @@ class DistributedC10d {
       const std::chrono::milliseconds& timeout,
       int64_t world_size,
       int64_t rank,
-      std::shared_ptr<Store> store,
+      c10::intrusive_ptr<Store> store,
       const std::string& group_name);
 
   void destroyProcessGroup(std::shared_ptr<ProcessGroup> group);
@@ -202,7 +202,7 @@ class DistributedC10d {
   // need to use ProcessGroup or ProcesGroup* as key.
   std::unordered_map<
       std::shared_ptr<ProcessGroup>,
-      std::pair<std::string, std::shared_ptr<Store>>>
+      std::pair<std::string, c10::intrusive_ptr<Store>>>
       pg_map_;
 
   // Note, this is different mapping relationship than original Python
