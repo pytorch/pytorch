@@ -112,7 +112,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroupTest::createProcessGroupTest(
     int rank,
     int size,
     const std::chrono::duration<float>& timeout) {
-  return std::make_shared<ProcessGroupTest>(rank, size);
+  return c10::make_intrusive<ProcessGroupTest>(rank, size);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
