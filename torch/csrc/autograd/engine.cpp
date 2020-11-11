@@ -877,7 +877,7 @@ auto Engine::execute(const edge_list& roots,
   }
 
   if (skip_dummy_node) {
-    auto inputs_ = std::vector<Variable>();
+    auto inputs_ = variable_list();
     inputs_.reserve(graph_root->num_inputs());
     for (size_t i = 0; i < graph_root->num_inputs(); ++i) {
       if (i == roots.at(0).input_nr) {
@@ -916,7 +916,7 @@ std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
 
   InputBuffer input_buffer(std::move(inputs));
   auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
-  queue -> push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
+  queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call
