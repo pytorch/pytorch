@@ -146,9 +146,8 @@ Tensor _cudnn_convolution_v8(
 
   cudnnHandle_t handle = getCudnnHandle();
 
-  auto op_builder = cudnn_frontend::OperationBuilder();
+  auto op_builder = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
   op_builder
-      .setOpMode(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
       .setxDesc(getTensorDescriptor(input_contig, groups, 'x'))
       .setyDesc(getTensorDescriptor(output, groups, 'y'))
       .setwDesc(getTensorDescriptor(weight_contig, groups, 'w'))
