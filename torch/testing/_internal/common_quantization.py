@@ -18,6 +18,7 @@ from torch.quantization.quantization_mappings import (
     get_default_qconfig_propagation_list,
     get_default_qat_module_mappings,
 )
+from torch.quantization.quant_type import quant_type_to_str
 
 try:
     # graph mode quantization based on fx
@@ -356,16 +357,18 @@ class QuantizationTestCase(TestCase):
                     submodule_name_count += 1
             return submodule_name_count == 0
 
+        quant_type = getattr(getattr(module, 'qconfig', None), 'quant_type', None)
+        quant_type_str = quant_type_to_str(quant_type)
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
             and type(module) in propagate_qconfig_list) or
-           type(module) in float_to_observed_module_class_mapping.keys()):
+           type(module) in float_to_observed_module_class_mapping.get(quant_type_str, {}).keys()):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_default_qat_module_mappings().values() and \
-           type(module) not in float_to_observed_module_class_mapping.values():
+           type(module) not in float_to_observed_module_class_mapping.get(quant_type_str, {}).values():
             for child in module.children():
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 

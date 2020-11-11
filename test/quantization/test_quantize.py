@@ -668,7 +668,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
         original_m.qconfig = default_qconfig
         prepare_custom_config_dict = {
             "float_to_observed_custom_module_class": {
-                CustomModule: ObservedCustomModule
+                'static': {
+                    CustomModule: ObservedCustomModule
+                }
             }
         }
         convert_custom_config_dict = {
