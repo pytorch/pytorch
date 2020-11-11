@@ -163,7 +163,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Reference to the store so that we can write aborted communicators
     // to the store.
-    c10::intrusive_ptr<Store> store_;
+    std::shared_ptr<Store> store_;
 
     // Store a reference to NCCL collective's outputs to be used by getFuture.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
@@ -393,7 +393,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // communicator. These NCCL communicators are cached and reused if possible.
   //
   ProcessGroupNCCL(
-      const c10::intrusive_ptr<Store>& store,
+      const std::shared_ptr<Store>& store,
       int rank,
       int size,
       Options options = Options());
@@ -402,7 +402,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
   C10_DEPRECATED ProcessGroupNCCL(
-      const c10::intrusive_ptr<Store>& store,
+      const std::shared_ptr<Store>& store,
       int rank,
       int size,
       const std::string& groupName,
@@ -594,7 +594,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   static const int64_t kWorkCleanupThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
-  c10::intrusive_ptr<Store> store_;
+  std::shared_ptr<Store> store_;
 
   // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is

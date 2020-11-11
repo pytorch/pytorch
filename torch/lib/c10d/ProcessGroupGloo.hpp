@@ -152,7 +152,7 @@ class ProcessGroupGloo : public ProcessGroup {
   static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
   explicit ProcessGroupGloo(
-      const c10::intrusive_ptr<Store>& store,
+      const std::shared_ptr<Store>& store,
       int rank,
       int size,
       Options options = Options());

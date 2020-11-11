@@ -31,7 +31,7 @@ class NCCLTestBase {
   }
 
   void initialize(int rank, int size) {
-    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size));

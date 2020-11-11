@@ -437,7 +437,7 @@ bool ProcessGroupNCCL::WorkNCCL::timedOut() {
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
-    const c10::intrusive_ptr<Store>& store,
+    const std::shared_ptr<Store>& store,
     int rank,
     int size,
     Options options)
