@@ -63,7 +63,7 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id) {
     .build();
 }
 
-void filterEngineConfig(
+void filterEngineConfigs(
   std::vector<cudnnBackendDescriptor_t> &from,
   std::vector<cudnnBackendDescriptor_t> &to,
   bool deterministic, bool allow_tf32)
@@ -171,7 +171,7 @@ Tensor _cudnn_convolution_v8(
   // auto &fallback_list = fallback.getFallbackList();
 
   std::vector<cudnnBackendDescriptor_t> filtered_configs;
-  filterEngineConfig(engine_configs, filtered_configs, deterministic, allow_tf32);
+  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32);
 
   for (auto &cfg : filtered_configs) {
     try {
