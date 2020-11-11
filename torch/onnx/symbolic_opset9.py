@@ -1110,7 +1110,8 @@ def log_softmax(g, input, dim, dtype=None):
         dim = input_dim - 1
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != 'prim::Constant':
-        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
+        parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
@@ -1645,10 +1646,22 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
-def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
-    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
-    tensor = zeros(g, shape, dtype, layout, device)
-    return g.op("EyeLike", tensor)
+def eye(g, *args):
+    if len(args) == 5:
+        # aten::eye(n, dtype, layout, device, pin_memory)
+        n, dtype, layout, device, pin_memory = args
+        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        shape = g.op("Concat", dim_size, dim_size, axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    elif len(args) == 6:
+        # aten::eye(n, m, dtype, layout, device, pin_memory)
+        n, m, dtype, layout, device, pin_memory = args
+        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    else:
+        raise NotImplementedError("Unknown aten::eye signature")
 
 
 def slice(g, self, *args):

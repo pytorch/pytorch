@@ -88,16 +88,16 @@ class ProcessGroupTest : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
-      int tag);
+      int tag) override;
 
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int tag);
+      int tag) override;
 
   // Create a new ProcessGroupTest instance
   static c10::intrusive_ptr<ProcessGroup> createProcessGroupTest(
