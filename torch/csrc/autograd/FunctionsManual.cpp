@@ -1863,21 +1863,12 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   // for complex-valued input there is an additional term
   // https://giggleliu.github.io/2019/04/02/einsumbp.html
   // https://arxiv.org/abs/1909.02659
-  if (self.is_complex()) {
-    if (gu.defined()) {
-      auto I = at::eye(uh.size(-2), uh.options());
-      Tensor L = I.mul(at::matmul(uh, gu));
-      L = L - L.conj().transpose(-2, -1);
-      Tensor imag_term = 0.5 * at::chain_matmul({u, L, sigma_mat_inv, vh});
-      return u_term + sigma_term + v_term + imag_term;
-    }
-    else if (!gu.defined() && gv.defined()) {
-      auto I = at::eye(vh.size(-2), vh.options());
-      Tensor L = I.mul(at::matmul(vh, gv));
-      L = L.conj().transpose(-2, -1) - L;
-      Tensor imag_term = 0.5 * at::chain_matmul({u, sigma_mat_inv, L, vh});
-      return u_term + sigma_term + v_term + imag_term;
-    }
+  if (self.is_complex() && gu.defined()) {
+    auto I = at::eye(uh.size(-2), uh.options());
+    Tensor L = I.mul(at::matmul(uh, gu));
+    L = L - L.conj().transpose(-2, -1);
+    Tensor imag_term = 0.5 * at::chain_matmul({u, L, sigma_mat_inv, vh});
+    return u_term + sigma_term + v_term + imag_term;
   }
 
   return u_term + sigma_term + v_term;
