@@ -15425,6 +15425,60 @@ dedent """
         inp = torch.ones(1)
         self.checkModule(MyModule(), inp)
 
+    def test_stepped_slicing_tuple(self):
+
+        inp = torch.ones(1)
+
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2)
+
+            def forward(self, a):
+                return self.x[::2]
+
+        self.checkModule(A(), inp)
+
+        class B(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[::1]
+
+        self.checkModule(B(), inp)
+
+        class C(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[::55]
+
+        self.checkModule(C(), inp)
+
+        class D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[1:4:2]
+
+        self.checkModule(D(), inp)
+
+        class E(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[1:4]
+
+        self.checkModule(E(), inp)
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.

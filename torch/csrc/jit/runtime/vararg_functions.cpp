@@ -250,11 +250,10 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   push(stack, false);
 }
 
-void tupleSlice(Stack& stack, size_t begin, size_t end) {
+void tupleSlice(Stack& stack, size_t begin, size_t end, int8_t step_size) {
   auto tuple = pop(stack).toTuple();
   std::vector<IValue> output_elems;
-  output_elems.reserve(end - begin);
-  for (size_t i = begin; i < end; ++i) {
+  for (size_t i = begin; i < end; i += step_size) {
     output_elems.emplace_back(tuple->elements()[i]);
   }
   push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));

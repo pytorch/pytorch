@@ -3449,17 +3449,20 @@ struct to_ir {
       args.emplace_back(loc, "end", end);
     }
     if (sliceable->type()->cast<TupleType>()) {
-      if (step) {
-        // TODO: add support for slicing tuples with a step
-        throw ErrorReport(loc)
-            << "Unsupported operation: slicing tuples with a step isn't supported";
+      if (end && step) {
+        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2], step);
       }
 
       if (end) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
-      } else {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
+        return emitTupleSlice(
+            loc, args[0], args[1], /*end*/ args[2], c10::nullopt);
       }
+
+      if (step) {
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt, step);
+      }
+
+      return emitTupleSlice(loc, args[0], args[1], c10::nullopt, c10::nullopt);
     }
 
     if (!step) {
@@ -3824,7 +3827,8 @@ struct to_ir {
       const SourceRange& loc,
       const NamedValue& tuple_val,
       const NamedValue& beg_val,
-      const at::optional<NamedValue>& end_val) {
+      const at::optional<NamedValue>& end_val,
+      const at::optional<NamedValue>& step) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
     int64_t beg = getAdjTupleIndex(
         loc,
@@ -3843,8 +3847,23 @@ struct to_ir {
     end = std::min(std::max((int64_t)0, end), tuple_len);
     beg = std::min(std::max((int64_t)0, beg), tuple_len);
 
+    int64_t step_size = 1;
+    if (step) {
+      auto val = toIValue(step->value(*graph));
+      if (val->isInt()) {
+        step_size = val->to<int64_t>();
+      }
+    }
+
+    if (step_size < 0) {
+      // TODO: add support for slicing tuples with a negative step
+      throw ErrorReport(loc)
+          << "Unsupported operation: slicing tuples with a negative step isn't supported";
+    }
+
     return graph
-        ->insertNode(graph->createTupleSlice(tuple_val.value(*graph), beg, end))
+        ->insertNode(graph->createTupleSlice(
+            tuple_val.value(*graph), beg, end, step_size))
         ->output();
   }
 
@@ -3874,11 +3893,11 @@ struct to_ir {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
           auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, end);
+              emitTupleSlice(val_range, s_tuple_val, begin, end, c10::nullopt);
           return std::make_shared<SimpleValue>(tupleSliceValue);
         } else {
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
+          auto tupleSliceValue = emitTupleSlice(
+              val_range, s_tuple_val, begin, c10::nullopt, c10::nullopt);
           return std::make_shared<SimpleValue>(tupleSliceValue);
         }
       } else {

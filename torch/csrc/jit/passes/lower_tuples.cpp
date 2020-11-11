@@ -65,7 +65,8 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
     std::vector<Value*> values;
     int64_t beg = n->i(attr::beg);
     int64_t end = n->i(attr::end);
-    for (int64_t i = beg; i < end; i += 1) {
+    int64_t step_size = n->i(attr::step_size);
+    for (int64_t i = beg; i < end; i += step_size) {
       values.push_back(construct->inputs().at(i));
     }
     auto graph = n->owningGraph();

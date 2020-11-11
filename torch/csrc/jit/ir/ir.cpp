@@ -1605,13 +1605,18 @@ Node* Graph::createTupleIndex(
   return n;
 }
 
-Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
+Node* Graph::createTupleSlice(
+    Value* tup,
+    int64_t beg,
+    int64_t end,
+    int64_t step_size) {
   auto n = create(prim::TupleSlice, {tup});
   auto tuple_type = tup->type()->expect<TupleType>();
   n->i_(attr::beg, beg);
   n->i_(attr::end, end);
+  n->i_(attr::step_size, step_size);
   std::vector<TypePtr> output_types;
-  for (auto i = beg; i < end; ++i) {
+  for (auto i = beg; i < end; i += step_size) {
     output_types.push_back(tuple_type->elements().at(i));
   }
   auto tt = TupleType::create(std::move(output_types));

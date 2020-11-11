@@ -360,6 +360,7 @@ namespace c10 {
   _(attr, beg)                       \
   _(attr, idx)                       \
   _(attr, split)                     \
+  _(attr, step_size)                 \
   _(attr, slot)                      \
   _(attr, kinds)                     \
   _(attr, types)                     \

@@ -163,7 +163,7 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case TUPLE_SLICE: {
-        tupleSlice(stack, inst.X, inst.X + inst.N);
+        tupleSlice(stack, inst.X, inst.X + inst.N, inst.unused);
         ++pc;
       } break;
       case DICT_CONSTRUCT: {
