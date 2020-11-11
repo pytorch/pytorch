@@ -19,6 +19,16 @@
 
 #include <c10d/Types.hpp>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <fcntl.h>
+#include <BaseTsd.h>
+#include <errno.h>
+typedef SSIZE_T ssize_t;
+#pragma comment(lib, "Ws2_32.lib")
+#endif
+
 namespace c10d {
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
@@ -464,6 +474,25 @@ using SizeType = uint64_t;
 // `success_cond` is an expression used to check if an error has happend. So for
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
+#ifdef _WIN32
+#define SYSCHECK(expr, success_cond)                                         \
+  while (true) {                                                             \
+    auto __output = (expr);                                                  \
+    auto errno_local = WSAGetLastError();                                    \
+    (void)__output;                                                          \
+    if (!(success_cond)) {                                                   \
+      if (errno == EINTR) {                                                  \
+        continue;                                                            \
+      } else if (errno_local == EAGAIN || errno_local == EWOULDBLOCK) {      \
+        throw std::runtime_error("Socket Timeout");                          \
+      } else {                                                               \
+        throw std::system_error(errno_local, std::system_category());        \
+      }                                                                      \
+    } else {                                                                 \
+      break;                                                                 \
+    }                                                                        \
+  }
+#else
 #define SYSCHECK(expr, success_cond)                            \
   while (true) {                                                \
     auto __output = (expr);                                     \
@@ -480,9 +509,11 @@ using SizeType = uint64_t;
       break;                                                    \
     }                                                           \
   }
+#endif
 
 // Most functions indicate error by returning `-1`. This is a helper macro for
 // this common case with `SYSCHECK`.
+// Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
 // Helper resource guard class
@@ -506,7 +537,6 @@ class ResourceGuard {
   bool released_;
 };
 
-#ifndef _WIN32
 namespace tcputil {
 
 constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
@@ -536,8 +566,13 @@ void sendBytes(
 
   while (bytesToSend > 0) {
     ssize_t bytesSent;
+#ifdef _WIN32
+    SYSCHECK_ERR_RETURN_NEG1(
+        bytesSent = send(socket, (const char*)currentBytes, bytesToSend, flags))
+#else
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+#endif
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -559,8 +594,13 @@ void recvBytes(int socket, T* buffer, size_t length) {
 
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
+#ifdef _WIN32
+    SYSCHECK_ERR_RETURN_NEG1(
+        bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
+#else
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
+#endif
     if (bytesReceived == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -620,6 +660,24 @@ inline std::string recvString(int socket) {
   return std::string(value.data(), value.size());
 }
 
+inline void closeSocket(int socket) {
+#ifdef _WIN32
+  closesocket(socket);
+#else
+  ::close(socket);
+#endif
+}
+
+inline void socketInitialize() {
+#ifdef _WIN32
+  static std::once_flag init_flag;
+  std::call_once(init_flag, []() {
+      WSADATA wsa_data;
+      SYSCHECK_ERR_RETURN_NEG1(WSAStartup(MAKEWORD(2, 2), &wsa_data))
+  });
+#endif
+}
+
 // Other helpers
 std::string sockaddrToString(struct sockaddr* addr);
 
@@ -636,5 +694,4 @@ std::tuple<int, std::string> accept(
     const std::chrono::milliseconds& timeout = kNoTimeout);
 
 } // namespace tcputil
-#endif
 } // namespace c10d

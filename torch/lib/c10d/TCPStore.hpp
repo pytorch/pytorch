@@ -7,6 +7,12 @@
 #include <c10d/Store.hpp>
 #include <c10d/Utils.hpp>
 
+#ifdef _WIN32
+#define CONNECT_SOCKET_OFFSET 1
+#else
+#define CONNECT_SOCKET_OFFSET 2
+#endif
+
 namespace c10d {
 
 class TCPStoreDaemon {
@@ -29,6 +35,7 @@ class TCPStoreDaemon {
   void getNumKeysHandler(int socket) const;
   void deleteHandler(int socket);
   void waitHandler(int socket);
+  void addPollfd(std::vector<struct pollfd>& fds, int socket, short events);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   void wakeupWaitingClients(const std::string& key);
@@ -42,7 +49,13 @@ class TCPStoreDaemon {
 
   std::vector<int> sockets_;
   int storeListenSocket_;
+#ifdef _WIN32
+  const std::chrono::milliseconds checkTimeout_
+    = std::chrono::milliseconds(10);
+  HANDLE ghStopEvent_;
+#else
   std::vector<int> controlPipeFd_{-1, -1};
+#endif
 };
 
 class TCPStore : public Store {

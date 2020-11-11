@@ -2,10 +2,10 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
+#include <c10d/TCPStore.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
-#include <c10d/TCPStore.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
 
@@ -590,6 +590,7 @@ Example::
     >>> store.set("first_key", "first_value")
       )")
       .def(py::init<>());
+#endif
 
   intrusive_ptr_class_<::c10d::TCPStore>(
       module,
@@ -629,7 +630,6 @@ Example::
           py::arg("is_master"),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
-#endif
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,

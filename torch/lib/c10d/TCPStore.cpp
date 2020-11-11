@@ -1,16 +1,22 @@
 #include <c10d/TCPStore.hpp>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <io.h>
+#else
 #include <poll.h>
-
 #include <unistd.h>
+#endif
+
 #include <algorithm>
+#include <fcntl.h>
 #include <system_error>
 
 namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE };
+enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETED };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
@@ -23,11 +29,21 @@ enum class WaitResponseType : uint8_t { STOP_WAITING };
 TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
     : storeListenSocket_(storeListenSocket) {
   // Use control pipe to signal instance destruction to the daemon thread.
+#ifdef _WIN32
+  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (ghStopEvent_ == NULL)
+  {
+      throw std::runtime_error(
+          "Failed to create the control pipe to start the "
+          "TCPStoreDaemon run");
+  }
+#else
   if (pipe(controlPipeFd_.data()) == -1) {
     throw std::runtime_error(
         "Failed to create the control pipe to start the "
         "TCPStoreDaemon run");
   }
+#endif
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
 }
 
@@ -39,15 +55,19 @@ TCPStoreDaemon::~TCPStoreDaemon() {
   // Close unclosed sockets
   for (auto socket : sockets_) {
     if (socket != -1) {
-      ::close(socket);
+      tcputil::closeSocket(socket);
     }
   }
   // Now close the rest control pipe
+#ifdef _WIN32
+  CloseHandle(ghStopEvent_);
+#else
   for (auto fd : controlPipeFd_) {
     if (fd != -1) {
       ::close(fd);
     }
   }
+#endif
 }
 
 void TCPStoreDaemon::join() {
@@ -56,9 +76,11 @@ void TCPStoreDaemon::join() {
 
 void TCPStoreDaemon::run() {
   std::vector<struct pollfd> fds;
-  fds.push_back({.fd = storeListenSocket_, .events = POLLIN});
+  addPollfd(fds, storeListenSocket_, POLLIN);
+#ifndef _WIN32
   // Push the read end of the pipe to signal the stopping of the daemon run
-  fds.push_back({.fd = controlPipeFd_[0], .events = POLLHUP});
+  addPollfd(fds, controlPipeFd_[0], POLLHUP);
+#endif
 
   // receive the queries
   bool finished = false;
@@ -67,12 +89,31 @@ void TCPStoreDaemon::run() {
       fds[i].revents = 0;
     }
 
+#ifdef _WIN32
+    int res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count());
+    if (res == SOCKET_ERROR) {
+      throw std::system_error(GetLastError(), std::system_category());
+    }
+    else if (res == 0) {
+      auto rv = WaitForSingleObject(ghStopEvent_, 0);
+      if (rv != WAIT_TIMEOUT) {
+          finished = true;
+          break;
+      }
+      continue;
+    }
+#else
     SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
+#endif
 
     // TCPStore's listening socket has an event and it should now be able to
     // accept new connections.
     if (fds[0].revents != 0) {
+#ifdef _WIN32
+      if (!(fds[0].revents & POLLIN)) {
+#else
       if (fds[0].revents ^ POLLIN) {
+#endif
         throw std::system_error(
             ECONNABORTED,
             std::system_category(),
@@ -81,8 +122,10 @@ void TCPStoreDaemon::run() {
       }
       int sockFd = std::get<0>(tcputil::accept(storeListenSocket_));
       sockets_.push_back(sockFd);
-      fds.push_back({.fd = sockFd, .events = POLLIN});
+      addPollfd(fds, sockFd, POLLIN);
     }
+
+#ifndef _WIN32
     // The pipe receives an event which tells us to shutdown the daemon
     if (fds[1].revents != 0) {
       // Will be POLLUP when the pipe is closed
@@ -96,10 +139,11 @@ void TCPStoreDaemon::run() {
       finished = true;
       break;
     }
+#endif
     // Skipping the fds[0] and fds[1],
     // fds[0] is master's listening socket
-    // fds[1] is control pipe's reading fd
-    for (size_t fdIdx = 2; fdIdx < fds.size(); ++fdIdx) {
+    // fds[1] is control pipe's reading fd, it is not for Windows platform
+    for (size_t fdIdx = CONNECT_SOCKET_OFFSET; fdIdx < fds.size(); ++fdIdx) {
       if (fds[fdIdx].revents == 0) {
         continue;
       }
@@ -115,7 +159,7 @@ void TCPStoreDaemon::run() {
         // exception, other connections will get an exception once they try to
         // use the store. We will go ahead and close this connection whenever
         // we hit an exception here.
-        ::close(fds[fdIdx].fd);
+        tcputil::closeSocket(fds[fdIdx].fd);
 
         // Remove all the tracking state of the close FD
         for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
@@ -140,7 +184,7 @@ void TCPStoreDaemon::run() {
           }
         }
         fds.erase(fds.begin() + fdIdx);
-        sockets_.erase(sockets_.begin() + fdIdx - 2);
+        sockets_.erase(sockets_.begin() + fdIdx - CONNECT_SOCKET_OFFSET);
         --fdIdx;
         continue;
       }
@@ -149,11 +193,15 @@ void TCPStoreDaemon::run() {
 }
 
 void TCPStoreDaemon::stop() {
+#ifdef _WIN32
+  SetEvent(ghStopEvent_);
+#else
   if (controlPipeFd_[1] != -1) {
     // close the write end of the pipe
     ::close(controlPipeFd_[1]);
     controlPipeFd_[1] = -1;
   }
+#endif
 }
 
 // query communicates with the worker. The format
@@ -183,7 +231,7 @@ void TCPStoreDaemon::query(int socket) {
   } else if (qt == QueryType::GETNUMKEYS) {
     getNumKeysHandler(socket);
 
-  } else if (qt == QueryType::DELETE) {
+  } else if (qt == QueryType::DELETED) {
     deleteHandler(socket);
 
   } else {
@@ -283,6 +331,14 @@ bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
   });
 }
 
+void TCPStoreDaemon:: addPollfd(std::vector<struct pollfd>& fds, int socket, short events) {
+#ifdef _WIN32
+  fds.push_back({(SOCKET)socket, events});
+#else
+  fds.push_back({.fd = socket, .events = events});
+#endif
+}
+
 // TCPStore class methods
 TCPStore::TCPStore(
     const std::string& masterAddr,
@@ -298,6 +354,7 @@ TCPStore::TCPStore(
       numWorkers_(numWorkers),
       initKey_("init/"),
       regularPrefix_("/") {
+  tcputil::socketInitialize();
   if (isServer_) {
     // Opening up the listening socket
     std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
@@ -308,19 +365,18 @@ TCPStore::TCPStore(
   // Connect to the daemon
   storeSocket_ = tcputil::connect(
       tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-
   if (waitWorkers) {
     waitForWorkers();
   }
 }
 
 TCPStore::~TCPStore() {
-  ::close(storeSocket_);
+  tcputil::closeSocket(storeSocket_);
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
     tcpStoreDaemon_.reset(nullptr);
-    ::close(masterListenSocket_);
+    tcputil::closeSocket(masterListenSocket_);
   }
 }
 
@@ -375,7 +431,7 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 
 bool TCPStore::deleteKey(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE);
+  tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETED);
   tcputil::sendString(storeSocket_, regKey, true);
   auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
   return (numDeleted == 1);
@@ -431,8 +487,13 @@ void TCPStore::waitHelper_(
     const std::chrono::milliseconds& timeout) {
   // Set the socket timeout if there is a wait timeout
   if (timeout != kNoTimeout) {
+#ifdef _WIN32
+    struct timeval timeoutTV = {timeout.count() / 1000,
+                                (timeout.count() % 1000) * 1000};
+#else
     struct timeval timeoutTV = {.tv_sec = timeout.count() / 1000,
                                 .tv_usec = (timeout.count() % 1000) * 1000};
+#endif
     SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
         storeSocket_,
         SOL_SOCKET,

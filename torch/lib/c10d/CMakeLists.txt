@@ -45,6 +45,7 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
+  TCPStore.cpp
   ProcessGroup.cpp
   Store.cpp
   PrefixStore.cpp
@@ -52,7 +53,7 @@ set(C10D_SRCS
   )
 
 if(NOT WIN32)
-  list(APPEND C10D_SRCS HashStore.cpp ProcessGroupRoundRobin.cpp TCPStore.cpp)
+  list(APPEND C10D_SRCS HashStore.cpp ProcessGroupRoundRobin.cpp)
 endif()
 
 set(C10D_LIBS torch)
@@ -120,6 +121,7 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
+copy_header(TCPStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
@@ -131,7 +133,6 @@ if(USE_GLOO)
 endif()
 if(NOT WIN32)
   copy_header(HashStore.hpp)
-  copy_header(TCPStore.hpp)
 endif()
 
 if(USE_C10D_NCCL)
