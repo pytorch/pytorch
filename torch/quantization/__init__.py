@@ -8,9 +8,10 @@ from .fuse_modules import fuse_modules
 from .stubs import *
 from .quant_type import *
 from .quantize_jit import *
-# from .quantize_fx import *
 from .quantization_mappings import *
 from .fuser_method_mappings import *
+
+from . import fx
 
 def default_eval_fn(model, calib_data):
     r"""

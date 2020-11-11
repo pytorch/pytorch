@@ -13,11 +13,6 @@ We will recreate all the RNN modules as we require the modules to be decomposed
 into its building blocks to be able to observe.
 """
 
-def _hidden_as_output(x):
-    if isinstance(x, Tensor):
-        return x
-    return x[0]
-
 class LSTMCell(torch.nn.Module):
     _FLOAT_MODULE = nn.LSTMCell
 
@@ -60,8 +55,7 @@ class LSTMCell(torch.nn.Module):
 
         tanh_cy = torch.tanh(cy)
         hy = self.ogate_cy.mul(out_gate, tanh_cy)
-
-        return hy, (hy, cy)
+        return hy, cy
 
     def initialize_hidden(self, batch_size: int, is_quantized: bool = False) -> Tuple[Tensor, Tensor]:
         h, c = torch.zeros((batch_size, self.hidden_size)), torch.zeros((batch_size, self.hidden_size))
@@ -104,8 +98,8 @@ class _LSTMLayer(nn.Module):
     def forward(self, x, hidden=None):
         result = []
         for xx in x:
-            output, hidden = self.cell(xx, hidden)
-            result.append(_hidden_as_output(hidden))
+            hidden = self.cell(xx, hidden)
+            result.append(hidden[0])
         result = torch.stack(result, 0)
         return result, hidden
 
