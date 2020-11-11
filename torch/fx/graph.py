@@ -385,7 +385,7 @@ class Graph:
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {node.args[0]}')
+                body.append(f'return {repr(node.args[0])}')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
