@@ -174,8 +174,10 @@ static void UpdateScalarTypeForInputs(
   }
 
   for (auto input : n->inputs()) {
+    c10::optional<c10::ScalarType> st = c10::nullopt;
     auto input_tensor_type = input->type()->cast<TensorType>();
-
+    auto input_list_type = input->type()->cast<ListType>();
+    
     if ((input->node()->kind() == onnx::Constant) ||
         (input_tensor_type && input_tensor_type->scalarType() &&
          (*input_tensor_type->scalarType() != scalar_type))) {
