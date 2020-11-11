@@ -1275,11 +1275,9 @@ struct PythonPrintImpl {
     }
 
     const auto& returnType = schema.returns().at(0).type();
-
-    body_ << ") -> "
-          << returnType->annotation_str(type_printer_)
-          << ":\n";
+    body_ << ") -> " << returnType->annotation_str(type_printer_) << ":\n";
     registerClassDependencies(returnType);
+
     printBody(graph.block());
   }
 
