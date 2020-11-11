@@ -4735,6 +4735,33 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
+    def test_float_power_function(self):
+        a = torch.tensor([0., 0., 0.])
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.float_power(a, b).sum()
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
+
+        s = 0
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.float_power(a, b).sum()
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
+
+    def test_float_power_zero_tensor_gradient(self):
+        def run_test(input_size, exponent):
+            input = torch.zeros(*input_size, requires_grad=True)
+            input.float_power(exponent).sum().backward()
+            self.assertEqual(input.grad.abs().sum(), 0)
+
+        run_test((10,), torch.zeros(10))
+        run_test((10, 10), torch.zeros(10, 10))
+        run_test((10,), 0)
+
+    def test_float_power_scalar_base(self):
+        a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
+        gradcheck(lambda a: torch.float_power(2, a), (a,))
+
     def test_nansum_with_nans(self):
         a = torch.randn(2, 2, 2, 2)
         with torch.no_grad():

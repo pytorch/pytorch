@@ -6342,11 +6342,11 @@ add_docstr(torch.float_power,
            r"""
 float_power(input, exponent, *, out=None) -> Tensor
 
-Raises :attr:`input` to power of :attr:`exponent`, elementwise, in double precision. 
+Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision. 
 If neither input is complex returns a ``torch.float64`` tensor, 
 and if one or more inputs is complex returns a ``torch.complex128`` tensor.
 
-:attr:`exponent` can be either a single ``float`` number or a `Tensor`
+:attr:`exponent` can be either a single number, or a `Tensor`
 with the same number of elements as :attr:`input`.
 
 .. math::
@@ -6357,7 +6357,7 @@ with the same number of elements as :attr:`input`.
     This function always computes in double precision, unlike :func:`torch.pow`, 
     which implements more typical :ref:`type promotion <type-promotion-doc>`.
     This is useful when the computation needs to be performed in a wider or more precise dtype, 
-    or the results of computation may contain fractional values not representable in the input dtypes, 
+    or the results of the computation may contain fractional values not representable in the input dtypes, 
     like when an integer base is raised to a negative integer exponent.
 
 Args:
