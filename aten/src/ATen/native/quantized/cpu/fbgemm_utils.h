@@ -339,6 +339,10 @@ struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
     return version_;
   }
 
+  at::Tensor get_packed_weight() const override {
+    return packed_w;
+  }
+
   at::Tensor embeddingbag_byte(
     const at::Tensor& indices,
     const c10::optional<at::Tensor>& offsets,

@@ -22,7 +22,6 @@ at::Tensor embedding_bag_4bit_impl(
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   TORCH_CHECK(weight.dim() == 2);
-  TORCH_CHECK(indices.dim() == 1);
   TORCH_CHECK(offsets.dim() == 1);
 
   const auto weight_data = weight.data_ptr<uint8_t>();
@@ -198,12 +197,11 @@ at::Tensor embedding_bag_byte_impl(
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset) {
+    bool include_last_offset,
+    bool is_embedding_op) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.dim() == 2);
-  TORCH_CHECK(indices.dim() == 1);
   TORCH_CHECK(offsets.dim() == 1);
-
   const auto weight_data = weight.data_ptr<uint8_t>();
   const auto indices_data = indices.data_ptr<IndexType>();
   auto offsets_data = offsets.data_ptr<OffsetType>();
@@ -223,6 +221,7 @@ at::Tensor embedding_bag_byte_impl(
 
   int64_t output_size = M - 1;
   std::vector<OffsetType> offsets_include_last_val;
+  at::Tensor output;
   if (!include_last_offset) {
     output_size = M;
     offsets_include_last_val.resize(M + 1);
@@ -237,9 +236,13 @@ at::Tensor embedding_bag_byte_impl(
     offsets_include_last_val[M] = indices.numel();
     offsets_data = offsets_include_last_val.data();
   }
-
-  std::vector<int64_t> shape = {output_size, D};
-  auto output = at::empty(shape, weight.options().dtype(at::kFloat));
+  if (indices.dim() == 2 && is_embedding_op) {
+    std::vector<int64_t> shape = {indices.size(0), indices.size(1), D};
+    output = at::empty(shape, weight.options().dtype(at::kFloat));
+  } else {
+    std::vector<int64_t> shape = {output_size, D};
+    output = at::empty(shape, weight.options().dtype(at::kFloat));
+  }
   auto* output_data = output.data_ptr<float>();
 
   const int index_size = indices.numel();
@@ -314,11 +317,27 @@ at::Tensor embedding_bag_byte_helper(
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset) {
+    bool include_last_offset,
+    bool is_embedding_op) {
+  at::Tensor offsets;
   TORCH_CHECK(
-      offsets_in.has_value(),
-      "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
-  auto offsets = offsets_in.value();
+      indices.dim() == 1 || indices.dim() == 2,
+      "qembedding/qembedding_bag operator supports 1 or 2d indices, got ",
+      indices.dim());
+  // For embedding_bag operator with 2D indices, we set the offsets explicitly
+  // here.
+  if (indices.dim() == 2 && !is_embedding_op) {
+    TORCH_CHECK(
+        !offsets_in.has_value(),
+        "embedding_bag_byte operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
+
+    offsets =
+        at::arange(0, indices.numel(), indices.size(1), indices.scalar_type());
+  } else {
+    TORCH_CHECK(
+        offsets_in.has_value(), "embedding_bag_byte expects offsets to be set for 1D indices.");
+    offsets = offsets_in.value();
+  }
 
   TORCH_CHECK(
       indices.scalar_type() == at::kInt || indices.scalar_type() == at::kLong,
@@ -341,7 +360,8 @@ at::Tensor embedding_bag_byte_helper(
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
-        include_last_offset);
+        include_last_offset,
+        is_embedding_op);
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_byte_impl<int, int64_t>(
@@ -351,7 +371,8 @@ at::Tensor embedding_bag_byte_helper(
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
-        include_last_offset);
+        include_last_offset,
+        is_embedding_op);
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int64_t, int>(
@@ -361,7 +382,8 @@ at::Tensor embedding_bag_byte_helper(
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
-        include_last_offset);
+        include_last_offset,
+        is_embedding_op);
   }
 
   // default case given the TORCH_CHECK above
@@ -372,7 +394,8 @@ at::Tensor embedding_bag_byte_helper(
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset);
+      include_last_offset,
+      is_embedding_op);
 }
 
 at::Tensor embedding_bag_4bit_helper(
@@ -383,10 +406,27 @@ at::Tensor embedding_bag_4bit_helper(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  at::Tensor offsets;
   TORCH_CHECK(
-      offsets_in.has_value(),
-      "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
-  auto offsets = offsets_in.value();
+      indices.dim() == 1 || indices.dim() == 2,
+      "qembedding/qembedding_bag operator supports 1 or 2d indices, got ",
+      indices.dim());
+
+  // For embedding_bag operator with 2D indices, we need to set the offsets
+  // explicitly here.
+  if (indices.dim() == 2) {
+    TORCH_CHECK(
+        !offsets_in.has_value(),
+        "embedding_bag_4bit operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
+
+    offsets =
+        at::arange(0, indices.numel(), indices.size(1), indices.scalar_type());
+  } else {
+    TORCH_CHECK(
+        offsets_in.has_value(),
+        "embedding_bag_4bit operator expects offsets to be set for 1D indices.");
+    offsets = offsets_in.value();
+  }
 
   TORCH_CHECK(
       indices.scalar_type() == at::kInt || indices.scalar_type() == at::kLong,
@@ -456,7 +496,8 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset);
+      include_last_offset,
+      false);
 }
 
 at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
@@ -497,7 +538,8 @@ Tensor embedding_bag_byte_rowwise_offsets(
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset);
+      include_last_offset,
+      false);
 }
 
 Tensor embedding_bag_4bit_rowwise_offsets(
@@ -563,12 +605,20 @@ class QEmbedding final {
       const c10::intrusive_ptr<EmbeddingPackedParamsBase>& packed_weight,
       const Tensor& indices,
       bool pruned_weights) {
+    // Set default offsets here since the FBGEMM lookup op expects it.
     const auto offsets_size = indices.numel();
-    at::Tensor offsets = at::arange(0, offsets_size, at::kLong);
+    at::Tensor offsets = at::arange(0, offsets_size, indices.scalar_type());
     at::Tensor output;
     if (bit_rate == 8) {
-      return packed_weight->embeddingbag_byte(
-          indices, offsets, pruned_weights, c10::nullopt, c10::nullopt, false);
+      return embedding_bag_byte_helper(
+          packed_weight->get_packed_weight().contiguous(),
+          indices,
+          offsets,
+          pruned_weights,
+          c10::nullopt,
+          c10::nullopt,
+          false,
+          true);
     } else {
       TORCH_INTERNAL_ASSERT(
           "Currently only support 8-bit embedding quantization");
