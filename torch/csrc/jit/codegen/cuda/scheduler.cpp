@@ -360,21 +360,34 @@ void scheduleReduction(
   mergeReduction(red_tv);
 
   // Merge all iteration dimensions
-  mergeNonReduction(red_tv);
-  for (auto iter_tv : outs_of_red) {
-    mergeNonReduction(iter_tv);
+  if (red_tv->domain()->domain().size() > 1) {
+    mergeNonReduction(red_tv);
+    for (auto iter_tv : outs_of_red) {
+      mergeNonReduction(iter_tv);
+    }
   }
 
   // Evaluate Dimensions of Reduction TensorView
   auto red_ids = red_tv->domain()->domain();
 
   TORCH_INTERNAL_ASSERT(
-      red_ids.size() == 2, "We coalesced all dimensions into 2 previously.");
+      red_ids.size() == 1 || red_ids.size() == 2,
+      "We coalesced all dimensions into 1 or 2 previously.");
+
+  if (red_ids.size() == 1) {
+    TORCH_INTERNAL_ASSERT(
+        rparams.fastest_dim,
+        "If all dims are reduction, so should the fastest dim.");
+  }
 
   constexpr int kLoopUnrollSplit = 4;
 
   // Scheduling the Reduction
   if (rparams.fastest_dim) {
+    const bool has_iter_axis = red_ids.size() == 2;
+    const int iter_axis = 0;
+    const int reduce_axis = red_ids.size() == 2 ? 1 : 0;
+
     // Do multiple reductions per block
     if (rparams.mul_reds_per_blk) {
       // Reduction Splits
@@ -382,17 +395,22 @@ void scheduleReduction(
       // Idx:     0     |   1(-1)      2(-2)     3(-1) |
       //                --------------------------------
       //                Reduction Dimensions
-      red_tv->split(1, rparams.loop_unroll);
-      red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
+      red_tv->split(reduce_axis, rparams.loop_unroll);
+      red_tv->split(
+          reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
 
       // Output Splits
       //      [|Out-Leftover, Out-PerBlock|, <Reduction Dims>]
       // Idx:  |     0             1      |   2(-2) -- 3(-1)
       //       ----------------------------
       //       Output Dimensions
-      red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDy));
-      for (auto iter_tv : outs_of_red) {
-        iter_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDy));
+      if (has_iter_axis) {
+        red_tv->split(
+            iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->split(
+              iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
+        }
       }
 
       auto red_tv_rf = red_tv->rFactor({-3, -1});
@@ -401,14 +419,17 @@ void scheduleReduction(
 
       red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
-      red_tv->axis(0)->parallelize(ParallelType::BIDx);
-      for (auto iter_tv : outs_of_red) {
-        iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+      if (has_iter_axis) {
+        red_tv->axis(0)->parallelize(ParallelType::BIDx);
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+        }
+        red_tv->axis(1)->parallelize(ParallelType::TIDy);
+        for (auto iter_tv : outs_of_red) {
+          iter_tv->axis(1)->parallelize(ParallelType::TIDy);
+        }
       }
-      red_tv->axis(1)->parallelize(ParallelType::TIDy);
-      for (auto iter_tv : outs_of_red) {
-        iter_tv->axis(1)->parallelize(ParallelType::TIDy);
-      }
+
       red_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
       // Bind Inputs to Reduction
@@ -425,10 +446,13 @@ void scheduleReduction(
         // Idx:     0     |   1(-5)      2(-4)    3(-3)   4(-2)     5(-1) |
         //                -------------------------------------------------
         //                Reduction Dimensions
-        red_tv->split(1, rparams.loop_unroll);
-        red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
-        red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
-        red_tv->split(1, NamedScalar::getParallelDim(ParallelType::BIDy));
+        red_tv->split(reduce_axis, rparams.loop_unroll);
+        red_tv->split(
+            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
+        red_tv->split(
+            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
+        red_tv->split(
+            reduce_axis, NamedScalar::getParallelDim(ParallelType::BIDy));
 
         auto red_tv_rf = red_tv->rFactor(
             {-5, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
@@ -437,9 +461,11 @@ void scheduleReduction(
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
-        red_tv->axis(0)->parallelize(ParallelType::BIDx);
-        for (auto iter_tv : outs_of_red) {
-          iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+        if (has_iter_axis) {
+          red_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
+          for (auto iter_tv : outs_of_red) {
+            iter_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
+          }
         }
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
@@ -457,9 +483,11 @@ void scheduleReduction(
         // Idx:     0     |   1(-4)       2(-3)   3(-2)     4(-1) |
         //                -----------------------------------------
         //                Reduction Dimensions
-        red_tv->split(1, rparams.loop_unroll);
-        red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
-        red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
+        red_tv->split(reduce_axis, rparams.loop_unroll);
+        red_tv->split(
+            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
+        red_tv->split(
+            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
 
         auto red_tv_rf = red_tv->rFactor({-4, -1});
 
@@ -467,10 +495,13 @@ void scheduleReduction(
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::Unroll);
 
-        red_tv->axis(0)->parallelize(ParallelType::BIDx);
-        for (auto iter_tv : outs_of_red) {
-          iter_tv->axis(0)->parallelize(ParallelType::BIDx);
+        if (has_iter_axis) {
+          red_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
+          for (auto iter_tv : outs_of_red) {
+            iter_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
+          }
         }
+
         red_tv->axis(-1)->parallelize(ParallelType::TIDx);
         red_tv->axis(-2)->parallelize(ParallelType::TIDy);
 

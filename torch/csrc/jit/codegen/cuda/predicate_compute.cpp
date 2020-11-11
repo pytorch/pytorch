@@ -116,7 +116,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
   if (loops.empty()) {
-    return ir_builder.create<kir::Bool>(true);
+    return thread_pred;
   }
 
   // Handle these elsewhere

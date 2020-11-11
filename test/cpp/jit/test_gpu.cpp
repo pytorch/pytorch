@@ -5919,6 +5919,75 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
       aten_output.sub(outputs[0]).abs().max());
 }
 
+TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
+  std::vector<bool> fp16_usage = {true, false};
+  std::vector<int> red_dims;
+
+  // Making sure we get deterministic results
+  // (see https://github.com/csarofeen/pytorch/issues/399)
+  at::manual_seed(0);
+
+  // Tried to cut down the number iterations with just
+  // doing every other power of 2.
+  for (int i = 1; i <= 1024 * 1024; i <<= 2) {
+    red_dims.push_back(i);
+  }
+
+  for (auto fp16 : fp16_usage) {
+    for (auto& rdim : red_dims) {
+      Fusion fusion;
+      FusionGuard fg(&fusion);
+
+      TensorView* tv0 =
+          makeSymbolicTensor(1, (fp16 ? DataType::Half : DataType::Float));
+      fusion.addInput(tv0);
+
+      Val* tv0_cast = nullptr;
+      if (fp16) {
+        tv0_cast = castOp(DataType::Float, tv0);
+      }
+
+      TensorView* tv1 = reductionOp(
+          BinaryOpType::Add,
+          {0},
+          new Float(0),
+          (fp16 ? tv0_cast->as<TensorView>() : tv0));
+
+      TensorView* tv1_cast = nullptr;
+      if (fp16) {
+        tv1_cast = castOp(DataType::Half, tv1);
+      }
+
+      fusion.addOutput((fp16 ? tv1_cast : tv1));
+
+      auto options = at::TensorOptions()
+                         .dtype((fp16 ? at::kHalf : at::kFloat))
+                         .device(at::kCUDA, 0);
+      at::Tensor input = at::randn({rdim}, options);
+
+      std::vector<TensorView*> outputs_of_red;
+      if (fp16) {
+        outputs_of_red.push_back(tv1_cast);
+      }
+
+      auto reduction_params = getReductionHeuristics(&fusion, {input}, tv1);
+      TORCH_CHECK(reduction_params.has_value(), "Reduction is not found!");
+      scheduleReduction(&fusion, reduction_params.value(), tv1, outputs_of_red);
+
+      FusionExecutor fe;
+      fe.compileFusion(&fusion);
+
+      auto outputs = fe.runFusion({input}, reduction_params.value().lparams);
+      auto aten_output = input.sum({0});
+
+      TORCH_CHECK(
+          aten_output.allclose(outputs[0], 1e-03, 1e-03),
+          "Error of: ",
+          aten_output.sub(outputs[0]).abs().max());
+    }
+  }
+}
+
 TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<bool> fp16_usage = {true, false};
   std::vector<int> red_axis = {1, 0};

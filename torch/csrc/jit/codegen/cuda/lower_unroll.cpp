@@ -49,9 +49,15 @@ kir::Bool* UnrollPass::getThreadPredicate(const kir::TensorView* tv) {
 }
 
 void UnrollPass::handle(kir::Expr* expr) {
-  // If tv op, predicate it (except for top level expressions)
-  if (ir_utils::isTVOp(expr) && !for_loops_.empty()) {
+  if (ir_utils::isTVOp(expr)) {
+    // If tv op, predicate it
     const auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
+    const bool should_predicate = !for_loops_.empty() ||
+        out_tv->memoryType() == MemoryType::Global ||
+        out_tv->memoryType() == MemoryType::Shared;
+    if (!should_predicate) {
+      return;
+    }
     const auto pred = PredicateCompute::getInlinePredicate(
         expr, for_loops_, getThreadPredicate(out_tv), ca_root_map_);
 
@@ -59,11 +65,20 @@ void UnrollPass::handle(kir::Expr* expr) {
     if (!pred->isConst() || !(pred->isConst() && pred->value().value())) {
       non_trivial_pred_found_ = true;
       kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+      kir::ForLoop* insert_scope =
+          for_loops_.empty() ? nullptr : for_loops_.back();
       kir::IfThenElse* inline_ite =
-          ir_builder.create<kir::IfThenElse>(pred, for_loops_.back());
+          ir_builder.create<kir::IfThenElse>(pred, insert_scope);
       inline_ite->thenBody().push_back(expr);
-      for_loops_.back()->body().insert_before(expr, inline_ite);
-      for_loops_.back()->body().erase(expr);
+      if (for_loops_.empty()) {
+        // Special handling for top level output expressions that still
+        // need predicates. One motivating example is a reduction op that
+        // reduces to a scalar (issue #491)
+        loop_replacement_map_.insert({expr, inline_ite});
+      } else {
+        for_loops_.back()->body().insert_before(expr, inline_ite);
+        for_loops_.back()->body().erase(expr);
+      }
     }
   } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
     handle(for_loop);
