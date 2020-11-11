@@ -2242,14 +2242,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
-    def test_batchnorm1d_norunningstats(self):
-        x = torch.randn(10, 10)
-        model = torch.nn.BatchNorm1d(10, track_running_stats=False)
-        self.run_test(model, x)
-
-        x = torch.randn(10, 10, 128)
-        self.run_test(model, x)  
-
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
@@ -2258,11 +2250,6 @@ class TestONNXRuntime(unittest.TestCase):
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
-        self.run_test(model, x)
-
-    def test_batchnorm2d_norunningstats(self):
-        x = torch.randn(10, 3, 128, 128)
-        model = torch.nn.BatchNorm2d(3, track_running_stats=False)
         self.run_test(model, x)
 
     def test_batchnorm3d(self):
@@ -2510,6 +2497,14 @@ class TestONNXRuntime(unittest.TestCase):
             model = torch.nn.LogSoftmax(dim=i)
             input = torch.randn(3, 4, 5, 6)
             self.run_test(model, input)
+
+    def test_logsoftmax_dtype(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.log_softmax(x, dim=1, dtype=torch.float64)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(Model(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()  # scripting prim_dtype
@@ -3395,7 +3390,9 @@ class TestONNXRuntime(unittest.TestCase):
     def test_eye(self):
         class TensorFactory(torch.nn.Module):
             def forward(self, x):
-                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), torch.eye(x.size()[1], 2, dtype=torch.long)
+                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), \
+                    torch.eye(x.size()[1], 2, dtype=torch.long), torch.eye(x.shape[0]), \
+                    torch.eye(x.shape[0], dtype=torch.float64)
 
         x = torch.randn(2, 3, 4)
         another_x = torch.randn(5, 6, 7)
