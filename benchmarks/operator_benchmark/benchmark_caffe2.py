@@ -107,7 +107,7 @@ class Caffe2OperatorTestCase(object):
         self.test_config = test_config
         self.framework = "Caffe2"
 
-    def run_forward(self, num_runs, print_per_iter=False, cubda_sync=False):
+    def run_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
         """ Run the forward path of an operator in a loop
         """
         with core.DeviceScope(self.op_bench.dev):
@@ -115,7 +115,7 @@ class Caffe2OperatorTestCase(object):
         if not workspace.RunOperatorMultiple(op, num_runs):
             raise ValueError("Unable to run operator test case: {}".format(self.test_name))
 
-    def run_backward(self, num_runs):
+    def run_backward(self, num_runs, print_per_iter=False):
         """ Run the backward path of an operator in a loop
         """
         with core.DeviceScope(self.op_bench.dev):

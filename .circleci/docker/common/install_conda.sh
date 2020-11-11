@@ -98,11 +98,28 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install some other packages, including those needed for Python test reporting
   # TODO: Why is scipy pinned
-  # numba & llvmlite is pinned because of https://github.com/numba/numba/issues/4368
-  # scikit-learn is pinned because of
-  # https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5
-  # only)
-  as_jenkins pip install --progress-bar off pytest scipy==1.1.0 scikit-learn==0.20.3 scikit-image librosa>=0.6.2 psutil numba==0.46.0 llvmlite==0.30.0 unittest-xml-reporting coverage
+  # Pin MyPy version because new errors are likely to appear with each release
+  # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  as_jenkins pip install --progress-bar off pytest \
+    scipy==1.1.0 \
+    scikit-image \
+    librosa>=0.6.2 \
+    psutil \
+    numba \
+    llvmlite \
+    unittest-xml-reporting \
+    coverage \
+    hypothesis==4.53.2 \
+    mypy==0.770 \
+    tb-nightly
+
+  # Update scikit-learn to a python-3.8 compatible version
+  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
+    as_jenkins pip install --progress-bar off -U scikit-learn
+  else
+    # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
+    as_jenkins pip install --progress-bar off scikit-learn==0.20.3
+  fi
 
   popd
 fi
