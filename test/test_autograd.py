@@ -2693,68 +2693,6 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
-    @skipIfNoLapack
-    def test_svd_complex_grad_u(self):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        dtype = torch.complex128
-        device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
-            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
-
-            def func(A):
-                u, s, v = torch.svd(A)
-                return abs(u).sum()
-
-            gradcheck(func, A)
-            gradgradcheck(func, A)
-
-    @skipIfNoLapack
-    def test_svd_complex_grad_v(self):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        dtype = torch.complex128
-        device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
-            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
-
-            def func(A):
-                u, s, v = torch.svd(A)
-                return abs(v).sum()
-
-            gradcheck(func, A)
-            gradgradcheck(func, A)
-
-    @skipIfNoLapack
-    def test_svd_complex_grad_uv(self):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        dtype = torch.complex128
-        device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
-            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
-
-            def func(A):
-                u, s, v_conj = torch.svd(A)
-                # TODO: replace v_conj with v.conj() once
-                # https://github.com/pytorch/pytorch/issues/45821 is resolved
-                return v_conj[0, 0] * u[0, 0]
-
-            gradcheck(func, A)
-            gradgradcheck(func, A)
-
-    @skipIfNoLapack
-    def test_svd_complex_grad_s(self):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        dtype = torch.complex128
-        device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
-            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
-
-            def func(A):
-                u, s, v = torch.svd(A)
-                return torch.sum(s)
-
-            gradcheck(func, A)
-            gradgradcheck(func, A)
-
     @slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
