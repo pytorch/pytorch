@@ -1142,8 +1142,12 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, (2, 3))
 
     def test_string_literal_return(self):
-        def forward(self):
-            return "foo"
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self):
+                return "foo"
 
         m = M()
         self.checkGraphModule(m, ())
