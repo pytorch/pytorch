@@ -1276,6 +1276,9 @@ struct PythonPrintImpl {
     body_ << ") -> "
           << schema.returns().at(0).type()->annotation_str(type_printer_)
           << ":\n";
+    for (const Value* input : graph.inputs()) {
+      registerClassDependencies(input->type());
+    }
     printBody(graph.block());
   }
 

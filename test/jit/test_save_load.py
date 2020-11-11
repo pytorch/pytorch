@@ -947,3 +947,21 @@ class TestSaveLoad(JitTestCase):
         script_module = torch.jit.script(Foo())
         with self.assertRaises(RuntimeError):
             script_module.save("NonExist/path/test.pt")
+
+    def test_save_namedtuple_input_only(self):
+        """
+        Even if a NamedTuple is only used as an input argument, saving and
+        loading should work correctly.
+        """
+        global FooTuple  # see [local resolution in python]
+
+        class FooTuple(NamedTuple):
+            a: int
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x: FooTuple) -> torch.Tensor:
+                return torch.tensor(3)
+
+        m_loaded = self.getExportImportCopy(torch.jit.script(MyModule()))
+        output = m_loaded(FooTuple(a=5))
+        self.assertEqual(output, torch.tensor(3))
