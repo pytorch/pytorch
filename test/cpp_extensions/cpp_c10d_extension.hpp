@@ -41,61 +41,61 @@ class ProcessGroupTest : public ProcessGroup {
   explicit ProcessGroupTest(int rank = -1, int size = -1);
   virtual ~ProcessGroupTest();
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  std::shared_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce(
+  std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  std::shared_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> barrier(
+  std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> gather(
+  std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> scatter(
+  std::shared_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> send(
+  std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag);
 
-  c10::intrusive_ptr<ProcessGroup::Work> recv(
+  std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag);
 
-  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
       int tag);
 
