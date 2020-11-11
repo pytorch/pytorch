@@ -2947,30 +2947,6 @@ class TestAutograd(TestCase):
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 
-    @skipIfNoLapack
-    def test_pinverse(self):
-        # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
-        # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
-        # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
-        # 3. This method creates two orthogonal matrices, and a constructs a test case with large
-        #    singular values (given by x to the function).
-        # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
-        #    a derivative exists.
-        # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
-        m, n = 5, 10
-        U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-        V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-
-        def func(x):
-            S = torch.cat([x, torch.zeros(n - m)], 0)
-            M = U.mm(torch.diag(S)).mm(V.t())
-            return M.pinverse()
-
-        gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-        gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
-        gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-        gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
-
     def test_chain_matmul(self):
         def gen_matrices(p):
             matrices = []
@@ -5006,12 +4982,12 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'mean', 'svd'] + separate_complex_tests
+                'exp', 'mean', 'svd', 'pinverse'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
 skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex',
                   'svd_batched_complex', 'svd_tall_all_batched_complex', 'svd_tall_batched_complex',
-                  'svd_wide_all_batched_complex', 'svd_wide_batched_complex']
+                  'svd_wide_all_batched_complex', 'svd_wide_batched_complex', 'pinverse_batched_complex']
 
 def add_test(
         name,
