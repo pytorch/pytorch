@@ -220,7 +220,7 @@ void TensorPipeAgent::collectNames() {
 }
 
 TensorPipeAgent::TensorPipeAgent(
-    const std::shared_ptr<::c10d::Store>& store,
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
