@@ -4129,7 +4129,39 @@ class TestONNXRuntime(unittest.TestCase):
         self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
                          'Please try opset version 11.', the_exception.args[0])
 
-    @disableScriptTest()  # export prim::Uninitialized
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfONNXShapeInference(False)
+    def test_uninitialized(self):
+        class UninitializedModel(torch.nn.Module):
+            def forward(self, y):
+                if y.shape[1] < 5:
+                    if y.size(0) == 1:
+                        y = y + 4
+                    else:
+                        return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(UninitializedModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfONNXShapeInference(False)
+    def test_uninitialized_dynamic(self):
+        class UninitializedModel(torch.nn.Module):
+            def forward(self, y):
+                if y.shape[1] < 5:
+                    if y.size(0) == 1:
+                        y = y + 4
+                    else:
+                        return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        y = torch.ones((6, 7), dtype=torch.int)
+        self.run_test(UninitializedModel(), x, test_with_inputs=[y],
+                      input_names=['input_1'],
+                      dynamic_axes={'input_1': [0, 1]})
+
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -4139,7 +4171,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
-    @disableScriptTest()  # export prim::Uninitialized
     def test_replication_pad(self):
         model = torch.nn.ReplicationPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -4150,7 +4181,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # export prim::Uninitialized
     def test_im2col(self):
         class Unfold(torch.nn.Module):
             def forward(self, input):
