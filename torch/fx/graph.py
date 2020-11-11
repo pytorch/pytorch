@@ -344,7 +344,8 @@ class Graph:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
-                free_vars.append(f'{node.target}{maybe_type_annotation}')
+                maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
+                free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
                     body.append(f'{node.name} = {raw_name}\n')
