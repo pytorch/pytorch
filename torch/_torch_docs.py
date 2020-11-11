@@ -7642,7 +7642,7 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
-decomposition of a input real matrix or batches of real matrices :attr:`input` such that
+decomposition of a input matrix or batches of matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced
@@ -7653,6 +7653,8 @@ will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+
+Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -7677,6 +7679,9 @@ of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some
 
 .. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
           from the forward pass is required for the backward operation.
+
+.. note:: With the complex-valued input the backward operation works correctly only
+          for gauge invariant loss functions.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
