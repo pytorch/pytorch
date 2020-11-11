@@ -553,6 +553,9 @@ class _TensorBase(object):
     grad_fn: Any
     ${tensor_method_hints}
 
+# Defined in torch/csrc/multiprocessing/init.cpp
+def _multiprocessing_init() -> None: ...
+
 # Defined in torch/csrc/cuda/Module.cpp
 def _cuda_getCurrentStream(device: _int) -> _int: ...
 def _cuda_getDefaultStream(device: _int) -> _int: ...
