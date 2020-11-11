@@ -9323,6 +9323,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
+        # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
+        # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
+        x = torch.tensor([2], device=device, dtype=dtype)
+        self.assertEqual(x.squeeze().kthvalue(1), x.kthvalue(1))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
