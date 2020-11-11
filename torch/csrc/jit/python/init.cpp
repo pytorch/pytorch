@@ -242,13 +242,12 @@ void initJITBindings(PyObject* module) {
              bool inplace) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
-                c10::optional<
-                  std::tuple<Module,
-                             Module,
-                             int  // quant_type_int
-                            >>>>(qconfig_dict);
-            return InsertObservers(
-                module, method_name, dict, inplace);
+                c10::optional<std::tuple<
+                    Module,
+                    Module,
+                    int // quant_type_int
+                    >>>>(qconfig_dict);
+            return InsertObservers(module, method_name, dict, inplace);
           },
           py::arg("module"),
           py::arg("method_name"),

@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -7,7 +8,6 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
-#include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 
 #include <regex>
@@ -286,8 +286,7 @@ class ModuleCloneHelper {
 
 class InsertObserversHelper {
  public:
-  explicit InsertObserversHelper(
-      const ModuleQConfigMap& map)
+  explicit InsertObserversHelper(const ModuleQConfigMap& map)
       : module_qconfig_map_(map) {}
 
   // TODO: replace (module, method_name) with graph?
