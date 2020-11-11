@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -16,6 +17,8 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
+
+#include <torch/custom_class.h>
 
 namespace c10d {
 
@@ -175,8 +178,15 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options {
+  struct Options : torch::CustomClassHolder {
     explicit Options();
+
+    // return intrusive_ptr of the object
+    static c10::intrusive_ptr<Options> create(
+        std::chrono::milliseconds timeout = kNoTimeout,
+        bool isHighStream = false) {
+      return c10::make_intrusive<Options>();
+    }
 
     std::chrono::milliseconds opTimeout;
     bool isHighPriorityStream;
@@ -396,7 +406,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      Options options = Options());
+      const c10::intrusive_ptr<Options>& options = Options::create());
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
@@ -406,7 +416,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       int rank,
       int size,
       const std::string& groupName,
-      Options options = Options())
+      const c10::intrusive_ptr<Options>& options = Options::create())
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
