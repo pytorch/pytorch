@@ -183,7 +183,7 @@ static inline void launch_unrolled_kernel_for_multi_outputs(int64_t N, const fun
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   unrolled_elementwise_kernel_for_multi_outputs<num_outputs, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data, ic, oc);
-  AT_CUDA_CHECK(cudaGetLastError());
+  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename func_t>

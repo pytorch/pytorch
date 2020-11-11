@@ -2,9 +2,6 @@
 
 #include <torch/csrc/autograd/profiler_legacy.h>
 
-#include <c10/core/DeviceType.h>
-//#include <torch/csrc/WindowsTorchApiMacro.h>
-
 #ifdef USE_KINETO
 namespace libkineto {
 class TraceActivity;
@@ -18,8 +15,7 @@ namespace profiler {
 
 enum class C10_API_ENUM ActivityType {
   CPU = 0,
-  // CUDA_RUNTIME, // CUDA host events
-  CUDA, // CUDA kernels
+  CUDA, // CUDA kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
 
@@ -48,8 +44,8 @@ struct TORCH_API KinetoEvent {
     return end_thread_id_;
   }
 
-  uint8_t deviceType() const {
-    return device_type_;
+  uint8_t activityType() const {
+    return activity_type_;
   }
 
   uint64_t fwdThreadId() const {
@@ -96,7 +92,7 @@ struct TORCH_API KinetoEvent {
   }
 
   KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
-    *shapes_ = shapes;
+    shapes_ = shapes;
     return *this;
   }
 
@@ -106,7 +102,7 @@ struct TORCH_API KinetoEvent {
   }
 
   KinetoEvent& stack(const std::vector<std::string>& st) {
-    *stack_ = st;
+    stack_ = st;
     return *this;
   }
 
@@ -154,7 +150,7 @@ struct TORCH_API KinetoEvent {
   int64_t sequence_nr_ = 0;
   uint8_t scope_ = 0;
 
-  uint8_t device_type_;
+  uint8_t activity_type_;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
   c10::optional<std::vector<std::string>> stack_;
 
@@ -166,6 +162,9 @@ struct TORCH_API KinetoEvent {
   int64_t device_resource_id_ = 0;
 };
 
+// Consolidating events returned directly from Kineto
+// with events manually created by us (e.g. start/stop marks,
+// memory allocation events)
 struct TORCH_API ProfilerResult {
   ProfilerResult(
       std::vector<KinetoEvent> events,
@@ -184,11 +183,11 @@ struct TORCH_API ProfilerResult {
 
  private:
   std::vector<KinetoEvent> events_;
-  thread_event_lists legacy_events_; // tensor mem alloc, start/stop
+  thread_event_lists legacy_events_;
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
 };
 
-// avoid unique_ptr cophy issues when using pybind
+// avoid unique_ptr copy issues when using pybind
 struct TORCH_API ProfilerResultWrapper {
   ProfilerResultWrapper(const std::shared_ptr<ProfilerResult>& result)
     : result_(result) {}

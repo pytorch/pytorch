@@ -380,25 +380,21 @@ class profile(object):
         self.record_shapes = record_shapes
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.use_kineto = use_kineto
         self.use_cpu = use_cpu
         if not self.use_cpu:
-            assert self.use_kineto, \
+            assert use_kineto, \
                 "Device-only events supported only with Kineto (use_kineto=True)"
 
         self.profiler_kind = None
-        self.kineto_activities = []
-        if self.use_kineto:
+        self.kineto_activities = set()
+        if use_kineto:
             self.profiler_kind = torch.autograd.ProfilerState.KINETO
             if self.use_cpu:
-                self.kineto_activities = [torch.autograd.ProfilerActivity.CPU]
-            else:
-                self.kineto_activities = []
+                self.kineto_activities.add(torch.autograd.ProfilerActivity.CPU)
             if self.use_cuda:
-                self.kineto_activities += [
+                self.kineto_activities.add(
                     # uses CUPTI
-                    # torch.autograd.ProfilerActivity.CUDA_RUNTIME,
-                    torch.autograd.ProfilerActivity.CUDA]
+                    torch.autograd.ProfilerActivity.CUDA)
             assert len(self.kineto_activities) > 0, \
                 "No activities specified for Kineto profiler"
         elif self.use_cuda:
@@ -406,7 +402,6 @@ class profile(object):
             self.profiler_kind = torch.autograd.ProfilerState.CUDA
         else:
             self.profiler_kind = torch.autograd.ProfilerState.CPU
-        self.kineto_activities = set(self.kineto_activities)
 
         if self.profiler_kind == torch.autograd.ProfilerState.KINETO:
             assert (
@@ -426,7 +421,7 @@ class profile(object):
         if self.entered:
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
-        if self.use_kineto:
+        if self.kineto_activities:
             torch.autograd._prepare_profiler(self.config, self.kineto_activities)
             torch.autograd._enable_profiler(self.config, self.kineto_activities)
         else:
@@ -436,7 +431,7 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        if self.use_kineto:
+        if self.kineto_activities:
             result = torch.autograd._disable_profiler()
             self.function_events = parse_profiler_result(result)
         else:
@@ -1336,8 +1331,8 @@ def build_table(
         else:
             event_limit += 1
         name = evt.key
-        if len(name) >= MAX_NAME_COLUMN_WIDTH-3:
-            name = name[:(MAX_NAME_COLUMN_WIDTH-3)] + "..."
+        if len(name) >= MAX_NAME_COLUMN_WIDTH - 3:
+            name = name[:(MAX_NAME_COLUMN_WIDTH - 3)] + "..."
         row_values = [
             name,
             # Self CPU total, 0 for async events. %

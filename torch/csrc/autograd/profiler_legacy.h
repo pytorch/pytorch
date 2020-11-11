@@ -521,10 +521,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
   bool memoryProfilingEnabled() const override;
 
-  virtual void reportClientActivity(
-    const at::RecordFunction& fn,
-    const at::ObserverContext* ctx) {}
-
  protected:
   std::string getNvtxStr(
       const at::StringView& name,

@@ -44,7 +44,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
-      //.value("CUDA_RUNTIME", ActivityType::CUDA_RUNTIME)
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
@@ -100,6 +99,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       })
       .def("scope", [](const KinetoEvent& e) {
         return e.scope();
+      })
+      .def("activity_type", [](const KinetoEvent& e) {
+        return e.activityType();
       });
 
   py::class_<ProfilerResultWrapper>(m, "ProfilerResult")
