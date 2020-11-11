@@ -209,6 +209,44 @@ def matmul(g, self, other):
 
 @parse_args('v', 'v', 'v', 't', 't')
 def addmm(g, self, mat1, mat2, beta, alpha):
+    dtype = None
+    self_dtype = self.type().scalarType()
+    mat1_dtype = mat1.type().scalarType()
+    mat2_dtype = mat2.type().scalarType()
+    if self_dtype is not None:
+        dtype = self_dtype
+    elif mat1_dtype is not None:
+        dtype = mat1_dtype
+    elif mat2_dtype is not None:
+        dtype = mat2_dtype
+
+    mat1_rank = mat1.type().dim()
+    mat2_rank = mat2.type().dim()
+
+    def isNotNoneAnd(v, u):
+        return v is not None and v != u
+
+    if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+
+        res1 = g.op("MatMul", mat1, mat2)
+        res2 = self
+
+        alpha = sym_help._scalar(alpha)
+        beta = sym_help._scalar(beta)
+
+        if alpha != 1:
+            alpha = g.op("Constant",
+                         value_t=torch.tensor(alpha, dtype=dtype))
+            res1 = g.op("Mul", res1, alpha)
+        if beta != 1:
+            beta = g.op("Constant",
+                        value_t=torch.tensor(sym_help._scalar(beta), dtype=dtype))
+            res2 = g.op("Mul", res2, beta)
+
+        return g.op("Add", res1, res2)
+
     return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
 
 
@@ -1085,7 +1123,7 @@ def where(g, condition, self=None, other=None, _outputs=None):
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
     if self is None:
         condition = torch.onnx.symbolic_opset9.nonzero(g, condition)
-        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
+        return sym_help._unbind_helper(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
     return g.op("Where", condition, self, other)
 
 
@@ -1110,7 +1148,8 @@ def log_softmax(g, input, dim, dtype=None):
         dim = input_dim - 1
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != 'prim::Constant':
-        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
+        parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
@@ -1645,10 +1684,22 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
-def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
-    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
-    tensor = zeros(g, shape, dtype, layout, device)
-    return g.op("EyeLike", tensor)
+def eye(g, *args):
+    if len(args) == 5:
+        # aten::eye(n, dtype, layout, device, pin_memory)
+        n, dtype, layout, device, pin_memory = args
+        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        shape = g.op("Concat", dim_size, dim_size, axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    elif len(args) == 6:
+        # aten::eye(n, m, dtype, layout, device, pin_memory)
+        n, m, dtype, layout, device, pin_memory = args
+        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    else:
+        raise NotImplementedError("Unknown aten::eye signature")
 
 
 def slice(g, self, *args):
@@ -2052,11 +2103,11 @@ def randn(g, shapes, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
-    if sym_help._is_packed_list(shapes):
+    shape = sym_help._maybe_get_const(shapes, "is")
+    if sym_help._is_value(shape):
         shape_const = g.op("ConstantOfShape", shapes,
                            value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
         return g.op('RandomNormalLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
-    shape = sym_help._get_const(shapes, "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
@@ -2064,11 +2115,11 @@ def rand(g, shapes, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
-    if sym_help._is_packed_list(shapes):
+    shape = sym_help._maybe_get_const(shapes, "is")
+    if sym_help._is_value(shape):
         shape_const = g.op("ConstantOfShape", shapes,
                            value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
         return g.op('RandomUniformLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
-    shape = sym_help._get_const(shapes, "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
@@ -2195,6 +2246,12 @@ def prim_shape(g, self):
 
 def prim_data(g, self):
     return self
+
+def is_floating_point(g, self):
+    if sym_help._is_fp(self):
+        return g.op("Constant", value_t=torch.BoolTensor([1]))
+    return g.op("Constant", value_t=torch.BoolTensor([0]))
+
 
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):
