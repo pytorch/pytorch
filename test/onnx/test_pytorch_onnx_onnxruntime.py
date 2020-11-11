@@ -3104,6 +3104,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(GetItemModel(), (x, y, z, ind))
 
     @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_nonzero(self):
         class NonzeroModel(torch.nn.Module):
             def forward(self, x):
