@@ -16,7 +16,7 @@ def _is_magic(x: str) -> bool:
 def snake_case(s: str) -> str:
     return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
 
-def _qualified_name(func: Callable[..., Any]) -> str:
+def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
@@ -344,7 +344,8 @@ class Graph:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
-                free_vars.append(f'{node.target}{maybe_type_annotation}')
+                maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
+                free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
                     body.append(f'{node.name} = {raw_name}\n')
@@ -362,7 +363,7 @@ class Graph:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
                     continue
-                qualified_name = _qualified_name(node.target)
+                qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
                 if qualified_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
@@ -384,7 +385,7 @@ class Graph:
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {node.args[0]}')
+                body.append(f'return {repr(node.args[0])}')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
