@@ -6053,15 +6053,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    def _test_trace(self, device, dtype, legacy):
+    @onlyOnCPUAndCUDA
+    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
+                                               include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
+    def test_trace(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
-            diag = tensor.diag()
-            if legacy:
-                # NB: trace on cpu doesn't do type promotion... #47127
-                expected_dtype = dtype
-            else:
-                expected_dtype = tensor.sum().dtype
+            expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
             result = np.trace(tensor.cpu().numpy(), dtype=expected_dtype)
@@ -6077,16 +6076,6 @@ class TestTorchDeviceType(TestCase):
         )
         for shape in shapes:
             test(shape)
-
-    @onlyCPU
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
-    def test_trace_legacy(self, device, dtype):
-        self._test_trace(device, dtype, legacy=True)
-
-    @onlyCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
-    def test_trace(self, device, dtype):
-        self._test_trace(device, dtype, legacy=False)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -15272,7 +15261,7 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.expm1_(),
                 lambda x, y: x.floor(),
                 lambda x, y: x.floor_(),
-                # lambda x, y: x.fmod(2), # https://github.com/pytorch/pytorch/issues/24565
+                lambda x, y: x.fmod(2),
                 lambda x, y: x.frac(),
                 lambda x, y: x.hypot(y),
                 lambda x, y: x.hypot_(y),
@@ -17496,7 +17485,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         z = torch.tensor([30 / v.item() for v in x], device=device)
         self.assertEqual(y, z, exact_dtype=False)
 
-    @onlyCPU
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod(self, device, dtype):
         m1 = torch.Tensor(10, 10).uniform_(-10., 10.).to(dtype=dtype, device=device)
@@ -17510,10 +17498,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         zero = torch.zeros_like(m1)
         if dtype in torch.testing.get_all_int_dtypes():
-            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
-                m1.fmod(0)
-            with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
-                m1.fmod(zero)
+            if device == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                    m1.fmod(0)
+                with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                    m1.fmod(zero)
+            else:
+                self.assertTrue(torch.all(m1.fmod(0) == 4294967295))
+                self.assertTrue(torch.all(m1.fmod(zero) == 4294967295))
         else:
             self.assertTrue(torch.all(m1.fmod(0).isnan()))
             self.assertTrue(torch.all(m1.fmod(zero).isnan()))
