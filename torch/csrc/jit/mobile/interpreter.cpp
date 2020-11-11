@@ -36,10 +36,9 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
         if (at::hasGlobalCallbacks()) {
-          if (auto debug_info = c10::ThreadLocalDebugInfo::get(
-                  c10::DebugInfoKind::MOBILE_RUNTIME_INFO)) {
-            if (auto* mobile_debug_info =
-                    dynamic_cast<MobileDebugInfo*>(debug_info.get())) {
+          if (auto* mobile_debug_info = dynamic_cast<MobileDebugInfo*>(
+                  c10::ThreadLocalDebugInfo::getRawUnsafe(
+                      c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
               mobile_debug_info->setOpIdx(pc);
             }
           }
