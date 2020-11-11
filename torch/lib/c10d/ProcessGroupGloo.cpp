@@ -108,7 +108,7 @@ namespace {
 // Wrap c10d store as Gloo store
 class GlooStore : public ::gloo::rendezvous::Store {
  public:
-  GlooStore(const std::shared_ptr<::c10d::Store>& store) : store_(store) {}
+  GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
 
   void set(const std::string& key, const std::vector<char>& value) override {
     std::vector<uint8_t> tmp(value.begin(), value.end());
@@ -131,7 +131,7 @@ class GlooStore : public ::gloo::rendezvous::Store {
   }
 
  protected:
-  std::shared_ptr<::c10d::Store> store_;
+  c10::intrusive_ptr<::c10d::Store> store_;
 };
 
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
@@ -562,7 +562,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 #endif
 
 ProcessGroupGloo::ProcessGroupGloo(
-    const std::shared_ptr<Store>& store,
+    const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
     Options options)
