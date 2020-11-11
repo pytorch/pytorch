@@ -118,8 +118,7 @@ static void BM_leaky_relu(benchmark::State& state) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
 
-  const int batch_size = state.range(0);
-  auto data = torch::randn({batch_size, num_features});
+  auto data = torch::randn({num_features, num_features});
 
   std::vector<IValue> inputs({data});
 

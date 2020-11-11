@@ -40,8 +40,7 @@ const std::string trivial_model_1 = R"JIT(
 
 const std::string leaky_relu_model = R"JIT(
   def forward(self, input):
-      m = torch.LeakyReLU(0.1)
-      return m(input)
+      return torch.leaky_relu(input, 0.1)
 )JIT";
 
 
