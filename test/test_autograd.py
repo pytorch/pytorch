@@ -866,6 +866,64 @@ class TestAutograd(TestCase):
             torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
         self.assertRaises(RuntimeError, call_backwards)
 
+    def test_backward_with_inputs(self):
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2, requires_grad=True)
+
+        def fn():
+            return x ** 2 + y * x + y ** 2
+
+        gradient = torch.ones(2, 2)
+        x_grad_expected = 2 * x + y
+        y_grad_expected = x + 2 * y
+
+        @torch.no_grad()
+        def reset_grad():
+            x.grad.zero_()
+            y.grad.zero_()
+
+        torch.autograd.backward(fn(), gradient, inputs=[x, y])
+        self.assertEqual(x.grad, x_grad_expected)
+        self.assertEqual(y.grad, y_grad_expected)
+
+        reset_grad()
+        torch.autograd.backward(fn(), gradient, inputs=[x])
+        self.assertEqual(x.grad, x_grad_expected)
+        self.assertEqual(y.grad, torch.zeros(2, 2))
+
+        reset_grad()
+        torch.autograd.backward(fn(), gradient, inputs=[y])
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, torch.zeros(2, 2))
+
+        reset_grad()
+        self.assertRaisesRegex(RuntimeError, 'cannot be empty',
+                               lambda: torch.autograd.backward(fn(), gradient, inputs=[]))
+
+    def test_backward_with_nonleaf_inputs(self):
+        x = torch.randn(2, 2, requires_grad=True)
+        x_nonleaf = x * 1
+        y = torch.randn(2, 2, requires_grad=True)
+        z = torch.randn(2, 2, requires_grad=True)
+
+        out = x_nonleaf ** 2 + y * x_nonleaf + y ** 2
+
+        out.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y])
+        x_grad_expected = 2 * x + y
+        y_grad_expected = x + 2 * y
+
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, x_grad_expected)
+
+        self.assertRaisesRegex(RuntimeError, 'not a leaf Tensor',
+                               lambda: out.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y, x_nonleaf]))
+
+        # backward doesn't have an allow_unused flag, so the behavior of backward
+        # when variable is not part of the graph is as if allow_used were true
+        # x.grad will simply be None.
+        out.backward(torch.ones(2, 2), create_graph=True, inputs=[z])
+        self.assertIsNone(z.grad)
+
     def test_dependent_backward(self):
         x = torch.randn(10, requires_grad=True)
         y = x ** 2
@@ -2881,6 +2939,14 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    def test_igamma(self):
+        # 1e-3 offset to avoid zeros
+        # NOTE: derivative for s is not implemented
+        s = (torch.rand(100, dtype=torch.double) + 1e-3)
+        x = (torch.rand(100, dtype=torch.double) + 1e-3).requires_grad_()
+        gradcheck(torch.igamma, (s, x))
+        gradgradcheck(torch.igamma, (s, x))
+
     @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
@@ -4631,6 +4697,14 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
             fn(a, b)
 
+    def test_named_tensor_for_complex_views(self):
+        names = ["batch", "height", "width", "complex"]
+        z = torch.ones((5, 12, 14, 2), requires_grad=True)
+        z_named = z.refine_names(*names)
+        z_complex = torch.view_as_complex(z_named.rename(None)).refine_names(*names[:-1])
+        z_complex.sum().backward()
+        self.assertEqual(z.grad, torch.view_as_real(torch.ones_like(z_complex).rename(None)))
+
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):
             @staticmethod
@@ -4917,8 +4991,9 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition
-separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos']  # ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos', 'div', 'log',
+                          'log10', 'log1p', 'log2', 'pow', 'tan', 'reciprocal', 'rsqrt',
+                          '__rdiv__', 'add', 'sub']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
@@ -4929,15 +5004,12 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split',
-                'matmul', 'bmm', 'mv', 'ger', 'diagonal', ] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
+                'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
+                'exp', 'mean'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
 skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
-
-# TODO(@anjali411): add tests for 'sub', 'div
-# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
-# complex_list += ['fill_', 't', '__rdiv__', 'tanh']
 
 def add_test(
         name,
@@ -6709,6 +6781,39 @@ class TestAutogradDeviceType(TestCase):
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(torch.float64)
             self._test_rnn_mod(mod, inp)
 
+    def test_copysign_subgradient(self, device):
+        # Input is 0.0
+        x = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Input is -0.0
+        x = torch.tensor([-0.0, -0.0, -0.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Other is 0.0
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [-1.0, 0.0, 1.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Other is -0.0
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([-0.0, -0.0, -0.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [1.0, 0.0, -1.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
     @deviceCountAtLeast(1)
     def test_grad_assignment(self, devices):
         x = torch.randn(5, 5, device=devices[0])
@@ -7050,6 +7155,32 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
+
+    @slowTest
+    def test_lu_backward(self, device):
+        def run_test(*sizes):
+            x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
+
+            gradcheck(lambda x: x.lu(get_infos=True), x)
+            gradgradcheck(lambda x: x.lu(get_infos=True), x)
+
+            gradcheck(lambda x: x.lu(get_infos=False), x)
+            gradgradcheck(lambda x: x.lu(get_infos=False), x)
+
+            # there is no pivot-less LU factorization on CPU
+            if x.device.type == 'cuda':
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+
+        run_test(3, 3)
+        run_test(3, 3, 3)
+        run_test(3, 3, 3, 3)
+        run_test(5, 5)
+        run_test(3, 5, 5)
+        run_test(3, 3, 5, 5)
 
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.

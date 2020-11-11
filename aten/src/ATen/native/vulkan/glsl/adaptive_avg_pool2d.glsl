@@ -1,42 +1,43 @@
 #version 450 core
 #define PRECISION $precision
+
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform constBlock {
-  int IW;
-  int IH;
-  int OW;
-  int OH;
-}
-uConstBlock;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  int ow = uConstBlock.OW;
-  int oh = uConstBlock.OH;
-  if (pos.x < ow && pos.y < oh) {
-    int iw = uConstBlock.IW;
-    int ih = uConstBlock.IH;
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-    int sx = int(floor(float(pos.x * iw) / ow));
-    int sy = int(floor(float(pos.y * ih) / oh));
-    int ex = int(ceil(float((pos.x + 1) * iw) / ow));
-    int ey = int(ceil(float((pos.y + 1) * ih) / oh));
+  /* Dynamically Uniform */
+  const ivec3 size = imageSize(uOutput);
+  const vec3 isize = textureSize(uInput, 0);
+  const vec2 stride = isize.xy / size.xy;
+  const vec2 kernel = isize.xy - (size.xy - 1) * stride;
 
-    vec4 r = vec4(1.0) / float(ex - sx) / float(ey - sy);
-    vec4 acc = vec4(0);
+  if (all(lessThan(pos, size))) {
+    const vec2 ipos = pos.xy * stride;
 
-    int xi, yi;
-    for (xi = sx; xi < ex; ++xi) {
-      for (yi = sy; yi < ey; ++yi) {
-        acc += texelFetch(uInput, ivec3(xi, yi, pos.z), 0);
+    const ivec2 start = ivec2(ipos);
+    const ivec2 end = ivec2(ceil(ipos + kernel));
+    const ivec2 range = end - start;
+
+    vec4 sum = vec4(0);
+
+    for (int y = start.y; y < end.y; ++y) {
+      for (int x = start.x; x < end.x; ++x) {
+        sum += texelFetch(uInput, ivec3(x, y, pos.z), 0);
       }
     }
 
-    imageStore(uOutput, pos, r * acc);
+    imageStore(
+        uOutput,
+        pos,
+        sum / (range.x * range.y));
   }
 }

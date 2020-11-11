@@ -4,6 +4,11 @@
 
 namespace torch {
 namespace jit {
+namespace {
+inline at::Tensor create_empty_from(const at::Tensor& t) {
+  return at::empty({0}, t.options());
+}
+} // namespace
 
 bool canRunOutOfPlace(Node* n) {
   static std::unordered_set<std::string> out_of_place_nodes{"aten::add",
@@ -11,19 +16,22 @@ bool canRunOutOfPlace(Node* n) {
                                                             "aten::addmm",
                                                             "aten::bmm",
                                                             "aten::sigmoid",
-                                                            "aten::cat",
-                                                            "aten::transpose",
-                                                            "aten::flatten"};
+                                                            "aten::cat"};
   auto str = std::string(n->kind().toQualString());
   return out_of_place_nodes.count(str) > 0;
 }
 
+// TODO: expand to include all view producing ops, mostly in
+// https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/TensorShape.cpp
+bool canRunNatively(Node* n) {
+  static std::unordered_set<std::string> native_nodes{"aten::transpose",
+                                                      "aten::flatten"};
+  auto str = std::string(n->kind().toQualString());
+  return native_nodes.count(str) > 0;
+}
+
 std::function<void(const ProcessedNode*, std::vector<IValue>&)>
 getOutOfPlaceOperation(Node* n) {
-  auto create_empty_from = [](const at::Tensor& t) {
-    return at::empty({0}, t.options());
-  };
-
   if (n->kind() == c10::Symbol::fromQualString("aten::add")) {
     return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
       auto in0_t = p_node->Input(0, reg).toTensor();
@@ -98,7 +106,14 @@ getOutOfPlaceOperation(Node* n) {
       auto out_t = p_node->Output(0, reg).toTensor();
       at::native::sigmoid_out(out_t, in0_t);
     };
-  } else if (n->kind() == c10::Symbol::fromQualString("aten::transpose")) {
+  }
+
+  return [](const ProcessedNode*, std::vector<IValue>&) { TORCH_CHECK(0); };
+}
+
+std::function<void(const ProcessedNode*, std::vector<IValue>&)>
+getNativeOperation(Node* n) {
+  if (n->kind() == c10::Symbol::fromQualString("aten::transpose")) {
     return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
       auto in0_t = p_node->Input(0, reg).toTensor();
       auto in1_i = p_node->Input(1, reg).toInt();
@@ -113,7 +128,6 @@ getOutOfPlaceOperation(Node* n) {
       p_node->Output(0, reg) = at::native::flatten(in0_t, in1_i, in2_i);
     };
   }
-
   return [](const ProcessedNode*, std::vector<IValue>&) { TORCH_CHECK(0); };
 }
 

@@ -98,21 +98,32 @@ class NativeFunction:
     # registrations don't participate in codegen-based selective build!
     manual_kernel_registration: bool
 
-    # Distinguish between a missing dispatch dict (historically, this
-    # means to register a catch-all kernel) and a present but empty
-    # dispatch dict (this means register nothing; arguably, this should
-    # subsume manual_kernel_registration).
+    # A mapping of dispatch keys to names of functions implementing
+    # them.  In native_functions.yaml, the dispatch entry is optional; in that
+    # case, that is equivalent to having written:
+    #
+    #   dispatch:
+    #       Math: $operator_name
     #
     # TODO: str key could be replaced with more explicit enum
-    dispatch: Optional[Dict[str, str]]
+    dispatch: Dict[str, str]
 
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
     loc: 'Location'
 
-    # TODO COMMENT TODO
+    # Whether or not this out functions is a "structured kernel".  Structured
+    # kernels are defined a little differently from normal kernels; in
+    # particular, their shape checking logic is defined separately from
+    # the kernel.  Only out functions can be structured; other functions
+    # delegate to the out function using the structured_delegate keyword.
+    # Every structured kernel must have at least an out and a functional
+    # variant.
     structured: bool
-    abstract: Optional[bool]
+
+    # Whether or not this non-out function is a structured kernel, defined
+    # in terms of the out kernel referenced by the string here.
+    structured_delegate: Optional['OperatorName']
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -161,8 +172,11 @@ class NativeFunction:
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
-        abstract = e.pop('abstract', None)
-        assert abstract is None or isinstance(abstract, bool), f'not a bool: {abstract}'
+        structured_delegate_s = e.pop('structured_delegate', None)
+        assert structured_delegate_s is None or isinstance(structured_delegate_s, str), f'not a str: {structured_delegate}'
+        structured_delegate: Optional[OperatorName] = None
+        if structured_delegate_s is not None:
+            structured_delegate = OperatorName.parse(structured_delegate_s)
 
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
@@ -172,9 +186,8 @@ class NativeFunction:
 
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Optional[Dict[str, str]] = None
+        dispatch: Dict[str, str] = {}
         if raw_dispatch is not None:
-            dispatch = {}
             for ks, v in raw_dispatch.items():
                 if ks == '__line__':
                     continue  # not worth tracking line numbers for dispatch entries
@@ -182,9 +195,14 @@ class NativeFunction:
                 assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
+        else:
+            from tools.codegen.api import cpp
+            dispatch['Math'] = cpp.name(func)
 
-        # Throws if both DefaultBackend and Math are provided
-        assert not (dispatch is not None and 'DefaultBackend' in dispatch and 'Math' in dispatch)
+        assert not ('DefaultBackend' in dispatch and 'Math' in dispatch), \
+            "cannot specify both DefaultBackend and Math on a single kernel; each " \
+            "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
+            "implementation, specify DefaultBackend; otherwise specify Math only"
 
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
@@ -193,8 +211,8 @@ class NativeFunction:
             func=func,
             use_c10_dispatcher=use_c10_dispatcher,
             variants=variants,
-            abstract=abstract,
             structured=structured,
+            structured_delegate=structured_delegate,
             manual_kernel_registration=manual_kernel_registration,
             python_module=python_module,
             category_override=category_override,
@@ -202,6 +220,14 @@ class NativeFunction:
             device_guard=device_guard,
             loc=loc,
         )
+
+    def validate_unstructured(self) -> None:
+        # TODO: probably better to accumulate these errors and report them all
+        # at once
+        assert not self.structured, "This function is structured, but there was " \
+            "no valid functional variant of it."
+        assert self.structured_delegate, "This function delegates to another structured out function, " \
+            "but no valid function was found (the delegate may not exist, or it has the wrong type)"
 
     # __post_init__ functions in dataclasses can be used to do extra
     # validation after construction.
@@ -216,61 +242,65 @@ class NativeFunction:
                 "be declared with only function variant; e.g., variants: function; " \
                 "otherwise you will tickle a Python argument binding bug " \
                 "(which usually manifests itself as the result variable being undefined.)"
-
         if self.structured:
             assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
-                "variant of a function"
+                "variant of a function; did you mean structured_delegate?"
+        if self.structured_delegate:
+            assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
+                "on out= functions; did you mean structured?"
+        # Technically, with the asserts above, this assert is impossible to
+        # happen
+        assert not (self.structured and self.structured_delegate), \
+            "Cannot have both structured and structured_delegate on function"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
-# Represents a bundle of native functions that are semantically related.
+# A structured kernel is guaranteed to have a functional and out variant, and
+# optionally an inplace variant.
 @dataclass(frozen=True)
-class NativeFunctionGroup:
-    functional: Optional[NativeFunction]
+class StructuredNativeFunctions:
+    functional: NativeFunction
     inplace: Optional[NativeFunction]
-    out: Optional[NativeFunction]
+    out: NativeFunction
 
     def __post_init__(self) -> None:
-        test_sig: Optional[FunctionSchema] = None
+        test_sig: FunctionSchema = self.functional.func.signature()
         for f in self.functions():
-            if test_sig is None:
-                test_sig = f.func.signature()
-            else:
-                if test_sig != f.func.signature():
-                    raise AssertionError(
-                        "NativeFunctionGroup constructed from two NativeFunctions "
-                        f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
-                    )
-
-    def structured(self) -> bool:
-        if self.out is None:
-            return False
-        return self.out.structured
+            if test_sig != f.func.signature():
+                raise AssertionError(
+                    "StructuredNativeFunctions constructed from two NativeFunctions "
+                    f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                )
+        assert self.functional.func.kind() == SchemaKind.functional
+        assert self.functional.structured_delegate == self.out.func.name, \
+            f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
+            f"but its actual delegate is {self.out.func.name}"
+        assert self.out.func.kind() == SchemaKind.out
+        assert self.out.structured
+        # For now, structured composite kernels are not supported (need some
+        # design work to figure out how to make the composite case work)
+        assert self.out.dispatch.keys() != {'Math'}
+        if self.inplace is not None:
+            assert self.inplace.func.kind() == SchemaKind.inplace
+            assert self.inplace.structured_delegate == self.out.func.name
 
     def signature(self) -> 'FunctionSchema':
-        if self.out is not None:
-            return self.out.func.signature()
-        elif self.functional is not None:
-            return self.functional.func.signature()
-        elif self.inplace is not None:
-            return self.inplace.func.signature()
-        else:
-            raise AssertionError("invalid NativeFunctionGroup has no NativeFunctions")
+        return self.out.func.signature()
 
     def functions(self) -> Iterator[NativeFunction]:
-        if self.out is not None:
-            yield self.out
-        if self.functional is not None:
-            yield self.functional
+        yield self.out
+        yield self.functional
         if self.inplace is not None:
             yield self.inplace
 
     @staticmethod
-    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> 'NativeFunctionGroup':
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['StructuredNativeFunctions']:
         functional = d.get(SchemaKind.functional)
         inplace = d.get(SchemaKind.inplace)
         out = d.get(SchemaKind.out)
-        return NativeFunctionGroup(
+        if functional is None or out is None or not out.structured:
+            return None
+        return StructuredNativeFunctions(
             functional=functional,
             inplace=inplace,
             out=out,
@@ -375,6 +405,16 @@ class FunctionSchema:
             assert arg.annotation == ret.annotation, \
                 "Out arguments must have matching return Tensor; furthermore, " \
                 "the ith-argument needs to correspond to the ith return"
+        # Invariant: we expect out arguments to appear as keyword arguments in the schema.
+        # This means that all mutable returns should be aliased to a keyword argument
+        # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
+        # See Note [is_out_fn]
+        out_and_self = list(self.out_arguments) + [arg for arg in self.arguments if arg.name == "self"]
+        mutable_returns = [ret for ret in self.returns if ret.annotation is not None and ret.annotation.is_write]
+        for ret in mutable_returns:
+            assert any([ret.annotation == arg.annotation for arg in out_and_self]), \
+                "All mutable returns must be aliased either to a keyword argument, or to \"self\". " \
+                "Did you forget to mark an out argument as keyword-only?"
         if self.out_arguments:
             assert len(self.out_arguments) == len(self.returns), \
                 "Must return as many arguments as there are out arguments"
@@ -448,6 +488,7 @@ class FunctionSchema:
         else:
             return SchemaKind.functional
 
+    # WARNING: This method is not currently tested in any meaningful way
     def signature(self) -> 'FunctionSchema':
         """
         Certain schemas are 'related', in that they are simply
