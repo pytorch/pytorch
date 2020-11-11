@@ -1276,7 +1276,7 @@ struct to_ir {
     // comprehension introduces it's own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::ListComprehensionScope, lc.range(), 0));
+        graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -1293,6 +1293,54 @@ struct to_ir {
     emitFor(targets_list, itrs, loc, emit_body);
     popFrame();
     return list_value;
+  }
+
+  Value* emitDictComprehension(const DictComp& dc, const TypePtr& type_hint) {
+    const auto loc = dc.range();
+    const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
+    const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
+
+    // If 1) there is no type hint, and 2) we emit this Value over an unrolled
+    // iterable of length 0, then we emit a Dict[Tensor, Tensor]
+    Value* dict_value =
+        graph->insertNode(graph->create(prim::DictConstruct, 1))
+            ->output()
+            ->setType(DictType::create(TensorType::get(), TensorType::get()));
+    bool type_set = false;
+    if (type_hint) {
+      if (!type_hint->cast<DictType>()) {
+        throw ErrorReport(loc)
+            << "Expected Dict type annotation for dict comprehension"
+               ", found "
+            << type_hint->repr_str();
+      }
+      dict_value->setType(type_hint);
+      type_set = true;
+    }
+
+    // A dict comprehension introduces its own scope. No variable assigned
+    // may leak into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::ComprehensionScope, dc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
+    auto emit_body = [&]() {
+      auto k = emitExpr(dc.key());
+      auto v = emitExpr(dc.value());
+      if (!type_set) {
+        dict_value->setType(DictType::create(k->type(), v->type()));
+        type_set = true;
+      }
+      NamedValue self = NamedValue(loc, "self", dict_value);
+      NamedValue input_k = NamedValue(loc, "", k);
+      NamedValue input_v = NamedValue(loc, "", v);
+      emitBuiltinCall(
+          loc, *graph, aten::_set_item, {input_k, input_v}, {}, self);
+    };
+    emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
+    return dict_value;
   }
 
   // Insert subtyping refinements
@@ -3390,6 +3438,10 @@ struct to_ir {
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
         return emitListComprehension(lc, type_hint);
+      } break;
+      case TK_DICT_COMP: {
+        auto dc = DictComp(tree);
+        return emitDictComprehension(dc, type_hint);
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;

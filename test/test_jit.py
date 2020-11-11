@@ -329,6 +329,11 @@ class TestJit(JitTestCase):
             def dot(points, query, dim):
                 return (points * query).sum(dim)
 
+    def test_dict_comprehension(self):
+        def fn():
+            return {i:chr(i+65) for i in range(4)}
+        self.checkScript(fn, ())
+
     def test_constants_pkl(self):
         # This test asserts that the serialization archive includes a `constants.pkl`
         # file. This file is used by `torch.load` to determine whether a zip file

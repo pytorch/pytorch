@@ -102,6 +102,7 @@ namespace jit {
   _(TK_ASSERT, "assert", "assert")               \
   _(TK_DOTS, "dots", "...")                      \
   _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_DICT_COMP, "dict comprehension", "")      \
   _(TK_BREAK, "break", "break")                  \
   _(TK_CONTINUE, "continue", "continue")         \
   _(TK_DELETE, "del", "del")                     \
