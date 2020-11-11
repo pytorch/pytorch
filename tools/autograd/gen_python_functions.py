@@ -33,15 +33,22 @@
 from collections import defaultdict
 import itertools
 import re
+import yaml
+
 from .gen_trace_type import should_trace
-from .utils import write, is_tensor_method
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.api.python import *
-from tools.codegen.gen import cpp_string, with_native_function
+from tools.codegen.gen import cpp_string, parse_native_yaml, with_native_function, FileManager
 from tools.codegen.model import *
 
-from typing import Dict, Optional, List, Any, Tuple, Set, Sequence
+from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
+
+try:
+    # use faster C loader if available
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader  # type: ignore
 
 #
 # declarations blocklist
@@ -84,21 +91,6 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
     'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
 ]
 
-# TODO: remove after migrating the entire file to the new data model.
-def should_generate_python_binding(declaration):
-    name = declaration['name']
-    for pattern in SKIP_PYTHON_BINDINGS:
-        if re.match('^' + pattern + '$', name):
-            return False
-
-    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
-    signature = '{}({})'.format(name, ', '.join(simple_types))
-    for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
-        if pattern == signature:
-            return False
-
-    return True
-
 @with_native_function
 def should_generate_py_binding(f: NativeFunction) -> bool:
     name = cpp.name(f.func)
@@ -115,215 +107,11 @@ def should_generate_py_binding(f: NativeFunction) -> bool:
 
     return True
 
-#
-# top-level codegen functions, called from gen_autograd
-#
-
-def get_py_variable_methods(declarations):
-    """
-    Get declarations (grouped by name) which should be generated
-    as methods on Tensor.
-    """
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                not declaration.get('python_module') and
-                is_tensor_method(declaration))
-
-    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
-
-
-def gen_py_variable_methods(out, declarations, template_path):
-    """
-    Generate Tensor methods.
-    """
-    PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
-
-    py_variable_methods = get_py_variable_methods(declarations)
-
-    env = create_python_bindings(py_variable_methods, is_python_method=True, module=None)
-
-    write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
-
-
-def get_py_nn_functions(declarations):
-    """
-    Get declarations (grouped by name) which should be generated
-    as functions in the "nn" module.
-    """
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                is_nn_module_function(declaration))
-
-    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
-
-
-def gen_py_nn_functions(out, declarations, template_path):
-    """
-    Generate functions in the "nn" module.
-    """
-    PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
-
-    py_nn_functions = get_py_nn_functions(declarations)
-
-    env = create_python_bindings(py_nn_functions, is_python_method=False, module="torch.nn")
-
-    write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
-
-
-def get_py_fft_functions(declarations):
-    """
-    Get declarations (grouped by name) which should be generated
-    as functions in the "fft" module.
-    """
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                is_fft_module_function(declaration))
-
-    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
-
-
-def gen_py_fft_functions(out, declarations, template_path):
-    """
-    Generate functions in the "fft" module.
-    """
-    PY_FFT_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_fft_functions.cpp')
-
-    py_fft_functions = get_py_fft_functions(declarations)
-
-    env = create_python_bindings(py_fft_functions, is_python_method=False, module="torch.fft")
-
-    write(out, 'python_fft_functions.cpp', PY_FFT_FUNCTIONS_CPP, env)
-
-def get_py_linalg_functions(declarations):
-    """
-    Get declarations (grouped by name) which should be generated
-    as functions in the "linalg" module.
-    """
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                is_linalg_module_function(declaration))
-
-    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
-
-
-def gen_py_linalg_functions(out, declarations, template_path):
-    """
-    Generate functions in the "linalg" module.
-    """
-    PY_LINALG_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_linalg_functions.cpp')
-
-    py_linalg_functions = get_py_linalg_functions(declarations)
-
-    env = create_python_bindings(py_linalg_functions, is_python_method=False, module="torch.linalg")
-
-    write(out, 'python_linalg_functions.cpp', PY_LINALG_FUNCTIONS_CPP, env)
-
-
-def get_py_torch_functions(declarations):
-    """
-    Get declarations (grouped by name) which should be generated
-    as functions in the "torch" module.
-    """
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                not declaration.get('python_module') and
-                is_torch_function(declaration))
-
-    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
-
-
-def gen_py_torch_functions(out, declarations, template_path):
-    """
-    Generate functions in the "torch" module.
-    """
-    PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
-
-    py_torch_functions = get_py_torch_functions(declarations)
-
-    env = create_python_bindings(py_torch_functions, is_python_method=False, module="torch")
-
-    write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
-
-
-def group_declarations_by_op_name(declarations):
-    groups = defaultdict(list)
-    for d in declarations:
-        groups[op_name(d)].append(d)
-    return groups
-
-
-def create_python_bindings(python_functions, is_python_method, module):
-    """Generates Python bindings to ATen functions"""
-    py_methods: List[str] = []
-    py_method_defs: List[str] = []
-    py_forwards: List[str] = []
-
-    for name in sorted(python_functions.keys()):
-        overloads = list(decl_to_signature_function_pair(decl, method=is_python_method)
-                         for decl in python_functions[name])
-        py_methods.append(method_impl(name, module, overloads, method=is_python_method))
-        py_method_defs.append(method_def(name, module, overloads, method=is_python_method))
-        py_forwards.extend(forward_decls(name, overloads, method=is_python_method))
-
-    return {
-        'py_forwards': py_forwards,
-        'py_methods': py_methods,
-        'py_method_defs': py_method_defs,
-    }
-
-#
-# declaration derived props, utils, etc.
-# declarations are dicts loaded from Declarations.yaml,
-# passed to our codegen methods by callers in gen_autograd
-#
-
 def get_pycname(name: str) -> str:
     return f'THPVariable_{name}'
 
-
 def is_noarg(overloads: Sequence[PythonSignatureNativeFunctionPair]) -> bool:
     return len(overloads) == 1 and overloads[0].signature.arguments_count() == 0
-
-
-def is_output(arg):
-    return arg.get('output', False)
-
-
-def has_outputs(declaration):
-    return any([is_output(arg) for arg in declaration['arguments']])
-
-
-def is_torch_function(declaration):
-    return 'namespace' in declaration['method_of']
-
-
-def is_nn_module_function(declaration):
-    return declaration.get('python_module') == 'nn'
-
-
-def is_fft_module_function(declaration):
-    return declaration.get('python_module') == 'fft'
-
-
-def is_linalg_module_function(declaration):
-    return declaration.get('python_module') == 'linalg'
-
-
-def op_name(declaration):
-    name = declaration['name']
-    if has_outputs(declaration):
-        if not name.endswith("_out"):
-            raise RuntimeError(
-                '{} has output params, expecting name ending with \'_out\''.
-                format(declaration['name']))
-        return name[:-4]
-    else:
-        if name.endswith("_out"):
-            raise RuntimeError(
-                '{}: name ends with \'_out\', expecting output params'.
-                format(declaration['name']))
-        return name
-
 
 def is_py_variable_method(f: NativeFunction) -> bool:
     return f.python_module is None \
@@ -341,6 +129,197 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == 'linalg'
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#
+#                            Main Function
+#
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
+    fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+
+    methods = load_signatures(native_yaml_path, deprecated_yaml_path, method=True)
+    create_python_bindings(
+        fm, methods, is_py_variable_method, None, 'python_variable_methods.cpp', method=True)
+
+    functions = load_signatures(native_yaml_path, deprecated_yaml_path, method=False)
+    create_python_bindings(
+        fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp', method=False)
+
+    create_python_bindings(
+        fm, functions, is_py_nn_function, 'torch.nn', 'python_nn_functions.cpp', method=False)
+
+    create_python_bindings(
+        fm, functions, is_py_fft_function, 'torch.fft', 'python_fft_functions.cpp', method=False)
+
+    create_python_bindings(
+        fm, functions, is_py_linalg_function, 'torch.linalg', 'python_linalg_functions.cpp', method=False)
+
+def create_python_bindings(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    module: Optional[str],
+    filename: str,
+    *,
+    method: bool,
+) -> None:
+    """Generates Python bindings to ATen functions"""
+    py_methods: List[str] = []
+    py_method_defs: List[str] = []
+    py_forwards: List[str] = []
+
+    grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    for pair in pairs:
+        if pred(pair.function):
+            grouped[str(pair.function.func.name.name)].append(pair)
+
+    for name in sorted(grouped.keys()):
+        overloads = grouped[name]
+        py_methods.append(method_impl(name, module, overloads, method=method))
+        py_method_defs.append(method_def(name, module, overloads, method=method))
+        py_forwards.extend(forward_decls(name, overloads, method=method))
+
+    fm.write_with_template(filename, filename, lambda: {
+        'generated_comment': f'@generated from {fm.template_dir}/{filename}',
+        'py_forwards': py_forwards,
+        'py_methods': py_methods,
+        'py_method_defs': py_method_defs,
+    })
+
+def load_signatures(
+    native_yaml_path: str,
+    deprecated_yaml_path: str,
+    *,
+    method: bool,
+) -> Sequence[PythonSignatureNativeFunctionPair]:
+    native_functions = list(filter(should_generate_py_binding, parse_native_yaml(native_yaml_path)))
+
+    @with_native_function
+    def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:
+        return PythonSignatureNativeFunctionPair(
+            signature=signature(f, method=method),
+            function=f,
+        )
+
+    pairs = list(map(gen_signature_pairs, native_functions))
+    deprecated = load_deprecated_signatures(pairs, deprecated_yaml_path, method=method)
+    return pairs + deprecated
+
+def load_deprecated_signatures(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    deprecated_yaml_path: str,
+    *,
+    method: bool,
+) -> List[PythonSignatureNativeFunctionPair]:
+    # The deprecated.yaml doesn't have complete type information, we need
+    # find and leverage the original ATen signature (to which it delegates
+    # the call) to generate the full python signature.
+    # We join the deprecated and the original signatures using type-only form.
+
+    # native function -> type-only signature
+    def signature_original(f: NativeFunction) -> str:
+        # remove inplace suffix but keep outplace suffix
+        opname = str(f.func.name.name.base)
+        if f.func.is_out_fn():
+            opname += '_out'
+        types = ', '.join(argument_type_str(a.type)
+                          for a in itertools.chain(f.func.out_arguments,
+                                                   f.func.arguments,
+                                                   f.func.kwarg_only_arguments))
+        return f'{opname}({types})'
+
+    # deprecated -> type-only native signature (according to the call order)
+    def signature_deprecated(opname: str, params: List[str], call_args: List[str]) -> str:
+        # create a mapping of parameter name to parameter type
+        types: Dict[str, str] = {}
+        for param in params:
+            if param == '*':
+                continue
+            type, name = param.split(' ')
+            types[name] = type
+        # if the name in the call is not in the parameter list, assume it's
+        # a literal Scalar
+        rearranged_types = ', '.join(types.get(arg, 'Scalar') for arg in call_args)
+        return f'{opname}({rearranged_types})'
+
+    # TODO: Use a real parser here; this will get bamboozled
+    def split_name_params(schema: str) -> Tuple[str, List[str]]:
+        m = re.match(r'(\w+)(\.\w+)?\((.*)\)', schema)
+        if m is None:
+            raise RuntimeError(f'Unsupported function schema: {schema}')
+        name, _, params = m.groups()
+        return name, params.split(', ')
+
+    # group the original ATen signatures by type-only signature
+    grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    for pair in pairs:
+        grouped[signature_original(pair.function)].append(pair)
+
+    # find matching original signatures for each deprecated signature
+    results: List[PythonSignatureNativeFunctionPair] = []
+
+    with open(deprecated_yaml_path, 'r') as f:
+        deprecated_defs = yaml.load(f, Loader=Loader)
+
+    for deprecated in deprecated_defs:
+        _, params = split_name_params(deprecated['name'])
+        aten_name, call_args = split_name_params(deprecated['aten'])
+
+        for pair in grouped[signature_deprecated(aten_name, params, call_args)]:
+            # It uses the types from the original ATen declaration, but the
+            # ordering and parameter names from the deprecated overload. Any
+            # default parameter values from the original ATen declaration are
+            # ignored.
+            # Deprecated signature might reorder input_args and input_kwargs,
+            # but never changes output_args nor TensorOptions (if any?),
+            # so here we only look into these two types of args.
+            python_sig = pair.signature
+            src_args: Dict[str, PythonArgument] = {a.name: PythonArgument(
+                name=a.name,
+                type=a.type,
+                default=None,
+                default_init=None,
+            ) for a in itertools.chain(python_sig.input_args, python_sig.input_kwargs)}
+
+            args: List[str] = []
+            input_args: List[PythonArgument] = []
+            input_kwargs: List[PythonArgument] = []
+
+            kwarg_only = False
+            for param in params:
+                if param == '*':
+                    kwarg_only = True
+                    continue
+                _, param_name = param.split(' ')
+                args.append(param_name)
+
+                if param_name not in src_args:
+                    # output argument
+                    continue
+
+                if not kwarg_only:
+                    if not method or param_name != 'self':
+                        input_args.append(src_args[param_name])
+                else:
+                    input_kwargs.append(src_args[param_name])
+
+            results.append(PythonSignatureNativeFunctionPair(
+                signature=PythonSignatureDeprecated(
+                    name=python_sig.name,
+                    input_args=tuple(input_args),
+                    input_kwargs=tuple(input_kwargs),
+                    output_args=python_sig.output_args,
+                    tensor_options_args=python_sig.tensor_options_args,
+                    method=python_sig.method,
+                    deprecated_args_names=tuple(args),
+                    deprecated_args_exprs=tuple(call_args),
+                ),
+                function=pair.function,
+            ))
+
+    return results
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -491,7 +470,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 
 def method_impl(
     name: str,
-    module: str,
+    module: Optional[str],
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
     method: bool
@@ -550,7 +529,9 @@ def method_impl(
         self_="self_" if method else "nullptr",
     )
 
-def gen_has_torch_function_check(name: str, module: str, *, noarg: bool, method: bool) -> str:
+def gen_has_torch_function_check(
+    name: str, module: Optional[str], *, noarg: bool, method: bool
+) -> str:
     if noarg:
         if method:
             return f"""\
@@ -663,7 +644,7 @@ BINARY_OP_NAMES = [
 
 def method_def(
     name: str,
-    module: str,
+    module: Optional[str],
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
     method: bool
@@ -849,73 +830,6 @@ def sort_overloads(
 #                       Codegen API Integration
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-# These helper functions allow us to call the new codegen API from the
-# old codegen script (which operates on Declarations.yaml).
-
-# TODO: remove all these HACKs after migration is completed!
-
-# function schema str -> NativeFunction
-NF_TABLE: Optional[Dict[str, NativeFunction]] = None
-
-def init(native_yaml_path: str) -> None:
-    from tools.codegen.gen import parse_native_yaml
-    global NF_TABLE
-    NF_TABLE = {str(f.func): f for f in parse_native_yaml(native_yaml_path)}
-
-# Multiple decl entries can map to the same native function (because of deprecated decl).
-def decl_to_native_function(decl: Dict[str, Any]) -> NativeFunction:
-    assert NF_TABLE is not None, 'need to initialize codegen.api.python with init()'
-    function_schema_str = decl['schema_string']
-    assert function_schema_str.startswith('aten::'), f'unknown namespace: {function_schema_str}'
-    function_schema_str = function_schema_str[len('aten::'):]
-    assert function_schema_str in NF_TABLE, f'cannot find func: {function_schema_str}'
-    return NF_TABLE[function_schema_str]
-
-# Each decl entry has unique (python signature, native function) pair.
-def decl_to_signature_function_pair(
-    decl: Dict[str, Any], *, method: bool
-) -> PythonSignatureNativeFunctionPair:
-    f = decl_to_native_function(decl)
-
-    @with_native_function
-    def go(f: NativeFunction) -> PythonSignature:
-        return signature(f, method=method)
-
-    python_sig = go(f)
-
-    if decl.get('deprecated', False):
-        # TODO: directly load 'deprecated.yaml'.
-        # deprecated.yaml doesn't have complete type information, we need
-        # leverage the source signature (to which it delegates the call).
-        # Deprecated signature might reorder input_args and input_kwargs,
-        # but never changes output_args nor python_binding_args (if any?),
-        # so here we only look into these two types of args.
-        src_args: Dict[str, PythonArgument] = {a.name: PythonArgument(
-            name=a.name,
-            type=a.type,
-            default=None,
-            default_init=None,
-        ) for a in itertools.chain(python_sig.input_args, python_sig.input_kwargs)}
-        args: List[Dict[str, Any]] = decl['arguments']
-        input_arg_names: List[str] = \
-            list(str(a['name']) for a in args if not a['kwarg_only'] and not a['output'])
-        input_kwarg_names: List[str] = \
-            list(str(a['name']) for a in args if a['kwarg_only'] and not a['output'])
-        python_sig = PythonSignatureDeprecated(
-            name=python_sig.name,
-            input_args=tuple(src_args[n] for n in input_arg_names if not method or n != 'self'),
-            input_kwargs=tuple(src_args[n] for n in input_kwarg_names),
-            output_args=python_sig.output_args,
-            tensor_options_args=python_sig.tensor_options_args,
-            method=python_sig.method,
-            deprecated_args_names=tuple(str(a['name']) for a in args),
-            deprecated_args_exprs=tuple(decl.get('call_args')),
-        )
-    return PythonSignatureNativeFunctionPair(
-        signature=python_sig,
-        function=f,
-    )
 
 def emit_single_dispatch(
     ps: PythonSignature, f: NativeFunction, namedtuple_typenames: Dict[str, str]
