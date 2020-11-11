@@ -326,12 +326,10 @@ def op_name(declaration):
 
 
 def is_py_variable_method(f: NativeFunction) -> bool:
-    return f.python_module is None \
-        and Variant.method in f.variants
+    return f.python_module is None and Variant.method in f.variants
 
 def is_py_torch_function(f: NativeFunction) -> bool:
-    return f.python_module is None \
-        and Variant.function in f.variants
+    return f.python_module is None and Variant.function in f.variants
 
 def is_py_nn_function(f: NativeFunction) -> bool:
     return f.python_module == 'nn'
