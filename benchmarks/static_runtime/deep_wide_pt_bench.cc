@@ -118,8 +118,8 @@ static void BM_leaky_relu(benchmark::State& state) {
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
 
-  auto data = torch::randn({num_features, num_features});
-
+  const int batch_size = state.range(0);
+  auto data = torch::randn({batch_size, num_features});
   std::vector<IValue> inputs({data});
 
   mod.forward(inputs);
@@ -128,7 +128,7 @@ static void BM_leaky_relu(benchmark::State& state) {
   }
 }
 
-BENCHMARK(BM_leaky_relu);
+BENCHMARK(BM_leaky_relu)->RangeMultiplier(8)->Ranges({{1, 20}});
 BENCHMARK(BM_deep_wide_base)->RangeMultiplier(8)->Ranges({{1, 20}});
 BENCHMARK(BM_deep_wide_fast)->RangeMultiplier(8)->Ranges({{1, 20}});
 
