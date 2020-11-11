@@ -217,7 +217,7 @@ int main(int argc, char** argv) {
       FLAGS_warmup,
       ".");
   for (int i = 0; i < FLAGS_warmup; ++i) {
-    module.forward(inputs).toTensor().cpu();
+    module.forward(inputs);
   }
 
   std::cout << "Main runs." << std::endl;
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
   auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
-    module.forward(inputs).toTensor().cpu();
+    module.forward(inputs);
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());

@@ -1429,9 +1429,17 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
-    # If not given, determine what's needed for the GPU that can be found
+    # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
         capability = torch.cuda.get_device_capability()
+        supported_sm = [int(arch.split('_')[1])
+                        for arch in torch.cuda.get_arch_list() if 'sm_' in arch]
+        max_supported_sm = max((sm // 10, sm % 10) for sm in supported_sm)
+        # Capability of the device may be higher than what's supported by the user's
+        # NVCC, causing compilation error. User's NVCC is expected to match the one
+        # used to build pytorch, so we use the maximum supported capability of pytorch
+        # to clamp the capability.
+        capability = min(max_supported_sm, capability)
         arch_list = [f'{capability[0]}.{capability[1]}']
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
