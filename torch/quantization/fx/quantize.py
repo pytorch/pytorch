@@ -347,9 +347,10 @@ class Quantizer:
 
         # match the patterns that will get quantized
         standalone_module_names = prepare_custom_config_dict.get("standalone_module_name", None)
+        standalone_module_classes = prepare_custom_config_dict.get("standalone_module_class", None)
         custom_module_classes = get_custom_module_class_keys(prepare_custom_config_dict, "float_to_observed_custom_module_class")
         matches = self._find_matches(
-            model.graph, self.modules, self.patterns, standalone_module_names, custom_module_classes)
+            model.graph, self.modules, self.patterns, standalone_module_names, standalone_module_classes, custom_module_classes)
 
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
@@ -388,8 +389,6 @@ class Quantizer:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
-                if qconfig is None:
-                    continue
 
                 def insert_observer(node, observer, device):
                     get_new_observer_name = get_new_attr_name_with_prefix(prefix)
@@ -401,93 +400,92 @@ class Quantizer:
                     if device:
                         getattr(model, observer_name).to(device)
 
-                if isinstance(obj, CustomModuleQuantizeHandler):
-                    custom_module = self.modules[node.target]
-                    custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
-                    observed_custom_module_class = \
-                        get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig)
-                    observed_custom_module = \
-                        observed_custom_module_class.from_float(custom_module)
-                    parent_name, name = _parent_name(node.target)
-                    setattr(self.modules[parent_name], name, observed_custom_module)
-
                 # index for input of custom module that needs to be observed in parent
                 standalone_module_input_idxs = None
-                if isinstance(obj, StandaloneModuleQuantizeHandler):
-                    # observe standalone module
-                    standalone_module = self.modules[node.target]
-                    prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
-                    observed_standalone_module = prepare(standalone_module, {'': qconfig})
-                    observed_standalone_module.qconfig = qconfig
-                    standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
-                    observed_standalone_module = mark_observed_standalone_module(observed_standalone_module)
-                    parent_name, name = _parent_name(node.target)
-                    setattr(self.modules[parent_name], name, observed_standalone_module)
-                    self.modules[node.target] = observed_standalone_module
+                if qconfig is not None:
+                    if isinstance(obj, CustomModuleQuantizeHandler):
+                        custom_module = self.modules[node.target]
+                        custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
+                        observed_custom_module_class = \
+                            get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig)
+                        observed_custom_module = \
+                            observed_custom_module_class.from_float(custom_module)
+                        parent_name, name = _parent_name(node.target)
+                        setattr(self.modules[parent_name], name, observed_custom_module)
+
+                    elif isinstance(obj, StandaloneModuleQuantizeHandler):
+                        # observe standalone module
+                        standalone_module = self.modules[node.target]
+                        prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
+                        observed_standalone_module = prepare(standalone_module, {'': qconfig})
+                        observed_standalone_module.qconfig = qconfig
+                        standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
+                        observed_standalone_module = mark_observed_standalone_module(observed_standalone_module)
+                        parent_name, name = _parent_name(node.target)
+                        setattr(self.modules[parent_name], name, observed_standalone_module)
+                        self.modules[node.target] = observed_standalone_module
 
 
-                # don't need to insert observer for output if activation does not
-                # need to be statically quantized
-                if not activation_is_statically_quantized(qconfig):
-                    continue
-
-                if isinstance(obj, FixedQParamsOpQuantizeHandler) and model.training:
-                    # we only insert fake quantize module in qat
-                    activation_post_process_ctr = \
-                        get_default_output_activation_post_process_map().get(pattern, None)
-                    assert activation_post_process_ctr is not None, \
-                        'activation_post_process constructor not provided for ' + \
-                        'pattern:' + str(pattern)
-                    device = assert_and_get_unique_device(model)
-                    insert_observer(node, activation_post_process_ctr(), device)
-                elif (isinstance(obj, FixedQParamsOpQuantizeHandler) and
-                      not model.training) or isinstance(obj, CopyNode):
-                    # inserting observers for output of observed module, or mark the output
-                    # as observed
-                    assert node.op in [
-                        'call_module',
-                        'call_function',
-                        'call_method'], \
-                        'CopyNode of type ' + node.op + ' is not handled'
-
-                    def is_observed(input_arg):
-                        if isinstance(input_arg, Node):
-                            return input_arg.name in observed_node_names_set
-                        elif isinstance(input_arg, list):
-                            return all(map(is_observed, input_arg))
-                    # propagate observed property from input
-                    if is_observed(node.args[0]):
-                        observed_node_names_set.add(node.name)
-                elif (isinstance(obj, Add) or isinstance(obj, Mul)) and obj.num_node_args == 1:
-                    input_node = matched_nodes[-1]  # first node in the sequence
-
-                    def input_is_observed(arg):
-                        return isinstance(arg, Node) and arg.name in observed_node_names_set
-                    # This is checking if one of the argument of add/mul
-                    # is an observed node
-                    # If both of the inputs are number,
-                    # we will not consider the output to be observed
-                    if input_is_observed(input_node.args[0]) or input_is_observed(input_node.args[1]):
-                        observed_node_names_set.add(node.name)
-                elif isinstance(obj, StandaloneModuleQuantizeHandler):
-                    assert node.op == 'call_module'
-                    output_is_observed = self.modules[node.target]._output_is_observed
-                    if output_is_observed:
-                        observed_node_names_set.add(node.name)
-                elif qconfig is not None and obj.all_node_args:
-                    # observer for outputs
-                    new_observer = qconfig.activation()
-                    # respect device affinity when adding observers
-                    device = assert_and_get_unique_device(model)
-                    insert_observer(node, new_observer, device)
-
-                # insert observer for input of standalone module
-                if standalone_module_input_idxs is not None:
-                    for idx in standalone_module_input_idxs:
-                        if node.args[idx].name not in observed_node_names_set:
-                            new_observer = qconfig.activation()
+                    # don't need to insert observer for output if activation does not
+                    # need to be statically quantized
+                    if activation_is_statically_quantized(qconfig):
+                        if isinstance(obj, FixedQParamsOpQuantizeHandler) and model.training:
+                            # we only insert fake quantize module in qat
+                            activation_post_process_ctr = \
+                                get_default_output_activation_post_process_map().get(pattern, None)
+                            assert activation_post_process_ctr is not None, \
+                                "activation_post_process constructor not provided for " + \
+                                "pattern:" + str(pattern)
                             device = assert_and_get_unique_device(model)
-                            insert_observer(node.args[idx], new_observer, device)
+                            insert_observer(node, activation_post_process_ctr(), device)
+                        elif (isinstance(obj, FixedQParamsOpQuantizeHandler) and
+                              not model.training) or isinstance(obj, CopyNode):
+                            # inserting observers for output of observed module, or mark the output
+                            # as observed
+                            assert node.op in [
+                                'call_module',
+                                'call_function',
+                                'call_method'], \
+                                'CopyNode of type ' + node.op + ' is not handled'
+
+                            def is_observed(input_arg):
+                                if isinstance(input_arg, Node):
+                                    return input_arg.name in observed_node_names_set
+                                elif isinstance(input_arg, list):
+                                    return all(map(is_observed, input_arg))
+                            # propagate observed property from input
+                            if is_observed(node.args[0]):
+                                observed_node_names_set.add(node.name)
+                        elif (isinstance(obj, Add) or isinstance(obj, Mul)) and obj.num_node_args == 1:
+                            input_node = matched_nodes[-1]  # first node in the sequence
+
+                            def input_is_observed(arg):
+                                return isinstance(arg, Node) and arg.name in observed_node_names_set
+                            # This is checking if one of the argument of add/mul
+                            # is an observed node
+                            # If both of the inputs are number,
+                            # we will not consider the output to be observed
+                            if input_is_observed(input_node.args[0]) or input_is_observed(input_node.args[1]):
+                                observed_node_names_set.add(node.name)
+                        elif isinstance(obj, StandaloneModuleQuantizeHandler):
+                            assert node.op == 'call_module'
+                            output_is_observed = self.modules[node.target]._output_is_observed
+                            if output_is_observed:
+                                observed_node_names_set.add(node.name)
+                        elif obj.all_node_args:
+                            # observer for outputs
+                            new_observer = qconfig.activation()
+                            # respect device affinity when adding observers
+                            device = assert_and_get_unique_device(model)
+                            insert_observer(node, new_observer, device)
+
+                    # insert observer for input of standalone module
+                    if standalone_module_input_idxs is not None:
+                        for idx in standalone_module_input_idxs:
+                            if node.args[idx].name not in observed_node_names_set:
+                                new_observer = qconfig.activation()
+                                device = assert_and_get_unique_device(model)
+                                insert_observer(node.args[idx], new_observer, device)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
@@ -749,7 +747,7 @@ class Quantizer:
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:
                 # copy quantized or non-quantized node
-                env[node.name] = self.quantized_graph.node_copy(node, load_x)
+                env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
 
         # remove activation post process
         act_post_process_removed_graph = Graph()
@@ -829,7 +827,9 @@ class Quantizer:
 
     def _find_matches(
             self, graph, modules, patterns,
-            standalone_module_names=None, custom_module_classes=None):
+            standalone_module_names=None,
+            standalone_module_classes=None,
+            custom_module_classes=None):
         """
         Matches the nodes in the input graph to quantization patterns, and
         outputs the information needed to quantize them in future steps.
@@ -852,6 +852,12 @@ class Quantizer:
         """
         if custom_module_classes is None:
             custom_module_classes = []
+
+        if standalone_module_classes is None:
+            standalone_module_classes = []
+
+        if standalone_module_names is None:
+            standalone_module_names = []
 
         match_map = {}
         all_matched = set()
@@ -886,10 +892,9 @@ class Quantizer:
                 match_map[node.name] = (
                     node, [node], None, CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
 
-        def is_standalone_module(module_path):
-            if standalone_module_names is None:
-                return False
-            return module_path in standalone_module_names
+        def is_standalone_module(node_target):
+            return node_target in standalone_module_names or \
+                type(self.modules[node_target]) in standalone_module_classes
 
         # add standalone modules to the match
         for node in graph.nodes:

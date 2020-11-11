@@ -151,10 +151,14 @@ class DistributedDataParallel(Module):
 
     .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
         gradient will be ``M`` times smaller when compared to the same model
-        trained on a single node with ``batch=M*N`` (because the gradients
+        trained on a single node with ``batch=M*N`` if the loss is summed (NOT 
+        averaged as usual) across instances in a batch (because the gradients
         between different nodes are averaged). You should take this into
         consideration when you want to obtain a mathematically equivalent
-        training process compared to the local training counterpart.
+        training process compared to the local training counterpart. But in most 
+        cases, you can just treat a DistributedDataParallel wrapped model, a 
+        DataParallel wrapped model and an ordinary model on a single GPU as the 
+        same (E.g. using the same learning rate for equivalent batch size).
 
     .. note::
         Parameters are never broadcast between processes. The module performs
@@ -973,9 +977,9 @@ class DistributedDataParallel(Module):
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
 
-    def _register_comm_hook(self, state: object, hook: callable):
+    def register_comm_hook(self, state: object, hook: callable):
         r"""
-        Register a communication hook which is an enhancement that provides a
+        Registers a communication hook which is an enhancement that provides a
         flexible hook to users where they can specify how DDP aggregates gradients
         across multiple workers.
 
@@ -1024,7 +1028,7 @@ class DistributedDataParallel(Module):
         .. warning ::
             ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
             which is an internal type and should be used with caution. It can still be used by
-            ``_register_comm_hook`` API, but it is subject to some subtle differences compared
+            ``register_comm_hook`` API, but it is subject to some subtle differences compared
             to ``torch.futures.Future``.
 
         .. warning ::
@@ -1038,7 +1042,7 @@ class DistributedDataParallel(Module):
             >>>     fut.set_result(bucket.get_tensors())
             >>>     return fut
 
-            >>> ddp._register_comm_hook(state = None, hook = noop)
+            >>> ddp.register_comm_hook(state = None, hook = noop)
 
         Example::
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
@@ -1054,11 +1058,45 @@ class DistributedDataParallel(Module):
             >>>         return decoded_tensors
             >>>     return fut.then(decode)
 
-            >>> ddp._register_comm_hook(state = None, hook = encode_and_decode)
+            >>> ddp.register_comm_hook(state = None, hook = encode_and_decode)
 
         """
         self._check_comm_hook(hook)
         dist._register_comm_hook(self.reducer, state, hook)
+
+    def _register_builtin_comm_hook(
+        self, comm_hook_type
+    ):
+        r"""
+        Registers a built-in communication hook that specifies how DDP
+        aggregates gradients across multiple workers.
+        The built-in hooks aim to provide efficient C++ implementations for certain hooks,
+        which might not be as efficient if implemented in Python using a Python communication hook.
+
+        Arguments:
+            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
+            ALLREDUCE, FP16_COMPRESS, etc.
+
+        .. warning ::
+            DDP communication hook can only be registered once and should be registered
+            before calling backward.
+
+        .. warning ::
+            DDP communication hook does not support single-process multiple-device mode.
+            Gradbucket tensors should consist of only a single tensor.
+
+        .. warning ::
+            DDP communication hook is experimental and subject to change.
+
+        Example::
+            Below is an example of a FP16 compression where gradients are
+            compressed into 16-bit floating-point numbers before allreduce, and
+            then decompressed after allreduce.
+
+            >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
+
+        """
+        dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0
