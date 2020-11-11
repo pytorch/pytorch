@@ -2,6 +2,12 @@
 
 #include <Python.h>
 
+// Undefine the copysign macro so that at::copysign works as intended with MSVC
+// https://github.com/python/cpython/blob/c60394c7fc9cc09b16e9675a3eeb5844b6d8523f/PC/pyconfig.h#L196
+#ifdef _MSC_VER
+#undef copysign
+#endif // _MSC_VER
+
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"

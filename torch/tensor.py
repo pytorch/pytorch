@@ -178,7 +178,7 @@ class Tensor(torch._C._TensorBase):
         # All strings are unicode in Python 3.
         return torch._tensor_str._str(self)
 
-    def backward(self, gradient=None, retain_graph=None, create_graph=False):
+    def backward(self, gradient=None, retain_graph=None, create_graph=False, inputs=None):
         r"""Computes the gradient of current tensor w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
@@ -213,6 +213,11 @@ class Tensor(torch._C._TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
+            inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
+                accumulated into ``.grad``. All other Tensors will be ignored. If not
+                provided, the gradient is accumulated into all the leaf Tensors that were
+                used to compute the attr::tensors. All the provided inputs must be leaf
+                Tensors.
         """
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
@@ -223,8 +228,9 @@ class Tensor(torch._C._TensorBase):
                 self,
                 gradient=gradient,
                 retain_graph=retain_graph,
-                create_graph=create_graph)
-        torch.autograd.backward(self, gradient, retain_graph, create_graph)
+                create_graph=create_graph,
+                inputs=inputs)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs=inputs)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.
