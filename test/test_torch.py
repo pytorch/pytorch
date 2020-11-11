@@ -2951,34 +2951,20 @@ class AbstractTestCases:
                                    lambda: torch.tensor().new_zeros((5, 5), 0))
 
         def test_half_tensor(self):
-            devices = ["cpu"]
-            if torch.cuda.is_available():
-                devices.append("cuda")
+            x = torch.randn(5, 5).float()
+            y = torch.randn(5, 5).float()
+            xh, yh = x.half(), y.half()
 
-            # contiguous tensor
-            # non-contiguous tensor
-            # dense non-overlapping tensor
-            # non-dense non-overlapping sliced tensor
-            # non-dense overlapping equal strides
-            for device in devices:
-                tset = (
-                    torch.randn(4, 3, 2, device=device, dtype=torch.float).contiguous(),
-                    torch.randn(4, 3, 2, device=device, dtype=torch.float).transpose(0, 1),
-                    torch.randn(4, 3, 2, device=device, dtype=torch.float),
-                    torch.randn(4, 3, 2, device=device, dtype=torch.float)[:, :, ::2],
-                    torch.empty_strided(
-                        (4, 2, 3), (10, 3, 3), device=device, dtype=torch.float
-                    ).copy_(torch.rand((4, 2, 3), dtype=torch.float, device=device)),
-                )
+            self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
 
-                for x in tset:
-                    self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
-                    xh = x.half()
-                    with tempfile.NamedTemporaryFile() as f:
-                        torch.save(xh, f)
-                        f.seek(0)
-                        xh2 = torch.load(f)
-                        self.assertEqual(xh.float(), xh2.float())
+            z = torch.Tensor(5, 5)
+            self.assertEqual(z.copy_(xh), x, atol=1e-3, rtol=0)
+
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(xh, f)
+                f.seek(0)
+                xh2 = torch.load(f)
+                self.assertEqual(xh.float(), xh2.float())
 
         def test_from_buffer(self):
             a = bytearray([1, 2, 3, 4])
@@ -17361,11 +17347,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Use double copysign to verify the correctnes of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
-            # Special case: NaN conversions between FP32 and FP16 is not bitwise
-            # equivalent to pass this assertion.
-            if a.dtype != torch.float16 and b.dtype != torch.float16:
-                self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
-                                 torch.copysign(torch.tensor(1.0), expected))
+            self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
+                             torch.copysign(torch.tensor(1.0), expected))
 
         # Compare Result with NumPy
         # Type promotion
