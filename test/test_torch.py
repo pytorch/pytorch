@@ -406,8 +406,8 @@ class AbstractTestCases:
             height = 5
             width = 5
             for device in torch.testing.get_all_device_types():
-                for dt1 in torch.testing.get_all_math_dtypes(device):
-                    for dt2 in torch.testing.get_all_math_dtypes(device):
+                for dt1 in torch.testing.get_all_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False):
+                    for dt2 in torch.testing.get_all_dtypes(include_half=device.startswith('cuda'), include_bfloat16=False):
                         for contiguous in [True, False]:
                             x1 = get_tensor((height, width), dt1, device, contiguous)
                             x2 = get_tensor((height, width), dt2, device, contiguous)
@@ -515,7 +515,8 @@ class AbstractTestCases:
             self._test_dim_ops(
                 lambda t, d: t.mean(d),
                 lambda n, d: n.mean(d),
-                use_integral=False)
+                use_integral=False,
+                use_complex=True)
 
         @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
         def test_std_dim(self):
@@ -2949,20 +2950,34 @@ class AbstractTestCases:
                                    lambda: torch.tensor().new_zeros((5, 5), 0))
 
         def test_half_tensor(self):
-            x = torch.randn(5, 5).float()
-            y = torch.randn(5, 5).float()
-            xh, yh = x.half(), y.half()
+            devices = ["cpu"]
+            if torch.cuda.is_available():
+                devices.append("cuda")
 
-            self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
+            # contiguous tensor
+            # non-contiguous tensor
+            # dense non-overlapping tensor
+            # non-dense non-overlapping sliced tensor
+            # non-dense overlapping equal strides
+            for device in devices:
+                tset = (
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float).contiguous(),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float).transpose(0, 1),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float)[:, :, ::2],
+                    torch.empty_strided(
+                        (4, 2, 3), (10, 3, 3), device=device, dtype=torch.float
+                    ).copy_(torch.rand((4, 2, 3), dtype=torch.float, device=device)),
+                )
 
-            z = torch.Tensor(5, 5)
-            self.assertEqual(z.copy_(xh), x, atol=1e-3, rtol=0)
-
-            with tempfile.NamedTemporaryFile() as f:
-                torch.save(xh, f)
-                f.seek(0)
-                xh2 = torch.load(f)
-                self.assertEqual(xh.float(), xh2.float())
+                for x in tset:
+                    self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
+                    xh = x.half()
+                    with tempfile.NamedTemporaryFile() as f:
+                        torch.save(xh, f)
+                        f.seek(0)
+                        xh2 = torch.load(f)
+                        self.assertEqual(xh.float(), xh2.float())
 
         def test_from_buffer(self):
             a = bytearray([1, 2, 3, 4])
@@ -5977,10 +5992,13 @@ class TestTorchDeviceType(TestCase):
                     out = torch.zeros(1, dtype=torch.complex128)  # all casts to complex128 are safe
                     compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
-    @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bool)
     def test_diag(self, device, dtype):
-        x = torch.rand(100, 100, dtype=dtype, device=device)
+        if dtype is torch.bool:
+            x = torch.rand(100, 100, device=device) >= 0.5
+        else:
+            x = torch.rand(100, 100, dtype=dtype, device=device)
+
         res1 = torch.diag(x)
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.diag(x, out=res2)
@@ -6048,15 +6066,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    def _test_trace(self, device, dtype, legacy):
+    @onlyOnCPUAndCUDA
+    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
+                                               include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
+    def test_trace(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
-            diag = tensor.diag()
-            if legacy:
-                # NB: trace on cpu doesn't do type promotion... #47127
-                expected_dtype = dtype
-            else:
-                expected_dtype = tensor.sum().dtype
+            expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
             result = np.trace(tensor.cpu().numpy(), dtype=expected_dtype)
@@ -6072,16 +6089,6 @@ class TestTorchDeviceType(TestCase):
         )
         for shape in shapes:
             test(shape)
-
-    @onlyCPU
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
-    def test_trace_legacy(self, device, dtype):
-        self._test_trace(device, dtype, legacy=True)
-
-    @onlyCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
-    def test_trace(self, device, dtype):
-        self._test_trace(device, dtype, legacy=False)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -10190,6 +10197,11 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(x.is_contiguous())
         result = torch.diagflat(x)
         expected = torch.diag(x.contiguous().view(-1))
+        self.assertEqual(result, expected)
+
+        # Complex number support
+        result = torch.diagflat(torch.ones(4, dtype=torch.complex128))
+        expected = torch.eye(4, dtype=torch.complex128)
         self.assertEqual(result, expected)
 
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
@@ -17340,8 +17352,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Use double copysign to verify the correctnes of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
-            self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
-                             torch.copysign(torch.tensor(1.0), expected))
+            # Special case: NaN conversions between FP32 and FP16 is not bitwise
+            # equivalent to pass this assertion.
+            if a.dtype != torch.float16 and b.dtype != torch.float16:
+                self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
+                                 torch.copysign(torch.tensor(1.0), expected))
 
         # Compare Result with NumPy
         # Type promotion
@@ -20780,9 +20795,12 @@ tensor_op_tests = [
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('minimum', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
-    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
-    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
+    ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5,
+        torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes(), _cpu_types, False),
+    ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5,
+        torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes(), _cpu_types, False),
+    ('mean', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-2, 1e-2,
+        torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes(), _cpu_types, False),
     # Double here because the CPU result will be wrong otherwise
     ('mean', '64bit_indexing', _giant_1d, lambda t, d: [],
         1e-3, 1e-5, 1e-5, [torch.double], _cpu_types, False, [slowTest]),
