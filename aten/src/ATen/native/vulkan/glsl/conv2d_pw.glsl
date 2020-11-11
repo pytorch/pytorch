@@ -17,6 +17,7 @@ layout(set = 0, binding = 4)          uniform PRECISION restrict           Block
   ivec2 stride;
   ivec2 padding;
   vec2 clamp;
+  int W;
 } uBlock;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
@@ -38,10 +39,37 @@ void main() {
       const vec4 In = texelFetch(uInput, ivec3(ipos.x, ipos.y, z), 0);
       const ivec4 kz = block + 4 * z;
 
-      sum = fma(In.xxxx, texelFetch(uKernel, ivec3(0, 0, kz.x), 0), sum);
-      sum = fma(In.yyyy, texelFetch(uKernel, ivec3(0, 0, kz.y), 0), sum);
-      sum = fma(In.zzzz, texelFetch(uKernel, ivec3(0, 0, kz.z), 0), sum);
-      sum = fma(In.wwww, texelFetch(uKernel, ivec3(0, 0, kz.w), 0), sum);
+      const int W = uBlock.W;
+
+      const vec4 val1 = vec4(
+          texelFetch(uKernel, ivec3((4*kz.x+0)%W, ((4*kz.x+0))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.x+1)%W, ((4*kz.x+1))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.x+2)%W, ((4*kz.x+2))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.x+3)%W, ((4*kz.x+3))/W, 0), 0).x
+      );
+      const vec4 val2 = vec4(
+          texelFetch(uKernel, ivec3((4*kz.y+0)%W, ((4*kz.y+0))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.y+1)%W, ((4*kz.y+1))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.y+2)%W, ((4*kz.y+2))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.y+3)%W, ((4*kz.y+3))/W, 0), 0).x
+      );
+      const vec4 val3 = vec4(
+          texelFetch(uKernel, ivec3((4*kz.z+0)%W, ((4*kz.z+0))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.z+1)%W, ((4*kz.z+1))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.z+2)%W, ((4*kz.z+2))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.z+3)%W, ((4*kz.z+3))/W, 0), 0).x
+      );
+      const vec4 val4 = vec4(
+          texelFetch(uKernel, ivec3((4*kz.w+0)%W, ((4*kz.w+0))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.w+1)%W, ((4*kz.w+1))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.w+2)%W, ((4*kz.w+2))/W, 0), 0).x,
+          texelFetch(uKernel, ivec3((4*kz.w+3)%W, ((4*kz.w+3))/W, 0), 0).x
+      );
+
+      sum = fma(In.xxxx, val1, sum);
+      sum = fma(In.yyyy, val2, sum);
+      sum = fma(In.zzzz, val3, sum);
+      sum = fma(In.wwww, val4, sum);
     }
 
     imageStore(
