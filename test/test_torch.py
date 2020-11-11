@@ -17938,23 +17938,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIf(torch.version.cuda == "10.1", "flaky on CUDA 10.1")
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=AMPERE_OR_ROCM) +
+                    torch.testing.get_all_complex_dtypes()))
+    @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
+                   torch.testing.get_all_complex_dtypes()))
     @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
         num_batches = 10
         M, N, O = 23, 8, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
-
-        cpu_supported_dtypes = torch.testing.floating_and_complex_types()
-        cuda_supported_dtypes = torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + torch.testing.get_all_complex_dtypes()
-        is_supported = (self.device_type == 'cpu' and dtype in cpu_supported_dtypes) or \
-            (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
-
-        if not is_supported:
-            b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
-            b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.bmm(b1, b2))
-            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
