@@ -1298,4 +1298,9 @@ Tensor sum_to(const Tensor& tensor, IntArrayRef shape) {
   return leading_dims > 0 ? tensor_.view(shape) : tensor_;
 }
 
+Tensor sum_to_nt(const Tensor& tensor, IntArrayRef shape) {
+  TORCH_CHECK(false, "Not implemented.");
+  return tensor;
+}
+
 }} // namespace at::native

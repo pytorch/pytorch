@@ -25,11 +25,16 @@ struct InputMetadata {
       const at::TensorOptions options,
       at::IntArrayRef shape,
       at::Device device,
-      bool is_nested_tensor)
+      bool is_nested_tensor,
+      at::Tensor nested_size_tensor)
       : options_{options},
         shape_{shape},
         device_{device},
-        is_nested_tensor_(is_nested_tensor) {
+        is_nested_tensor_(is_nested_tensor),
+        nested_size_(
+            nested_size_tensor.data_ptr<int64_t>(),
+            nested_size_tensor.data_ptr<int64_t>() + 
+                     nested_size_tensor.numel()) {
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
@@ -38,14 +43,21 @@ struct InputMetadata {
             t.options(),
             t.sizes(),
             t.device(),
-            at::is_nested_tensor_impl(t)) {}
+            at::is_nested_tensor_impl(t),
+            at::serialize_nested_size(t)) {}
 
   const at::TensorOptions options() const {
     return options_;
   }
 
   at::IntArrayRef shape() const {
+    TORCH_CHECK(!is_nested_tensor(), "NestedTensor doesn't have a shape.");
     return shape_;
+  }
+
+  at::IntArrayRef nested_size() const {
+    TORCH_CHECK(is_nested_tensor(), "Only available to NestedTensors.");
+    return at::IntArrayRef(nested_size_);
   }
 
   at::Device device() const {
@@ -70,6 +82,7 @@ struct InputMetadata {
   at::Device device_ = at::kCPU;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);
   bool is_nested_tensor_;
+  std::vector<int64_t> nested_size_;
 };
 
 } // namespace autograd

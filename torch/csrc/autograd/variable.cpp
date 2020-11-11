@@ -392,7 +392,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
             diff_view_meta->base_.options(),
             self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
             diff_view_meta->base_.device(),
-            at::is_nested_tensor_impl(self));
+            at::is_nested_tensor_impl(self),
+            at::serialize_nested_size(self));
           diff_view_meta->grad_fn_ = std::move(fn);
         }
         diff_view_meta->attr_version = current_version;

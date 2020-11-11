@@ -593,18 +593,29 @@ void validate_outputs(
       continue;
     }
     if (metadata.is_nested_tensor()) {
-      TORCH_CHECK(at::is_nested_tensor_impl(grad), "Unexpected 1.");
-      TORCH_CHECK(grad.dim() == metadata.shape().size(), "Unexpected 2.");
-    }
-    if (!metadata.is_nested_tensor() && !grad.sizes().equals(metadata.shape())) {
-      if (!at::is_nested_tensor_impl(grad) && !at::is_expandable_to(metadata.shape(), grad.sizes())) {
-        std::stringstream ss;
-        ss << "invalid gradient at index " << i << " - got ";
-        ss << grad.sizes() << " but expected shape compatible with ";
-        ss << metadata.shape();
-        AT_ERROR(format_error(ss.str()));
+      if (!at::sizes_equal_nt_other(grad, metadata.nested_size())) {
+        if (!at::native_is_expandable_to_nt_other(metadata.nested_size(), grad)) {
+          std::cout << "at::is_nested_tensor_impl(grad): " << at::is_nested_tensor_impl(grad) << std::endl;
+          std::cout << "grad: " << grad << std::endl;
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - got ";
+          ss << grad.sizes() << " but expected shape compatible with ";
+          ss << metadata.nested_size();
+          AT_ERROR(format_error(ss.str()));
+        }
+        grad = at::sum_to_nt(std::move(grad), metadata.nested_size());
       }
-      grad = at::sum_to(std::move(grad), metadata.shape());
+    } else {
+      if (!at::sizes_equal(grad, metadata.shape())) {
+        if (!at::native::native_is_expandable_to(metadata.shape(), grad)) {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - got ";
+          ss << grad.sizes() << " but expected shape compatible with ";
+          ss << metadata.shape();
+          AT_ERROR(format_error(ss.str()));
+        }
+        grad = at::sum_to(std::move(grad), metadata.shape());
+      }
     }
 
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));

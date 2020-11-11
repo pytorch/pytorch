@@ -3741,7 +3741,29 @@
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
-- func: sum_to(Tensor self, int[1] dim) -> Tensor
+- func: sum_to(Tensor self, int[1] shape) -> Tensor
+
+- func: sum_to_nt(Tensor self, int[1] nested_size) -> Tensor
+
+- func: serialize_nested_size(Tensor self) -> Tensor
+
+# There are 4 scenarios we're trying to cover with sizes_equal and sizes_equal_nt_other
+# sizes_equal_nt_other -> Compare Tensor       vs. NestedTensor -> catchall lives in nestedtensor
+# sizes_equal_nt_other -> Compare NestedTensor vs. NestedTensor -> catchall lives in nestedtensor
+# sizes_equal          -> Compare       Tensor vs. Tensor       -> lives in ATen
+# sizes_equal          -> Compare NestedTensor vs. Tensor       -> lives in nestedtensor
+# This is used in autograd/engine.cpp and input_metadata doesn't store Tensors, so we use a catchall
+# to also support the Tensor vs. NestedTensor case.
+
+- func: sizes_equal_nt_other(Tensor size_self, int[1] nested_size_other) -> bool
+
+- func: sizes_equal(Tensor size_self, int[1] size_other) -> bool
+
+- func: native_is_expandable_to_nt_other(int[1] metadata_nested_size, Tensor grad) -> bool
+
+- func: native_is_expandable_to(int[1] metadata_shape, Tensor grad) -> bool
+
+- func: expand_nt(Tensor(a) self, Tensor nested_size, *, bool implicit=False) -> Tensor(a)
 
 - func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
