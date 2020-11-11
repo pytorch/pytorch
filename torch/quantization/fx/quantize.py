@@ -490,6 +490,22 @@ class Quantizer:
                         new_observer = qconfig.activation()
                         insert_observer(node.args[idx], new_observer)
 
+        def insert_observer_for_input_arg_of_observed_node(arg):
+            """
+               Input:
+                 arg: input arg node for another observed node, e.g.
+                 input activaiton for functional linear node
+            """
+            if node.name not in observed_node_names_set and node.name in quants:
+                if is_standalone_module and node.name in graph_inputs:
+                    # we'll insert observer for input of standalone module
+                    # in parent graph
+                    standalone_module_observed_input_idxs.append(graph_inputs.index(node.name))
+                    return
+                _, activation_post_process_ctr = quants[node.name]
+                if activation_post_process_ctr is not None:
+                    insert_observer(node, activation_post_process_ctr())
+
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
@@ -511,17 +527,8 @@ class Quantizer:
                         node, obj, qconfig, standalone_module_input_idxs)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
+            insert_observer_for_input_arg_of_observed_node(node)
 
-            # insert observer for output of the node
-            if node.name not in observed_node_names_set and node.name in quants:
-                if is_standalone_module and node.name in graph_inputs:
-                    # we'll insert observer for input of standalone module
-                    # in parent graph
-                    standalone_module_observed_input_idxs.append(graph_inputs.index(node.name))
-                    continue
-                _, activation_post_process_ctr = quants[node.name]
-                if activation_post_process_ctr is not None:
-                    insert_observer(node, activation_post_process_ctr())
 
         model = GraphModule(model, observed_graph)
         self.save_state(model)
