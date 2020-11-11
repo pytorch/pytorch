@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/ResizeCommon.h>
 #include <TH/THTensor.hpp>
 
 namespace at { namespace native {
@@ -51,15 +52,7 @@ inline TensorImpl* resize_impl_cpu_(
   if (stride) {
     self->set_sizes_and_strides(size, *stride);
     // NB: storage size can be different from numel.
-    for (size_t dim = 0; dim < size.size(); ++dim) {
-      // FIXME: Don't rely on storage_size being negative because this
-      // may not be true for some edge cases.
-      if (size[dim] == 0) {
-        storage_size = 0;
-        break;
-      }
-      storage_size += (size[dim] - 1) * stride.value()[dim];
-    }
+    storage_size = storage_size_for(size, *stride);
   } else {
     self->set_sizes_contiguous(size);
     storage_size = self->numel();
@@ -73,7 +66,7 @@ static inline void checkInBoundsForStorage(
     IntArrayRef size,
     IntArrayRef stride,
     int64_t storage_offset,
-    const caffe2::TypeMeta& data_type,
+    const caffe2::TypeMeta data_type,
     const Storage& new_storage) {
   int64_t storage_size_bytes =
       detail::computeStorageNbytes(size, stride, data_type.itemsize());

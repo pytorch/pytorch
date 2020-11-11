@@ -74,6 +74,7 @@ header_template_rule(
         "#cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "",
         "#cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "",
         "#cmakedefine01 TENSORPIPE_HAS_CUDA_IPC_CHANNEL": "",
+        "#cmakedefine01 TENSORPIPE_HAS_IBV_TRANSPORT": "",
         "#cmakedefine01 TENSORPIPE_SUPPORTS_CUDA": "",
     },
 )

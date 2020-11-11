@@ -135,7 +135,7 @@ class TestVmapAPI(TestCase):
             r"fallback path doesn't work on out= or view ops"
         )
         with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
+            vmap(torch.ravel)(tensor)
 
         def out_op(x, y):
             return torch.abs(x, out=y)
@@ -466,6 +466,37 @@ class TestVmapAPI(TestCase):
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
+    def test_fallback_zero_dim(self):
+        # NB: One day we will implement a batching rule for torch.atan2.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = torch.atan2
+        x = torch.randn(11)
+        y = torch.randn(11)
+        self._assert_uses_vmap_fallback((op,), (x, y))
+
+        B0, B1 = 0, 3
+        x = torch.randn(B0, 11)
+        y = torch.randn(11)
+
+        msg = 'The fallback path does not support vmap over dims of size 0'
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
+        x = torch.randn(B0, B1, 11)
+        y = torch.randn(B1, 11)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
     def test_fallback_atan2(self):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
@@ -733,6 +764,25 @@ class TestVmapAPI(TestCase):
         result = vmap(model)(tensor)
         self.assertEqual(result, model(tensor))
 
+    def test_fallback_with_undefined_grad(self):
+        B0 = 7
+        x = torch.randn(2, 3, 4, 5, requires_grad=True)
+        weight = torch.randn(3, 3, 1, 1)
+        v = torch.randn(B0, 2, 3, 4, 5)
+
+        def get_vjp(v):
+            result = torch.nn.functional.conv2d(x, weight)
+            grad_x, = torch.autograd.grad(result, x, v)
+            return grad_x
+
+        # Runs vmap(get_vjp)(v), which should not error out.
+        # The backward formula for convolution returns an undefined
+        # Tensor for grad_bias because the original bias does not exist.
+        #
+        # In the future we'll probably add a batching rule for convolution
+        # backward. When this happens, we should modify this test to use a
+        # different op (and/or create and use a dummy operator) to avoid bitrot.
+        self._assert_uses_vmap_fallback([get_vjp], [v])
 
 def slice_inputs(inputs, bdims, i):
     result = []
@@ -950,6 +1000,36 @@ class TestVmapOperators(Namespace.TestVmapBase):
         for op, getter in cases:
             self._test_unary(op, getter, 'cpu')
 
+    def test_clone(self):
+        # Some basic tests
+        self._test_unary(lambda x: x.clone(), TensorFactory.randn, 'cpu')
+        self._test_unary(lambda x: x.clone(memory_format=torch.preserve_format),
+                         TensorFactory.randn, 'cpu')
+        self._test_unary(lambda x: x.clone(memory_format=torch.contiguous_format),
+                         TensorFactory.randn, 'cpu')
+
+        # Test that the per-examples are contiguous when using torch.contiguous_format
+        def clone_contiguous(x):
+            return x.clone(memory_format=torch.contiguous_format)
+
+        B0, B1 = 3, 5
+        x = torch.randn(2, B0, 7)
+        y = vmap(clone_contiguous, in_dims=1, out_dims=1)(x)
+        self.assertTrue(y.movedim(1, 0).is_contiguous())
+        self.assertTrue(y[:, 0, :].is_contiguous())
+
+        x = torch.randn(2, B0, 7, B1)
+        y = vmap(vmap(clone_contiguous, in_dims=2), in_dims=1)(x)
+        self.assertTrue(y.is_contiguous())
+        self.assertTrue(y[0][0].is_contiguous())
+
+
+        msg = r'only supported with memory_format torch.preserve_format or torch.contiguous_format'
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(lambda x: x.clone(memory_format=torch.channels_last))(torch.randn(B0))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(torch.randn(B0))
+
     def test_binary_pointwise_ops(self):
         def get_number(getter):
             return getter([]).item()
@@ -1014,6 +1094,98 @@ class TestVmapOperators(Namespace.TestVmapBase):
             # self._test_unary(lambda t: op(t, number), getter, device='cuda')
             # self._test_unary(lambda t: op(number, t), getter, device='cuda')
             # self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
+
+    def test_as_strided(self):
+        def _test(sizes, strides, offset, tensor, lambd):
+            result = vmap(lambda t: t.as_strided(sizes, strides, offset))(tensor)
+            expected = vmap(lambd)(tensor)
+            self.assertTrue(result._base is expected._base)
+            self.assertEqual(result, expected)
+
+        # single vmap test
+        B0 = 5
+        tensors = [
+            # contiguous
+            torch.randn(B0, 2, 3),
+            # non-contiguous
+            torch.randn(B0, 3, 2).transpose(1, 2),
+            # non-zero storage offset
+            torch.randn(2, B0, 2, 3)[1],
+            # non-contiguous strides, zero storage offset
+            torch.randn(B0, 2, 4, 3, 7)[:, :, 0, :, 0],
+            # non-contiguous strides, non-zero storage offset
+            torch.randn(B0, 2, 4, 3, 7)[:, :, 2, :, 1],
+        ]
+
+        for x in tensors:
+            S0, S1 = x.stride()[1:]
+            offset = x.storage_offset()
+
+            # Broadcast
+            _test([5, 5, 2, 3], [0, 0, S0, S1], offset, x, lambda x: x.expand(5, 5, 2, 3))
+            # transpose
+            _test([3, 2], [S1, S0], offset, x, lambda x: x.transpose(0, 1))
+            # select
+            _test([2], [S0], offset + S1, x, lambda x: x[:, 1])
+
+        # Nested vmap test
+        B1 = 7
+        x = torch.randn(B1, B0, 2, 3)
+        S0, S1 = x.stride()[2:]
+        result = vmap(vmap(lambda t: t.as_strided([5, 5, 2, 3], [0, 0, S0, S1])), in_dims=1)(x)
+        expected = vmap(vmap(lambda t: t.expand(5, 5, 2, 3)), in_dims=1)(x)
+        self.assertTrue(result._base is expected._base)
+        self.assertEqual(result, expected)
+
+        # Check that mal-formatted size/strides doesn't crash
+        with self.assertRaisesRegex(RuntimeError, 'size and stride must have the same length'):
+            x = torch.randn(B0, 2, 3).transpose(0, 1)
+            vmap(lambda x: x.as_strided([1, 1, 1], [1, 1]))(x)
+
+        # Sanity check #1: we require the batch dims to be at the front of the
+        # tensor (in memory layout).
+        msg = 'batch dims being vmapped over are at the front of the tensor'
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x = torch.randn(2, B0, 3).transpose(0, 1)
+            vmap(lambda x: x.as_strided([2, 3], [B0 * 3, 1]))(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x = torch.randn(B0, 2, 3, B1).movedim(3, 1)
+            vmap(vmap(lambda x: x.as_strided([2, 3], [B1 * 3, B1])))(x)
+
+        # All the Sanity check #2{a,b,c} cases check that
+        # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
+        # doesn't index memory that is out of bounds of xs[i]. This condition
+        # is important to the correctness of the as_strided batching rule
+        # (see NOTE: [When will the as_strided_batching_rule fail?])
+
+        # Sanity check #2a: The maximum indexable location of
+        # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
+        # is less than or equal to the maximum indexable location of xs[i].
+        msg = 'This is not supported inside of vmap'
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x = torch.randn(B0, 3)
+            vmap(lambda x: x.as_strided([3], [1], 1))(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x = torch.randn(B0, 3, 5)
+            vmap(lambda x: x.as_strided([4, 4], [4, 1], 0))(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x = torch.randn(B0, B1, 3, 5)
+            vmap(vmap(lambda x: x.as_strided([4, 4], [4, 1], 0)))(x)
+
+        # Sanity check #2b: The min indexable location of
+        # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
+        # is greater than or equal to the min indexable location of xs[i].
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x = torch.randn(2, B0, 3)[1]
+            vmap(lambda x: x.as_strided([3], [1], B0 * 3 - 1))(x)
+
+        # Sanity check #2c:
+        # xs[i] is a zero-dim tensor, but
+        # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
+        # is not
+        with self.assertRaisesRegex(RuntimeError, msg):
+            x = torch.randn(B0, 0, 3)
+            vmap(lambda x: x.as_strided([3], [1]))(x)
 
     def test_bmm(self):
         op = torch.bmm
@@ -1160,6 +1332,93 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
+    def _test_complex_views(self, op, dtypes):
+        test = self._vmap_view_test
+
+        def run_test(op, dtype):
+            def get(shape):
+                return torch.randn(shape, dtype=dtype)
+
+            B0, B1 = 7, 11
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3])])
+            test(op, [get([3, B0])], in_dims=1)
+            test(op, [get([2, 5, B0, 3])], in_dims=2)
+            test(op, [get([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1])])
+            test(vmap(op), [get([B1, 2, 5, 3, B0])], in_dims=4)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
+        for dtype in dtypes:
+            run_test(op, dtype)
+
+    def test_real(self):
+        self._test_complex_views(torch.real, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_imag(self):
+        self._test_complex_views(torch.imag, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_view_as_real(self):
+        self._test_complex_views(torch.view_as_real, dtypes=[torch.cfloat, torch.cdouble])
+
+    def test_view_as_complex(self):
+        def run_test(dtype):
+            def get(shape):
+                return torch.randn(shape, dtype=dtype)
+
+            op = torch.view_as_complex
+            test = self._vmap_view_test
+            B0, B1 = 7, 11
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3, 2])])
+            test(op, [get([2, 5, B0, 3, 2])], in_dims=2)
+            test(op, [get([2, 5, B0, 3, 2])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1, 2])])
+            test(vmap(op), [get([B1, 2, 5, B0, 3, 2])], in_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3, 2])],
+                 in_dims=2, out_dims=2)
+
+            # Interesting case #1: Batch dim directly before dim of size 2
+            test(op, [get([3, B0, 2])], in_dims=1)
+            test(vmap(op, in_dims=1), [get([3, B1, B0, 2])], in_dims=2)
+
+            # Interesting case #2: Batch dim at end of tensor, success cases
+            # view_as_complex requires that the dim with size 2 have stride 1
+            # in order for the view to function propertly
+            test(op, [get([B0, 2]).transpose(0, 1)], in_dims=1)
+            test(vmap(op, in_dims=1), [get([B0, B1, 2]).movedim(1, 2)])
+            test(vmap(op, in_dims=2), [get([B0, 3, B1, 2]).movedim(2, 3)])
+
+            # Interesting case #3: Batch dim at end of tensor, failure cases
+            msg = "Tensor must have a last dimension with stride 1"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op, in_dims=1)(get([2, B0]))
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(vmap(op, in_dims=1), in_dims=1)(get([2, B0, B1]))
+
+            # Invalid input: no dimension of size 2
+            msg = 'Input tensor must have one or more dimensions'
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op)(get([B0]))
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(vmap(op))(get([B0, B1]))
+
+            # Invalid input: Batch dim has size 2, but the logical last dim does
+            # not have size 2
+            msg = 'Tensor must have a last dimension of size 2'
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(op, in_dims=1)(get([3, 2]))
+
+        for dtype in [torch.float, torch.double]:
+            run_test(dtype)
+
     def test_is_complex(self):
         ctensor = torch.randn(3, dtype=torch.cfloat)
         tensor = torch.randn(3)
@@ -1265,6 +1524,72 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
              (torch.rand(B1, 2, B0, 5, B2), -1, 2, 3), in_dims=(2, None, None, None))
 
+    def test_new_empty(self):
+        # Empty is non-deterministic so we just check that the shape of the
+        # output tensor is what we expect and that the vmap fallback isn't used.
+        op = Tensor.new_empty
+
+        B0, B1 = 7, 11
+
+        result = vmap(lambda x: op(x, [2, 3]))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0, 2, 3])
+
+        result = vmap(lambda x: op(x, []))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0])
+
+        result = vmap(vmap(lambda x: op(x, [2, 3])))(torch.randn(B0, B1))
+        self.assertEqual(result.shape, [B0, B1, 2, 3])
+
+    def test_new_empty_strided(self):
+        # Empty is non-deterministic so we just check that the size and shape
+        # of the output are what we expect and that the vmap fallback isn't used
+        B0, B1 = 7, 11
+
+        def _test_single_vmap(size, stride, B0):
+            x = torch.randn(B0)
+            result = vmap(lambda x: x.new_empty_strided(size, stride))(x)
+            S = torch.empty_strided(size, stride).storage().size()
+            self.assertEqual(result.shape, [B0] + size)
+            self.assertEqual(result.stride(), [S] + stride)
+
+        def _test_double_vmap(size, stride, B0, B1):
+            x = torch.randn(B0, B1)
+            result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)))(x)
+            S = torch.empty_strided(size, stride).storage().size()
+            self.assertEqual(result.shape, [B0, B1] + size)
+            self.assertEqual(result.stride(), [B1 * S, S] + stride)
+
+            x = torch.randn(B1, B0)
+            result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)), in_dims=1)(x)
+            S = x.new_empty_strided(size, stride).storage().size()
+            self.assertEqual(result.shape, [B0, B1] + size)
+            self.assertEqual(result.stride(), [B1 * S, S] + stride)
+
+        # contiguous case
+        _test_single_vmap([2, 3, 5], [3 * 5, 5, 1], B0)
+        _test_double_vmap([2, 3, 5], [3 * 5, 5, 1], B0, B1)
+
+        # expanded
+        _test_single_vmap([2, 3, 5], [0, 5, 1], B0)
+        _test_double_vmap([2, 3, 5], [0, 5, 1], B0, B1)
+
+        # some of these cases are pretty strange, just verifying that if
+        # empty_strided allows them then BatchedTensor.new_empty_strided
+        # can as well
+        for shape in [[2, 3, 4], [0, 2, 0]]:
+            for strides in [[12, 4, 1], [2, 4, 6], [0, 0, 0]]:
+                _test_single_vmap(shape, strides, B0)
+                _test_double_vmap(shape, strides, B0, B1)
+
+    def test_new_zeros(self):
+        op = Tensor.new_zeros
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+
+        test(lambda x: op(x, 2, 3), (torch.rand(B0),))
+        test(lambda x: op(x, []), (torch.rand(B0),))
+        test(vmap(lambda x: op(x, 3, 5)), (torch.rand(B0, B1),))
+
     def test_select(self):
         op = torch.select
         test = self._vmap_view_test
@@ -1302,6 +1627,22 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(lambda t: t[:, 0:1], in_dims=2), (torch.rand(3, 5, B0, B1),), in_dims=2)
         test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
+
+    def test_sum_dim(self):
+        test = self._vmap_test
+        B0, B1 = 5, 7
+
+        # Single vmap, various in_dims / out_dims
+        test(lambda x: x.sum(0), [torch.randn([B0])])
+        test(lambda x: x.sum(0), [torch.randn([B0, 3])])
+        test(lambda x: x.sum(-1), [torch.randn([2, 5, B0, 3])], in_dims=2)
+        test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+        # Doubly nested vmap
+        test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
+        test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
+        test(vmap(lambda x: x.sum(2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
+             in_dims=2, out_dims=2)
 
     def test_reshape(self):
         test = self._vmap_test
@@ -1694,6 +2035,18 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             return x.expand(5, 5, 2, 3)
         self._batched_grad_test(op, (x,), {})
 
+    @allowVmapFallbackUsage
+    def test_index(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        index = torch.tensor([[0, 0], [1, 1]], device=device)
+
+        def op(x):
+            y = x * x
+            return y[index]
+
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
+
     def test_lgamma(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
         self._batched_grad_test(Tensor.lgamma, (x,), {})
@@ -1717,6 +2070,21 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log1p, (x,), {})
         self._batched_grad_grad_test(torch.log1p, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_max(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.max, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_median(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.median, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_min(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.min, (x,), {})
 
     def test_permute(self, device):
         x = torch.randn(2, 3, 5, requires_grad=True, device=device)
@@ -1758,6 +2126,37 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(lambda x: x[0:1], (x,), {})
         self._batched_grad_test(lambda x: x[:, 1:3], (x,), {})
         self._batched_grad_test(lambda x: x[..., 1:3], (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_inplace_view(self, device):
+        leaf = torch.randn(4, 5, requires_grad=True)
+
+        def func(leaf):
+            # Make sure the function is non-trivially twice differentiable
+            base = leaf * leaf
+            view = base[0]
+            view.cos_()
+            return view
+
+        self._batched_grad_test(func, (leaf,), {})
+        self._batched_grad_grad_test(func, (leaf,), {})
+
+    @allowVmapFallbackUsage
+    def test_inplace_manyview(self, device):
+        leaf = torch.randn(4, 4, 5, requires_grad=True)
+
+        def func(leaf):
+            # Make sure the function is non-trivially twice differentiable
+            base = leaf * leaf
+            view = base.transpose(0, 2)
+            view = view[1]
+            view = view.diagonal()
+            view = view[::2]
+            view.cos_()
+            return view
+
+        self._batched_grad_test(func, (leaf,), {})
+        self._batched_grad_grad_test(func, (leaf,), {})
 
     def test_diagonal(self, device):
         x = torch.randn(4, 5, device=device, requires_grad=True)
