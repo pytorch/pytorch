@@ -17965,18 +17965,25 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return (d[0], d[1], d[2])
 
         def generate_inputs():
+            # transposed tensors
             for perm1, perm2 in product(permutations((0, 1, 2)), repeat=2):
                 b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
                 b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
+            # broadcasting tensors
             for b1, b2, b3, b4, b5, b6 in product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
                 b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
                 b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
                 yield b1, b2
+            # zero-sized tensors
+            bug = (self.device_type == 'cuda' and dtype == torch.half and torch.version.cuda is not None and
+                   float(torch.version.cuda) < 11)
+            if bug:
+                return
             for z1, z2, z3, z4 in product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
@@ -18226,8 +18233,9 @@ else:
                 out_tensor = torch.zeros_like(ref)
                 yield b1, b2, ref, out_tensor
             # zero-sized tensors
-            if self.device_type == 'cuda' and dtype == torch.half and torch.version.cuda == "10.1":
-                # this is flaky
+            bug = (self.device_type == 'cuda' and dtype == torch.half and torch.version.cuda is not None and
+                   float(torch.version.cuda) < 11)
+            if bug:
                 return
             for z1, z2, z3, z4 in product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
