@@ -1791,7 +1791,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   // once https://github.com/pytorch/pytorch/issues/45821 is resolved
   auto v = raw_v.conj();
   auto gu = grads[0];
-  auto gv = grads[2];
+  auto gv = grads[2].conj();  // TODO: remove .conj()
 
   if (!some) {
     // We ignore the free subspace here because possible base vectors cancel
