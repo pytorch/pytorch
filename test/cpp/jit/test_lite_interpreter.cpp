@@ -539,7 +539,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
 
   // class C(nn.Module):
   //   def __init__(self):
-  //     super(B, self).__init__()
+  //     super(C, self).__init__()
   //     self.A0 = A()
   //     self.B0 = B()
 
