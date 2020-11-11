@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(c10 CXX)
 
+option(BUILD_ARM64 "Compile x86 and arm64 universal binary" ON)
+
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -43,6 +45,10 @@ add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 if(HAVE_SOVERSION)
   set_target_properties(c10 PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
+endif()
+if(APPLE AND BUILD_ARM64)
+  string(APPEND CMAKE_C_FLAGS " -arch x86_64 -arch arm64")
+  string(APPEND CMAKE_CXX_FLAGS " -arch x86_64 -arch arm64")
 endif()
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
