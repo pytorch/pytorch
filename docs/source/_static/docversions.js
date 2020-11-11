@@ -1,4 +1,4 @@
-/* Create version-related dynamic output: instert_version_links() will output
+/* Create version-related dynamic output: insert_version_links() will output
    <li> elements for each string in `version`. The content will be an <a>,
    with the href to the parallel document in the other version. Using jquery
    ajax, it will check that the document exists, if not the href will point to
@@ -58,4 +58,3 @@ function insert_version_links() {
                         .replace('URL', url));
     }
 }
-
