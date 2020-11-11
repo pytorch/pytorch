@@ -307,14 +307,11 @@ namespace jit {
   _(BoundsInference_4)                              \
   _(BoundsInference_5)                              \
   _(BoundsInference_6)                              \
-  _(BoundsInferenceNonOverlapping)                  \
   _(BoundsInferenceAdjacent)                        \
-  _(MergeInferredBounds)                            \
-  _(MergeInferredLoadStoreDiff)                     \
-  _(MergeInferred2DBounds)                          \
-  _(MergeAdjacentBounds)                            \
-  _(MergeSymbolicBounds)                            \
-  _(MergeSymbolicAdjacent)                          \
+  _(BoundsInferenceMultipleTopLoopLoad)             \
+  _(BoundsInferenceMultipleTopLoopStore)            \
+  _(BoundsInferenceCacheReads)                      \
+  _(BoundsInferenceFlattened)                       \
   _(BoundOverlap)                                   \
   _(BoundOverlapSymbolic)                           \
   _(BoundOverlapMultiDim)                           \
