@@ -115,5 +115,9 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments], is_out_ar
 
 def arguments(func: FunctionSchema) -> Tuple[NativeArgument, ...]:
     (args, out_args) = cpp.group_arguments(func, method=False)
-    return tuple(i for arg in out_args for i in argument(arg, is_out_argument=True)) + \
-        tuple(i for arg in args for i in argument(arg, is_out_argument=False))
+    native_args = tuple(i for arg in args for i in argument(arg, is_out_argument=False))
+    native_out_args = tuple(i for arg in out_args for i in argument(arg, is_out_argument=True))
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
+        return native_args + native_out_args
+    else:
+        return native_out_args + native_args
