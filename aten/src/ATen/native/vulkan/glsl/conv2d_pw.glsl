@@ -65,10 +65,6 @@ void main() {
           texelFetch(uKernel, ivec3((4*kz.w+2)%W, ((4*kz.w+2))/W, 0), 0).x,
           texelFetch(uKernel, ivec3((4*kz.w+3)%W, ((4*kz.w+3))/W, 0), 0).x
       );
-      //const vec4 refval1 = texelFetch(uKernel2, ivec3(0, 0, kz.x), 0);
-      //const vec4 refval2 = texelFetch(uKernel2, ivec3(0, 0, kz.y), 0);
-      //const vec4 refval3 = texelFetch(uKernel2, ivec3(0, 0, kz.z), 0);
-      //const vec4 refval4 = texelFetch(uKernel2, ivec3(0, 0, kz.w), 0);
 
       sum = fma(In.xxxx, val1, sum);
       sum = fma(In.yyyy, val2, sum);
