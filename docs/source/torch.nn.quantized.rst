@@ -1,8 +1,7 @@
 torch.nn.quantized
 ------------------
 
-This module implements the quantized versions of the nn layers such as
-~`torch.nn.Conv2d` and `torch.nn.Linear`.
+This module implements the quantized versions of the nn modules and functionals.
 
 Functional interface
 ~~~~~~~~~~~~~~~~~~~~
