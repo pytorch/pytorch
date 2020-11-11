@@ -50,6 +50,18 @@ public:
       base,            base +     step, base + 2 * step, base + 3 * step,
       base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
   }
+  template<typename step_t>
+  static Vec256<float> arange_index_offset(float base = 0.f, step_t step = static_cast<step_t>(1), int64_t index_offset = 0) {
+    return Vec256<float>(
+      base + index_offset * step,
+      base + (index_offset + 1) * step,
+      base + (index_offset + 2) * step,
+      base + (index_offset + 3) * step,
+      base + (index_offset + 4) * step,
+      base + (index_offset + 5) * step,
+      base + (index_offset + 6) * step,
+      base + (index_offset + 7) * step);
+  }
   static Vec256<float> set(const Vec256<float>& a, const Vec256<float>& b,
                            int64_t count = size()) {
     switch (count) {

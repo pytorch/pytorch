@@ -74,6 +74,14 @@ public:
   static Vec256<int64_t> arange(int64_t base = 0, step_t step = static_cast<step_t>(1)) {
     return Vec256<int64_t>(base, base + step, base + 2 * step, base + 3 * step);
   }
+  template <typename step_t>
+  static Vec256<int64_t> arange_index_offset(int64_t base = 0, step_t step = static_cast<step_t>(1), int64_t index_offset = 0) {
+    return Vec256<int64_t>(
+      base + index_offset * step,
+      base + (index_offset + 1) * step,
+      base + (index_offset + 2) * step,
+      base + (index_offset + 3) * step);
+  }
   static Vec256<int64_t>
   set(Vec256<int64_t> a, Vec256<int64_t> b, int64_t count = size()) {
     switch (count) {
@@ -191,6 +199,18 @@ public:
     return Vec256<int32_t>(
       base,            base +     step, base + 2 * step, base + 3 * step,
       base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
+  }
+  template <typename step_t>
+  static Vec256<int32_t> arange_index_offset(int32_t base = 0, step_t step = static_cast<step_t>(1), int64_t index_offset = 0) {
+    return Vec256<int32_t>(
+      base + index_offset * step,
+      base + (index_offset + 1) * step,
+      base + (index_offset + 2) * step,
+      base + (index_offset + 3) * step,
+      base + (index_offset + 4) * step,
+      base + (index_offset + 5) * step,
+      base + (index_offset + 6) * step,
+      base + (index_offset + 7) * step);
   }
   static Vec256<int32_t>
   set(Vec256<int32_t> a, Vec256<int32_t> b, int32_t count = size()) {
@@ -398,6 +418,26 @@ public:
       base +  4 * step, base +  5 * step, base +  6 * step, base +  7 * step,
       base +  8 * step, base +  9 * step, base + 10 * step, base + 11 * step,
       base + 12 * step, base + 13 * step, base + 14 * step, base + 15 * step);
+  }
+  template <typename step_t>
+  static Vec256<int16_t> arange_index_offset(int16_t base = 0, step_t step = static_cast<step_t>(1), int64_t index_offset = 0) {
+    return Vec256<int16_t>(
+      base + index_offset * step,
+      base + (index_offset + 1) * step,
+      base + (index_offset + 2) * step,
+      base + (index_offset + 3) * step,
+      base + (index_offset + 4) * step,
+      base + (index_offset + 5) * step,
+      base + (index_offset + 6) * step,
+      base + (index_offset + 7) * step,
+      base + (index_offset + 8) * step,
+      base + (index_offset + 9) * step,
+      base + (index_offset + 10) * step,
+      base + (index_offset + 11) * step,
+      base + (index_offset + 12) * step,
+      base + (index_offset + 13) * step,
+      base + (index_offset + 14) * step,
+      base + (index_offset + 15) * step);
   }
   static Vec256<int16_t>
   set(Vec256<int16_t> a, Vec256<int16_t> b, int16_t count = size()) {
@@ -618,6 +658,42 @@ public:
       base + 20 * step, base + 21 * step, base + 22 * step, base + 23 * step,
       base + 24 * step, base + 25 * step, base + 26 * step, base + 27 * step,
       base + 28 * step, base + 29 * step, base + 30 * step, base + 31 * step);
+  }
+  template <typename step_t>
+  static Vec256<int8_t> arange_index_offset(int8_t base = 0, step_t step = static_cast<step_t>(1), int64_t index_offset = 0) {
+    return Vec256<int8_t>(
+      base + index_offset * step,
+      base + (index_offset + 1) * step,
+      base + (index_offset + 2) * step,
+      base + (index_offset + 3) * step,
+      base + (index_offset + 4) * step,
+      base + (index_offset + 5) * step,
+      base + (index_offset + 6) * step,
+      base + (index_offset + 7) * step,
+      base + (index_offset + 8) * step,
+      base + (index_offset + 9) * step,
+      base + (index_offset + 10) * step,
+      base + (index_offset + 11) * step,
+      base + (index_offset + 12) * step,
+      base + (index_offset + 13) * step,
+      base + (index_offset + 14) * step,
+      base + (index_offset + 15) * step,
+      base + (index_offset + 16) * step,
+      base + (index_offset + 17) * step,
+      base + (index_offset + 18) * step,
+      base + (index_offset + 19) * step,
+      base + (index_offset + 20) * step,
+      base + (index_offset + 21) * step,
+      base + (index_offset + 22) * step,
+      base + (index_offset + 23) * step,
+      base + (index_offset + 24) * step,
+      base + (index_offset + 25) * step,
+      base + (index_offset + 26) * step,
+      base + (index_offset + 27) * step,
+      base + (index_offset + 28) * step,
+      base + (index_offset + 29) * step,
+      base + (index_offset + 30) * step,
+      base + (index_offset + 31) * step);
   }
   static Vec256<int8_t>
   set(Vec256<int8_t> a, Vec256<int8_t> b, int8_t count = size()) {

@@ -29,7 +29,7 @@ static void arange_kernel(TensorIterator& iter, Scalar scalar_start, Scalar scal
           },
           [start, step, &idx]() -> Vec256<scalar_t> {
             Vec256<scalar_t> res;
-            res = Vec256<scalar_t>::arange(start + step * idx, step);
+            res = Vec256<scalar_t>::arange_index_offset(start, step, idx);
             idx += Vec256<scalar_t>::size();
             return res;
           }, {p_begin, p_end});

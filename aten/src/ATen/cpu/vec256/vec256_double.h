@@ -47,6 +47,22 @@ public:
   static Vec256<double> arange(double base = 0., step_t step = static_cast<step_t>(1)) {
     return Vec256<double>(base, base + step, base + 2 * step, base + 3 * step);
   }
+  template<typename step_t>
+  static Vec256<double> arange_index_offset(double base = 0., step_t step = static_cast<step_t>(1), int64_t index_offset = 0) {
+    Vec256<double> index_v(index_offset, index_offset + 1, index_offset + 2, index_offset + 3);
+    Vec256<double> step_v(step, step, step, step);
+    Vec256<double> offset_v = _mm256_mul_pd(step_v, index_v);
+
+    // NOTE: It is important that we do not use an AVX add here, to prevent the multiply
+    // and add operations from combining into an fmadd in the AVX2 build. If an fmadd
+    // is used, AVX2 numerics differ from the AVX and default builds, causing this issue:
+    // https://github.com/pytorch/pytorch/issues/47043
+    return Vec256<double>(
+      base + offset_v.values[0],
+      base + offset_v.values[1],
+      base + offset_v.values[2],
+      base + offset_v.values[3]);
+  }
   static Vec256<double> set(const Vec256<double>& a, const Vec256<double>& b,
                             int64_t count = size()) {
     switch (count) {

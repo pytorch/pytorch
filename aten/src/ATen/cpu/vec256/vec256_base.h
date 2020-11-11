@@ -167,6 +167,14 @@ public:
     }
     return vec;
   }
+  template<typename step_t>  // step sometimes requires a higher precision type (e.g., T=int, step_t=double)
+  static Vec256<T> arange_index_offset(T base = static_cast<T>(0), step_t step = static_cast<step_t>(1), int64_t index_offset = 0) {
+    Vec256 vec;
+    for (int64_t i = 0; i < size(); i++, index_offset++) {
+      vec.values[i] = base + (index_offset * step);
+    }
+    return vec;
+  }
   static Vec256<T> set(const Vec256<T>& a, const Vec256<T>& b, int64_t count = size()) {
     Vec256 vec;
     for (int64_t i = 0; i < size(); i++) {

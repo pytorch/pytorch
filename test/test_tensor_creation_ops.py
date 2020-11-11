@@ -631,6 +631,12 @@ class TestTensorCreation(TestCase):
             d = torch.arange(-4.0, 4.0, 0.01, dtype=torch.float32, device=device)
             self.assertEqual(d.shape[0], 800)
 
+    @onlyCPU
+    def test_arange_numerics(self, device):
+        x_float = torch.arange(-5.0, 5.0, 1.4, dtype=torch.float32)
+        x_double = torch.arange(-5.0, 5.0, 1.4, dtype=torch.float64)
+        self.assertEqual(x_float.floor().double(), x_double.floor())
+
     # TODO: this test should be updated
     @onlyCPU
     def test_arange_inference(self, device):
