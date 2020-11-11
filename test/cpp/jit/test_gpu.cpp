@@ -8762,7 +8762,6 @@ TEST(NVFuserTest, FusionIssue459_CUDA) {
 
   auto t2 = add(t0, new Float(1));
   auto t3 = broadcast(t2, {true, false});
-
   auto t4 = add(t1, t3);
 
   // Create two outputs from the final arithmetic result
@@ -8781,8 +8780,24 @@ TEST(NVFuserTest, FusionIssue459_CUDA) {
 
   t0->computeAt(t5, -1);
 
-  // TODO: Fix lowering. See #459.
-  ASSERT_ANY_THROW(fusion.printKernel());
+  t6->axis(0)->parallelize(ParallelType::BIDx);
+  t6->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  const int numel_x = 10;
+  const int numel_y = 20;
+  auto at_t0 = at::randn({numel_x}, options);
+  auto at_t1 = at::randn({numel_y, numel_x}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto outputs = fe.runFusion({at_t0, at_t1});
+
+  auto at_t5 = (at_t0 + 1).unsqueeze(0) + at_t1 + 1;
+  TORCH_CHECK(at_t5.allclose(outputs[0]));
+  TORCH_CHECK(at_t5.allclose(outputs[1]));
 }
 
 TEST(NVFuserTest, FusionSmemIndexingSimple_CUDA) {

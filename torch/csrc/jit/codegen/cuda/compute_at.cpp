@@ -220,18 +220,19 @@ unsigned int ComputeAt::backwardComputeAt_impl(
 
   auto& producer_entry = tv_data.at(producer);
 
-  const TensorDomain* current_domain = producer->domain();
-
-  // Use TensorDomain interface so it doesn't set computeAt automatically
   auto replay = TransformReplay::replayPasC(
-      producer, consumer, (int)consumer_compute_at_axis, root_map_);
-
-  const TensorDomain* new_domain = producer->domain();
-  root_map_.setAlias(current_domain, new_domain);
+      producer->domain(),
+      consumer->domain(),
+      (int)consumer_compute_at_axis,
+      root_map_);
 
   producer_entry.setPassPosition(replay.second);
 
   if (producer_entry.shouldSetComputeAt(replay.second)) {
+    const TensorDomain* current_domain = producer->domain();
+    TensorDomain* new_domain = replay.first;
+    producer->setDomain(new_domain);
+    root_map_.setAlias(current_domain, new_domain);
     producer->setComputeAt(
         consumer, (int)replay.second, (int)consumer_compute_at_axis);
     producer_entry.setComputeAtDomain(producer->domain());
@@ -250,13 +251,11 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   auto& consumer_entry = tv_data.at(consumer);
   const auto& producer_entry = tv_data.at(producer);
 
-  const TensorDomain* current_domain = consumer->domain();
-
   auto replay = TransformReplay::replayCasP(
-      consumer, producer, (int)producer_compute_at_axis, root_map_);
-
-  const TensorDomain* new_domain = consumer->domain();
-  root_map_.setAlias(current_domain, new_domain);
+      consumer->domain(),
+      producer->domain(),
+      (int)producer_compute_at_axis,
+      root_map_);
 
   if (producer_entry.shouldSetComputeAt(producer_compute_at_axis)) {
     int producer_rel_pos = replay.second;
@@ -272,6 +271,10 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   consumer_entry.setPassPosition(replay.second);
   if (consumer_entry.shouldSetComputeAt(replay.second) &&
       consumer != consumer_) {
+    const TensorDomain* current_domain = consumer->domain();
+    TensorDomain* new_domain = replay.first;
+    consumer->setDomain(new_domain);
+    root_map_.setAlias(current_domain, new_domain);
     consumer_entry.setComputeAtDomain(consumer->domain());
   }
 
@@ -425,7 +428,6 @@ void ComputeAt::runPass() {
   setupOutputs();
 
   for (const auto& entry : tv_data) {
-    entry.first->setDomain(entry.second.getComputeAtDomain());
     entry.second.validateNewComputeAt();
   }
 
