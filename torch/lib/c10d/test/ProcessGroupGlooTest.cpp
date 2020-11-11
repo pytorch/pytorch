@@ -45,7 +45,7 @@ class SignalTest {
   }
 
   c10::intrusive_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_, size);
+    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     ::c10d::ProcessGroupGloo::Options options;
     // Set a timeout that is small enough to make this test run fast, but also
@@ -101,7 +101,7 @@ c10::intrusive_ptr<::c10d::ProcessGroup::Work> testSignal(
 class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
  public:
   ProcessGroupGlooDelayed(
-      const std::shared_ptr<::c10d::Store>& store,
+      const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
       int size,
       Options options)
@@ -151,7 +151,7 @@ class CollectiveTest {
   }
 
   void start(int rank, int size, bool delayed) {
-    auto store = std::make_shared<::c10d::FileStore>(path_, size);
+    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     // Set a timeout that is small enough to make this test run fast, but also
     // make sure that we don't get timeouts in the ProcessGroupGloo constructor.

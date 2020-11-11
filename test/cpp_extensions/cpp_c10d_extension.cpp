@@ -108,7 +108,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::recvAnysource(
 }
 
 std::shared_ptr<ProcessGroup> ProcessGroupTest::createProcessGroupTest(
-    const std::shared_ptr<::c10d::Store>& store,
+    const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,
     const std::chrono::duration<float>& timeout) {
