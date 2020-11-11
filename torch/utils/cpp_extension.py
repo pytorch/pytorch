@@ -562,7 +562,7 @@ class BuildExtension(build_ext, object):
                         else:
                             cflags = []
 
-                        cflags = win_cuda_flags(cflags)
+                        cflags = win_cuda_flags(cflags) + ['--use-local-env']
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
@@ -632,7 +632,7 @@ class BuildExtension(build_ext, object):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = []
+                cuda_cflags = ['--use-local-env']
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
