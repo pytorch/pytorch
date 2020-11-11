@@ -1000,8 +1000,7 @@ Arguments:
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
-                  const c10::intrusive_ptr<
-                      ::c10d::ProcessGroupNCCL::Options>&>(),
+                  c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
