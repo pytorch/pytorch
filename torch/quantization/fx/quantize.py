@@ -39,7 +39,7 @@ from .observed_module import (
 
 from .quantization_patterns import *
 
-from .utils import (
+from ..utils import (
     _parent_name,
     quantize_node,
     get_custom_module_class_keys,

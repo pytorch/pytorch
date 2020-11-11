@@ -1,6 +1,7 @@
 import re
 import torch
-from ..quant_type import QuantType, quant_type_to_str
+
+from .quant_type import QuantType, quant_type_to_str
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):

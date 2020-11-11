@@ -16,7 +16,7 @@ from ..quantization_mappings import (
 from .pattern_utils import (
     register_quant_pattern,
 )
-from .utils import (
+from ..utils import (
     _parent_name,
     quantize_node,
     get_per_tensor_qparams,

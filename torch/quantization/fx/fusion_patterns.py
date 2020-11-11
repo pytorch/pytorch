@@ -2,7 +2,7 @@ import torch
 from .pattern_utils import (
     register_fusion_pattern,
 )
-from .utils import _parent_name
+from ..utils import _parent_name
 from ..fuser_method_mappings import get_fuser_method
 
 # ---------------------
