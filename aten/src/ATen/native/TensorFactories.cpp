@@ -341,6 +341,15 @@ Tensor new_empty(
   return at::empty(size, self.options().merge_in(options));
 }
 
+Tensor new_empty_strided(
+    const Tensor& self,
+    IntArrayRef size,
+    IntArrayRef stride,
+    const TensorOptions& options
+    ) {
+  return at::empty_strided(size, stride, self.options().merge_in(options));
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor eye(int64_t n, const TensorOptions& options) {
