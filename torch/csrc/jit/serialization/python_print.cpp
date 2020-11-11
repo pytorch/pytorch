@@ -1255,6 +1255,7 @@ struct PythonPrintImpl {
     body_ << "def " << func.name() << "(";
     auto param_it = graph.inputs().begin();
     for (const Argument& arg : schema.arguments()) {
+      registerClassDependencies(arg.type());
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
@@ -1273,12 +1274,12 @@ struct PythonPrintImpl {
       assignValue(*param_it++, arg_name);
     }
 
+    const auto& returnType = schema.returns().at(0).type();
+
     body_ << ") -> "
-          << schema.returns().at(0).type()->annotation_str(type_printer_)
+          << returnType->annotation_str(type_printer_)
           << ":\n";
-    for (const Value* input : graph.inputs()) {
-      registerClassDependencies(input->type());
-    }
+    registerClassDependencies(returnType);
     printBody(graph.block());
   }
 
