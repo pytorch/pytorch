@@ -1,6 +1,5 @@
 import sys
 import io
-import gc
 import inspect
 import itertools
 import math
@@ -8005,7 +8004,6 @@ class TestTorchDeviceType(TestCase):
         B = torch.mm(L, L.t().conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
-    @skipIfRocm  # This test has many dimensions, which is larger than the maximum dims supported by ROCm (16)
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
         template = torch.rand(3, 5, device=device)
@@ -9325,6 +9323,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
+        # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
+        # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
+        x = torch.tensor([2], device=device, dtype=dtype)
+        self.assertEqual(x.squeeze().kthvalue(1), x.kthvalue(1))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -9663,7 +9666,7 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
-    @onlyCUDA
+    @slowTest
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -9672,13 +9675,6 @@ class TestTorchDeviceType(TestCase):
         result = input_.sum(dim=0)
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
-        gc.collect()
-        torch.cuda.empty_cache()
-        a = torch.randn(8, 1, 128, 1024, 1024, device=device, dtype=torch.half)
-        self.assertEqual((a.sum(1) - a.squeeze()).abs().max(), 0)
-        gc.collect()
-        torch.cuda.empty_cache()
-        self.assertEqual((a.sum(1, keepdim=True) - a).abs().max(), 0)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
@@ -19172,11 +19168,7 @@ else:
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            if (inp_dtype, out_dtype) == (torch.uint8, torch.float16):
-                # 25504.0 vs 25536.0
-                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=0, rtol=0.002)
-            else:
-                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
@@ -19615,6 +19607,50 @@ else:
             actual = torch.dstack(torch_input)
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=False)))
+    def test_all_any_vs_numpy(self, device, dtype):
+        def _test_all_any(x):
+            self.compare_with_numpy(torch.all, np.all, x)
+            self.compare_with_numpy(torch.any, np.any, x)
+
+        def _test_all_any_with_dim(x, dim):
+            torch_fn = partial(torch.all, dim=dim)
+            np_fn = partial(np.all, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+            torch_fn = partial(torch.any, dim=dim)
+            np_fn = partial(np.any, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+        for ndim in range(5):
+            shape = self._rand_shape(ndim, 1, 5)
+            x = self._generate_input(shape, dtype, device, with_extremal=False)
+            _test_all_any(x)
+
+            x = self._generate_input(shape, dtype, device, with_extremal=True)
+            _test_all_any(x)
+
+            x = torch.zeros_like(x)
+            _test_all_any(x)
+
+            x = torch.ones_like(x)
+            _test_all_any(x)
+
+            for dim in range(ndim):
+                x = self._generate_input(shape, dtype, device, with_extremal=False)
+                _test_all_any_with_dim(x, dim)
+
+                x = self._generate_input(shape, dtype, device, with_extremal=True)
+                _test_all_any_with_dim(x, dim)
+
+                x = torch.zeros_like(x)
+                _test_all_any_with_dim(x, dim)
+
+                x = torch.ones_like(x)
+                _test_all_any_with_dim(x, dim)
 
     @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):
