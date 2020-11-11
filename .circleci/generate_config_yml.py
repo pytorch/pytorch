@@ -112,7 +112,7 @@ def gen_build_workflows_tree():
                 "when": r"<< pipeline.parameters.run_binary_tests >>",
                 "jobs": [f() for f in binary_build_functions],
             },
-            "build": {"jobs": [f() for f in build_workflows_functions]},
+            # "build": {"jobs": [f() for f in build_workflows_functions]},
         }
     }
 
