@@ -9,6 +9,8 @@ from .quantize_jit import *
 from .quantization_mappings import *
 from .fuser_method_mappings import *
 
+from . import fx
+
 def default_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
