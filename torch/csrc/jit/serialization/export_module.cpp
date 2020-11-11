@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <caffe2/serialize/inline_container.h>
 
@@ -76,6 +77,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     bool save_mobile_debug_info) {
   auto graph = func.graph()->copy();
 
+  runOptimization(graph, false);
   Inline(*graph);
   if (save_mobile_debug_info) {
     ReconstructScopes(module, *graph, "top");
