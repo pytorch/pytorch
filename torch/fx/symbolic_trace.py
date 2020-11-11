@@ -51,6 +51,11 @@ class Tracer(TracerBase):
                 if a is p:
                     return self.create_node('get_attr', n, (), {})
             raise NameError('parameter is not a member of this module')
+        if isinstance(a, torch.Tensor):
+            for n, p in self.root.named_buffers():
+                if a is p:
+                    return self.create_node('get_attr', n, (), {})
+            raise NameError('parameter is not a member of this module')
         # Tensors do not have a reliable string repr() from which they can be
         # constructed (and we probably don't want to rely on that, either), so
         # for any constant Tensor values we encounter, first search for if they
@@ -160,8 +165,6 @@ class Tracer(TracerBase):
             for k, v in m.__dict__.items():
                 if isinstance(v, torch.Tensor):
                     self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
-            for k, v in m.named_buffers():
-                self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
             for k, v in m.named_children():
                 collect_tensor_attrs(v, prefix_atoms + [k])
 

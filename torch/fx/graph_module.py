@@ -82,7 +82,12 @@ def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target:
             setattr(to_module, item, t)
         from_module, to_module = f, t
 
-    setattr(to_module, field, getattr(from_module, field))
+    org = getattr(from_module, field)
+    if isinstance(org, torch.Tensor) and not isinstance(org, torch.nn.Parameter):
+        to_module.register_buffer(field, org)
+    else:
+        setattr(to_module, field, getattr(from_module, field))
+
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -136,8 +141,6 @@ class GraphModule(torch.nn.Module):
         """
         super().__init__()
         if isinstance(root, torch.nn.Module):
-            for i, buf in enumerate(root.buffers()):
-                self.register_buffer(f"_buffer_{i}", buf)
             if hasattr(root, 'training'):
                 self.training = root.training
             for node in graph.nodes:
