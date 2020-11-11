@@ -43,6 +43,8 @@ class Optimizer(object):
                 with torch.autograd.profiler.record_function(name):
                     return func(*args, **kwargs)
             return wrapper
+        # Using this way could elegantly wrap self.step as a method not function,
+        # which don't influence re-wrapped by _LRScheduler and deepcopy.
         self.__class__.step = _step_with_profile(self.__class__.step, self.__class__.__name__)
 
         if isinstance(params, torch.Tensor):
