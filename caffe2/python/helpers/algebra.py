@@ -18,6 +18,11 @@ def sum(model, blob_in, blob_out, **kwargs):
     return model.net.Sum(blob_in, blob_out, **kwargs)
 
 
+def sub(model, blob_in, blob_out, **kwargs):
+    """Subtract"""
+    return model.net.Sub(blob_in, blob_out, **kwargs)
+
+
 def batch_mat_mul(model, blob_in, blob_out,
                   enable_tensor_core=False, **kwargs):
     if enable_tensor_core:

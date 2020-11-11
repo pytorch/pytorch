@@ -156,9 +156,9 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
 
       // multi_tensor_apply guards onto tensor_lists[0][0], no need to guard explicitly.
       multi_tensor_apply<1>(tensor_lists,
-                            UnaryOpFunctor<scalar_t, 
+                            UnaryOpFunctor<scalar_t,
                                            /* depth */ 1,
-                                           /* r_args_depth */ 1, 
+                                           /* r_args_depth */ 1,
                                            /* res_arg_index */ 0>(),
                             [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA (opmath_t val) -> opmath_t {
                               // There is a slight asymmetry here with the TensorIterator kernel above.
@@ -243,6 +243,7 @@ Tensor _amp_update_scale_cuda(Tensor& growth_tracker,
     growth_factor,
     backoff_factor,
     growth_interval);
+  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 
   return new_scale;
 }
