@@ -638,20 +638,18 @@ class TestAssert(TestCase):
     def test_assert_true(self):
         # verify assertions work as expected
         # bool argument
-        torch.Assert(True, "foo")
+        torch._assert(True, "foo")
         with self.assertRaisesRegex(AssertionError, "bar"):
-            torch.Assert(False, "bar")
+            torch._assert(False, "bar")
         # tensor argument
-        t = torch.tensor([True, True], dtype=torch.bool)
-        f = torch.tensor([True, False], dtype=torch.bool)
-        torch.Assert(t, "foo")
+        torch._assert(torch.tensor([True], dtype=torch.bool), "foo")
         with self.assertRaisesRegex(AssertionError, "bar"):
-            torch.Assert(f, "bar")
+            torch._assert(torch.tensor([False], dtype=torch.bool), "bar")
 
     def test_assert_scriptable(self):
         class M(torch.nn.Module):
             def forward(self, x):
-                torch.Assert(x.sum() > 0, "foo")
+                torch._assert(x.sum() > 0, "foo")
                 return x
 
         m = M()

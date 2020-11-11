@@ -7,14 +7,16 @@
 namespace at {
 namespace native {
 
-void Assert(bool condition, std::string message) {
+void _assert(bool condition, std::string message) {
   if (!condition) {
     throw c10::AssertionError(message.c_str(), "");
   }
 }
 
-void Assert(const Tensor& condition, std::string message) {
-  if (!at::native::all(condition).item<bool>()) {
+void _assert(const Tensor& condition, std::string message) {
+  TORCH_CHECK(condition.dtype() == ScalarType::Bool,
+    "The input to _assert must be a boolean.");
+  if (!condition.is_nonzero()) {
     throw c10::AssertionError(message.c_str(), "");
   }
 }
