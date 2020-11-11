@@ -6229,7 +6229,6 @@ class TestNN(NNTestCase):
     def test_projections_lstm_initial_hidden_state(self):
         for bidir in [False, True]:
             rnn = nn.LSTM(30, 20, 2, bidirectional=bidir, proj_size=10)
-            rnn.cuda()
             num_dirs = 2 if bidir else 1
             input = torch.randn(10, 32, 30, device="cuda")
             hidden_h = torch.zeros(2 * num_dirs, 32, 10, device="cuda")
