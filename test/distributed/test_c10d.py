@@ -4860,9 +4860,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         self.assertEqual(x1.grad, x_s)
 
 
-if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+if __name__ == '__main__':
+    assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
 
     run_tests()
