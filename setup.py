@@ -371,8 +371,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             return
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
         libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
-        libtorch_path = os.path.join(lib_dir, 'libtorch.dylib')
-        libtorch_python_path = os.path.join(lib_dir, 'libtorch_python.dylib')
+        if not os.path.exists(libtorch_cpu_path):
+            return
         # Parse libtorch_cpu load commands
         otool_cmds = subprocess.check_output(['otool', '-l', libtorch_cpu_path]).decode('utf-8').split('\n')
         rpaths, libs = [], []
@@ -399,11 +399,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_lib = os.path.join(self.build_lib, 'torch', 'lib', omp_lib_name)
             self.copy_file(source_lib, target_lib)
             break
-
-        # Delete rpath from those libs
-        for rpath in rpaths:
-            for lib in [libtorch_cpu_path, libtorch_path, libtorch_python_path]:
-                subprocess.check_call(['install_name_tool', '-delete_rpath', rpath, lib])
 
     def run(self):
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
@@ -668,13 +663,13 @@ def configure_extension_build():
             extra_link_args += ['-g']
 
 
-    def make_relative_rpath(path):
+    def make_relative_rpath_args(path):
         if IS_DARWIN:
-            return '-Wl,-rpath,@loader_path/' + path
+            return ['-Wl,-rpath,@loader_path/' + path]
         elif IS_WINDOWS:
-            return ''
+            return []
         else:
-            return '-Wl,-rpath,$ORIGIN/' + path
+            return ['-Wl,-rpath,$ORIGIN/' + path]
 
     ################################################################################
     # Declare extensions and package
@@ -689,7 +684,7 @@ def configure_extension_build():
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
-                  extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')])
+                  extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
 
     if not IS_WINDOWS:
