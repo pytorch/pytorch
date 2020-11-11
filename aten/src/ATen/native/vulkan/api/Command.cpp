@@ -264,13 +264,13 @@ void Command::Buffer::dispatch(
 
   vkCmdDispatch(
       command_buffer_,
-      div_up(
+      utils::div_up(
           global_work_group.width,
           bound_.pipeline.local_work_group.width),
-      div_up(
+      utils::div_up(
           global_work_group.height,
           bound_.pipeline.local_work_group.height),
-      div_up(
+      utils::div_up(
           global_work_group.depth,
           bound_.pipeline.local_work_group.depth));
 }
