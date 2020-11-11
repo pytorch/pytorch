@@ -39,7 +39,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off
@@ -9323,6 +9323,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
+        # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
+        # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
+        x = torch.tensor([2], device=device, dtype=dtype)
+        self.assertEqual(x.squeeze().kthvalue(1), x.kthvalue(1))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -16286,81 +16291,6 @@ class TestTorchDeviceType(TestCase):
         test_helper(torch.finfo(dtype).tiny, torch.finfo(dtype).max)
 
     @onlyCPU
-    @slowTest
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    @dtypes(torch.double)
-    def test_einsum(self, device: torch.device, dtype: torch.dtype) -> None:
-        # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
-        x = torch.randn(5, dtype=dtype, device=device)
-        y = torch.randn(7, dtype=dtype, device=device)
-        A = torch.randn(3, 5, dtype=dtype, device=device)
-        B = torch.randn(2, 5, dtype=dtype, device=device)
-        C = torch.randn(2, 3, 5, dtype=dtype, device=device)
-        D = torch.randn(2, 5, 7, dtype=dtype, device=device)
-        E = torch.randn(7, 9, dtype=dtype, device=device)
-        F = torch.randn(2, 3, 5, 7, dtype=dtype, device=device)
-        G = torch.randn(7, 11, 13, dtype=dtype, device=device)
-        H = torch.randn(4, 4, dtype=dtype, device=device)
-        I = torch.randn(3, 4, 4, dtype=dtype, device=device)
-        l = torch.randn(5, 10, dtype=dtype, device=device)
-        r = torch.randn(5, 20, dtype=dtype, device=device)
-        w = torch.randn(30, 10, 20, dtype=dtype, device=device)
-        test_list: List[Union[Tuple[str, torch.Tensor],
-                        Tuple[str, torch.Tensor, torch.Tensor],
-                        Tuple[str, torch.Tensor, torch.Tensor, torch.Tensor]]] = [
-            # -- Vector
-            ("i->", x),                 # sum
-            ("i,i->", x, x),            # dot
-            ("i,i->i", x, x),           # vector element-wise mul
-            ("i,j->ij", x, y),          # outer
-            # -- Matrix
-            ("ij->ji", A),              # transpose
-            ("ij->j", A),               # row sum
-            ("ij->i", A),               # col sum
-            ("ij,ij->ij", A, A),        # matrix element-wise mul
-            ("ij,j->i", A, x),          # matrix vector multiplication
-            ("ij,kj->ik", A, B),        # matmul
-            ("ij,ab->ijab", A, E),      # matrix outer product
-            # -- Tensor
-            ("aij,ajk->aik", C, D),     # batch matmul
-            ("ijk,jk->i", C, A),        # tensor matrix contraction
-            ("aij,jk->aik", D, E),      # tensor matrix contraction
-            ("abcd,dfg->abcfg", F, G),  # tensor tensor contraction
-            ("ijk,jk->ik", C, A),       # tensor matrix contraction with double indices
-            ("ijk,jk->ij", C, A),       # tensor matrix contraction with double indices
-            ("ijk,ik->j", C, B),        # non contiguous
-            ("ijk,ik->jk", C, B),       # non contiguous with double indices
-            # -- Diagonal
-            ("ii", H),                 # trace
-            ("ii->i", H),              # diagonal
-            # -- Ellipsis
-            ("i...->...", H),
-            ("ki,...k->i...", A.t(), B),
-            ("k...,jk", A.t(), B),
-            ("...ii->...i", I),       # batch diagonal
-            # -- Other
-            ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
-            ("... ii->...i  ", I),       # batch diagonal with spaces
-        ]
-        for test in test_list:
-            actual = torch.einsum(test[0], test[1:])
-            expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
-            self.assertEqual(expected.shape, actual.shape, msg=test[0])
-            self.assertEqual(expected, actual, msg=test[0])
-            # test vararg
-            actual2 = torch.einsum(test[0], *test[1:])
-            self.assertEqual(expected.shape, actual2.shape, msg=test[0])
-            self.assertEqual(expected, actual2, msg=test[0])
-
-            def do_einsum(*args):
-                return torch.einsum(test[0], args)
-            # FIXME: following test cases fail gradcheck
-            if test[0] not in {"i,i->", "i,i->i", "ij,ij->ij"}:
-                gradcheck_inps = tuple(t.detach().requires_grad_() for t in test[1:])
-                self.assertTrue(torch.autograd.gradcheck(do_einsum, gradcheck_inps))
-            self.assertTrue(A._version == 0)  # check that we do not use inplace ops
-
-    @onlyCPU
     @dtypes(torch.bool, torch.double)
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:
@@ -19602,6 +19532,50 @@ else:
             actual = torch.dstack(torch_input)
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=False)))
+    def test_all_any_vs_numpy(self, device, dtype):
+        def _test_all_any(x):
+            self.compare_with_numpy(torch.all, np.all, x)
+            self.compare_with_numpy(torch.any, np.any, x)
+
+        def _test_all_any_with_dim(x, dim):
+            torch_fn = partial(torch.all, dim=dim)
+            np_fn = partial(np.all, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+            torch_fn = partial(torch.any, dim=dim)
+            np_fn = partial(np.any, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+        for ndim in range(5):
+            shape = self._rand_shape(ndim, 1, 5)
+            x = self._generate_input(shape, dtype, device, with_extremal=False)
+            _test_all_any(x)
+
+            x = self._generate_input(shape, dtype, device, with_extremal=True)
+            _test_all_any(x)
+
+            x = torch.zeros_like(x)
+            _test_all_any(x)
+
+            x = torch.ones_like(x)
+            _test_all_any(x)
+
+            for dim in range(ndim):
+                x = self._generate_input(shape, dtype, device, with_extremal=False)
+                _test_all_any_with_dim(x, dim)
+
+                x = self._generate_input(shape, dtype, device, with_extremal=True)
+                _test_all_any_with_dim(x, dim)
+
+                x = torch.zeros_like(x)
+                _test_all_any_with_dim(x, dim)
+
+                x = torch.ones_like(x)
+                _test_all_any_with_dim(x, dim)
 
     @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):
