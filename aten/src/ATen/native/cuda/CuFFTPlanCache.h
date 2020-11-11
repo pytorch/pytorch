@@ -179,6 +179,7 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
     layout.dist = strides[0];
   }
 
+  // Calculate the embedding shape, or set must_clone if the strides cannot be embedded
   layout.embed.resize(signal_ndim);
   for (auto i = signal_ndim - 1; !layout.must_clone && i > 0; i--) {
     auto stride = strides[i];
@@ -193,6 +194,7 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
   }
 
   if (layout.must_clone) {
+    // If the input needs to be cloned, assume it will be contiguous
     layout = cufft_simple_embed(sizes, onesided);
     layout.must_clone = true;
   } else {
@@ -267,8 +269,8 @@ public:
                "tensor only has SM_", dev_prop->major, dev_prop->minor);
       for (int64_t i = 0; i < signal_ndim; i++) {
         TORCH_CHECK(is_pow_of_two(sizes[i + 1]),
-            "cuFFT doesn't support signals of half type with size at any ",
-            "dimension that is not a power of two, but got a signal size of ",
+            "cuFFT only supports dimensions whose sizes are powers of two when"
+            " computing in half precision, but got a signal size of",
             sizes.slice(1));
       }
       clone_input |= in_strides.back() != 1;
@@ -281,7 +283,7 @@ public:
       in_layout = as_cufft_embed(in_strides, sizes, fft_type == CuFFTTransformType::C2R);
     }
     auto out_layout = as_cufft_embed(out_strides, sizes, fft_type == CuFFTTransformType::R2C);
-    TORCH_CHECK(!out_layout.must_clone, "Out strides cannot be represented as CuFFT embedding");
+    TORCH_INTERNAL_ASSERT(!out_layout.must_clone, "Out strides cannot be represented as CuFFT embedding");
     clone_input |= in_layout.must_clone;
 
     // Check if we can take advantage of simple data layout.
@@ -367,11 +369,7 @@ public:
     ws_size = static_cast<int64_t>(ws_size_t);
   }
 
-#ifdef __HIP_PLATFORM_HCC__
-  cufftHandle &plan() const { return plan_ptr.get(); }
-#else
   const cufftHandle &plan() const { return plan_ptr.get(); }
-#endif
 
   CuFFTTransformType transform_type() const { return fft_type_; }
   ScalarType data_type() const { return value_type_; }
@@ -379,7 +377,7 @@ public:
   int64_t workspace_size() const { return ws_size; }
 
 private:
-  mutable CuFFTHandle plan_ptr;
+  CuFFTHandle plan_ptr;
   bool clone_input;
   int64_t ws_size;
   CuFFTTransformType fft_type_;
