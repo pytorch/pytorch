@@ -89,15 +89,15 @@ class EventList(list):
         for thread_id, thread_events in threads:
             thread_events_ = sorted(
                 thread_events,
-                key=lambda event: [event.cpu_interval.start, -event.cpu_interval.end],
+                key=lambda event: [event.time_range.start, -event.time_range.end],
             )
             current_events: List[FunctionEvent] = []
             cur_end = 0
             for event in thread_events_:
                 while len(current_events) > 0:
                     parent = current_events[-1]
-                    if event.cpu_interval.start >= parent.cpu_interval.end or \
-                            event.cpu_interval.end > parent.cpu_interval.end:
+                    if event.time_range.start >= parent.time_range.end or \
+                            event.time_range.end > parent.time_range.end:
                         # this can't be a parent
                         current_events.pop()
                     else:
@@ -205,8 +205,8 @@ class EventList(list):
                     '"args": {}}, '
                     % (
                         evt.name,
-                        evt.cpu_interval.start,
-                        evt.cpu_interval.elapsed_us(),
+                        evt.time_range.start,
+                        evt.time_range.elapsed_us(),
                         evt.thread
                         if not evt.is_remote
                         else f'" node_id:{evt.node_id}, thread_id:{evt.thread} "',
@@ -222,7 +222,7 @@ class EventList(list):
                             '"pid": "CPU functions", '
                             '"id": %s, '
                             '"cat": "cpu_to_cuda", '
-                            '"args": {}}, ' % (evt.name, evt.cpu_interval.start,
+                            '"args": {}}, ' % (evt.name, evt.time_range.start,
                                                evt.thread, next_id))
                     f.write('{"name": "%s", '
                             '"ph": "f", '
@@ -433,22 +433,15 @@ class profile(object):
         if not self.enabled:
             return
         if self.kineto_activities:
-            result = torch.autograd._disable_profiler()
-            #
-            for evt_list in result.legacy_events():
-                for evt in evt_list:
-                    print(evt, evt.kind(), flush=True)
-            print()
-            for evt in result.events():
-                print("  ", evt.name(), evt.start_thread_id(), evt.end_thread_id(), evt.device_index(), evt.device_resource_id(), evt.start_us(), evt.duration_us(), evt.correlation_id(), evt.fwd_thread_id())
-            #
-            self.function_events = parse_profiler_result(result)
+            results = torch.autograd._disable_profiler()
+            parsed_results = parse_kineto_results(results)
         else:
             records = torch.autograd._disable_profiler_legacy()
-            self.function_events = EventList(
-                parse_event_records(records),
-                use_cuda=self.use_cuda,
-                profile_memory=self.profile_memory)
+            parsed_results = parse_legacy_records(records)
+        self.function_events = EventList(
+            parsed_results,
+            use_cuda=self.use_cuda,
+            profile_memory=self.profile_memory)
         if self.with_stack:
             self.function_events.set_backward_stacktraces()
         return False
@@ -779,13 +772,13 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
-            self, id, node_id, name, thread, cpu_start, cpu_end, fwd_thread=None, input_shapes=None,
+            self, id, node_id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=True, sequence_nr=-1):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
-        self.cpu_interval: Interval = Interval(cpu_start, cpu_end)
+        self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
         self.fwd_thread: Optional[int] = fwd_thread
         self.kernels: List[Kernel] = []
@@ -860,7 +853,7 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def cpu_time_total(self):
-        return self.cpu_interval.elapsed_us()
+        return self.time_range.elapsed_us()
 
     @property
     def key(self):
@@ -868,14 +861,14 @@ class FunctionEvent(FormattedTimesMixin):
 
     def __repr__(self):
         return (
-            '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
+            '<FunctionEvent id={} node_id={} cpu_time={} start_us={} end_us={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
             'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={}>'.format(
                 self.id,
                 self.node_id,
                 self.cpu_time_str,
-                self.cpu_interval.start,
-                self.cpu_interval.end,
+                self.time_range.start,
+                self.time_range.end,
                 str([child.id for child in self.cpu_children]),
                 self.cuda_time_str,
                 self.name,
@@ -971,10 +964,26 @@ class StringTable(defaultdict):
         self[key] = torch._C._demangle(key) if len(key) > 1 else key
         return self[key]
 
-def parse_event_records(thread_records):
+# Parsing of kineto profiler events
+def parse_kineto_results(result):
+    #
+    for evt_list in result.legacy_events():
+        for evt in evt_list:
+            print(evt, evt.kind(), flush=True)
+    print()
+    for evt in result.events():
+        print("  ", evt.name(), evt.start_thread_id(), evt.end_thread_id(), evt.device_index(), evt.device_resource_id(), evt.start_us(), evt.duration_us(), evt.correlation_id(), evt.fwd_thread_id())
+    #
+    return []
+    # result.events() has most of the events - PyTorch op-level and device-level events
+    # result.legacy_events() has events not yet ported to kineto
+    # (e.g. start/stop marks, tensor memory allocator events)
+
+# Parsing of legacy profiler events
+def parse_legacy_records(thread_records):
     def get_record_key(record):
         """
-        Returns a tuple to be used by parse_event_records for correlating start and
+        Returns a tuple to be used by parse_legacy_records for correlating start and
         end records.
         """
         return (record.handle(), record.node_id())
@@ -1083,8 +1092,8 @@ def parse_event_records(thread_records):
                     node_id=record.node_id(),
                     name=string_table[start.name()],
                     thread=start.thread_id(),
-                    cpu_start=start_record.cpu_elapsed_us(start),
-                    cpu_end=start_record.cpu_elapsed_us(record),
+                    start_us=start_record.cpu_elapsed_us(start),
+                    end_us=start_record.cpu_elapsed_us(record),
                     fwd_thread=start.fwd_thread_id(),
                     input_shapes=start.shapes(),
                     stack=[entry for entry in start.stack() if filter_stack_entry(entry)],
@@ -1122,7 +1131,7 @@ def parse_event_records(thread_records):
     # granularity of the given clock tick)--we always show
     # the outermost nested call first. This adds stability
     # in how FunctionEvents appear
-    functions.sort(key=lambda evt: [evt.cpu_interval.start, -evt.cpu_interval.end])
+    functions.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return functions
 
 
@@ -1169,8 +1178,8 @@ def parse_nvprof_trace(path):
                             node_id=0,  # missing a node_id when calling FunctionEvent. This is just to ensure
                                         # that pytorch doesn't crash when creating a FunctionEvent() object
                             name=strings[row['name']],
-                            cpu_start=row['start_time'],
-                            cpu_end=row['end_time'],
+                            start_us=row['start_time'],
+                            end_us=row['end_time'],
                             thread=0)  # TODO: find in sqlite database
         functions.append(evt)
         functions_map[evt.id] = evt
@@ -1201,7 +1210,7 @@ def parse_nvprof_trace(path):
                           row['kernel_start'],
                           row['kernel_end'])
 
-    functions.sort(key=lambda evt: evt.cpu_interval.start)
+    functions.sort(key=lambda evt: evt.time_range.start)
     return functions
 
 
