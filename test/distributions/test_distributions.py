@@ -47,8 +47,9 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Independent, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
                                  MixtureSameFamily, Multinomial, MultivariateNormal,
-                                 NegativeBinomial, Normal, OneHotCategorical, Pareto,
-                                 Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
+                                 NegativeBinomial, Normal,
+                                 OneHotCategorical, OneHotCategoricalStraightThrough,
+                                 Pareto, Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
                                  VonMises, Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import transform_to
@@ -335,6 +336,11 @@ EXAMPLES = [
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
         {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
     ]),
+    Example(OneHotCategoricalStraightThrough, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
+        {'logits': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
     Example(Pareto, [
         {
             'scale': 1.0,
@@ -601,6 +607,10 @@ BAD_EXAMPLES = [
         },
     ]),
     Example(OneHotCategorical, [
+        {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
+        {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
+    ]),
+    Example(OneHotCategoricalStraightThrough, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
         {'probs': torch.tensor([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
     ]),
@@ -3755,13 +3765,21 @@ class TestKL(TestCase):
 
 class TestConstraints(TestCase):
     def test_params_constraints(self):
+        normalize_probs_dists = (
+            Categorical,
+            Multinomial,
+            OneHotCategorical,
+            OneHotCategoricalStraightThrough,
+            RelaxedOneHotCategorical
+        )
+
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 for name, value in param.items():
                     if isinstance(value, numbers.Number):
                         value = torch.tensor([value])
-                    if Dist in (Categorical, OneHotCategorical, Multinomial) and name == 'probs':
+                    if Dist in normalize_probs_dists and name == 'probs':
                         # These distributions accept positive probs, but elsewhere we
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)
