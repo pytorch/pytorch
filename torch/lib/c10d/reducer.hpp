@@ -7,12 +7,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10d/comm.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
-#include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
 
 namespace c10d {
 
@@ -225,9 +225,12 @@ class Reducer {
     // participating variables after reduction has completed.
     std::vector<torch::autograd::Variable> variables;
 
-    // Per-variable offset/length into the flat bucket contents tensor.
+    // Per-variable offset/length into the flat bucket contents tensor and grad bucket.
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
+
+    // Per-variable sizes into the grad bucekt.
+    std::vector<c10::IntArrayRef> sizes_vec;
 
     // Number of tensors to be added before this bucket is complete.
     // This is reset to `variables.size()` every iteration.

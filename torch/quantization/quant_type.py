@@ -10,10 +10,15 @@ class QuantType(enum.IntEnum):
 
 
 def quant_type_to_str(quant_type):
+    """Converts the QuantType to its string equivalent.
+
+    Note: The default is different to its C++ equivalent. Here we return None,
+          while in C++ unknown key would set the error state flag.
+    """
     m = {
         QuantType.STATIC: "static",
         QuantType.DYNAMIC: "dynamic",
         QuantType.QAT: "qat",
         QuantType.WEIGHT_ONLY: "weight_only",
     }
-    return m[quant_type]
+    return m.get(quant_type, None)

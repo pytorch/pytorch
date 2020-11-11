@@ -1940,7 +1940,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                              " fixed length sequences. However, found "
                              "offsets of type {}".format(type_str))
         offsets = torch.arange(0, input.numel(), input.size(1),
-                               dtype=torch.long, device=input.device)
+                               dtype=input.dtype, device=input.device)
 
         input = input.reshape(-1)
         if per_sample_weights is not None:
@@ -3227,6 +3227,7 @@ upsample_bilinear.__doc__ = upsample_bilinear.__doc__.format(**reproducibility_n
 GRID_SAMPLE_INTERPOLATION_MODES = {
     'bilinear': 0,
     'nearest': 1,
+    'bicubic': 2,
 }
 
 GRID_SAMPLE_PADDING_MODES = {
@@ -3293,8 +3294,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         grid (Tensor): flow-field of shape :math:`(N, H_\text{out}, W_\text{out}, 2)` (4-D case)
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
-            ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
-            Note: When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
+            ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
+            Note: ``mode='bicubic'`` supports only 4-D input. 
+            When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear.
         padding_mode (str): padding mode for outside grid values
@@ -3324,6 +3326,17 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         The default behavior up to version 1.2.0 was ``align_corners = True``.
         Since then, the default behavior has been changed to ``align_corners = False``,
         in order to bring it in line with the default for :func:`interpolate`.
+
+    .. note::
+        ``mode='bicubic'`` is implemented using the `cubic convolution algorithm`_ with :math:`\alpha=-0.75`. 
+        The constant :math:`\alpha` might be different from packages to packages. 
+        For example, `PIL`_ and `OpenCV`_ use -0.5 and -0.75 respectively. 
+        This algorithm may "overshoot" the range of values it's interpolating. 
+        For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255]. 
+        Clamp the results with :func: `torch.clamp` to ensure they are within the valid range.
+    .. _`cubic convolution algorithm`: https://en.wikipedia.org/wiki/Bicubic_interpolation
+    .. _`PIL`: https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51
+    .. _`OpenCV`: https://github.com/opencv/opencv/blob/f345ed564a06178670750bad59526cfa4033be55/modules/imgproc/src/resize.cpp#L908
     """
     if not torch.jit.is_scripting():
         tens_ops = (input, grid)
@@ -3331,9 +3344,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
             return handle_torch_function(
                 grid_sample, tens_ops, input, grid, mode=mode, padding_mode=padding_mode,
                 align_corners=align_corners)
-    if mode != 'bilinear' and mode != 'nearest':
+    if mode != 'bilinear' and mode != 'nearest' and mode != 'bicubic':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
-                         "'bilinear' or 'nearest', but got: '{}'".format(mode))
+                         "'bilinear', 'nearest' or 'bicubic', but got: '{}'".format(mode))
     if padding_mode != 'zeros' and padding_mode != 'border' and padding_mode != 'reflection':
         raise ValueError("nn.functional.grid_sample(): expected padding_mode "
                          "to be 'zeros', 'border', or 'reflection', "
@@ -3341,8 +3354,10 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
     if mode == 'bilinear':
         mode_enum = 0
-    else:  # mode == 'nearest'
+    elif mode == 'nearest':
         mode_enum = 1
+    else:  # mode == 'bicubic'
+        mode_enum = 2
 
     if padding_mode == 'zeros':
         padding_mode_enum = 0

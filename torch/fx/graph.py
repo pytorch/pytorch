@@ -16,7 +16,7 @@ def _is_magic(x: str) -> bool:
 def snake_case(s: str) -> str:
     return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
 
-def _qualified_name(func: Callable[..., Any]) -> str:
+def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
@@ -355,7 +355,7 @@ class Graph:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
                     continue
-                qualified_name = _qualified_name(node.target)
+                qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
                 if qualified_name == 'getattr' and \
                    isinstance(node.args, tuple) and \

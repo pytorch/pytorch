@@ -14,12 +14,13 @@ from .quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
-    has_special_act_post_process,
-    get_default_special_act_post_process,
+    _has_special_act_post_process,
+    _get_special_act_post_process,
 )
 
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
+from .quant_type import quant_type_to_str
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
@@ -87,7 +88,11 @@ def register_activation_post_process_hook(module):
         'Expect activation_post_process attribut already attached to the module'
     return module.register_forward_hook(_observer_forward_hook)
 
-def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
+def add_observer_(module,
+                  qconfig_propagation_list=None,
+                  non_leaf_module_list=None,
+                  device=None,
+                  custom_module_class_mapping=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -138,20 +143,24 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             m._forward_hooks.move_to_end(handle.id, last=False)
 
     for name, child in module.named_children():
+        quant_type = getattr(getattr(child, 'qconfig', None), 'quant_type', None)
+        quant_type_str = quant_type_to_str(quant_type)
+        quant_type_custom_module_class_mapping = custom_module_class_mapping.get(quant_type_str, {})
         if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
-        elif has_special_act_post_process(type(child)):
-            special_act_post_process = get_default_special_act_post_process(type(child))
+        elif _has_special_act_post_process(child):
+            special_act_post_process = _get_special_act_post_process(child)
             insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
             insert_activation_post_process(child)
-        elif needs_observation(child) and type(child) in custom_module_class_mapping:
-            observed_child = custom_module_class_mapping[type(child)].from_float(child)
+        elif needs_observation(child) and type(child) in quant_type_custom_module_class_mapping:
+            observed_child = quant_type_custom_module_class_mapping[type(child)].from_float(child)
             setattr(module, name, observed_child)
             insert_activation_post_process(observed_child)
         else:
-            add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
+            add_observer_(child, qconfig_propagation_list, non_leaf_module_list,
+                          device, custom_module_class_mapping)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
@@ -211,7 +220,14 @@ def prepare(model, inplace=False, allow_list=None,
            # module class which has a from_float class method that converts
            # float custom module to observed custom module
            "float_to_observed_custom_module_class": {
-               CustomModule: ObservedCustomModule
+                "static": {
+                    CustomModule: ObservedCustomModule,
+                    OtherCustomModule: ObservedOtherCustomModule
+                },
+                "dynamic": {
+                    CustomModule: ObservedCustomModule,
+                    OtherCustomModule: ObservedOtherCustomModule
+                }
            }
         }
 
