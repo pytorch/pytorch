@@ -9,6 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
+#include <ATen/DimVector.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 
@@ -647,17 +648,6 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64
   return at::where(mask, grad, grad_norm);
 }
 
-Tensor sum_tensorlist(TensorList tl) {
-  if (tl.size() == 0) {
-    throw std::runtime_error("Can't sum tensorlist of size 0");
-  }
-  Tensor sum = tl[0];
-  for(size_t i = 1; i < tl.size(); ++i) {
-    sum = sum + tl[i];
-  }
-  return sum;
-}
-
 Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
@@ -668,13 +658,69 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   for (int64_t i = 0; i < num_unsqueezed; ++i) {
     grad = grad.sum(0, false);
   }
-  for (size_t j = num_unsqueezed; j < repeats.size(); ++j) {
-    int64_t repeat = repeats[j];
-    if (repeat == 1) {
-      continue;
+
+  at::DimVector grad_size, sum_dims;
+  for (size_t dim = 0; dim < input_dims; ++dim) {
+    int64_t repeat = repeats[dim + num_unsqueezed];
+    // Reshape gradient (repeat > 1)
+    // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
+    // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
+    // The gradient tensor at 'dim' is reshaped to 'repeat' times of input tensor.
+    // Then, sum up gradients over repeated tensors along 'dim', and reduce shape
+    // from 'repeat * dimsize/repeat' to 'dimsize/repeat' ('input_dimsize').
+    // Example:
+    //        Size(3, 2)                                             Size(6, 2)
+    //                                                             [[v1_0, v1_1],
+    //                                                              [v1_2, v1_3],
+    //        [[v0, v1],                   repeat(2, 1)             [v1_4, v1_5],
+    //         [v2, v3],                  ------------->            [v2_0, v2_1],
+    //         [v4, v5]]                                            [v2_2, v2_3],
+    //                                                              [v2_4, v2_5]]
+    //
+    //    input grad (3, 2)            reshape (2, 3, 2)         output grad (6, 2)
+    //                                  [[[g1_0, g1_1],            [[g1_0, g1_1],
+    //                                    [g1_2, g1_3],             [g1_2, g1_3],
+    // [[g1_0+g2_0, g1_1+g2_1],           [g1_4, g1_5]],            [g1_4, g1_5],
+    //  [g1_0+g2_0, g1_1+g2_1],                                     [g2_0, g2_1],
+    //  [g1_0+g2_0, g1_1+g2_1]]          [[g2_0, g2_1],             [g2_2, g2_3],
+    //                                    [g2_2, g2_3],             [g2_4, g2_5]]
+    //                                    [g2_4, g2_5]]]
+    // If gradient tensor is reshaped to [..., dimsize/repeat, repeat, ...] and then
+    // sum over 'dim+1'. The gradient for input is not correctly aligned with input.
+    // Example:
+    //     input grad (3, 2)            reshape (3, 2, 2)        output grad (6, 2)
+    //                                  [[[g1_0, g1_1],
+    //                                    [g1_2, g1_3]],           [[g1_0, g1_1],
+    //                                                              [g1_2, g1_3],
+    // [[g1_0+g1_2, g1_1+g1_3],          [[g1_4, g1_5],             [g1_4, g1_5],
+    //  [g1_4+g2_0, g1_5+g2_1],           [g2_0, g2_1]],            [g2_0, g2_1],
+    //  [g2_2+g2_4, g2_3+g2_5]]                                     [g2_2, g2_3],
+    //                                   [[g2_2, g2_3],             [g2_4, g2_5]]
+    //                                    [g2_4, g2_5]]]
+    if (repeat != 1) {
+      grad_size.push_back(repeat);
+      sum_dims.push_back(grad_size.size() - 1);
     }
-    int64_t dim = j - num_unsqueezed;
-    grad = sum_tensorlist(grad.chunk(repeat, dim));
+    // Don't need to reshape gradient into (repeat, input_shape[dim]) (repeat == 1)
+    grad_size.push_back(input_shape[dim]);
+  }
+  // One-time Reshape & Sum
+  // Reshape gradient to grad_size:
+  //   1. If repeat equals to 1, append input size at that dimension,
+  //   2. If repeat is larger than 1, append both repeat and input size at that dimension.
+  // Sum over all "repeat" dimensions from sum_dims:
+  // Example:
+  // Input Size         (2,    3,    4,    5)
+  // repeat             [4,    1,    9,    3]
+  // output/grad Size   (8,    3,    36,   15)
+  // grad_size          [4, 2,    3, 9, 4, 3, 5]
+  // sum_dims           [0,          3,    5]
+
+  // When repeat 1 time over all original dimensions, the empty sum_dims will reduce
+  // the whole grad tensor into a scalar rather than keeping original dimensions.
+  if (!sum_dims.empty()) {
+    grad = grad.reshape(grad_size);
+    grad = grad.sum(sum_dims);
   }
   return grad;
 }
@@ -1600,7 +1646,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
     _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
     _min_storage_size(out_sizes_, out_strides_, out_effective_offset)
   );
-  auto storage = at::zeros({base_size}, grad.options());
+  auto storage = grad.new_zeros({base_size});
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
