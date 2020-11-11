@@ -51,37 +51,12 @@ int64_t getAlignment(const Tensor &t) {
   return std::min<int64_t>(alignment / 2, 8);
 }
 
-using shape_stride_t = std::pair<std::vector<int64_t>, std::vector<int64_t>>;
-
-shape_stride_t getInputOutputShapeAndStride(const Tensor &t, int64_t groups) {
-  return {t.sizes().vec(), t.strides().vec()};
-  // cuDNN v8 has shape NGCHW..., but PyTorch has NCHW...
-  std::vector<int64_t> shape = t.sizes().vec();
-  shape.insert(shape.begin() + 1, groups);
-  shape[2] /= groups;
-  std::vector<int64_t> strides = t.strides().vec();
-  int64_t cstride = strides[1];
-  strides.insert(strides.begin() + 1, cstride * shape[2]);
-  return {shape, strides};
-}
-
-shape_stride_t getFilterShapeAndStride(const Tensor &t, int64_t groups) {
-  return {t.sizes().vec(), t.strides().vec()};
-  // cuDNN v8 has shape GKCRS..., but PyTorch has KCRS...
-  std::vector<int64_t> shape = t.sizes().vec();
-  shape.insert(shape.begin(), groups);
-  shape[1] /= groups;
-  std::vector<int64_t> strides = t.strides().vec();
-  int64_t cstride = strides[0];
-  strides.insert(strides.begin(), cstride * shape[1]);
-  return {shape, strides};
-}
-
-cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t groups, int64_t id) {
-  shape_stride_t shape_and_stride = (id == 'w' ? getFilterShapeAndStride(t, groups) : getInputOutputShapeAndStride(t, groups));
+cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id) {
+  auto shape = t.sizes().vec();  // TODO: auto shape = t.sizes();
+  auto strides = t.strides().vec();  // TODO: auto strides = t.strides();
   return cudnn_frontend::TensorBuilder()
-    .setDim(shape_and_stride.first.size(), shape_and_stride.first.data())
-    .setStrides(shape_and_stride.second.size(), shape_and_stride.second.data())
+    .setDim(shape.size(), shape.data())
+    .setStrides(strides.size(), strides.data())
     .setId(id)
     .setAlignment(getAlignment(t))
     .setDataType(getDataType(t))
@@ -133,10 +108,10 @@ Tensor _cudnn_convolution_v8(
       .setDataType(getDataType(input))
       .setMathMode(CUDNN_CROSS_CORRELATION)
       .setNDims(convDim)
-      .setStrides(convDim, stride.vec().data())
-      .setPrePadding(convDim, padding.vec().data())
-      .setPostPadding(convDim, padding.vec().data())
-      .setDilation(convDim, dilation.vec().data())
+      .setStrides(convDim, stride.vec().data()) // TODO: remove the .vec()
+      .setPrePadding(convDim, padding.vec().data()) // TODO: remove the .vec()
+      .setPostPadding(convDim, padding.vec().data()) // TODO: remove the .vec()
+      .setDilation(convDim, dilation.vec().data()) // TODO: remove the .vec()
       .build();
 
   // std::cout << getTensorDescriptor(input_contig, groups, 'x').describe() << std::endl;
@@ -148,9 +123,9 @@ Tensor _cudnn_convolution_v8(
 
   auto op_builder = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
   op_builder
-      .setxDesc(getTensorDescriptor(input_contig, groups, 'x'))
-      .setyDesc(getTensorDescriptor(output, groups, 'y'))
-      .setwDesc(getTensorDescriptor(weight_contig, groups, 'w'))
+      .setxDesc(getTensorDescriptor(input_contig, 'x'))
+      .setyDesc(getTensorDescriptor(output, 'y'))
+      .setwDesc(getTensorDescriptor(weight_contig, 'w'))
       .setcDesc(conv_descriptor);
   if (input.scalar_type() == kDouble) {
     op_builder.setAlpha(1.0).setBeta(0.0);
