@@ -261,6 +261,15 @@ class Graph:
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
 
+        # Null out this Node's argument nodes so that the Nodes referred to
+        # can update their `users` accordingly
+        new_args = map_arg(to_erase.args, lambda n: None)
+        assert isinstance(new_args, tuple)
+        to_erase.args = new_args
+        new_kwargs = map_arg(to_erase.kwargs, lambda n: None)
+        assert isinstance(new_kwargs, dict)
+        to_erase.kwargs = new_kwargs
+
     def inserting_before(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
