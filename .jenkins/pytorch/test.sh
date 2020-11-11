@@ -11,17 +11,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [ -n "${IN_CI}" ]; then
-  # TODO move this to docker
-  pip_install unittest-xml-reporting coverage pytest
+if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+  export PYTORCH_TEST_WITH_SLOW=1
+  export PYTORCH_TEST_SKIP_FAST=1
+fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
-    export PYTORCH_TEST_WITH_SLOW=1
-    export PYTORCH_TEST_SKIP_FAST=1
-  fi
-  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-    export PYTORCH_COLLECT_COVERAGE=1
-  fi
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  export PYTORCH_COLLECT_COVERAGE=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -36,18 +32,6 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
-
-  # TODO: Please move this to Docker
-  # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  pip_install --user "hypothesis==4.53.2"
-  # Pin MyPy version because new errors are likely to appear with each release
-  pip_install --user "mypy==0.770"
-  # Update scikit-learn to a python-3.8 compatible version
-  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
-    pip_install -U scikit-learn
-  fi
-
-  pip_install --user tb-nightly
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -401,10 +385,15 @@ else
   test_distributed
   test_benchmarks
   test_rpc
-  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-    pushd test
-    echo "Generating XML coverage report"
-    time python -mcoverage xml
-    popd
-  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  pushd test
+  echo "Generating XML coverage report"
+  time python -mcoverage xml
+  popd
+  pushd build
+  echo "Generating lcov coverage report for C++ sources"
+  time lcov --capture --directory . --output-file coverage.info
+  popd
 fi

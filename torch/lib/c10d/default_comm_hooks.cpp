@@ -1,12 +1,12 @@
-#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
+#include <c10d/default_comm_hooks.hpp>
 
+#include <c10d/comm.hpp>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/torch.h>
 
 namespace c10d {
 
-c10::intrusive_ptr<torch::jit::Future> AllReduceCommHook::runHook(
+c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
     GradBucket& bucket) {
   auto allreduce_work = state_->allreduce(bucket.getTensorsRef());
 
@@ -19,7 +19,7 @@ c10::intrusive_ptr<torch::jit::Future> AllReduceCommHook::runHook(
   return fut->then(div_by_process_group_size, fut->elementType());
 }
 
-c10::intrusive_ptr<torch::jit::Future> FP16CompressCommHook::runHook(
+c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
     GradBucket& bucket) {
   auto& tensors = bucket.getTensorsRef();
   for (auto& tensor : tensors) {
