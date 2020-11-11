@@ -27,6 +27,19 @@ detail::types<void, Types...> init() {
   return detail::types<void, Types...>{};
 }
 
+// template <class... Types, class Func>
+// // detail::types<void, Types...> init(Func f) {
+// decltype(auto) init(Func f) {
+//   // return detail::types<void, typename
+//   // c10::guts::infer_function_traits_t<Func>::parameter_types>{};
+//   using ParameterTypes =
+//       typename c10::guts::infer_function_traits_t<Func>::parameter_types;
+//   return detail::types<void, ParameterTypes>{};
+// }
+
+template <class Func>
+Func init() {}
+
 /// Entry point for custom C++ class registration. To register a C++ class
 /// in PyTorch, instantiate `torch::class_` with the desired class as the
 /// template parameter. Typically, this instantiation should be done in
@@ -87,6 +100,23 @@ class class_ {
                                                // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
+      auto object = self.ivalue.toObject();
+      object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
+    };
+
+    defineMethod("__init__", std::move(func), std::move(doc_string));
+    return *this;
+  }
+
+  template <typename Func>
+  class_& def(Func f, std::string doc_string = "") { // Used in combination with
+    // torch::init<...>()
+    auto paramTypes =
+        typename c10::guts::infer_function_traits<Func>::parameter_types;
+    // do init? infer the parameter types
+    auto func = [](c10::tagged_capsule<CurClass> self, paramTypes args) {
+      auto classObj = f(args);
+      // auto classObj = c10::make_intrusive<CurClass>(args...);
       auto object = self.ivalue.toObject();
       object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
