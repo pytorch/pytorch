@@ -11,15 +11,6 @@ std::ostream& operator<<(std::ostream& os, QuantType t) {
     case QuantType::STATIC:
       os << "static";
       break;
-    case QuantType::QAT:
-      os << "qat";
-      break;
-    case QuantType::WEIGHT_ONLY:
-      os << "weight_only";
-      break;
-    case QuantType::ACTIVATION_ONLY:
-      os << "activation_only";
-      break;
     default:
       os.setstate(std::ios_base::failbit);
   }

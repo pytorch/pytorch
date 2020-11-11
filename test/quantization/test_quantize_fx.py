@@ -257,7 +257,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 node_occurrence[weight_prepack_node] = 0
             self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
-                inputs, quant_type=quant_type,
+                inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 debug=False)
@@ -276,7 +276,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 node_occurrence[quantized_node] = 0
             self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
-                inputs, quant_type=quant_type,
+                inputs, quant_type,
                 expected_node_occurrence=node_occurrence,
                 debug=True)
 
@@ -889,12 +889,9 @@ class TestQuantizeFx(QuantizationTestCase):
             "dynamic": (default_dynamic_qconfig, DynamicQuantCustomModule, 0)
         }
 
-        for key in ['dynamic']:
+        for quant_type in [QuantType.DYNAMIC]:
+            key = quant_type_to_str(quant_type)
             qconfig, quantized_module_class, num_observers = test_configs[key]
-            quant_type = qconfig.quant_type
-            # Sanity check
-            assert key == quant_type_to_str(quant_type)
-
             qconfig_dict = {"": qconfig}
             if key == "static":
                 prepare_custom_config_dict = {
