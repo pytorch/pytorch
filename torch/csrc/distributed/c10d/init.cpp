@@ -1000,17 +1000,16 @@ Arguments:
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
-                  const c10::intrusive_ptr<
-                      ::c10d::ProcessGroupNCCL::Options>&>(),
+                  ::c10d::ProcessGroupNCCL::Options>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size,
                           const std::chrono::milliseconds& timeout) {
-                auto options = ::c10d::ProcessGroupNCCL::Options::create();
-                options->isHighPriorityStream = false;
-                options->opTimeout = timeout;
+                ::c10d::ProcessGroupNCCL::Options options;
+                options.isHighPriorityStream = false;
+                options.opTimeout = timeout;
                 return std::make_shared<::c10d::ProcessGroupNCCL>(
                     store, rank, size, options);
               }),
@@ -1021,8 +1020,7 @@ Arguments:
                   ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
               py::call_guard<py::gil_scoped_release>());
 
-  intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
-      processGroupNCCL, "Options")
+  py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
       .def(py::init<>())
       .def_readwrite(
           "is_high_priority",
