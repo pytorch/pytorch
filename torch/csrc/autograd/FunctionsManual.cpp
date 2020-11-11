@@ -1813,7 +1813,6 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     gsigma = gsigma.to(self.dtype());
     // computes u @ diag(gsigma) @ vh
     sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
-    // sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vh));
   } else {
     sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
