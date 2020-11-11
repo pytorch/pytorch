@@ -1,4 +1,3 @@
-import unittest
 import os
 import sys
 import typing
@@ -159,7 +158,6 @@ class TestRecursiveScript(JitTestCase):
             # Make sure that no entries are left over from the previous failure
             FileCheck().check_count("is being compiled", 2).run(str(e))
 
-    @unittest.skipIf(sys.version_info[:2] < (3, 7), "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
         class M1(torch.nn.Module):
             x : torch.jit.Final[int]
@@ -496,6 +494,50 @@ class TestRecursiveScript(JitTestCase):
                 return x
 
         self.checkModule(M(), (torch.randn(5, 5),))
+
+    def test_prepare_scriptable_basic(self):
+        class SeluButReluWhenScripted(torch.nn.SELU):
+            def __prepare_scriptable__(self):
+                return nn.ReLU()
+
+        t = torch.randn(5, 5)
+        m = SeluButReluWhenScripted()
+        sm = torch.jit.script(m)
+        eager_out = m(t)
+        script_out = sm(t)
+        self.assertNotEqual(eager_out, script_out)
+
+    def test_prepare_scriptable_iterable_modules(self):
+        class SeluButReluWhenScripted(torch.nn.SELU):
+            def __prepare_scriptable__(self):
+                return nn.ReLU()
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                shared = SeluButReluWhenScripted()
+                self.sequential = nn.Sequential(
+                    SeluButReluWhenScripted(),
+                    SeluButReluWhenScripted(),
+                    nn.Sequential(SeluButReluWhenScripted(), shared, SeluButReluWhenScripted()),
+                    shared,
+                )
+                self.module_list = nn.ModuleList([SeluButReluWhenScripted(),
+                                                  shared,
+                                                  SeluButReluWhenScripted()])
+
+            def forward(self, x):
+                for mod in self.module_list:
+                    x += mod(x)
+                x += self.sequential(x)
+                return x
+
+        t = torch.randn(5, 5)
+        m = M()
+        eager_out = m(t.clone())
+        sm = torch.jit.script(m)
+        script_out = sm(t.clone())
+        self.assertNotEqual(eager_out, script_out)
 
     def test_attributes(self):
         @torch.jit.script
