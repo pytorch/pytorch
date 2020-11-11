@@ -66,13 +66,16 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id) {
 void filterEngineConfigs(
   std::vector<cudnnBackendDescriptor_t> &from,
   std::vector<cudnnBackendDescriptor_t> &to,
-  bool deterministic, bool allow_tf32)
+  bool deterministic, bool allow_tf32, c10::ScalarType scalar_type)
 {
-  auto filter = [=](cudnnBackendDescriptor_t &engine_config) {
+  auto filter = [=](cudnnBackendDescriptor_t &c) {
     if (deterministic) {
-      if (cudnn_frontend::isNonDeterministic(engine_config)) return true;
+      if (cudnn_frontend::isNonDeterministic(c)) return true;
     }
-    // TODO: handle TF32
+    if (scalar_type == kFloat || !allow_tf32) {
+      // if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
+      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
+    }
     return false;
   };
   cudnn_frontend::filter(from, to, filter);
@@ -171,7 +174,7 @@ Tensor _cudnn_convolution_v8(
   // auto &fallback_list = fallback.getFallbackList();
 
   std::vector<cudnnBackendDescriptor_t> filtered_configs;
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32);
+  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
 
   for (auto &cfg : filtered_configs) {
     try {

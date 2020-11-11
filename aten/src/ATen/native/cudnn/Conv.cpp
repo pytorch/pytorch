@@ -1003,7 +1003,7 @@ Tensor cudnn_convolution(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
-  if (!benchmark && !deterministic && allow_tf32) {
+  if (!benchmark) {
     return at::_cudnn_convolution_v8(input_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
   }
 
@@ -1022,7 +1022,7 @@ Tensor cudnn_convolution_transpose_backward_input(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
-  if (!benchmark && allow_tf32) {
+  if (!benchmark) {
     return at::_cudnn_convolution_v8(grad_output_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
   }
 
