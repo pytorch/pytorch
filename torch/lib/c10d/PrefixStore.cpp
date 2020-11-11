@@ -4,7 +4,7 @@ namespace c10d {
 
 PrefixStore::PrefixStore(
     const std::string& prefix,
-    c10::intrusive_ptr<Store> store)
+    std::shared_ptr<Store> store)
     : prefix_(prefix), store_(store) {}
 
 std::string PrefixStore::joinKey(const std::string& key) {
