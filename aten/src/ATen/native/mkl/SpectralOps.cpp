@@ -55,11 +55,14 @@ void _fft_fill_with_conjugate_symmetry_slice(
     Range range, at::ArrayRef<bool> is_mirrored_dim, IntArrayRef signal_half_sizes,
     IntArrayRef in_strides, const scalar_t * in_ptr,
     IntArrayRef out_strides, scalar_t * out_ptr) {
-  const int64_t ndim = signal_half_sizes.size();
+  const auto ndim = signal_half_sizes.size();
   DimVector iter_index(ndim, 0);
 
+  // We explicitly loop over one row, then use this lambda to iterate over
+  // n-dimensions. This advances iter_index by one row, while updating in_ptr
+  // and out_ptr to point to the new row of data.
   auto advance_index = [&] {
-    for (int64_t i = 1; i < iter_index.size(); ++i) {
+    for (size_t i = 1; i < iter_index.size(); ++i) {
       if (iter_index[i] + 1 < signal_half_sizes[i]) {
         ++iter_index[i];
         in_ptr += in_strides[i];
@@ -85,11 +88,13 @@ void _fft_fill_with_conjugate_symmetry_slice(
     }
   };
 
+  // The data slice we operate on may start part-way into the data
+  // Update iter_index and pointers to reference the start of the slice
   if (range.begin > 0) {
     iter_index[0] = range.begin % signal_half_sizes[0];
     auto linear_idx = range.begin / signal_half_sizes[0];
 
-    for (int64_t i = 1; i < ndim && linear_idx > 0; ++i) {
+    for (size_t i = 1; i < ndim && linear_idx > 0; ++i) {
       iter_index[i] = linear_idx % signal_half_sizes[i];
       linear_idx = linear_idx / signal_half_sizes[i];
 
@@ -107,6 +112,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
   auto numel_remaining = range.end - range.begin;
 
   if (is_mirrored_dim[0]) {
+    // Explicitly loop over a Hermitian mirrored dimension
     if (iter_index[0] > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
       for (int64_t i = iter_index[0]; i < end; ++i) {
@@ -127,6 +133,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
       advance_index();
     }
   } else {
+    // Explicit loop over a non-mirrored dimension, so just a simple conjugated copy
     while (numel_remaining > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
       for (int64_t i = iter_index[0]; i != end; ++i) {
@@ -157,7 +164,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
 
   // Construct boolean mask for mirrored dims
   c10::SmallVector<bool, at::kDimVectorStaticSize> is_mirrored_dim(ndim, false);
-  for (auto dim : mirror_dims) {
+  for (const auto& dim : mirror_dims) {
     is_mirrored_dim[dim] = true;
   }
 
