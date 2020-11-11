@@ -1,42 +1,46 @@
 #version 450 core
+#define PRECISION $precision
+
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly highp uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform highp sampler3D uInput;
-layout(set = 0, binding = 2) uniform constBlock {
-  ivec4 inputSize;
-  ivec4 outputSize;
-  ivec2 kernelSize;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
+layout(set = 0, binding = 2)          uniform PRECISION restrict           Block {
+  ivec2 kernel;
   ivec2 stride;
   ivec2 padding;
-  ivec2 dilate;
-}
-uConstBlock;
-
-#define UP_DIV(x, y) (((x) + (y)-1) / (y))
+} uBlock;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  ivec3 outputSize = uConstBlock.outputSize.xyz;
-  if (all(lessThan(pos, outputSize))) {
-    ivec2 s0 = pos.xy * uConstBlock.stride - uConstBlock.padding;
-    ivec2 sfxy = max(ivec2(0), (UP_DIV(-s0, uConstBlock.dilate)));
-    ivec2 efxy =
-        min(uConstBlock.kernelSize,
-            UP_DIV(uConstBlock.inputSize.xy - s0, uConstBlock.dilate));
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-    vec4 r = vec4(1.0) / float(efxy.x - sfxy.x) / float(efxy.x - sfxy.x);
-    vec4 acc = vec4(0);
+  /* Dynamically Uniform */
+  const ivec3 size = imageSize(uOutput);
+  const ivec3 isize = textureSize(uInput, 0);
+  const float range = uBlock.kernel.x * uBlock.kernel.y;
 
-    for (int kyi = sfxy.y; kyi < efxy.y; ++kyi) {
-      for (int kxi = sfxy.x; kxi < efxy.x; ++kxi) {
-        ivec2 ixy = s0 + ivec2(kxi, kyi);
-        acc += texelFetch(uInput, ivec3(ixy.x, ixy.y, pos.z), 0);
+  if (all(lessThan(pos, size))) {
+    const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
+
+    const ivec2 start = max(ivec2(0), ipos);
+    const ivec2 end = min(ipos + uBlock.kernel, isize.xy);
+
+    vec4 sum = vec4(0);
+
+    for (int y = start.y; y < end.y; ++y) {
+      for (int x = start.x; x < end.x; ++x) {
+        sum += texelFetch(uInput, ivec3(x, y, pos.z), 0);
       }
     }
 
-    imageStore(uOutput, pos, r * acc);
+    imageStore(
+        uOutput,
+        pos,
+        sum / range);
   }
 }

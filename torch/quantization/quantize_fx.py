@@ -103,9 +103,7 @@ def _prepare_standalone_module_fx(model, qconfig_dict, prepare_custom_config_dic
                                    custom module is observed or not
 
     """
-    torch._C._log_api_usage_once("quantization_api.quantize_fx._prepare_standalone_module_fx")
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module=True)
-
 
 def fuse_fx(model, fuse_custom_config_dict=None):
     r""" Fuse modules like conv+bn, conv+bn+relu etc, model must be in eval mode.
@@ -280,19 +278,17 @@ def prepare_qat_fx(model, qconfig_dict, prepare_custom_config_dict=None):
         'train mode'
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
-def _convert_fx(graph_module, inplace, debug, convert_custom_config_dict=None, is_standalone_module=False):
+def _convert_fx(graph_module, debug, convert_custom_config_dict=None, is_standalone_module=False):
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
     """
     _check_is_graph_module(graph_module)
     quantizer = Quantizer()
-    return quantizer.convert(graph_module, inplace, debug, convert_custom_config_dict, is_standalone_module)
+    return quantizer.convert(graph_module, debug, convert_custom_config_dict, is_standalone_module)
 
-def convert_fx(graph_module, inplace=False, debug=False, convert_custom_config_dict=None):
+def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
     r""" Convert a calibrated or trained model to a quantized model
     Args:
         `graph_module`: A prepared and calibrated/trained model (GraphModule)
-        `inplace`: flag for carry out model transformations in-place,
-        the original module is mutated
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
         convert_custom_config_dict = {
@@ -334,9 +330,9 @@ def convert_fx(graph_module, inplace=False, debug=False, convert_custom_config_d
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_fx")
-    return _convert_fx(graph_module, inplace, debug, convert_custom_config_dict)
+    return _convert_fx(graph_module, debug, convert_custom_config_dict)
 
-def _convert_standalone_module_fx(graph_module, inplace=False, debug=False, convert_custom_config_dict=None):
+def _convert_standalone_module_fx(graph_module, debug=False, convert_custom_config_dict=None):
     r""" [Internal use only] Convert a model produced by :func:`~torch.quantization.prepare_standalone_module_fx`
     and convert it to a quantized model
 
@@ -347,5 +343,4 @@ def _convert_standalone_module_fx(graph_module, inplace=False, debug=False, conv
       A quantized standalone module which accepts quantized input(if needed)
       and produces quantized output (if needed).
     """
-    torch._C._log_api_usage_once("quantization_api.quantize_fx._convert_standalone_module_fx")
-    return _convert_fx(graph_module, inplace, debug, convert_custom_config_dict, is_standalone_module=True)
+    return _convert_fx(graph_module, debug, convert_custom_config_dict, is_standalone_module=True)
