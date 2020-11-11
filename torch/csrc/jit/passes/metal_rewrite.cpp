@@ -15,8 +15,6 @@
 namespace torch {
 namespace jit {
 
-#ifdef USE_PYTORCH_METAL
-
 namespace {
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
@@ -160,16 +158,14 @@ void metalFusePrePackedConvWithClamp(script::Module& module) {
 void metalInsertCopyOps(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   auto&& outputs = graph->outputs();
-  for (int i = 0; i < outputs.size(); ++i) {
+  for (size_t i = 0; i < outputs.size(); ++i) {
     Value* output = outputs[i];
-    std::cout << "find output: " << *output->node() << std::endl;
     auto namedValue = NamedValue("", output);
     if (namedValue.type()->kind() == TypeKind::TensorType) {
       // find the insertion point
       WithInsertPoint ip(output->node()->next());
       Value* replaced_output = graph->insert(
           Symbol::fromQualString("metal::copy_to_host"), {namedValue});
-      std::cout << "insert: " << *replaced_output->node() << std::endl;
       // replaced the output
       graph->block()->replaceOutput(i, replaced_output);
     }
@@ -190,40 +186,10 @@ script::Module metalOptimizeForMobile(
   metalFoldPrePackingOps(cloned_module);
   metalInsertCopyOps(cloned_module);
   removeDropout(cloned_module);
+  cloned_module.register_attribute(
+      "optimized_for_metal", BoolType::get(), true);
   return cloned_module;
 }
 
-#else
-
-void metalInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-void metalInsertPrePackedOps(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-TORCH_API void metalFusePrePackedConvWithClamp(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-TORCH_API void metalFoldPrePackingOps(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-}
-
-script::Module metalOptimizeForMobile(
-    const script::Module& m,
-    const std::vector<std::string>& preserved_methods) {
-  TORCH_INTERNAL_ASSERT(
-      "Mobile optimizaiton only available with metal at the moment. "
-      "metal is not enabled. Please build with USE_PYTORCH_METAL=1");
-  return m;
-}
-
-#endif
 } // namespace jit
 } // namespace torch

@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Optional, List, Callable, Union
+from typing import Any, Dict, Optional, List, Callable, Union
 import torch
 
 from .node import Argument
@@ -59,25 +59,7 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, torch.Tensor):
-            # TODO: slow
-            def search_for_tensor(m : torch.nn.Module) -> Optional[List[str]]:
-                """
-                Search for a tensor value in the module's attributes. If it's
-                found, return the qualified name of that attribute, given the
-                previous `qualname_atoms`. If it's not found, recurse down into
-                child submodules. If it's not found there, return None
-                """
-                for n, p in m.__dict__.items():
-                    if a is p:
-                        return [n]
-                for n, c in m.named_children():
-                    maybe_result : Optional[List[str]] = search_for_tensor(c)
-                    if maybe_result:
-                        return [n] + maybe_result
-                return None
-            # Retrieve the qualname for an existing Tensor attribute
-            qualname_atoms : Optional[List[str]] = search_for_tensor(self.root)
-            qualname = '.'.join(qualname_atoms) if qualname_atoms else None
+            qualname : Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -143,8 +125,15 @@ class Tracer(TracerBase):
             next(names_iter)  # skip self
             args.append(self.root)
 
+        sig = inspect.signature(fn_for_analysis)
+
         def proxy_placeholder(name: str):
-            return self.create_proxy('placeholder', name, (), {},
+            if name[0] == '*':
+                default = ()    # type: ignore
+            else:
+                param = sig.parameters[name]
+                default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
+            return self.create_proxy('placeholder', name, default, {},
                                      type_expr=fn_for_analysis.__annotations__.get(name, None))
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
@@ -167,6 +156,21 @@ class Tracer(TracerBase):
             self.root = torch.nn.Module()
             fn = root
         self.graph = Graph()
+
+        # When we encounter a Tensor value that's not a parameter, we look if it
+        # is some other attribute on the model. Construct a dict mapping Tensor
+        # values to the qualified name here for efficiency. This is used downstream
+        # in create_arg
+        self.tensor_attrs : Dict[torch.Tensor, str] = {}
+
+        def collect_tensor_attrs(m : torch.nn.Module, prefix_atoms : List[str]):
+            for k, v in m.__dict__.items():
+                if isinstance(v, torch.Tensor):
+                    self.tensor_attrs[v] = '.'.join(prefix_atoms + [k])
+            for k, v in m.named_children():
+                collect_tensor_attrs(v, prefix_atoms + [k])
+
+        collect_tensor_attrs(self.root, [])
 
         assert isinstance(fn, FunctionType)
 
@@ -205,6 +209,7 @@ class Tracer(TracerBase):
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
+
 
 # Symbolic tracing API
 #

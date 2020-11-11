@@ -14,7 +14,7 @@ from torch.testing import \
      floating_types, floating_types_and, floating_and_complex_types,
      floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack,
      expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -211,9 +211,13 @@ op_db = [
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
+                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -233,8 +237,10 @@ op_db = [
     UnaryUfuncInfo('acosh',
                    ref=np.arccosh,
                    domain=(1, float('inf')),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('asin',
@@ -251,13 +257,19 @@ op_db = [
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
                    ref=np.arcsinh,
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('atan',
                    ref=np.arctan,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -268,8 +280,10 @@ op_db = [
     UnaryUfuncInfo('atanh',
                    ref=np.arctanh,
                    domain=(-1, 1),
-                   dtypesIfCPU=floating_types(),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False),
     UnaryUfuncInfo('cos',
@@ -402,7 +416,10 @@ op_db = [
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -708,6 +725,15 @@ def method_tests():
         ('cosh', (S, S, S), NO_ARGS, '', (True,)),
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('conj', (S, S, S), NO_ARGS),
+        ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
+        ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
+        ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
+        ('copysign', (S, 1, S), ((M, S),), 'broadcast_all', (False,)),
+        ('copysign', (S, S), (3.14,), 'scalar', (False,)),
+        ('copysign', (S, S), (0.0,), 'scalar_pos_zero', (False,)),
+        # TorchScript does not recognize -0.0: Issue #46848
+        # https://github.com/pytorch/pytorch/issues/46848
+        # ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
         ('real', (S, S, S), NO_ARGS, 'complex'),
         ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
@@ -841,11 +867,9 @@ def method_tests():
         ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
         ('kthvalue', (S,), (2, 0,), 'dim_1d', (), [1]),
         ('kthvalue', (S,), (2, 0, True,), 'keepdim_dim_1d', (), [1]),
-        # TODO: https://github.com/pytorch/pytorch/issues/30818
-        ('kthvalue', (), (1,), 'scalar', (), (), [expectedFailureCUDA]),
-        ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1], [expectedFailureCUDA]),
-        ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1], [expectedFailureCUDA]),
-        # END TODO
+        ('kthvalue', (), (1,), 'scalar', (), ()),
+        ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1]),
+        ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1]),
         ('quantile', (S, S, S), (0.5,)),
         ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
         ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
@@ -936,6 +960,8 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('repeat', (S, S), (1, 1), 'keepdim0'),
+        ('repeat', (S, S), (3, 1, 1), 'keepdim1'),
         ('repeat', (S,), (0, ), 'zero_dim'),
         ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
@@ -1462,6 +1488,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
+        ('kron', (S, S), ((M, L),))
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
