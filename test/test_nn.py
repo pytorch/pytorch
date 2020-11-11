@@ -9726,22 +9726,20 @@ class TestNNDeviceType(NNTestCase):
         # We check whether, we get same values for the output of dropout, when the probability
         # of dropout is 0 or very close to 0.
         # Reference: https://github.com/pytorch/pytorch/issues/47176
-        close_to_zero_p = 0.0000000001  # Should be almost zero but not zero, as for p=0 different path is taken
+        close_to_zero_p = 1e-10  # Should be almost zero but not zero, as for p=0 different path is taken
         for p in [0, close_to_zero_p]:
             inp = torch.ones(2, 3, 3, 3, device=device)
             inp_discontiguous = torch.empty(2, 3, 3, 6, device=device, memory_format=memory_format)[..., ::2]
             inp_discontiguous.copy_(inp)
             mod = cls(p=p)
             out = mod(inp_discontiguous)
-            self.assertEqual(out.layout, inp_discontiguous.layout)
+            if p != 0:  # Zero will keep strides as is based on input.
+                # When prob == 0, input stride (54, 18, 6, 2) -> output stride (54, 18, 6, 2)
+                # When prob != 0, input stride (54, 18, 6, 2) -> output stride (27, 9, 3, 1)
+                self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertEqual(inp_discontiguous, out)
 
     def _test_dropout_mean_check(self, cls, device):
-        def _test_dropout_mean(inp, out):
-            self.assertEqual(inp.layout, out.layout)
-            self.assertNotEqual(inp, out)
-            self.assertEqual(inp.mean(), out.mean(), rtol=0.5, atol=0.5)
-
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
             return (d[0], d[1], d[2], d[3])
@@ -9750,12 +9748,18 @@ class TestNNDeviceType(NNTestCase):
         shifts = [(0, 0), (1, 0), (0, 1), (1, 1)]
         for perm in itertools.permutations((0, 1, 2, 3), r=4):
             for shift in shifts:
-                for p in [0.3, 0.5, 0.7]:
+                for p in [1e-10, 0.3, 0.5, 0.7]:
                     mod = cls(p=p)
                     permuted_inp = inp.permute(perm).contiguous().permute(invert_perm(perm))
                     permuted_inp = permuted_inp[shift[0]:, shift[1]:, :, :]
                     out = mod(permuted_inp)
-                    _test_dropout_mean(permuted_inp, out)
+
+                    self.assertTrue(out.permute(perm).is_contiguous())
+                    self.assertEqual(inp.mean(), out.mean(), rtol=0.5, atol=0.5)
+                    if p == 1e-10:
+                        self.assertEqual(permuted_inp, out)
+                    else:
+                        self.assertNotEqual(permuted_inp, out)
 
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
