@@ -204,9 +204,14 @@ void prepareProfiler(
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
   }
 
+  if (!libkineto::api().isProfilerRegistered()) {
+    libkineto_init();
+  }
+
   if (!libkineto::api().isProfilerInitialized()) {
     libkineto::api().initProfilerIfRegistered();
   }
+
   libkineto::api().activityProfiler().prepareTrace(k_activities);
 }
 

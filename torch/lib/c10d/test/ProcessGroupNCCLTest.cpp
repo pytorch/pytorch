@@ -31,7 +31,7 @@ class NCCLTestBase {
   }
 
   void initialize(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_, size);
+    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size));
@@ -80,7 +80,7 @@ class NCCLTest : public NCCLTestBase {
   }
 
   void wait(
-      std::shared_ptr<ProcessGroup::Work>& work,
+      c10::intrusive_ptr<ProcessGroup::Work>& work,
       std::chrono::milliseconds timeout = kNoTimeout) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait(timeout);
@@ -166,7 +166,7 @@ class AllreduceNCCLTest : public NCCLTest {
   AllreduceNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -189,7 +189,7 @@ class BroadcastNCCLTest : public NCCLTest {
   BroadcastNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -208,7 +208,7 @@ class ReduceNCCLTest : public NCCLTest {
   ReduceNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -227,7 +227,7 @@ class AllgatherNCCLTest : public NCCLTest {
   AllgatherNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -242,7 +242,7 @@ struct ReduceScatterNCCLTest : NCCLTest {
   ReduceScatterNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
