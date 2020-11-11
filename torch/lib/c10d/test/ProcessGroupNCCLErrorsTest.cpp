@@ -40,7 +40,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      const c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options>& opts)
+      c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCL(store, rank, size, opts), simulate_error_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
@@ -109,7 +109,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      const c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options>& opts)
+      c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
         set_timedout_error_(false) {}
 
