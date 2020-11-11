@@ -1,6 +1,5 @@
 #pragma once
 
-#include <iostream>
 #include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
@@ -297,8 +296,6 @@ struct CAFFE2_API TensorIterator {
     return true;
   }
 
-  friend CAFFE2_API std::ostream& operator<<(std::ostream& os, const TensorIterator& iter);
-
 protected:
   void build(TensorIteratorConfig&);
 
@@ -535,7 +532,5 @@ struct CAFFE2_API SplitUntil32Bit {
 private:
   const TensorIterator& iter;
 };
-
-CAFFE2_API std::ostream& operator<<(std::ostream& os, const TensorIterator& iter);
 
 }  // namespace at
