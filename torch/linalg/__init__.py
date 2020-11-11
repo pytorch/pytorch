@@ -184,3 +184,11 @@ Examples::
     >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b, atol=1e-6)
     True
 """)
+
+
+def qr(a, mode='reduced'):
+    if mode == 'reduced':
+        return torch.qr(a, some=True)
+    elif mode == 'complete':
+        return torch.qr(a, some=False)
+    raise NotImplementedError('unkown mode: %s' % mode)

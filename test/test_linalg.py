@@ -1347,6 +1347,37 @@ class TestLinalg(TestCase):
         check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
                                r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
 
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_reduced(self, device, dtype):
+        t = torch.randn((7, 5), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+
+        exp_q, exp_r = np.linalg.qr(np_t)
+        q, r = torch.linalg.qr(t)
+        self.assertEqual(q, exp_q)
+        self.assertEqual(r, exp_r)
+
+        exp_q, exp_r = np.linalg.qr(np_t, mode='reduced')
+        q, r = torch.linalg.qr(t, mode='reduced')
+        self.assertEqual(q, exp_q)
+        self.assertEqual(r, exp_r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_complete(self, device, dtype):
+        t = torch.randn((10, 11), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+
+        exp_q, exp_r = np.linalg.qr(np_t, mode='complete')
+        q, r = torch.linalg.qr(t, mode='complete')
+        self.assertEqual(q, exp_q)
+        self.assertEqual(r, exp_r)
+
+
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':
