@@ -114,12 +114,10 @@ def is_noarg(overloads: Sequence[PythonSignatureNativeFunctionPair]) -> bool:
     return len(overloads) == 1 and overloads[0].signature.arguments_count() == 0
 
 def is_py_variable_method(f: NativeFunction) -> bool:
-    return f.python_module is None \
-        and Variant.method in f.variants
+    return f.python_module is None and Variant.method in f.variants
 
 def is_py_torch_function(f: NativeFunction) -> bool:
-    return f.python_module is None \
-        and Variant.function in f.variants
+    return f.python_module is None and Variant.function in f.variants
 
 def is_py_nn_function(f: NativeFunction) -> bool:
     return f.python_module == 'nn'
