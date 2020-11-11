@@ -486,6 +486,14 @@ class LSTM(RNNBase):
     dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random
     variable which is :math:`0` with probability :attr:`dropout`.
 
+    If ``proj_size > 0`` is specified, LSTM with projections will be used. This changes
+    the LSTM cell in the following way. First, the dimension of :math:`h_t` will be changed from
+    ``hidden_size`` to ``proj_size`` (dimensions of :math:`W_{hi}` will be changed accordingly).
+    Second, the output hidden state of each layer will be multiplied by a learnable projection
+    matrix: :math:`h_t = W_{hr}h_t`. Note that as a consequence of this, the output
+    of LSTM network will be of different shape as well. See Inputs/Outputs sections below for exact
+    dimensions of all variables. You can find more details in https://arxiv.org/abs/1402.1128.
+
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
@@ -501,6 +509,7 @@ class LSTM(RNNBase):
             LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
+        proj_size: If ``> 0``, will use LSTM with projections of corresponding size. Default: 0
 
     Inputs: input, (h_0, c_0)
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -511,6 +520,8 @@ class LSTM(RNNBase):
         - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial hidden state for each element in the batch.
           If the LSTM is bidirectional, num_directions should be 2, else it should be 1.
+          If ``proj_size > 0`` was specified, the shape has to be
+          `(num_layers * num_directions, batch, proj_size)`.
         - **c_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial cell state for each element in the batch.
 
@@ -521,14 +532,16 @@ class LSTM(RNNBase):
         - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
           containing the output features `(h_t)` from the last layer of the LSTM,
           for each `t`. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
-          given as the input, the output will also be a packed sequence.
+          given as the input, the output will also be a packed sequence. If ``proj_size > 0``
+          was specified, output shape will be `(seq_len, batch, num_directions * proj_size)`.
 
           For the unpacked case, the directions can be separated
           using ``output.view(seq_len, batch, num_directions, hidden_size)``,
           with forward and backward being direction `0` and `1` respectively.
           Similarly, the directions can be separated in the packed case.
         - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
-          containing the hidden state for `t = seq_len`.
+          containing the hidden state for `t = seq_len`. If ``proj_size > 0``
+          was specified, ``h_n`` shape will be `(num_layers * num_directions, batch, proj_size)`.
 
           Like *output*, the layers can be separated using
           ``h_n.view(num_layers, num_directions, batch, hidden_size)`` and similarly for *c_n*.
@@ -540,11 +553,15 @@ class LSTM(RNNBase):
             `(W_ii|W_if|W_ig|W_io)`, of shape `(4*hidden_size, input_size)` for `k = 0`.
             Otherwise, the shape is `(4*hidden_size, num_directions * hidden_size)`
         weight_hh_l[k] : the learnable hidden-hidden weights of the :math:`\text{k}^{th}` layer
-            `(W_hi|W_hf|W_hg|W_ho)`, of shape `(4*hidden_size, hidden_size)`
+            `(W_hi|W_hf|W_hg|W_ho)`, of shape `(4*hidden_size, hidden_size)`. If ``proj_size > 0``
+            was specified, the shape will be `(4*hidden_size, proj_size)`.
         bias_ih_l[k] : the learnable input-hidden bias of the :math:`\text{k}^{th}` layer
             `(b_ii|b_if|b_ig|b_io)`, of shape `(4*hidden_size)`
         bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer
             `(b_hi|b_hf|b_hg|b_ho)`, of shape `(4*hidden_size)`
+        weight_hr_l[k] : the learnable projection weights of the :math:`\text{k}^{th}` layer
+            of shape `(proj_size, hidden_size)`. Only present when ``proj_size > 0`` was
+            specified.
 
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
