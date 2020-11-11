@@ -6242,7 +6242,7 @@ class TestNN(NNTestCase):
 
     def test_projections_errors_on_gru_and_rnn(self):
         error_msg = "proj_size argument is only supported for LSTM, not RNN or GRU"
-        for mode in  ['RNN', 'GRU']:
+        for mode in ['RNN', 'GRU']:
             with self.assertRaisesRegex(ValueError, error_msg):
                 rnn = getattr(nn, mode)(30, 20, 2, proj_size=10)
 
@@ -6399,7 +6399,7 @@ class TestNN(NNTestCase):
 
         # checking LSTM with projections
         for bias, bidirectional, batch_first, contig, variable_len, lens_as_tensor \
-                    in product((True, False), repeat=6):
+                in product((True, False), repeat=6):
             num_directions = 2 if bidirectional else 1
             if batch_first:
                 input_val = torch.randn(batch, seq_length, input_size, dtype=dtype)
