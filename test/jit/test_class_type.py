@@ -1326,4 +1326,6 @@ class TestClassType(JitTestCase):
             a = A()
             return a.f(torch.tensor([1]), torch.device("cpu"))
 
-        torch.jit.script(g)
+        self.checkScript(g, ())
+        s = self.getExportImportCopy(torch.jit.script(g))
+        self.assertEqual(s(), g())
