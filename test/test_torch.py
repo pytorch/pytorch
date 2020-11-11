@@ -17946,7 +17946,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
         cpu_supported_dtypes = torch.testing.floating_and_complex_types()
-        cuda_supported_dtypes = torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + torch.testing.complex_types()
+        cuda_supported_dtypes = torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + torch.testing.get_all_complex_dtypes()
         is_supported = (self.device_type == 'cpu' and dtype in cpu_supported_dtypes) or \
             (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
 
