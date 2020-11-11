@@ -3194,7 +3194,7 @@ Args:
 
 Keyword args:
     out (Tensor, optional): Optional output tensor to write result into. The output
-                            shape is :math:`input.shape[:-1] + other.shape[:-1]`.
+                            shape is `input.shape[:-1] + other.shape[:-1]`.
 
 Example::
 

@@ -1,6 +1,5 @@
 import sys
 import io
-import gc
 import inspect
 import itertools
 import math
@@ -2951,20 +2950,34 @@ class AbstractTestCases:
                                    lambda: torch.tensor().new_zeros((5, 5), 0))
 
         def test_half_tensor(self):
-            x = torch.randn(5, 5).float()
-            y = torch.randn(5, 5).float()
-            xh, yh = x.half(), y.half()
+            devices = ["cpu"]
+            if torch.cuda.is_available():
+                devices.append("cuda")
 
-            self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
+            # contiguous tensor
+            # non-contiguous tensor
+            # dense non-overlapping tensor
+            # non-dense non-overlapping sliced tensor
+            # non-dense overlapping equal strides
+            for device in devices:
+                tset = (
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float).contiguous(),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float).transpose(0, 1),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float)[:, :, ::2],
+                    torch.empty_strided(
+                        (4, 2, 3), (10, 3, 3), device=device, dtype=torch.float
+                    ).copy_(torch.rand((4, 2, 3), dtype=torch.float, device=device)),
+                )
 
-            z = torch.Tensor(5, 5)
-            self.assertEqual(z.copy_(xh), x, atol=1e-3, rtol=0)
-
-            with tempfile.NamedTemporaryFile() as f:
-                torch.save(xh, f)
-                f.seek(0)
-                xh2 = torch.load(f)
-                self.assertEqual(xh.float(), xh2.float())
+                for x in tset:
+                    self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
+                    xh = x.half()
+                    with tempfile.NamedTemporaryFile() as f:
+                        torch.save(xh, f)
+                        f.seek(0)
+                        xh2 = torch.load(f)
+                        self.assertEqual(xh.float(), xh2.float())
 
         def test_from_buffer(self):
             a = bytearray([1, 2, 3, 4])
@@ -6053,15 +6066,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    def _test_trace(self, device, dtype, legacy):
+    @onlyOnCPUAndCUDA
+    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
+                                               include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
+    def test_trace(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
-            diag = tensor.diag()
-            if legacy:
-                # NB: trace on cpu doesn't do type promotion... #47127
-                expected_dtype = dtype
-            else:
-                expected_dtype = tensor.sum().dtype
+            expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
             result = np.trace(tensor.cpu().numpy(), dtype=expected_dtype)
@@ -6077,16 +6089,6 @@ class TestTorchDeviceType(TestCase):
         )
         for shape in shapes:
             test(shape)
-
-    @onlyCPU
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
-    def test_trace_legacy(self, device, dtype):
-        self._test_trace(device, dtype, legacy=True)
-
-    @onlyCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
-    def test_trace(self, device, dtype):
-        self._test_trace(device, dtype, legacy=False)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -8002,7 +8004,6 @@ class TestTorchDeviceType(TestCase):
         B = torch.mm(L, L.t().conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
-    @skipIfRocm  # This test has many dimensions, which is larger than the maximum dims supported by ROCm (16)
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
         template = torch.rand(3, 5, device=device)
@@ -9660,7 +9661,7 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
-    @onlyCUDA
+    @slowTest
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -9669,13 +9670,6 @@ class TestTorchDeviceType(TestCase):
         result = input_.sum(dim=0)
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
-        gc.collect()
-        torch.cuda.empty_cache()
-        a = torch.randn(8, 1, 128, 1024, 1024, device=device, dtype=torch.half)
-        self.assertEqual((a.sum(1) - a.squeeze()).abs().max(), 0)
-        gc.collect()
-        torch.cuda.empty_cache()
-        self.assertEqual((a.sum(1, keepdim=True) - a).abs().max(), 0)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
@@ -17358,8 +17352,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Use double copysign to verify the correctnes of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
-            self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
-                             torch.copysign(torch.tensor(1.0), expected))
+            # Special case: NaN conversions between FP32 and FP16 is not bitwise
+            # equivalent to pass this assertion.
+            if a.dtype != torch.float16 and b.dtype != torch.float16:
+                self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
+                                 torch.copysign(torch.tensor(1.0), expected))
 
         # Compare Result with NumPy
         # Type promotion
@@ -19166,11 +19163,7 @@ else:
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            if (inp_dtype, out_dtype) == (torch.uint8, torch.float16):
-                # 25504.0 vs 25536.0
-                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=0, rtol=0.002)
-            else:
-                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):

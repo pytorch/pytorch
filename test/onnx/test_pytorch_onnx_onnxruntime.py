@@ -2498,6 +2498,14 @@ class TestONNXRuntime(unittest.TestCase):
             input = torch.randn(3, 4, 5, 6)
             self.run_test(model, input)
 
+    def test_logsoftmax_dtype(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.log_softmax(x, dim=1, dtype=torch.float64)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(Model(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()  # scripting prim_dtype
     def test_lstm_no_hidden(self):
@@ -3382,7 +3390,9 @@ class TestONNXRuntime(unittest.TestCase):
     def test_eye(self):
         class TensorFactory(torch.nn.Module):
             def forward(self, x):
-                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), torch.eye(x.size()[1], 2, dtype=torch.long)
+                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), \
+                    torch.eye(x.size()[1], 2, dtype=torch.long), torch.eye(x.shape[0]), \
+                    torch.eye(x.shape[0], dtype=torch.float64)
 
         x = torch.randn(2, 3, 4)
         another_x = torch.randn(5, 6, 7)
