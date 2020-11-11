@@ -101,7 +101,7 @@ class ProcessGroupTest : public ProcessGroup {
 
   // Create a new ProcessGroupTest instance
   static std::shared_ptr<ProcessGroup> createProcessGroupTest(
-      const c10::intrusive_ptr<::c10d::Store>& store,
+      const std::shared_ptr<::c10d::Store>& store,
       int rank,
       int size,
       const std::chrono::duration<float>& timeout);
