@@ -67,42 +67,67 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("sequence_nr", &LegacyEvent::sequenceNr)
       .def("stack", &LegacyEvent::stack)
       .def("scope", &LegacyEvent::scope)
-      .def("correlation_id", &LegacyEvent::correlationId);
+      .def("correlation_id", &LegacyEvent::correlationId)
+      .def("start_us", &LegacyEvent::cpuUs);
 
 #ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "KinetoEvent")
+      // name of the event
       .def("name", &KinetoEvent::name)
+      // start callback PyTorch thread id
       .def("start_thread_id", [](const KinetoEvent& e) {
         return e.startThreadId();
       })
+      // end callback PyTorch thread id
       .def("end_thread_id", [](const KinetoEvent& e) {
         return e.endThreadId();
       })
-      .def("device_index", &KinetoEvent::deviceIndex)
-      .def("device_resource_id", &KinetoEvent::deviceResourceId)
-      .def("start_us", &KinetoEvent::startUs)
-      .def("duration_us", &KinetoEvent::durationUs)
-      .def("correlation_id", [](const KinetoEvent& e) {
-        return e.correlationId();
-      })
+      // for events of scope BACKWARD_FUNCTION - PyTorch thread id
+      // of the corresponding forward op
       .def("fwd_thread_id", [](const KinetoEvent& e) {
         return e.fwdThreadId();
       })
-      .def("shapes", [](const KinetoEvent& e) {
-        return e.shapes();
-      })
+      // together with fwd_thread_id, used to uniquely identify
+      // the forward op
       .def("sequence_nr", [](const KinetoEvent& e) {
         return e.sequenceNr();
       })
-      .def("stack", [](const KinetoEvent& e) {
-        return e.stack();
+      // absolute start time (since unix epoch) in us
+      .def("start_us", &KinetoEvent::startUs)
+      // duration in us
+      .def("duration_us", &KinetoEvent::durationUs)
+      // used to correlate between high-level PyTorch events
+      // and low-level device events
+      .def("correlation_id", [](const KinetoEvent& e) {
+        return e.correlationId();
       })
+      // shapes of input tensors
+      .def("shapes", [](const KinetoEvent& e) {
+        if (e.hasShapes()) {
+          return e.shapes();
+        } else {
+          return std::vector<std::vector<int64_t>>();
+        }
+      })
+      // stack traces of the PyTorch CPU events
+      .def("stack", [](const KinetoEvent& e) {
+        if (e.hasStack()) {
+          return e.stack();
+        } else {
+          return std::vector<std::string>();
+        }
+      })
+      // type of the RecordFunction that generated this PyTorch CPU event
+      // (op, torchscript function, user label, etc)
       .def("scope", [](const KinetoEvent& e) {
         return e.scope();
       })
-      .def("activity_type", [](const KinetoEvent& e) {
-        return e.activityType();
-      });
+      // device number, for CPU - process id
+      .def("device_index", &KinetoEvent::deviceIndex)
+      // for CUDA - stream id, for CPU - start thread id
+      .def("device_resource_id", &KinetoEvent::deviceResourceId)
+      // device type, currently: CPU or CUDA
+      .def("device_type", &KinetoEvent::deviceType);
 
   py::class_<ProfilerResultWrapper>(m, "ProfilerResult")
       .def("events",  [](const ProfilerResultWrapper& r) {

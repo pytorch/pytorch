@@ -772,9 +772,9 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
-            self, id, node_id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
+            self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=True, sequence_nr=-1):
+            is_remote=False, sequence_nr=-1, node_id=0):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -1005,35 +1005,25 @@ def parse_kineto_results(result):
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
 
     # Create and return FunctionEvent list
+    string_table = StringTable()
     function_events = []
     for kineto_event in result.events():
+        fe_start_us = kineto_event.start_us() - start_record.start_us()
         fe = FunctionEvent(
-            id=record.handle(),
-            node_id=record.node_id(),
-            name=string_table[start.name()],
-            thread=start.thread_id(),
-            start_us=start_record.cpu_elapsed_us(start),
-            end_us=start_record.cpu_elapsed_us(record),
-            fwd_thread=start.fwd_thread_id(),
-            input_shapes=start.shapes(),
-            stack=[entry for entry in start.stack() if filter_stack_entry(entry)],
-            scope=start.scope(),
-            cpu_memory_usage=cpu_memory_usage,
-            cuda_memory_usage=cuda_memory_usage,
-            is_async=is_async,
-            is_remote=is_remote_event,
-            sequence_nr=start.sequence_nr(),
+            id=kineto_event.correlation_id(),
+            name=string_table[kineto_event.name()],
+            thread=kineto_event.start_thread_id(),
+            start_us=fe_start_us,
+            end_us=fe_start_us + kineto_event.duration_us(),
+            fwd_thread=kineto_event.fwd_thread_id(),
+            input_shapes=kineto_event.shapes(),
+            stack=[entry for entry in kineto_event.stack() if filter_stack_entry(entry)],
+            scope=kineto_event.scope(),
+            #cpu_memory_usage=cpu_memory_usage,
+            #cuda_memory_usage=cuda_memory_usage,
+            is_async=kineto_event.start_thread_id() != kineto_event.end_thread_id(),
+            sequence_nr=kineto_event.sequence_nr(),
         )
-        # note: async events have only cpu total time
-        if not is_async and start.has_cuda():
-            cuda_start = adjusted_time(start, cuda_records)
-            cuda_end = adjusted_time(record, cuda_records)
-            if (cuda_end - cuda_start) > 0:
-                fe.append_kernel(
-                    start.name(),
-                    start.device(),
-                    cuda_start,
-                    cuda_end)
         function_events.append(fe)
     function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return function_events

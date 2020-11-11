@@ -144,6 +144,8 @@ struct TORCH_API KinetoEvent {
     return device_resource_id_;
   }
 
+  c10::DeviceType deviceType() const;
+
   uint64_t start_thread_id_ = 0;
   uint64_t end_thread_id_ = 0;
   uint64_t fwd_thread_id_ = 0;

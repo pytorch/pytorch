@@ -282,6 +282,24 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   return *this;
 }
 
+c10::DeviceType KinetoEvent::deviceType() const {
+  switch (activity_type_) {
+    case (uint8_t)libkineto::ActivityType::CPU_OP:
+      return c10::DeviceType::CPU;
+    case (uint8_t)libkineto::ActivityType::GPU_MEMCPY:
+      return c10::DeviceType::CUDA;
+    case (uint8_t)libkineto::ActivityType::GPU_MEMSET:
+      return c10::DeviceType::CUDA;
+    case (uint8_t)libkineto::ActivityType::CONCURRENT_KERNEL:
+      return c10::DeviceType::CUDA;
+    case (uint8_t)libkineto::ActivityType::EXTERNAL_CORRELATION:
+      return c10::DeviceType::CPU;
+    case (uint8_t)libkineto::ActivityType::CUDA_RUNTIME:
+      return c10::DeviceType::CPU;
+  }
+  TORCH_CHECK(false, "Unknown activity type");
+}
+
 KinetoEvent::KinetoEvent() : activity_type_((uint8_t)libkineto::ActivityType::CPU_OP) {}
 
 ProfilerResult::ProfilerResult(
