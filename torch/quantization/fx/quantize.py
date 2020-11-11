@@ -462,7 +462,9 @@ class Quantizer:
                     # propagate observed property from input
                     if is_observed(node.args[0]):
                         observed_node_names_set.add(node.name)
-                elif (isinstance(quantize_handler, Add) or isinstance(quantize_handler, Mul)) and quantize_handler.num_node_args == 1:
+                elif (isinstance(quantize_handler, Add) or
+                      isinstance(quantize_handler, Mul)) and \
+                      quantize_handler.num_node_args == 1:
                     input_node = matched_nodes[-1]  # first node in the sequence
 
                     def input_is_observed(arg):

@@ -70,7 +70,7 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     AsyncWork(const char* profilingTitle = nullptr):  ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle) {}
 
-    static void execute(c10::intrusive_ptr<AsyncWork> work) {
+    static void execute(std::shared_ptr<AsyncWork> work) {
       std::exception_ptr eptr;
       try {
         work->run();
@@ -152,82 +152,82 @@ class ProcessGroupGloo : public ProcessGroup {
   static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
   explicit ProcessGroupGloo(
-      const c10::intrusive_ptr<Store>& store,
+      const std::shared_ptr<Store>& store,
       int rank,
       int size,
       Options options = Options());
 
   virtual ~ProcessGroupGloo();
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  std::shared_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
+  std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
+  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce(
+  std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather(
+  std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
+  std::shared_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
+  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> gather(
+  std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const GatherOptions& opts = GatherOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> scatter(
+  std::shared_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+  std::shared_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputCounts,
       std::vector<int64_t>& inputCounts,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> send(
+  std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recv(
+  std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-  c10::intrusive_ptr<ProcessGroup::Work> barrier(
+  std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
  protected:
@@ -258,7 +258,7 @@ class ProcessGroupGloo : public ProcessGroup {
   void runLoop(int workerIndex);
 
   // Queue work to run on worker thread.
-  void enqueue(c10::intrusive_ptr<AsyncWork> work);
+  void enqueue(std::shared_ptr<AsyncWork> work);
 
   // Keep both a queue of pending work, and a vector with in progress work.
   // Both of these can only be mutated when holding the queue lock.
@@ -266,8 +266,8 @@ class ProcessGroupGloo : public ProcessGroup {
   // to all in progress and pending work when executing a barrier.
   // When executing a barrier, we need to ensure that all prior work
   // has completed before completing itself.
-  std::deque<c10::intrusive_ptr<AsyncWork>> workQueue_;
-  std::vector<c10::intrusive_ptr<AsyncWork>> workInProgress_;
+  std::deque<std::shared_ptr<AsyncWork>> workQueue_;
+  std::vector<std::shared_ptr<AsyncWork>> workInProgress_;
   std::mutex workMutex_;
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
