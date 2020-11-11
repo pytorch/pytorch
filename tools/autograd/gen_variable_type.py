@@ -23,7 +23,7 @@
 #     differentiable subcomponents.
 #
 
-from .utils import CodeTemplate, nested_dict, write
+from .utils import CodeTemplate, nested_dict, write, uninplace_api_name, unout_api_name
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
@@ -648,8 +648,13 @@ def emit_body(declaration):
     def emit_dispatch_call(api_name, input_base, unpacked_args):
         """ Dispatch call via function in a namespace or method on Tensor."""
         if 'namespace' in declaration['method_of']:
+            if declaration['use_c10_dispatcher'] in ['hacky_wrapper_for_legacy_signatures', 'full']:
+                dispatcher_api_name = unout_api_name(api_name)
+            else:
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                dispatcher_api_name = api_name
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                api_name=api_name,
+                api_name=dispatcher_api_name,
                 unpacked_args=unpacked_args)
         else:
             call = CALL_DISPATCH_VIA_METHOD.substitute(
