@@ -85,12 +85,16 @@ void release_image(const Resource::Image& image) {
 
 } // namespace
 
-void* map(const Resource::Memory& memory) {
-  // Call will be ignored by implementation if the memory type this allocation
-  // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
-  // we want.
-  VK_CHECK(vmaInvalidateAllocation(
-      memory.allocator, memory.allocation, 0u, VK_WHOLE_SIZE));
+void* map(
+    const Resource::Memory& memory,
+    const Resource::Memory::Access::Flags access) {
+  if (access & Resource::Memory::Access::Read) {
+    // Call will be ignored by implementation if the memory type this allocation
+    // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
+    // we want.
+    VK_CHECK(vmaInvalidateAllocation(
+        memory.allocator, memory.allocation, 0u, VK_WHOLE_SIZE));
+  }
 
   void* data = nullptr;
   VK_CHECK(vmaMapMemory(memory.allocator, memory.allocation, &data));

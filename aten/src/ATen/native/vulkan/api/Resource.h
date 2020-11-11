@@ -334,17 +334,17 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory);
+  void* map(const Memory& memory, Resource::Memory::Access::Flags);
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
+    reinterpret_cast<Pointer>(map(*this, Access::Read)),
     Scope(allocator, allocation, Access::Read),
   };
 }
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory);
+  void* map(const Memory& memory, Memory::Access::Flags);
 
   static_assert(
       (kAccess == Access::Read) ||
@@ -353,7 +353,7 @@ inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
       "Invalid memory access!");
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
+    reinterpret_cast<Pointer>(map(*this, kAccess)),
     Scope(allocator, allocation, kAccess),
   };
 }
