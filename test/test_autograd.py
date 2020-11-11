@@ -3271,7 +3271,7 @@ class TestAutograd(TestCase):
         print(prof.key_averages(group_by_input_shape=True).table(
             sort_by="self_cpu_time_total", row_limit=10))
         print(prof.table(
-            sort_by="self_cpu_time_total", row_limit=10, header="TEST", top_level_events_only=True))
+            sort_by="self_cpu_time_total", row_limit=10, max_src_column_width=300, header="TEST", top_level_events_only=True))
         print(prof.key_averages(group_by_input_shape=True).table(
             sort_by="self_cpu_time_total", row_limit=10, top_level_events_only=True))
 
@@ -4697,6 +4697,14 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
             fn(a, b)
 
+    def test_named_tensor_for_complex_views(self):
+        names = ["batch", "height", "width", "complex"]
+        z = torch.ones((5, 12, 14, 2), requires_grad=True)
+        z_named = z.refine_names(*names)
+        z_complex = torch.view_as_complex(z_named.rename(None)).refine_names(*names[:-1])
+        z_complex.sum().backward()
+        self.assertEqual(z.grad, torch.view_as_real(torch.ones_like(z_complex).rename(None)))
+
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):
             @staticmethod
@@ -4998,10 +5006,10 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp'] + separate_complex_tests
+                'exp', 'mean', 'inverse'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
-skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
+skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex', 'inverse_batched_complex']
 
 def add_test(
         name,
@@ -6772,6 +6780,39 @@ class TestAutogradDeviceType(TestCase):
         for bias in [True, False]:
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(torch.float64)
             self._test_rnn_mod(mod, inp)
+
+    def test_copysign_subgradient(self, device):
+        # Input is 0.0
+        x = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Input is -0.0
+        x = torch.tensor([-0.0, -0.0, -0.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Other is 0.0
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [-1.0, 0.0, 1.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
+
+        # Other is -0.0
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([-0.0, -0.0, -0.0], dtype=torch.float, device=device, requires_grad=True)
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [1.0, 0.0, -1.0])
+        self.assertEqual(y.grad.tolist(), [0.0] * 3)
 
     @deviceCountAtLeast(1)
     def test_grad_assignment(self, devices):
