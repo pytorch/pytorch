@@ -242,12 +242,6 @@ class C10_API SizesAndStrides {
           const auto bytesToZero = (newSize - oldSize) * sizeof(inlineStorage_[0]);
           memset(&inlineStorage_[oldSize], 0, bytesToZero);
           memset(&inlineStorage_[MAX_INLINE_SIZE + oldSize], 0, bytesToZero);
-        } else if (oldSize > newSize) {
-#ifndef NDEBUG
-         const auto bytesToSentinelize = (oldSize - newSize) * sizeof(inlineStorage_[0]);
-         memset(&inlineStorage_[newSize], 0x5a, bytesToSentinelize);
-         memset(&inlineStorage_[MAX_INLINE_SIZE + newSize], 0x5a, bytesToSentinelize);
-#endif
         }
       } else {
         int64_t* tempStorage = outOfLineStorage_;
@@ -332,9 +326,6 @@ class C10_API SizesAndStrides {
   void freeOutOfLineStorage() {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     free(outOfLineStorage_);
-#ifndef NDEBUG
-    outOfLineStorage_ = nullptr;
-#endif
   }
 
   void copyDataOutline(const SizesAndStrides& rhs) {
