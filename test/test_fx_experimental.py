@@ -240,7 +240,7 @@ class TestFXExperimental(JitTestCase):
         traced.graph.lint(traced)
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
-        self.assertTrue(any(node.op == "call_function" and node.target == torch.Assert for node in traced.graph.nodes))
+        self.assertTrue(any(node.op == "call_function" and node.target == torch._assert for node in traced.graph.nodes))
 
         # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
         traced(3, 3)
@@ -263,7 +263,7 @@ class TestFXExperimental(JitTestCase):
         traced.graph.lint(traced)
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
-        self.assertTrue(any(node.op == "call_function" and node.target == torch.Assert for node in traced.graph.nodes))
+        self.assertTrue(any(node.op == "call_function" and node.target == torch._assert for node in traced.graph.nodes))
 
         # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
         traced(3, 3)
@@ -286,7 +286,7 @@ class TestFXExperimental(JitTestCase):
         traced.graph.lint(traced)
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
-        self.assertTrue(any(node.op == "call_function" and node.target == torch.Assert for node in traced.graph.nodes))
+        self.assertTrue(any(node.op == "call_function" and node.target == torch._assert for node in traced.graph.nodes))
 
         # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
         traced(3, 3)
@@ -313,7 +313,7 @@ terrible spacing
         traced.graph.lint(traced)
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
-        self.assertTrue(any(node.op == "call_function" and node.target == torch.Assert for node in traced.graph.nodes))
+        self.assertTrue(any(node.op == "call_function" and node.target == torch._assert for node in traced.graph.nodes))
 
         # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
         error_msg = """
