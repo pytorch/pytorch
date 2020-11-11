@@ -16,12 +16,8 @@ namespace impl {
 // actually use and enforcing that the number of sizes is the same as
 // the number of strides. The memory layout is as follows:
 //
-// 1 tagged intptr_t; if the tag bit is 1, the data is stored inline and
-// the rest of the word indicates the size of the data. If the tag bit
-// is 0, the tag word is a pointer to an array of int64_t holding the
-// data; the first int64_t indicates the size of the rest.
-// 5 int64_t reserved for inline sizes
-// 5 int64_t reserved for inline strides
+// 1 size_t for the size
+// 5 eightbytes of inline sizes and 5 eightbytes of inline strides, OR pointer to out-of-line array
 class C10_API SizesAndStrides {
  public:
   // TODO: different iterator types for sizes & strides to prevent
@@ -31,23 +27,23 @@ class C10_API SizesAndStrides {
   using strides_iterator = int64_t*;
   using strides_const_iterator = const int64_t*;
 
-  SizesAndStrides() {
-    setInlineSize(1);
+  SizesAndStrides() : size_(1) {
     size_at_unchecked(0) = 0;
     stride_at_unchecked(0) = 1;
   }
 
   ~SizesAndStrides() {
     if (C10_UNLIKELY(!isInline())) {
-      delete outOfLineStorage();
+      freeOutOfLineStorage();
     }
   }
 
-  SizesAndStrides(const SizesAndStrides& rhs) {
+  SizesAndStrides(const SizesAndStrides& rhs) : size_(rhs.size_) {
     if (C10_LIKELY(rhs.isInline())) {
-      copyFromInline(rhs);
+      copyDataInline(rhs);
     } else {
-      taggedStorageOrSize_ = reinterpret_cast<int64_t>(new std::vector<int64_t>(*rhs.outOfLineStorage()));
+      allocateOutOfLineStorage(size_);
+      copyDataOutline(rhs);
     }
   }
 
@@ -57,27 +53,31 @@ class C10_API SizesAndStrides {
     }
     if (C10_LIKELY(rhs.isInline())) {
       if (C10_UNLIKELY(!isInline())) {
-        delete outOfLineStorage();
+        freeOutOfLineStorage();
       }
-      copyFromInline(rhs);
+      copyDataInline(rhs);
     } else {
       if (isInline()) {
-        taggedStorageOrSize_ = reinterpret_cast<int64_t>(new std::vector<int64_t>(*rhs.outOfLineStorage()));
+        allocateOutOfLineStorage(rhs.size_);
       } else {
-        // Both out of line. Copy their storage into ours.
-        *outOfLineStorage() = *rhs.outOfLineStorage();
+        resizeOutOfLineStorage(rhs.size_);
       }
+      copyDataOutline(rhs);
     }
+    size_ = rhs.size_;
     return *this;
   }
 
   // Move from rhs. rhs.size() == 0 afterwards.
-  SizesAndStrides(SizesAndStrides&& rhs) : taggedStorageOrSize_(rhs.taggedStorageOrSize_) {
+  SizesAndStrides(SizesAndStrides&& rhs) : size_(rhs.size_) {
     if (C10_LIKELY(isInline())) {
       memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
+    } else {
+      outOfLineStorage_ = rhs.outOfLineStorage_;
+      rhs.outOfLineStorage_ = nullptr;
     }
 
-    rhs.setInlineSize(0);
+    rhs.size_ = 0;
   }
 
   // Move from rhs. rhs.size() == 0 afterwards.
@@ -87,34 +87,32 @@ class C10_API SizesAndStrides {
     }
     if (C10_LIKELY(rhs.isInline())) {
       if (C10_UNLIKELY(!isInline())) {
-        delete outOfLineStorage();
+        freeOutOfLineStorage();
       }
-      copyFromInline(rhs);
+      copyDataInline(rhs);
     } else {
       // They're outline. We're going to steal their vector.
       if (!isInline()) {
-        delete outOfLineStorage();
+        freeOutOfLineStorage();
       }
-      taggedStorageOrSize_ = rhs.taggedStorageOrSize_;
+      outOfLineStorage_ = rhs.outOfLineStorage_;
+      rhs.outOfLineStorage_ = nullptr;
     }
-    rhs.setInlineSize(0);
+    size_ = rhs.size_;
+    rhs.size_ = 0;
 
     return *this;
   }
 
   size_t size() const {
-    if (C10_LIKELY(isInline())) {
-      return taggedStorageOrSize_ >> 1;
-    } else {
-      return outOfLineStorage()->size() / 2;
-    }
+    return size_;
   }
 
   const int64_t* sizes_data() const {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[0];
     } else {
-      return outOfLineStorage()->data();
+      return &outOfLineStorage_[0];
     }
   }
 
@@ -122,24 +120,16 @@ class C10_API SizesAndStrides {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[0];
     } else {
-      return outOfLineStorage()->data();
+      return &outOfLineStorage_[0];
     }
   }
 
   sizes_const_iterator sizes_begin() const {
-    if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[0];
-    } else {
-      return outOfLineStorage()->data();
-    }
+    return sizes_data();
   }
 
   sizes_iterator sizes_begin()  {
-    if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[0];
-    } else {
-      return outOfLineStorage()->data();
-    }
+    return sizes_data();
   }
 
   sizes_const_iterator sizes_end() const {
@@ -163,7 +153,7 @@ class C10_API SizesAndStrides {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
-      return outOfLineStorage()->data() + size();
+      return &outOfLineStorage_[size()];
     }
   }
 
@@ -171,7 +161,7 @@ class C10_API SizesAndStrides {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
-      return outOfLineStorage()->data() + size();
+      return &outOfLineStorage_[size()];
     }
   }
 
@@ -179,7 +169,7 @@ class C10_API SizesAndStrides {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
-      return outOfLineStorage()->data() + size();
+      return &outOfLineStorage_[size()];
     }
   }
 
@@ -187,7 +177,7 @@ class C10_API SizesAndStrides {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
-      return outOfLineStorage()->data() + size();
+      return &outOfLineStorage_[size()];
     }
   }
 
@@ -252,69 +242,113 @@ class C10_API SizesAndStrides {
           const auto bytesToZero = (newSize - oldSize) * sizeof(inlineStorage_[0]);
           memset(&inlineStorage_[oldSize], 0, bytesToZero);
           memset(&inlineStorage_[MAX_INLINE_SIZE + oldSize], 0, bytesToZero);
+        } else if (oldSize > newSize) {
+#ifndef NDEBUG
+         const auto bytesToSentinelize = (oldSize - newSize) * sizeof(inlineStorage_[0]);
+         memset(&inlineStorage_[newSize], 0x5a, bytesToSentinelize);
+         memset(&inlineStorage_[MAX_INLINE_SIZE + newSize], 0x5a, bytesToSentinelize);
+#endif
         }
       } else {
-        memcpy(&inlineStorage_[0], outOfLineStorage()->data(), MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
+        int64_t* tempStorage = outOfLineStorage_;
+        memcpy(
+            &inlineStorage_[0],
+            &tempStorage[0],
+            MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
         memcpy(
             &inlineStorage_[MAX_INLINE_SIZE],
-            outOfLineStorage()->data() + outOfLineStorage()->size() / 2,
+            &tempStorage[oldSize],
             MAX_INLINE_SIZE * sizeof(inlineStorage_[0]));
-        delete outOfLineStorage();
+        // CANNOT USE freeOutOfLineStorage() HERE! outOfLineStorage_
+        // HAS BEEN OVERWRITTEN!
+        free(tempStorage);
       }
-      setInlineSize(newSize);
     } else {
       if (isInline()) {
-        taggedStorageOrSize_ = reinterpret_cast<int64_t>(new std::vector<int64_t>(newSize * 2));
+        // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
+        // OVERWRITE inlineStorage_!
+        int64_t* tempStorage = static_cast<int64_t *>(malloc(storageBytes(newSize)));
         const auto bytesToCopy = oldSize * sizeof(inlineStorage_[0]);
-        memcpy(outOfLineStorage()->data(), &inlineStorage_[0], bytesToCopy);
-        memcpy(outOfLineStorage()->data() + newSize, &inlineStorage_[MAX_INLINE_SIZE], bytesToCopy);
+        const auto bytesToZero = (newSize > oldSize) ? (newSize - oldSize) * sizeof(tempStorage[0]) : 0;
+        memcpy(&tempStorage[0], &inlineStorage_[0], bytesToCopy);
+        if (bytesToZero) {
+          memset(&tempStorage[oldSize], 0, bytesToZero);
+        }
+        memcpy(&tempStorage[newSize], &inlineStorage_[MAX_INLINE_SIZE], bytesToCopy);
+        if (bytesToZero) {
+          memset(&tempStorage[newSize + oldSize], 0, bytesToZero);
+        }
+        outOfLineStorage_ = tempStorage;
       } else {
         const bool isGrowing = oldSize < newSize;
         if (isGrowing) {
           // Resize before shifting so that we have room.
-          outOfLineStorage()->resize(newSize * 2);
+          resizeOutOfLineStorage(newSize);
         }
         // Shift the old strides to their new starting point. Note
         // that this does not occur in the inline path above because
         // the stride starting point is not moving.
         memmove(
-            outOfLineStorage()->data() + newSize,
-            outOfLineStorage()->data() + oldSize,
-            std::min(oldSize, newSize) * sizeof(inlineStorage_[0]));
+            outOfLineStorage_ + newSize,
+            outOfLineStorage_ + oldSize,
+            std::min(oldSize, newSize) * sizeof(outOfLineStorage_[0]));
         if (!isGrowing) {
           // Resize after shifting so that we don't lose data.
-          outOfLineStorage()->resize(newSize * 2);
+          resizeOutOfLineStorage(newSize);
         } else {
           // Zero the end of the sizes portion.
-          memset(outOfLineStorage()->data() + oldSize, 0, (newSize - oldSize) * sizeof(inlineStorage_[0]));
+          const auto bytesToZero = (newSize - oldSize) * sizeof(outOfLineStorage_[0]);
+          memset(&outOfLineStorage_[oldSize], 0, bytesToZero);
+          memset(&outOfLineStorage_[newSize + oldSize], 0, bytesToZero);
         }
       }
     }
+    size_ = newSize;
   }
 
  private:
   bool isInline() const {
-    return (taggedStorageOrSize_ & 1) == 1;
+    return size_ <= MAX_INLINE_SIZE;
   }
 
-  std::vector<int64_t>* outOfLineStorage() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
-    return reinterpret_cast<std::vector<int64_t>*>(taggedStorageOrSize_);
-  }
-
-  void setInlineSize(size_t sz) {
-    taggedStorageOrSize_ = (sz << 1) | 1;
-  }
-
-  void copyFromInline(const SizesAndStrides& rhs) {
+  void copyDataInline(const SizesAndStrides& rhs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.isInline());
-    taggedStorageOrSize_ = rhs.taggedStorageOrSize_;
     memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
   }
 
+  static size_t storageBytes(size_t size) {
+    return size * 2 * sizeof(int64_t);
+  }
+
+  void allocateOutOfLineStorage(size_t size) {
+    outOfLineStorage_ = static_cast<int64_t *>(malloc(storageBytes(size)));
+  }
+
+  void resizeOutOfLineStorage(size_t newSize) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
+    outOfLineStorage_ = static_cast<int64_t *>(realloc(outOfLineStorage_, storageBytes(newSize)));
+  }
+
+  void freeOutOfLineStorage() {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
+    free(outOfLineStorage_);
+#ifndef NDEBUG
+    outOfLineStorage_ = nullptr;
+#endif
+  }
+
+  void copyDataOutline(const SizesAndStrides& rhs) {
+    memcpy(outOfLineStorage_, rhs.outOfLineStorage_, storageBytes(rhs.size_));
+  }
+
   static constexpr int MAX_INLINE_SIZE = 5;
-  int64_t taggedStorageOrSize_;
-  int64_t inlineStorage_[MAX_INLINE_SIZE * 2];
+
+  size_t size_;
+  union {
+    int64_t *outOfLineStorage_;
+    int64_t inlineStorage_[MAX_INLINE_SIZE * 2];
+  };
+
 };
 
 } // namespace impl

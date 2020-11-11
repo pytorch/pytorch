@@ -70,6 +70,11 @@ TEST(SizesAndStridesTest, Resize) {
   sz.resize(4);
   checkData(sz, {1, 2, 3, 4}, {2, 4, 6, 8});
 
+  // Small to small, growing back so that we can confirm that our "new"
+  // data really does get zeroed.
+  sz.resize(5);
+  checkData(sz, {1, 2, 3, 4, 0}, {2, 4, 6, 8, 0});
+
   // Small to big.
   sz.resize(6);
 
@@ -90,9 +95,18 @@ TEST(SizesAndStridesTest, Resize) {
 
   checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
 
+  sz.size_at_unchecked(6) = 11;
+  sz.stride_at_unchecked(6) = 22;
+
+  checkData(sz, {1, 2, 3, 4, 0, 6, 11}, {2, 4, 6, 8, 0, 12, 22});
+
   // Big to big, shrinking.
   sz.resize(6);
   checkData(sz, {1, 2, 3, 4, 0, 6}, {2, 4, 6, 8, 0, 12});
+
+  // Grow back to make sure "new" elements get zeroed in big mode too.
+  sz.resize(7);
+  checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
 
   // Finally, big to small.
 
@@ -104,7 +118,7 @@ TEST(SizesAndStridesTest, Resize) {
     sz.stride_at_unchecked(ii) = 2 * (ii - 1);
   }
 
-  checkData(sz, {-1, 0, 1, 2, 3, 4}, {-2, 0, 2, 4, 6, 8});
+  checkData(sz, {-1, 0, 1, 2, 3, 4, 5}, {-2, 0, 2, 4, 6, 8, 10});
 
   sz.resize(5);
   checkData(sz, {-1, 0, 1, 2, 3}, {-2, 0, 2, 4, 6});
