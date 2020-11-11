@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-absolute-value")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-ignored-qualifiers")
+  string(APPEND CMAKE_C_FLAGS " -Wno-ignored-qualifiers")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-absolute-value")
+  string(APPEND CMAKE_C_FLAGS " -Wno-absolute-value")
 endif(NOT MSVC)
 
 # Can be compiled standalone
@@ -51,6 +51,7 @@ file(GLOB cudnn_cpp "cudnn/*.cpp")
 
 file(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h")
 file(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
+list(REMOVE_ITEM hip_cpp "${CMAKE_CURRENT_SOURCE_DIR}/hip/detail/LazyNVRTC.cpp")
 file(GLOB hip_hip "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip")
 file(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
 file(GLOB hip_nvrtc_stub_cpp "hip/nvrtc_stub/*.cpp")
@@ -63,8 +64,20 @@ file(GLOB mkldnn_cpp "mkldnn/*.cpp")
 file(GLOB native_cpp "native/*.cpp")
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
+file(GLOB vulkan_cpp "vulkan/*.cpp")
 file(GLOB native_vulkan_cpp "native/vulkan/*.cpp")
-file(GLOB native_vulkan_stub_cpp "native/vulkan/stub/*.cpp")
+file(GLOB native_vulkan_api_cpp "native/vulkan/api/*.cpp" "native/vulkan/ops/*.cpp")
+
+# Metal
+file(GLOB metal_h "metal/*.h")
+file(GLOB metal_cpp "metal/*.cpp")
+file(GLOB_RECURSE native_metal_h "native/metal/*.h")
+file(GLOB metal_test_srcs "native/metal/mpscnn/tests/*.mm")
+file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm", "native/metal/*.cpp")
+EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
+file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
+file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
+
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
@@ -78,6 +91,7 @@ file(GLOB native_cuda_cu "native/cuda/*.cu")
 exclude(native_cuda_cu "${native_cuda_cu}" ${native_cuda_cu_sp})
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
 file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
+file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
@@ -92,6 +106,7 @@ file(GLOB native_sparse_hip_hip "native/sparse/hip/*.hip")
 file(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
 file(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
 file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
+file(GLOB native_utils_cpp "native/utils/*.cpp")
 
 # XNNPACK
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
@@ -101,7 +116,8 @@ append_filelist("jit_core_headers" ATen_CORE_HEADERS)
 append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
+add_subdirectory(nnapi)
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -109,9 +125,24 @@ if(AT_MKLDNN_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
 endif()
 if(USE_VULKAN)
-  set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
+  set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
+  if(USE_VULKAN_API)
+    set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_api_cpp})
+  endif()
 else()
-  set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_stub_cpp})
+  set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
+endif()
+
+# Metal
+if(USE_PYTORCH_METAL)
+  if(IOS)
+    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
+  else()
+    # Add files needed from optimized_for_mobile
+    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
+  endif()
+else()
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
 
 if(USE_CUDA AND USE_ROCM)
@@ -297,12 +328,15 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
       )
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
-      ${CUDA_curand_LIBRARY})
+      ${CUDA_curand_LIBRARY}
+      ${CUDA_cusolver_LIBRARY}
+      )
   endif()
 
   if(CAFFE2_USE_CUDNN)
@@ -368,7 +402,15 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+else()
+  if(USE_PYTORCH_METAL)
+    if(IOS)
+      list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
+    else()
+      list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
+    endif()
+  endif()
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
@@ -402,6 +444,10 @@ endif()
 
 list(APPEND ATen_MOBILE_BENCHMARK_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/tensor_add.cpp)
+list(APPEND ATen_MOBILE_BENCHMARK_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/quantize_per_channel.cpp)
+list(APPEND ATen_MOBILE_BENCHMARK_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/stateful_conv1d.cpp)
 
 # Pass source, includes, and libs to parent
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
@@ -417,7 +463,8 @@ set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MOBILE_BENCHMARK_SRCS ${ATen_MOBILE_BENCHMARK_SRCS} PARENT_SCOPE)
-set(ATen_MOBILE_TEST_SRCS ${ATen_VEC256_TEST_SRCS} PARENT_SCOPE)
+set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
+set(ATen_VEC256_TEST_SRCS  ${ATen_VEC256_TEST_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_TEST_SRCS ${ATen_QUANTIZED_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
 set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)

@@ -1,12 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+from hypothesis import given, settings
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 
@@ -15,9 +15,10 @@ import unittest
 
 class TestCeil(serial.SerializedTestCase):
 
-    @serial.given(X=hu.tensor(),
+    @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_ceil(self, X, gc, dc, engine):
         op = core.CreateOperator("Ceil", ["X"], ["Y"], engine=engine)
 

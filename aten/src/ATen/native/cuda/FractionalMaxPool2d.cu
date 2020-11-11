@@ -205,9 +205,9 @@ void fractional_max_pool2d_out_cuda_template(
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,
           poolSizeH, poolSizeW);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
        }
      );
-  AT_CUDA_CHECK(cudaGetLastError()); 
 }
 
 void fractional_max_pool2d_backward_out_cuda_template(
@@ -272,9 +272,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
       fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         devGradInput, devGradOutput, devIndices);
+      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       }
     );
-  AT_CUDA_CHECK(cudaGetLastError()); 
 }
 
 }// namespace
@@ -323,6 +323,9 @@ Tensor& fractional_max_pool2d_backward_out_cuda(
   IntArrayRef output_size,
   const at::Tensor& indices)
 {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("fractional_max_pool2d_backward_out_cuda");
   fractional_max_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
@@ -340,6 +343,9 @@ Tensor fractional_max_pool2d_backward_cuda(
   IntArrayRef output_size,
   const at::Tensor& indices)
 {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("fractional_max_pool2d_backward_cuda");
   Tensor gradInput = at::empty({0}, input.options());
   fractional_max_pool2d_backward_out_cuda_template(
     gradInput,

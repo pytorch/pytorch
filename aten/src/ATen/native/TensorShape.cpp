@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <vector>
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
@@ -118,6 +119,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
         "unsupported operation: the input tensors cannot refer to any of the "
         "output memory locations. Found overlap in input tensor ", i);
   }
+  at::assert_no_internal_overlap(result);
 
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
   for (auto const &tensor : tensors) {
@@ -196,6 +198,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)  // Already checked above
       .resize_outputs(false)
       .add_output(result_slice)
       .add_input(source_slice)
@@ -222,6 +225,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
+        .set_check_mem_overlap(false)  // Already checked above
         .resize_outputs(false)
         .add_output(result_slice)
         .add_input(tensor)
@@ -365,7 +369,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     // The dimension in each tensor's values object that corresponds to the overall dimension along which we're catting.
     int64_t values_dim = wrapped - sparse_dim + 1;
     // The final size along the catted dimension.
-    int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), 0, [values_dim](int64_t l, Tensor const &r) {
+    const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
       return l + r._values().size(values_dim);
     });
     auto zeros_sizes = tensors[0]._values().sizes().vec();
@@ -508,6 +512,37 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   } else {
     return self.split(split_size, dim);
   }
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
+  std::vector<Tensor> splits(sections);
+  int64_t min_split_size = self.size(dim_) / sections;
+  int64_t num_splits_one_extra = self.size(dim_) % sections;
+  int64_t start_idx = 0;
+  for (int64_t split_idx = 0; split_idx < sections; split_idx++) {
+    int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
+    splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
+    start_idx += split_size;
+  }
+  return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  int64_t num_indices = indices.size();
+  std::vector<Tensor> splits(num_indices + 1);
+  int64_t start_idx = 0;
+  for (int64_t split_idx = 0; split_idx < num_indices; split_idx++) {
+    int64_t end_idx = indices[split_idx];
+    splits[split_idx] = at::slice(self, dim_, start_idx, end_idx);
+    start_idx = end_idx;
+  }
+  splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
+  return splits;
 }
 
 std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -927,6 +962,12 @@ Tensor select(const Tensor& self, Dimname dim, int64_t index) {
   return at::select(self, dimname_to_position(self, dim), index);
 }
 
+Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
+  return grad_input;
+}
+
 Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
     Algorithm:
@@ -1047,6 +1088,12 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   return result;
 }
 
+Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
+}
+
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
@@ -1137,6 +1184,53 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
 }
 
+Tensor hstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    return at::cat(rep, 0);
+  }
+  return at::cat(rep, 1);
+}
+
+Tensor& hstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    return at::cat_out(result, rep, 0);
+  }
+  return at::cat_out(result, rep, 1);
+}
+
+Tensor vstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
+  auto rep = at::atleast_2d(tensors);
+  return at::cat(rep, 0);
+}
+
+Tensor& vstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
+  auto rep = at::atleast_2d(tensors);
+  return at::cat_out(result, rep, 0);
+}
+
+Tensor dstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
+  auto rep = at::atleast_3d(tensors);
+  return at::cat(rep, 2);
+}
+Tensor& dstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
+  auto rep = at::atleast_3d(tensors);
+  return at::cat_out(result, rep, 2);
+}
+
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   int64_t nsparse_dim = self.sparse_dim();
   TORCH_CHECK(dim0 < nsparse_dim && dim1 < nsparse_dim,
@@ -1167,6 +1261,47 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     at::sparse::get_sparse_impl(self)->raw_resize_(self._indices().size(0), self._values().dim() - 1, sizes);
   }
   return self;
+}
+
+// torch.row_stack, alias for torch.vstack
+Tensor& row_stack_out(Tensor& result, TensorList tensors) {
+  return at::vstack_out(result, tensors);
+}
+
+Tensor row_stack(TensorList tensors) {
+  return at::vstack(tensors);
+}
+
+static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    // reshape 0D or 1D tensor t into (t.numel(), 1)
+    if (input.dim() <= 1) {
+      return input.reshape({input.numel(), 1});
+    }
+    return input;
+  };
+  std::transform(tensors.cbegin(),
+                 tensors.cend(),
+                 result.begin(),
+                 transform_lambda);
+  return result;
+}
+
+Tensor& column_stack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+              "column_stack expects a non-empty TensorList");
+
+  auto reshaped_tensors = reshape_input_for_column_stack(tensors);
+  return at::hstack_out(result, reshaped_tensors);
+}
+
+Tensor column_stack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+              "column_stack expects a non-empty TensorList");
+
+  auto reshaped_tensors = reshape_input_for_column_stack(tensors);
+  return at::hstack(reshaped_tensors);
 }
 
 static Tensor& propagate_transposed_names(
@@ -1531,6 +1666,52 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
 }
 
+Tensor ravel(const Tensor& self) {
+  return self.reshape(-1);
+}
+
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
+  TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
+
+  const int64_t numel = prod_intlist(sizes);
+  if (self.has_names()) {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+      dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+    TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
+  } else {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+      dim, " (", self.size(dim), ") in the input tensor");
+  }
+
+  DimVector shape(self.sizes().begin(), self.sizes().end());
+  shape.erase(shape.begin() + dim);
+  shape.insert(shape.begin() + dim, sizes.begin(), sizes.end());
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = self.view(shape);
+  }
+
+  if (names) {
+    auto outnames = self.names().vec();
+    outnames.erase(outnames.begin() + dim);
+    outnames.insert(outnames.begin() + dim, names->begin(), names->end());
+    at::internal_set_names_inplace(result, outnames);
+  }
+
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
+}
+
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }
@@ -1687,10 +1868,121 @@ Tensor diag(const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "diag", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;
+}
+
+Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+  auto ndimension = input_sizes.size();
+  AT_ASSERT(ndimension == 1 || ndimension == 2);
+
+  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
+    return grad.diag(diagonal);
+  }
+
+  // Input was a matrix but was not square
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(diagonal);
+  diag.copy_(grad);
+  return grad_input;
+}
+
+Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(offset, dim1, dim2);
+  diag.copy_(grad);
+  return grad_input;
+}
+
+Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
+  TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
+              src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
+
+  size_t self_dim = self.dim();
+  DimVector normalized_src(src.size());
+  DimVector normalized_dst(dst.size());
+
+  auto wrap_dims = [&self_dim](const IntArrayRef& vec, DimVector& normalized_vec) {
+    for (int i = 0; i < vec.size(); i++) {
+      normalized_vec[i] = maybe_wrap_dim(vec[i], self_dim);
+    }
+  };
+
+  wrap_dims(src, normalized_src);
+  wrap_dims(dst, normalized_dst);
+
+  auto all_unique = [](const DimVector& dims) {
+    DimVector copy = dims;
+    std::sort(copy.begin(), copy.end());
+    auto duplicate = std::adjacent_find(copy.begin(), copy.end());
+    return duplicate == copy.end();
+  };
+  TORCH_CHECK(all_unique(normalized_src), "movedim: repeated dim in `source` (", src, ")");
+  TORCH_CHECK(all_unique(normalized_dst), "movedim: repeated dim in `destination` (", dst, ")");
+
+  // TODO: The algorithm below can probably be optimized.
+  // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505
+
+  // Algorithm Walkthrough
+  // Example Input
+  // Variable State:
+  //     normalized_src = 0, 1
+  //     normalized_dst = 2, 4
+  //     self_dim = 5
+  DimVector order(self_dim);
+  DimVector source_dims(self_dim);
+  DimVector destination_dims(self_dim);
+
+  // We initialize two vectors to track update to the dims
+  // `order` contains the final order of the dim positions.
+  // Variable State:
+  //     order = NA, NA, NA, NA, NA
+  //     source_dims = 0, 1, 2, 3, 4
+  //     destination_dims = 0, 1, 2, 3, 4
+  std::iota(source_dims.begin(), source_dims.end(), 0);
+  std::iota(destination_dims.begin(), destination_dims.end(), 0);
+
+  // We mark and update position for the dim provided by user
+  // i.e. `normalized_src` and `normalized_dims`
+  // Variable State:
+  //     order = NA, NA, 0, NA, 1
+  //     source_dims = -1, -1, 2, 3, 4
+  //     destination_dims = 0, 1, -1, 3, -1
+  for (int64_t i = 0; i < src.size(); ++i) {
+      order[normalized_dst[i]] = normalized_src[i];
+      source_dims[normalized_src[i]] = -1;
+      destination_dims[normalized_dst[i]] = -1;
+  }
+
+  // Remove the dims whose position we already know,
+  // the ones marked with -1 in previous step
+  // Variable State:
+  //     source_dims = 2, 3, 4
+  //     destination_dims = 0, 1, 3
+  auto source_iter = std::remove(source_dims.begin(), source_dims.end(), -1);
+  auto destination_iter = std::remove(destination_dims.begin(), destination_dims.end(), -1);
+
+  int64_t rest_dim = self.dim() - src.size();
+  TORCH_INTERNAL_ASSERT(std::distance(source_dims.begin(), source_iter)  == rest_dim);
+  TORCH_INTERNAL_ASSERT(std::distance(destination_dims.begin(), destination_iter)  == rest_dim);
+
+  // Update the position of the remaining dimensions.
+  // `source_dims` now contains the original position
+  // `destination_dims` contains the new position it will shifted to
+  // after considering the user inputs.
+  // Variable State:
+  //     order = 2, 3, 0, 4, 1
+  for (int64_t i = 0; i < rest_dim; ++i) {
+      order[destination_dims[i]] = source_dims[i];
+  }
+
+  return self.permute(order);
+}
+
+Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
+  return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
 }} // at::native

@@ -13,10 +13,10 @@ See comments in operator_test/dataset_ops_test.py for an example and
 walkthrough on how to use schema to store and iterate through a structured
 in-memory dataset.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import logging
 import numpy as np
@@ -97,6 +97,8 @@ Metadata.__new__.__defaults__ = (None, None, None)
 class Field(object):
     """Represents an abstract field type in a dataset.
     """
+
+    __slots__ = ("_parent", "_field_offsets")
 
     def __init__(self, children):
         """Derived classes must call this after their initialization."""
@@ -204,6 +206,8 @@ class List(Field):
     the parent domain.
     """
 
+    __slots__ = ("lengths", "_items")
+
     def __init__(self, values, lengths_blob=None):
         if isinstance(lengths_blob, Field):
             assert isinstance(lengths_blob, Scalar)
@@ -213,7 +217,7 @@ class List(Field):
         self._items = _normalize_field(values)
         self.lengths._set_parent(self, 0)
         self._items._set_parent(self, 1)
-        Field.__init__(self, [self.lengths, self._items])
+        super(List, self).__init__([self.lengths, self._items])
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -281,13 +285,16 @@ class ListWithEvicted(List):
     This class is similar with List, but containing extra field evicted_values for
     LRU Hashing.
     """
+
+    __slots__ = ("_evicted_values",)
+
     def __init__(self, values, lengths_blob=None, evicted_values=None):
         if isinstance(evicted_values, Field):
             assert isinstance(evicted_values, Scalar)
             self._evicted_values = _normalize_field(evicted_values)
         else:
             self._evicted_values = Scalar(np.int64, evicted_values)
-        List.__init__(self, values, lengths_blob=lengths_blob)
+        super(ListWithEvicted, self).__init__(values, lengths_blob=lengths_blob)
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -362,6 +369,8 @@ class Struct(Field):
     """Represents a named list of fields sharing the same domain.
     """
 
+    __slots__ = ("fields", "_frozen")
+
     def __init__(self, *fields):
         """ fields is a list of tuples in format of (name, field). The name is
         a string of nested name, e.g., `a`, `a:b`, `a:b:c`. For example
@@ -408,7 +417,7 @@ class Struct(Field):
             self.fields[name] = self.fields[name] + field
         for id, (_, field) in enumerate(viewitems(self.fields)):
             field._set_parent(self, id)
-        Field.__init__(self, viewvalues(self.fields))
+        super(Struct, self).__init__(viewvalues(self.fields))
         self._frozen = True
 
     def _struct_from_nested_name(self, nested_name, field):
@@ -534,7 +543,7 @@ class Struct(Field):
         if item.startswith('__'):
             raise AttributeError(item)
         try:
-            return self.__dict__['fields'][item]
+            return super(Struct, self).__getattribute__("fields")[item]
         except KeyError:
             raise AttributeError(item)
 
@@ -710,10 +719,12 @@ class Scalar(Field):
     a conversion to numpy.ndarray is attempted.
     """
 
+    __slots__ = ("_metadata", "dtype", "_original_dtype", "_blob")
+
     def __init__(self, dtype=None, blob=None, metadata=None):
         self._metadata = None
         self.set(dtype, blob, metadata, unsafe=True)
-        Field.__init__(self, [])
+        super(Scalar, self).__init__([])
 
     def field_names(self):
         return ['']
@@ -969,6 +980,8 @@ def from_dtype(dtype, _outer_shape=()):
 
 class _SchemaNode(object):
     """This is a private class used to represent a Schema Node"""
+
+    __slots__ = ("name", "children", "type_str", "field")
 
     def __init__(self, name, type_str=''):
         self.name = name

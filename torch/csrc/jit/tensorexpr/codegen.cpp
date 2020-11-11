@@ -41,20 +41,22 @@ std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
-    at::Device device) {
+    at::Device device,
+    const std::string& kernel_func_name) {
   RegisterCodeGenList::StmtFactoryMethod method =
       RegisterCodeGenList::GetInstance().FindStmtFactoryMethod(name);
-  return method(stmt, params, device);
+  return method(stmt, params, device, kernel_func_name);
 }
 
 const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
   if (v->op_type() == kSigmoid) {
-    ExprHandle x{v->param(0)};
-    ExprHandle y =
-        ExprHandle(1.0f) / (ExprHandle(1.0f) + exp(ExprHandle(-0.0f) - x));
+    auto x = v->param(0)->accept_mutator(this);
+    auto one = ExprHandle(getImmediateByType(v->dtype(), 1.0));
+    auto zero = ExprHandle(getImmediateByType(v->dtype(), 0.0));
+    ExprHandle y = one / (one + exp(zero - ExprHandle(x)));
     return y.node();
   }
-  return v;
+  return IRMutator::mutate(v);
 }
 
 } // namespace tensorexpr

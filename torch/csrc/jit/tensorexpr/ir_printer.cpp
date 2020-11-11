@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
-#include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -232,18 +231,22 @@ void IRPrinter::visit(const Ramp* v) {
 
 void IRPrinter::visit(const Load* v) {
   // TODO: support the mask case
-  os() << *v->base_handle() << "[";
-  size_t i = 0;
-  for (const Expr* ind : v->indices()) {
-    if (i++) {
-      os() << ", ";
+  if (v->indices().size() == 0) {
+    os() << *v->base_handle();
+  } else {
+    os() << *v->base_handle() << "[";
+    size_t i = 0;
+    for (const Expr* ind : v->indices()) {
+      if (i++) {
+        os() << ", ";
+      }
+      ind->accept(this);
     }
-    ind->accept(this);
+    if (v->indices().empty()) {
+      os() << "0";
+    }
+    os() << "]";
   }
-  if (v->indices().empty()) {
-    os() << "0";
-  }
-  os() << "]";
 }
 
 void IRPrinter::visit(const Broadcast* v) {
@@ -314,6 +317,36 @@ void IRPrinter::visit(const RoundOff* v) {
   os() << ")";
 }
 
+void IRPrinter::visit(const MaxTerm* v) {
+  os() << "MaxTerm(";
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    os() << ", ";
+  }
+  for (size_t i = 0; i < v->variables().size(); ++i) {
+    v->variables()[i]->accept(this);
+    if (i < v->variables().size() - 1) {
+      os() << ", ";
+    }
+  }
+  os() << ")";
+}
+
+void IRPrinter::visit(const MinTerm* v) {
+  os() << "MinTerm(";
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    os() << ", ";
+  }
+  for (size_t i = 0; i < v->variables().size(); ++i) {
+    v->variables()[i]->accept(this);
+    if (i < v->variables().size() - 1) {
+      os() << ", ";
+    }
+  }
+  os() << ")";
+}
+
 void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
   os() << *v->accumulator() << ", ";
@@ -355,6 +388,11 @@ void IRPrinter::visit(const ReduceOp* v) {
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
   emitIndent();
+  if (v->indices().size() == 0) {
+    os() << *v->base_handle() << " = " << *v->value() << ";" << std::endl;
+    return;
+  }
+
   os() << *v->base_handle() << "[";
   size_t i = 0;
   for (const Expr* ind : v->indices()) {
@@ -393,14 +431,6 @@ void IRPrinter::visit(const Block* v) {
   os() << "{" << std::endl;
   indent_++;
 
-  for (const auto& pair : v->varBindings()) {
-    const Var* var = pair.first;
-    const Expr* val = pair.second;
-    emitIndent();
-    os() << var->dtype().ToCppString() << " " << *var << " = " << *val << "; "
-         << std::endl;
-  }
-
   for (Stmt* s : *v) {
     os() << *s;
   }
@@ -426,6 +456,13 @@ void IRPrinter::visit(const Allocate* v) {
 void IRPrinter::visit(const Free* v) {
   emitIndent();
   os() << "Free(" << *v->buffer_var() << ");" << std::endl;
+}
+
+void IRPrinter::visit(const Let* v) {
+  emitIndent();
+  os() << v->dtype().ToCppString() << " " << *v->var();
+  os() << " = " << *v->value();
+  os() << "; " << std::endl;
 }
 
 void IRPrinter::visit(const Cond* v) {
@@ -463,6 +500,11 @@ void IRPrinter::visit(const AtomicAdd* v) {
   }
   os() << "], " << *v->value() << ");";
   os() << std::endl;
+}
+
+void IRPrinter::visit(const SyncThreads* v) {
+  emitIndent();
+  os() << "__syncthreads();\n";
 }
 
 void IRPrinter::emitIndent() {
@@ -510,11 +552,6 @@ std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const Function& f) {
-  stream << std::to_string(&f);
-  return stream;
-}
-
 void print(const Expr* expr) {
   if (expr) {
     IRPrinter p(std::cout);
@@ -522,6 +559,7 @@ void print(const Expr* expr) {
   } else {
     std::cout << "(null expr)";
   }
+  std::cout << "\n";
 }
 
 void print(const Stmt* stmt) {
@@ -535,10 +573,6 @@ void print(const Stmt* stmt) {
 
 void print(const Tensor* t) {
   std::cout << std::to_string(t);
-}
-
-void print(const Function* f) {
-  std::cout << std::to_string(f);
 }
 
 } // namespace tensorexpr
@@ -571,26 +605,6 @@ std::string to_string(const Tensor* t) {
     oss << *t->arg(i) << "[" << *t->dim(i) << "]";
   }
   oss << ") = " << *t->body() << "\n";
-  return oss.str();
-}
-
-std::string to_string(const Function* f) {
-  if (!f) {
-    return "(null function)\n";
-  }
-  std::ostringstream oss;
-  oss << "Function F(";
-  for (size_t i = 0; i < f->ndim(); i++) {
-    if (i != 0) {
-      oss << ", ";
-    }
-    oss << *f->arg(i) << "[" << *f->dim(i) << "]";
-  }
-  oss << ") {\n";
-  for (size_t i = 0; i < f->bodies().size(); i++) {
-    oss << "  " << *f->func_var(i) << " = " << *f->body(i) << "\n";
-  }
-  oss << "}\n";
   return oss.str();
 }
 } // namespace std

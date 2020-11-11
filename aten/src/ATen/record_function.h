@@ -1,32 +1,32 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/SmallVector.h>
+#include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
 #include <memory>
 
 #include <functional>
 
+namespace c10 {
+class CAFFE2_API OperatorHandle;
+}
+
 namespace at {
 
 // Kind of record function scope;
-// workaround for the older GCC versions:
-#ifndef _MSC_VER
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wattributes"
-#endif
-enum class TORCH_API RecordScope : uint8_t {
+enum class C10_API_ENUM RecordScope : uint8_t {
   // c10/ATen ops, autograd nodes
   FUNCTION = 0,
+  // Functions/nodes called from the autograd
+  BACKWARD_FUNCTION,
   // TorchScript functions, methods
   TORCHSCRIPT_FUNCTION,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
 };
-#ifndef _MSC_VER
-#  pragma GCC diagnostic pop
-#endif
 
 } // namespace at
 
@@ -75,7 +75,16 @@ struct TORCH_API StringView {
 // Soft limit on the number of callbacks to use;
 constexpr std::size_t kSoftLimitCallbacks = 4;
 
+// An abstract base class for various observer contexts that can be attached to
+// the RecordFunction.
+struct ObserverContext {
+  virtual ~ObserverContext() {}
+ protected:
+  ObserverContext() {}
+};
+
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
+typedef std::vector<std::unique_ptr<ObserverContext>> ObserverContextList;
 typedef uint64_t RecordFunctionHandle;
 
 struct TORCH_API RecordFunction {
@@ -114,8 +123,20 @@ struct TORCH_API RecordFunction {
   // Retrieves the thread_id that this RecordFunction ran start callbacks with.
   // Useful for writing thread safe end callbacks that may be potentially
   // executed in a different thread (async ops)
-  inline uint64_t getStartCallbacksThreadId() const {
+  inline uint64_t threadId() const {
     return thread_id_;
+  }
+
+  // For backward functions - thread id of the corresponding forward function,
+  // or zero otherwise;
+  // used alongside with sequence number to correlate backward functions with
+  // the forward ones
+  inline uint64_t forwardThreadId() const {
+    return fwd_thread_id_;
+  }
+
+  inline void setForwardThreadId(uint64_t thread_id) {
+    fwd_thread_id_ = thread_id;
   }
 
   inline RecordScope scope() const {
@@ -132,6 +153,7 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
+  void before(c10::OperatorHandle const& op, int64_t sequence_nr = -1);
 
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
@@ -163,35 +185,55 @@ struct TORCH_API RecordFunction {
     return handle_;
   }
 
+  inline c10::optional<OperatorName> operator_name() const {
+    return operator_name_;
+  }
+
   inline void setHandle(RecordFunctionHandle handle) {
     handle_ = handle;
   }
 
-  // Used internally to keep track of thread local and global callbacks
-  // that were picked to run; must be sorted;
-  // public because of anonymous "friend" class
-  CallbackHandles sorted_active_tls_handles_;
-  CallbackHandles sorted_active_global_handles_;
   // Whether this RecordFunction runs any callbacks
   bool active = false;
-  /// Whether any of the picked callbacks require inputs
+  // Whether any of the picked callbacks require inputs
   bool needs_inputs = false;
+
+ private:
+  // Allows the modification of some internal states for callbacks.
+  friend class CallbackManager;
+
+  // Used internally to keep track of thread local and global callbacks
+  // that were picked to run; must be sorted;
+  CallbackHandles sorted_active_tls_handles_;
+  CallbackHandles sorted_active_global_handles_;
+
+  // Stores various ObserverContext objects with event metadata for thread local
+  // callbacks.
+  ObserverContextList tls_ctx_;
+
+  // Stores various ObserverContext objects with event metadata for global
+  // callbacks.
+  ObserverContextList global_ctx_;
 
   // In cases when RecordFunction might be active but we chose not to
   // use the observers (e.g. operator is not observed), this boolean
   // flag is used to check whether the start callbacks were called
   bool called_start_callbacks_ = false;
 
- private:
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
+
+  c10::optional<c10::OperatorName> operator_name_;
 
   // Kind of scope this RecordFunction is observing
   const RecordScope scope_;
 
   // The logical thread_id that this RecordFunction was created with
   uint64_t thread_id_ = 0;
+
+  // For backward functions - thread id of the the forward function
+  uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
   // and end of ranges
@@ -206,6 +248,8 @@ struct TORCH_API RecordFunction {
  * RecordFunctionCallback represents a pair of callbacks to be used with
  * RecordFunction, members:
  *   start, end - the callbacks to run when entering and exiting the scope;
+ *     optionally, the start callback may return an ObserverContext which will
+ *     be passed to the end callback, use appropriate constructor accordingly.
  *   needs_inputs - whether the callbacks need the inputs passed from the observed
  *     function/range; NOTE: passing the inputs incurs an additional overhead;
  *   sampling_probability - if not 1.0, then the callback is probabilistically sampled
@@ -219,12 +263,25 @@ struct TORCH_API RecordFunction {
  */
 class TORCH_API RecordFunctionCallback {
  public:
+  // This interface supports observers that require passing an ObserverContext
+  // between start and end callbacks.
+  explicit RecordFunctionCallback(
+      std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start,
+      std::function<void(const RecordFunction&, ObserverContext*)> end =
+        [](const RecordFunction&, ObserverContext*) {}):
+      start_(std::move(start)),
+      end_(std::move(end)) {
+    scopes_.fill(true);
+  }
+
+  // This interface is for observers that do not pass an ObserverContext object
+  // between start and end callbacks.
   explicit RecordFunctionCallback(
       std::function<void(const RecordFunction&)> start,
       std::function<void(const RecordFunction&)> end =
         [](const RecordFunction&) {}):
-      start_(std::move(start)),
-      end_(std::move(end)) {
+      start_{[start](const RecordFunction& rf) { start(rf); return nullptr; }},
+      end_{[end](const RecordFunction& rf, ObserverContext*) { end(rf); }} {
     scopes_.fill(true);
   }
 
@@ -280,11 +337,11 @@ class TORCH_API RecordFunctionCallback {
     return scopes_[(size_t)sc];
   }
 
-  inline const std::function<void(const RecordFunction&)>& start() const {
+  inline const std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)>& start() const {
     return start_;
   }
 
-  inline const std::function<void(const RecordFunction&)>& end() const {
+  inline const std::function<void(const RecordFunction&, ObserverContext*)>& end() const {
     return end_;
   }
 
@@ -292,8 +349,8 @@ class TORCH_API RecordFunctionCallback {
   bool shouldRun(RecordScope scope) const;
 
  private:
-  std::function<void(const RecordFunction&)> start_;
-  std::function<void(const RecordFunction&)> end_;
+  std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
+  std::function<void(const RecordFunction&, ObserverContext*)> end_;
   std::function<bool(const RecordFunctionCallback&)> should_run_;
   bool needs_inputs_ = false;
   bool needs_ids_ = false;
@@ -443,5 +500,17 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
 // Internal, used in ThreadLocalState to propagate TLS callbacks across threads
 TORCH_API RecordFunctionCallbacks _getTLSCallbacks();
 TORCH_API void _setTLSCallbacks(const RecordFunctionCallbacks& callbacks);
+
+struct TORCH_API RecordFunctionTLS {
+  // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
+  // must be sorted in increasing handles order
+  RecordFunctionCallbacks sorted_tls_callbacks_;
+
+  bool tls_record_function_enabled_ = true;
+};
+
+TORCH_API const RecordFunctionTLS& get_record_function_tls_();
+
+TORCH_API void set_record_function_tls_(const RecordFunctionTLS& tls);
 
 } // namespace at

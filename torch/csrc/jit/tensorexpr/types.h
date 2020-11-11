@@ -76,6 +76,10 @@ class TORCH_API Dtype {
     return tensorexpr::is_floating_point(scalar_type_);
   }
 
+  Dtype cloneWithScalarType(ScalarType nt) const {
+    return Dtype(nt, lanes_);
+  }
+
  private:
   friend std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
   ScalarType scalar_type_;
@@ -124,6 +128,10 @@ inline Dtype BinaryOpDtype(
     Dtype op1_dtype,
     Dtype op2_dtype,
     ScalarType ret_type = ScalarType::None) {
+  if (op1_dtype.scalar_type() == ScalarType::Bool ||
+      op2_dtype.scalar_type() == ScalarType::Bool) {
+    throw malformed_input("arithmetic binary operations on Bool not supported");
+  }
   if (op1_dtype == op2_dtype) {
     if (ret_type == ScalarType::None) {
       return op1_dtype;

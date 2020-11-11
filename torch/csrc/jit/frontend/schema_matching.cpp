@@ -56,6 +56,15 @@ Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
+  // treat conversion to Optional[T] as conversions to T
+  if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
+    if (value->type()->kind() != OptionalType::Kind &&
+        !value->type()->isSubtypeOf(NoneType::get())) {
+      return tryConvertToType(
+          loc, graph, op->getElementType(), value, allow_conversions);
+    }
+  }
+
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
@@ -111,7 +120,7 @@ Value* tryConvertToType(
 
     // Convert strings to device
     if (value->type()->isSubtypeOf(StringType::get()) &&
-        DeviceObjType::get()->isSubtypeOf(concrete_type)) {
+        concrete_type->isSubtypeOf(DeviceObjType::get())) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
   }
@@ -575,8 +584,8 @@ Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
@@ -611,7 +620,7 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  auto matched = matchSchemas(schemas, loc, graph, inputs, attributes, self);
+  auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);

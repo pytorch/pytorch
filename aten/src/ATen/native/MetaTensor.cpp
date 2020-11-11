@@ -14,7 +14,7 @@ Tensor empty_meta(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  TensorOptions options = options_.merge_memory_format(optional_memory_format);
 
   // TODO: deduplicate this logic with empty_cpu
 
@@ -25,7 +25,7 @@ Tensor empty_meta(
     // participate in dispatch, but so that tests like is_sparse/is_cuda
     // give the correct result (a CUDA meta tensor "is cuda").  If we don't
     // like this, remove the computeDispatchKey line
-    DispatchKeySet{DispatchKey::Meta, computeDispatchKey(options)},
+    DispatchKeySet{DispatchKey::Meta, options.computeDispatchKey()},
     dtype,
     device
   );

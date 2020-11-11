@@ -29,20 +29,7 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   }
 
   for (const auto& pr : constants_) {
-    const auto& name = pr.first;
-    const auto& val = pr.second.v_;
-    auto match = tryToInferType(val);
-    if (!match.success()) {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "We need to infer the type of constant to convert the python value to IValue, but failed to infer type of ",
-          py::str(val),
-          "\n:",
-          match.reason());
-    }
-    // Validation and conversion to make sure `val` is a valid constant
-    // is done in python, see `torch/jit/_recursive.py`
-    cls->addConstant(name, toIValue(val, match.type()));
+    cls->addConstant(pr.first, pr.second);
   }
 
   for (const auto& moduleInfo : modules_) {
@@ -57,15 +44,43 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
 
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
     TypePtr type) {
+  ConcreteModuleTypeBuilder builder;
+  builder.setPoisoned();
+
   // `type` should either be a module interface or a class type
   if (auto interface = type->cast<InterfaceType>()) {
     TORCH_INTERNAL_ASSERT(interface->is_module());
   } else {
-    TORCH_INTERNAL_ASSERT(type->cast<ClassType>());
+    const auto classType = type->expect<ClassType>();
+
+    // Populate the builder metadata from the JIT type. This is to ensure
+    // ConcreteModuleTypes produced from Python and ones produced from a JIT
+    // type directly behave the same to the rest of the system.
+    for (size_t i = 0; i < classType->numAttributes(); i++) {
+      const auto& attrName = classType->getAttributeName(i);
+      const auto& attrType = classType->getAttribute(i);
+      if (attrType->is_module()) {
+        builder.addModule(attrName, ConcreteModuleType::fromJitType(attrType));
+      } else {
+        builder.addAttribute(
+            attrName,
+            attrType,
+            classType->is_parameter(i),
+            classType->is_buffer(i));
+      }
+    }
+
+    for (size_t i = 0; i < classType->numConstants(); i++) {
+      builder.addConstant(
+          classType->getConstantName(i), classType->getConstant(i));
+    }
   }
+
+  // Not make_shared because the constructor is private.
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
   ret->jitType_ = std::move(type);
-  ret->data_.setPoisoned();
+  ret->data_ = builder;
+
   return ret;
 }
 
@@ -91,6 +106,7 @@ bool ConcreteModuleTypeBuilder::equals(
     bool equal =
       pyClass_.is(other.pyClass_) &&
       iterableModuleKind_ == other.iterableModuleKind_ &&
+      ignoredAttributes_ == other.ignoredAttributes_ &&
       constants_ == other.constants_ &&
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
@@ -128,7 +144,10 @@ TypePtr ConcreteModuleType::getJitType() const {
   return jitType_;
 }
 
-py::object ConcreteModuleType::getPyClass() const {
+c10::optional<py::object> ConcreteModuleType::getPyClass() const {
+  if (!data_.pyClass_) {
+    return c10::nullopt;
+  }
   return data_.pyClass_;
 }
 
@@ -168,6 +187,10 @@ c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
   return c10::nullopt;
 }
 
+bool ConcreteModuleType::isIgnoredAttribute(const std::string& name) const {
+  return data_.ignoredAttributes_.count(name) > 0;
+}
+
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
     findSubmoduleConcreteType(const std::string& name) const {
   const auto it = std::find_if(
@@ -195,6 +218,20 @@ void ConcreteModuleTypeBuilder::setPoisoned() {
 void ConcreteModuleTypeBuilder::addConstant(
     std::string name,
     py::object value) {
+  auto match = tryToInferType(value);
+  if (!match.success()) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "We need to infer the type of constant to convert the python value to IValue,"
+        " but failed to infer type of ",
+        py::str(value),
+        "\n:",
+        match.reason());
+  }
+  constants_.emplace(std::move(name), toIValue(value, match.type()));
+}
+
+void ConcreteModuleTypeBuilder::addConstant(std::string name, IValue value) {
   constants_.emplace(std::move(name), std::move(value));
 }
 
@@ -249,12 +286,16 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
 }
 
+void ConcreteModuleTypeBuilder::addIgnoredAttribute(std::string name) {
+  ignoredAttributes_.emplace(std::move(name));
+}
+
 void ConcreteModuleType::dump() const {
   std::cout << "ConcreteModuleType for: "
             << py::getattr(data_.pyClass_, "__name__") << "\n";
   std::cout << "Constants: \n";
   for (const auto& pr : data_.constants_) {
-    std::cout << "\t" << pr.first << ": " << pr.second.v_ << "\n";
+    std::cout << "\t" << pr.first << ": " << pr.second << "\n";
   }
   std::cout << "\nAttributes: \n";
   for (const auto& pr : data_.attributes_) {
@@ -283,7 +324,7 @@ std::unordered_map<std::string, py::object> ConcreteModuleType::getConstantsPy()
   // need to bind ConcreteModuleType::Constant as well.
   std::unordered_map<std::string, py::object> ret;
   for (const auto& pr : data_.constants_) {
-    ret.emplace(pr.first, pr.second.v_);
+    ret.emplace(pr.first, toPyObject(pr.second));
   }
   return ret;
 }

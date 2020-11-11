@@ -32,25 +32,32 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
+from torch.nn.parameter import UninitializedParameter
 from torch.nn.parallel._functions import Broadcast
+from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
-    ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
+    ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, slowTest
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCriterionTest, \
-    module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
+from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
+    module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast
+    dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
+    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
+from torch.types import _TensorOrTensors
+
+
+AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -62,9 +69,6 @@ if TEST_SCIPY:
 
 if TEST_NUMPY:
     import numpy as np
-
-NO_HALF_TENSORTYPES = [torch.float,
-                       torch.double]
 
 DOUBLE_TENSORTYPES = [torch.double]
 
@@ -108,7 +112,7 @@ class PackedSequenceTest(TestCase):
     def _padded_sequence(self, tensor_type):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(tensor_type)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
@@ -229,7 +233,7 @@ class TestAvgPool(TestCase):
 
     def test_avg_pool2d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
+                               lambda: F.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
 
     def test_doubletensor_avg_pool2d_with_divisor(self):
         n, m = 3, 3
@@ -237,7 +241,7 @@ class TestAvgPool(TestCase):
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 for divisor in [1, 7, i * j]:
-                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = F.avg_pool2d(input[0], (i, j), divisor_override=divisor)
                     actual = actual.view(1, actual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
                     self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
@@ -267,7 +271,7 @@ class TestAvgPool(TestCase):
 
     def test_avg_pool3d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
+                               lambda: F.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
     def test_avg_pool1d_ceil_mode(self):
         # Regression test for gh-36977
@@ -314,15 +318,19 @@ class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def _forward(self, module, input):
+    def _forward(self, module, input: _TensorOrTensors):
         with freeze_rng_state():
-            return module(input)
+            if isinstance(input, tuple):
+                return module(*input)
+            else:
+                return module(input)
 
-    def _backward(self, module, input, output, grad_output, create_graph=False):
+    def _backward(self, module, input: _TensorOrTensors, output, grad_output, create_graph=False):
         output.backward(grad_output, retain_graph=True, create_graph=create_graph)
-        if input.grad is None:
-            return None
-        return input.grad.data
+        if isinstance(input, tuple):
+            return tuple(i.grad.data if i.grad is not None else None for i in input)
+        else:
+            return input.grad.data if input.grad is not None else None
 
     def _forward_criterion(self, criterion, input, target, extra_args=None):
         if extra_args is None:
@@ -346,7 +354,7 @@ class TestNN(NNTestCase):
             gradOutput = torch.ones(())
         criterion(*args).backward(gradOutput.to(input_tuple[0]))
         if isinstance(input, tuple):
-            return tuple(map(lambda i: i.grad.data, input))
+            return tuple(i.grad.data for i in input)
         else:
             return input.grad.data
 
@@ -635,6 +643,11 @@ class TestNN(NNTestCase):
         module.zero_grad()
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
+
+        # Force set to None.
+        module.zero_grad(set_to_none=True)
+        self.assertIsNone(module.weight.grad)
+
 
     def test_no_grad(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -1540,7 +1553,8 @@ class TestNN(NNTestCase):
         m = nn.Linear(20, 10).float()
         mw = m.weight[:]
         m.double()
-        mw[0][0] = 5
+        with torch.no_grad():
+            mw[0][0] = 5
         self.assertTrue(mw[0][0].dtype == torch.float)
         self.assertTrue(mw._base[0][0].dtype == torch.double)
 
@@ -1553,7 +1567,8 @@ class TestNN(NNTestCase):
             m = nn.Linear(20, 10).float()
             mw = m.weight[:]
             m.double()
-            mw[0][0] = 5
+            with torch.no_grad():
+                mw[0][0] = 5
             self.assertTrue(mw[0][0] == mw._base[0][0])
 
             # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
@@ -2643,6 +2658,19 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.weight_norm(m)
             m = torch.nn.utils.weight_norm(m)
 
+    def test_parameterlistdict_setting_attributes(self):
+        mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+
+        with self.assertWarnsRegex(UserWarning,
+                                   r"Setting attributes on ParameterList is not supported"):
+            torch.nn.utils.weight_norm(mod, "0")
+
+        mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+
+        with self.assertWarnsRegex(UserWarning,
+                                   r"Setting attributes on ParameterDict is not supported"):
+            torch.nn.utils.weight_norm(mod, "b")
+
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
@@ -2929,6 +2957,23 @@ class TestNN(NNTestCase):
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_max_norm_unsorted_repeating_indices(self):
+        def create_embedding(device):
+            # Seed RNG so we get the same Embedding each time
+            torch.manual_seed(0)
+            return torch.nn.Embedding(
+                num_embeddings=20,
+                embedding_dim=64,
+                max_norm=1.0).to(device)
+
+        ix = torch.arange(2, device='cpu', dtype=torch.long).repeat(2000)
+        out_cpu = create_embedding('cpu')(ix)
+
+        ix = ix.to('cuda')
+        out = create_embedding('cuda')(ix)
+        self.assertEqual(out.cpu(), out_cpu)
+
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
         input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
@@ -2980,6 +3025,12 @@ class TestNN(NNTestCase):
         output = embedding(input)
         self.assertEqual(a, output)
 
+    def test_embedding_from_pretrained_padding_idx(self):
+        padding_idx = 2
+        embeddings = torch.rand(4, 3, requires_grad=True)
+        embedding_nn = nn.Embedding.from_pretrained(embeddings, padding_idx=padding_idx)
+        self.assertEqual(embedding_nn.weight[padding_idx].sum(), 0)
+
     def test_embedding_from_pretrained_options(self):
         a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
         opts = {
@@ -3008,6 +3059,13 @@ class TestNN(NNTestCase):
         res_old = embed_old(a)
 
         res_F = F.embedding(a, embeddings)
+        self.assertEqual(res_old, res_F)
+
+        embed_old = torch.nn.Embedding(4, 3)
+        embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)
+        res_old = embed_old(a)
+        res_F = F.embedding(a, embeddings, padding_idx=2)
+
         self.assertEqual(res_old, res_F)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
@@ -3094,9 +3152,18 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
 
         inputs = torch.randn(1, 2, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+
+        # Assert assertion errors are raised for invalid circular padding values
+        inputs = torch.randn(1, 1, 4, requires_grad=True)
+        # Should raise error when trying to wrap around more than once
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (5, 4), mode='circular'))
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (3, 6), mode='circular'))
+        # Should raise error when negative padding results in negative output shape
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
 
         # assert that relfection padding errors when pad >= input size
         expected_err_msg = r"Padding size should be less than the corresponding input dimension"
@@ -3513,7 +3580,8 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @largeCUDATensorTest('12GB')
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @largeTensorTest('12GB', device='cuda')
     def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
         input = torch.randint(1, 10, (1, 32, 2 ** 17 + 1, 32), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -3535,7 +3603,8 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @largeCUDATensorTest('12GB')
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @largeTensorTest('12GB', device='cuda')
     def test_adaptive_pooling_avg_nhwc_launch_config_forward(self):
         input = torch.randint(1, 10, (1, 32, 16, 16), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -3613,7 +3682,7 @@ class TestNN(NNTestCase):
         self.assertIn('bn.running_var', state_dict)
         self.assertIn('bn.running_mean', state_dict)
         self.assertIn('bn.num_batches_tracked', state_dict)
-        self.assertFalse(any(map(lambda k: k.startswith('empty'), state_dict.keys())))
+        self.assertFalse(any(k.startswith('empty') for k in state_dict.keys()))
         for k, v in state_dict.items():
             param = net
             for component in k.split('.'):
@@ -3764,8 +3833,9 @@ class TestNN(NNTestCase):
 
         # use sequential to verify nesting
         m = nn.Sequential(CustomState())
-        m[0].param[0] = 10
-        m[0].sub.weight[0, 0] = 555
+        with torch.no_grad():
+            m[0].param[0] = 10
+            m[0].sub.weight[0, 0] = 555
         state_dict = m.state_dict()
         self.assertEqual(state_dict["0.serialized"].item(), 11)
         self.assertIn("0.sub.weight", state_dict)
@@ -3898,6 +3968,15 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
+    def test_Conv2d_1x1(self):
+        in_channels = 2
+        out_channels = 2
+        mod = torch.nn.Conv2d(2, 2, 1, bias=False).to(dtype=torch.double)
+        input = torch.randn(1, in_channels, 5, 5, requires_grad=True, dtype=torch.double)
+        for enabled in (False, True):
+            with torch.backends.mkldnn.flags(enabled=enabled):
+                gradcheck(F.conv2d, (input, mod.weight))
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_cudnn_non_contiguous(self):
@@ -3927,7 +4006,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    @repeat_test_for_types(ALL_TENSORTYPES2)
+    @repeat_test_for_types(get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     def test_Conv2d_deterministic_cudnn(self, dtype=torch.float):
         inputs = torch.randn(2, 3, 5, 5, device="cuda", dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
@@ -3957,7 +4036,7 @@ class TestNN(NNTestCase):
                                lambda: o1.sum().backward())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @repeat_test_for_types(ALL_TENSORTYPES2)
+    @repeat_test_for_types(get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     def test_Conv2d_large_workspace(self, dtype=torch.float):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
         # reasonable algorithm that does not run out of memory
@@ -4031,6 +4110,38 @@ class TestNN(NNTestCase):
                 else:
                     self.assertRaises(ValueError, lambda: m(i, (h, w)))
 
+    def test_ConvTranspose2d_output_size_downsample_upsample(self):
+        b, c, hid_c = 2, 3, 2
+        for h in range(13, 24):
+            for w in range(13, 17):
+                for k in range(2, 5):
+                    for d in range(1, 5):
+                        for s in range(1, 4):
+                            for p in range(3):
+                                conv = nn.Conv2d(
+                                    in_channels=c,
+                                    out_channels=hid_c,
+                                    kernel_size=k,
+                                    stride=s,
+                                    padding=p,
+                                    dilation=d,
+                                )
+
+                                t_conv = nn.ConvTranspose2d(
+                                    in_channels=hid_c,
+                                    out_channels=c,
+                                    kernel_size=k,
+                                    stride=s,
+                                    padding=p,
+                                    dilation=d,
+                                )
+
+                                i = torch.randn(b, c, h, w)
+
+                                out = t_conv(conv(i), output_size=i.shape)
+
+                                self.assertEqual(out.size()[2:], i.size()[2:])
+
     def test_ConvTranspose3d_correct_output_size(self):
         # Check that ConvTranspose3d can take a 5d output_size.
         m = nn.ConvTranspose3d(2, 2, 2)
@@ -4046,13 +4157,29 @@ class TestNN(NNTestCase):
             output = deconv(inputs)
             output.mean().backward()
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @repeat_test_for_types([torch.half, torch.float])
+    def test_ConvTranspose2d_large_output_padding(self, dtype=torch.half):
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='cuda', dtype=dtype)
+        net2 = torch.nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='cuda', dtype=dtype)
+        net3 = torch.nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='cuda', dtype=dtype)
+        x = torch.rand(1, 128, 6, 6, device='cuda', dtype=dtype, requires_grad=True)
+        x = net1(x)
+        x = net2(x)
+        x = net3(x)
+        x.backward(torch.randn_like(x))
+        torch.cuda.synchronize()
+
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
             dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
-        if TEST_WITH_ROCM:
+        if AMPERE_OR_ROCM:
             dev_dtypes += [("cuda", torch.bfloat16)]
         for device, dtype in dev_dtypes:
             m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False).to(device, dtype)
@@ -4090,7 +4217,7 @@ class TestNN(NNTestCase):
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
             dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
-        if TEST_WITH_ROCM:
+        if AMPERE_OR_ROCM:
             dev_dtypes += [("cuda", torch.bfloat16)]
         for device, dtype in dev_dtypes:
             m = nn.Conv2d(4, 16, kernel_size=3, groups=2, bias=False).to(device, dtype)
@@ -5103,6 +5230,493 @@ class TestNN(NNTestCase):
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_allclose(result, ref_output)
 
+    def test_transformerencoder(self):
+        def get_a_test_layer(use_cuda, activation):
+            d_model = 4
+            nhead = 2
+            dim_feedforward = 16
+            dropout = 0.0
+            device = torch.device("cuda" if use_cuda else "cpu")
+
+            layer = nn.TransformerEncoderLayer(
+                d_model,
+                nhead,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation=activation).to(device)
+
+            with torch.no_grad():
+                # set constant weights of the model
+                for idx, p in enumerate(layer.parameters()):
+                    x = p.data
+                    sz = x.view(-1).size(0)
+                    shape = x.shape
+                    x = torch.cos(torch.arange(0, sz).float().view(shape))
+                    p.data.copy_(x)
+
+            return layer
+
+        # this is a deterministic test for TransformerEncoder
+        activation = "relu"
+        use_cuda = torch.cuda.is_available()
+        device = torch.device("cuda" if use_cuda else "cpu")
+
+        encoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation)
+
+        model = nn.TransformerEncoder(encoder_layer, 1).to(device)
+
+        # deterministic input
+        encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                       [0.5387, 0.1655, 0.3565, 0.0471]],
+                                      [[0.8335, 0.2799, 0.5031, 0.2947],
+                                       [0.1402, 0.0318, 0.7636, 0.1346]],
+                                      [[0.6333, 0.9344, 0.1376, 0.9938],
+                                       [0.8924, 0.2872, 0.6692, 0.2944]],
+                                      [[0.9897, 0.6915, 0.3154, 0.1733],
+                                       [0.8645, 0.3513, 0.3064, 0.0767]],
+                                      [[0.8117, 0.2366, 0.4838, 0.7881],
+                                       [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                     ).to(device)
+        result = model(encoder_input)
+        ref_output = torch.Tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
+                                    [2.427987, 0.021213, -0.602496, -0.084103]],
+                                   [[2.424689, 0.019155, -0.604793, -0.085672],
+                                    [2.413863, 0.022211, -0.612486, -0.072490]],
+                                   [[2.433774, 0.021598, -0.598343, -0.087548],
+                                    [2.425104, 0.019748, -0.604515, -0.084839]],
+                                   [[2.436185, 0.022682, -0.596625, -0.087261],
+                                    [2.433556, 0.021891, -0.598509, -0.086832]],
+                                   [[2.416246, 0.017512, -0.610712, -0.082961],
+                                    [2.422901, 0.024187, -0.606178, -0.074929]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # all 0
+        mask = torch.zeros([2, 5]).to(device) == 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+        mask[0, 1] = 1
+        mask[1, 3] = 1
+        mask[1, 4] = 1
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
+                                    [2.428811, 0.021445, -0.601912, -0.084252]],
+                                   [[2.425009, 0.019155, -0.604566, -0.085899],
+                                    [2.415408, 0.02249, -0.611415, -0.073]],
+                                   [[2.434199, 0.021682, -0.598039, -0.087699],
+                                    [2.42598, 0.019941, -0.603896, -0.085091]],
+                                   [[2.436457, 0.022736, -0.59643, -0.08736],
+                                    [2.434021, 0.022093, -0.598179, -0.08679]],
+                                   [[2.416531, 0.017498, -0.610513, -0.083181],
+                                    [2.4242, 0.024653, -0.605266, -0.074959]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # test case 2, multiple layers no norm
+        model = nn.TransformerEncoder(encoder_layer, 2).to(device)
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor(
+            [[[2.419051, 0.017446, -0.608738, -0.085003],
+              [2.419102, 0.017452, -0.608703, -0.085026]],
+             [[2.419043, 0.017445, -0.608744, -0.084999],
+              [2.419052, 0.017446, -0.608738, -0.085004]],
+             [[2.419067, 0.017448, -0.608727, -0.085010],
+              [2.419098, 0.017452, -0.608706, -0.085024]],
+             [[2.419072, 0.017449, -0.608724, -0.085012],
+              [2.419119, 0.017455, -0.608691, -0.085034]],
+             [[2.419019, 0.017442, -0.608761, -0.084989],
+              [2.419075, 0.017449, -0.608722, -0.085014]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        model = nn.TransformerEncoder(encoder_layer, 6).to(device)
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor(
+            [[[2.419101, 0.017453, -0.608703, -0.085025],
+              [2.419101, 0.017453, -0.608704, -0.085025]],
+             [[2.419101, 0.017453, -0.608703, -0.085025],
+              [2.419101, 0.017453, -0.608704, -0.085025]],
+             [[2.419101, 0.017453, -0.608703, -0.085025],
+              [2.419101, 0.017453, -0.608704, -0.085025]],
+             [[2.419101, 0.017453, -0.608703, -0.085025],
+              [2.419101, 0.017453, -0.608704, -0.085025]],
+             [[2.419101, 0.017453, -0.608703, -0.085025],
+              [2.419101, 0.017453, -0.608704, -0.085025]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # test case 3, multiple layers with norm
+        # d_model = 4
+        norm = nn.LayerNorm(4)
+        model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor(
+            [[[1.695949, -0.357635, -0.893077, -0.445238],
+              [1.695955, -0.357639, -0.893050, -0.445266]],
+             [[1.695948, -0.357634, -0.893082, -0.445233],
+              [1.695950, -0.357635, -0.893077, -0.445238]],
+             [[1.695951, -0.357636, -0.893069, -0.445246],
+              [1.695955, -0.357639, -0.893052, -0.445264]],
+             [[1.695952, -0.357636, -0.893066, -0.445249],
+              [1.695957, -0.357641, -0.893041, -0.445276]],
+             [[1.695946, -0.357632, -0.893095, -0.445220],
+              [1.695952, -0.357637, -0.893065, -0.445251]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
+        result = model(encoder_input, src_key_padding_mask=mask)
+        ref_output = torch.Tensor(
+            [[[1.695955, -0.357639, -0.893051, -0.445265],
+              [1.695955, -0.357639, -0.893051, -0.445265]],
+             [[1.695955, -0.357639, -0.893051, -0.445265],
+              [1.695955, -0.357639, -0.893051, -0.445265]],
+             [[1.695955, -0.357639, -0.893051, -0.445265],
+              [1.695955, -0.357639, -0.893051, -0.445265]],
+             [[1.695955, -0.357639, -0.893051, -0.445265],
+              [1.695955, -0.357639, -0.893051, -0.445265]],
+             [[1.695955, -0.357639, -0.893051, -0.445265],
+              [1.695955, -0.357639, -0.893051, -0.445265]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+
+    def test_transformerdecoder(self):
+        def get_a_test_layer(use_cuda, activation):
+            d_model = 4
+            nhead = 2
+            dim_feedforward = 16
+            dropout = 0.0
+            device = torch.device("cuda" if use_cuda else "cpu")
+
+            layer = nn.TransformerDecoderLayer(
+                d_model,
+                nhead,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation=activation).to(device)
+
+            with torch.no_grad():
+                # set constant weights of the model
+                for idx, p in enumerate(layer.parameters()):
+                    x = p.data
+                    sz = x.view(-1).size(0)
+                    shape = x.shape
+                    x = torch.cos(torch.arange(0, sz).float().view(shape))
+                    p.data.copy_(x)
+
+            return layer
+
+        # this is a deterministic test for TransformerDecoder
+        activation = "relu"
+        use_cuda = torch.cuda.is_available()
+        device = torch.device("cuda" if use_cuda else "cpu")
+
+        decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation)
+
+        model = nn.TransformerDecoder(decoder_layer, 1).to(device)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
+        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.314351, 0.094805, -0.671322, 0.101977]]]).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
+                                     [[11, 12, 13, 14]]]).to(device)
+        memory_input = torch.Tensor([[[1, 2, 3, 4]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.422245, 0.051716, -0.606338, -0.024756]],
+             [[2.422245, 0.051716, -0.606338, -0.024756]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
+                                      [[5, 6, 7, 8]]]).to(device)
+        memory_input = torch.Tensor([[[9, 10, 11, 12]],
+                                     [[11, 12, 13, 14]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.343536, 0.085561, -0.654954, 0.074991]],
+             [[2.343536, 0.085561, -0.654954, 0.074991]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                       [0.2678, 0.3677, 0.4459, 0.7166]],
+                                      [[0.8100, 0.3716, 0.4096, 0.1976],
+                                       [0.6958, 0.8844, 0.6081, 0.8315]],
+                                      [[0.0494, 0.9343, 0.5955, 0.3830],
+                                       [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                     ).to(device)
+        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                      [0.5387, 0.1655, 0.3565, 0.0471]],
+                                     [[0.8335, 0.2799, 0.5031, 0.2947],
+                                      [0.1402, 0.0318, 0.7636, 0.1346]],
+                                     [[0.6333, 0.9344, 0.1376, 0.9938],
+                                      [0.8924, 0.2872, 0.6692, 0.2944]],
+                                     [[0.9897, 0.6915, 0.3154, 0.1733],
+                                      [0.8645, 0.3513, 0.3064, 0.0767]],
+                                     [[0.8117, 0.2366, 0.4838, 0.7881],
+                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                    ).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # key_padding_mask
+        key_padding_mask = torch.zeros(2, 3).to(device) == 1
+        result = model(decoder_input,
+                       memory_input,
+                       tgt_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # key_padding_mask
+        key_padding_mask[0, 2] = 1
+        key_padding_mask[1, 1] = 1
+        key_padding_mask[1, 2] = 1
+        result = model(decoder_input,
+                       memory_input,
+                       tgt_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430025, 0.027643, -0.601164, -0.073476],
+                                    [2.4323, 0.029375, -0.599553, -0.071881]],
+                                   [[2.428523, 0.026838, -0.602226, -0.07391],
+                                    [2.432634, 0.029842, -0.599318, -0.071253]],
+                                   [[2.432278, 0.028152, -0.599555, -0.074139],
+                                    [2.432659, 0.029244, -0.599294, -0.072382]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # memory_key_padding_mask
+        key_padding_mask = torch.zeros(2, 5).to(device) == 1
+        result = model(decoder_input,
+                       memory_input,
+                       memory_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # memory_key_padding_mask
+        key_padding_mask[0, 4] = 1
+        key_padding_mask[1, 3] = 1
+        key_padding_mask[1, 4] = 1
+        result = model(decoder_input,
+                       memory_input,
+                       memory_key_padding_mask=key_padding_mask)
+        ref_output = torch.Tensor([[[2.429757, 0.027358, -0.601351, -0.073816],
+                                    [2.432692, 0.028583, -0.599263, -0.073634]],
+                                   [[2.428247, 0.02662, -0.602419, -0.074123],
+                                    [2.432657, 0.029055, -0.599293, -0.072732]],
+                                   [[2.431515, 0.027687, -0.600096, -0.074459],
+                                    [2.433075, 0.028543, -0.598987, -0.073985]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # multiple layers no norm
+        model = nn.TransformerDecoder(decoder_layer, 2).to(device)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
+        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.31316, 0.0950293, -0.671995, 0.102802]]]).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # multiple layers no norm
+        model = nn.TransformerDecoder(decoder_layer, 6).to(device)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                      [0.2678, 0.3677, 0.4459, 0.7166]],
+                                     [[0.8100, 0.3716, 0.4096, 0.1976],
+                                      [0.6958, 0.8844, 0.6081, 0.8315]],
+                                     [[0.0494, 0.9343, 0.5955, 0.3830],
+                                      [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                     ).to(device)
+        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                      [0.5387, 0.1655, 0.3565, 0.0471]],
+                                     [[0.8335, 0.2799, 0.5031, 0.2947],
+                                      [0.1402, 0.0318, 0.7636, 0.1346]],
+                                     [[0.6333, 0.9344, 0.1376, 0.9938],
+                                      [0.8924, 0.2872, 0.6692, 0.2944]],
+                                     [[0.9897, 0.6915, 0.3154, 0.1733],
+                                      [0.8645, 0.3513, 0.3064, 0.0767]],
+                                     [[0.8117, 0.2366, 0.4838, 0.7881],
+                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                    ).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.42794, 0.026164, -0.60263, -0.0747591],
+              [2.43113, 0.0279516, -0.600376, -0.0736896]],
+             [[2.42794, 0.026164, -0.60263, -0.0747591],
+              [2.43113, 0.0279516, -0.600376, -0.0736896]],
+             [[2.42794, 0.026164, -0.60263, -0.0747591],
+              [2.43113, 0.0279516, -0.600376, -0.0736896]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # multiple layers with norm
+        # d_model = 4
+        norm = nn.LayerNorm(4)
+        model = nn.TransformerDecoder(decoder_layer, 2, norm=norm).to(device)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
+        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[1.66166, -0.326986, -1.01466, -0.320017]]]).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # multiple layers with norm
+        model = nn.TransformerDecoder(decoder_layer, 6, norm=norm).to(device)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                       [0.2678, 0.3677, 0.4459, 0.7166]],
+                                      [[0.8100, 0.3716, 0.4096, 0.1976],
+                                       [0.6958, 0.8844, 0.6081, 0.8315]],
+                                      [[0.0494, 0.9343, 0.5955, 0.3830],
+                                       [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                     ).to(device)
+        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                      [0.5387, 0.1655, 0.3565, 0.0471]],
+                                     [[0.8335, 0.2799, 0.5031, 0.2947],
+                                      [0.1402, 0.0318, 0.7636, 0.1346]],
+                                     [[0.6333, 0.9344, 0.1376, 0.9938],
+                                      [0.8924, 0.2872, 0.6692, 0.2944]],
+                                     [[0.9897, 0.6915, 0.3154, 0.1733],
+                                      [0.8645, 0.3513, 0.3064, 0.0767]],
+                                     [[0.8117, 0.2366, 0.4838, 0.7881],
+                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                    ).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[1.69559, -0.357291, -0.894741, -0.443553],
+              [1.69571, -0.357363, -0.894154, -0.444196]],
+             [[1.69559, -0.357291, -0.894741, -0.443553],
+              [1.69571, -0.357363, -0.894154, -0.444196]],
+             [[1.69559, -0.357291, -0.894741, -0.443553],
+              [1.69571, -0.357363, -0.894154, -0.444196]]]
+        ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
+        # gelu activation test cases
+        activation = "gelu"
+        use_cuda = torch.cuda.is_available()
+        device = torch.device("cuda" if use_cuda else "cpu")
+
+        decoder_layer = get_a_test_layer(use_cuda=use_cuda, activation=activation)
+
+        model = nn.TransformerDecoder(decoder_layer, 1).to(device)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[20, 30, 40, 50]]]).to(device)
+        memory_input = torch.Tensor([[[60, 70, 80, 90]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.306435, 0.095946, -0.675796, 0.10687]]]
+                                  ).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
+                                      [[11, 12, 13, 14]]]).to(device)
+        memory_input = torch.Tensor([[[1, 2, 3, 4]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.415448, 0.054389, -0.610932, -0.0156613]],
+             [[2.415448, 0.054389, -0.610932, -0.0156613]]]).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
+                                      [[5, 6, 7, 8]]]).to(device)
+        memory_input = torch.Tensor([[[9, 10, 11, 12]],
+                                     [[11, 12, 13, 14]]]).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.338531, 0.087709, -0.65776, 0.080646]],
+             [[2.338531, 0.087709, -0.65776, 0.080646]]]).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                       [0.2678, 0.3677, 0.4459, 0.7166]],
+                                      [[0.8100, 0.3716, 0.4096, 0.1976],
+                                       [0.6958, 0.8844, 0.6081, 0.8315]],
+                                      [[0.0494, 0.9343, 0.5955, 0.3830],
+                                       [0.5404, 0.3464, 0.9378, 0.6200]]]
+                                     ).to(device)
+        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                      [0.5387, 0.1655, 0.3565, 0.0471]],
+                                     [[0.8335, 0.2799, 0.5031, 0.2947],
+                                      [0.1402, 0.0318, 0.7636, 0.1346]],
+                                     [[0.6333, 0.9344, 0.1376, 0.9938],
+                                      [0.8924, 0.2872, 0.6692, 0.2944]],
+                                     [[0.9897, 0.6915, 0.3154, 0.1733],
+                                      [0.8645, 0.3513, 0.3064, 0.0767]],
+                                     [[0.8117, 0.2366, 0.4838, 0.7881],
+                                      [0.3718, 0.4945, 0.9511, 0.0864]]]
+                                    ).to(device)
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor(
+            [[[2.42049104, 0.03443088, -0.60793706, -0.05436271],
+              [2.42210631, 0.03546578, -0.60679895, -0.05357488]],
+             [[2.41907674, 0.0336104, -0.60892977, -0.05490462],
+              [2.42216881, 0.03586554, -0.6067524, -0.05289126]],
+             [[2.42205716, 0.03488046, -0.60683681, -0.05460596],
+              [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]).to(device)
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        torch.testing.assert_allclose(result, ref_output)
+
+
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
@@ -5193,73 +5807,6 @@ class TestNN(NNTestCase):
             hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn, nn.LSTM) else hx.cpu()
             output_cpu = rnn(input.cpu(), hx)
             self.assertEqual(output_cuda, output_cpu)
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @repeat_test_for_types(NO_HALF_TENSORTYPES)
-    def test_cuda_rnn_fused(self, dtype=torch.float):
-
-        def copy_rnn(rnn1, rnn2):
-            for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
-                for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
-
-        def check_rnn_grads(rnn1, rnn2):
-            for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
-                for x, y in zip(x_layer, y_layer):
-                    self.assertEqual(x.grad, y.grad, atol=5e-5, rtol=0)
-
-        input_size = 10
-        hidden_size = 6
-        num_layers = 2
-        seq_length = 7
-        batch = 6
-        input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
-        grad_output = torch.randn(seq_length, batch, hidden_size, dtype=dtype)
-        hx_val = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
-        grad_hy = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
-        with torch.backends.cudnn.flags(enabled=False):
-            for module in (nn.GRU, nn.LSTM):
-                for bias in (True, False):
-                    rnn = module(input_size, hidden_size, num_layers, bias=bias).to(dtype)
-                    rnn_cuda = module(input_size, hidden_size, num_layers, bias=bias).to("cuda", dtype)
-                    copy_rnn(rnn, rnn_cuda)
-
-                    is_lstm = isinstance(rnn, nn.LSTM)
-                    if is_lstm:
-                        hx = (hx_val.clone().requires_grad_(True),
-                              hx_val.clone().add(1).requires_grad_(True))
-                        hx_cuda = (hx_val.clone().cuda().requires_grad_(True),
-                                   hx_val.clone().cuda().add(1).requires_grad_(True))
-                    else:
-                        hx = hx_val.clone().requires_grad_(True)
-                        hx_cuda = hx_val.clone().cuda().requires_grad_(True)
-
-                    inp = input_val.clone().requires_grad_(True)
-                    inp_cu = input_val.clone().cuda().requires_grad_(True)
-                    output1, hy1 = rnn(inp, hx)
-                    output2, hy2 = rnn_cuda(inp_cu, hx_cuda)
-                    if is_lstm:
-                        torch.autograd.backward(
-                            [output1, hy1[0], hy1[1]], [grad_output, grad_hy, grad_hy + 1]
-                        )
-                        torch.autograd.backward(
-                            [output2, hy2[0], hy2[1]],
-                            [grad_output.cuda(), grad_hy.cuda(), (grad_hy + 1).cuda()]
-                        )
-                    else:
-                        torch.autograd.backward([output1, hy1], [grad_output, grad_hy])
-                        torch.autograd.backward([output2, hy2], [grad_output.cuda(), grad_hy.cuda()])
-
-                    self.assertEqual(output1, output2)
-                    self.assertEqual(hy1, hy2)
-
-                    check_rnn_grads(rnn, rnn_cuda)
-                    self.assertEqual(inp.grad.data, inp_cu.grad.data)
-                    if is_lstm:
-                        self.assertEqual(hx[0].grad.data, hx_cuda[0].grad.data)
-                        self.assertEqual(hx[1].grad.data, hx_cuda[1].grad.data)
-                    else:
-                        self.assertEqual(hx.grad.data, hx_cuda.grad.data)
 
     def test_transformer_args_check(self):
         model_name = 'Transformer'
@@ -5903,7 +6450,7 @@ class TestNN(NNTestCase):
             self.assertEqual(grad_output, grad_output_clone)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @repeat_test_for_types(ALL_TENSORTYPES2)
+    @repeat_test_for_types(get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     def test_noncontig_conv_grad_cuda(self, dtype=torch.float):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to("cuda", dtype)
@@ -5971,27 +6518,31 @@ class TestNN(NNTestCase):
     @unittest.skipIf(
         not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
     def test_gelu(self):
-        def _test_gelu(n, m, dtype, contiguous):
+        def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
+            numpy_dtype = {
+                torch.bfloat16: torch.float, torch.float: torch.float, torch.double: torch.double
+            }[dtype]
+            devices = ['cpu'] if dtype != torch.bfloat16 else [] + \
+                ['cuda'] if TEST_CUDA else []
+
             def _gelu_ref(X):
                 return X * stats.norm.cdf(X)
 
-            if contiguous:
-                X = torch.rand(n, m, dtype=dtype, requires_grad=True)
-            else:
-                X = torch.rand(n, m, dtype=dtype, requires_grad=True)[:, ::2]
-            res = F.gelu(X)
-            ref = _gelu_ref(X.detach().numpy())
-            self.assertEqual(res, ref)
-            gradcheck(F.gelu, [X], eps=1e-4)
-
-            if TEST_CUDA:
-                X_cuda = X.cuda()
-                res_cuda = F.gelu(X_cuda)
-                self.assertEqual(res_cuda.cpu(), ref)
-                gradcheck(F.gelu, [X_cuda], eps=1e-4)
+            for d in devices:
+                if contiguous:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
+                else:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
+                res = F.gelu(X)
+                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
+                self.assertEqual(res, ref, rtol=rtol, atol=atol)
+                if dtype != torch.bfloat16:
+                    gradcheck(F.gelu, [X], eps=1e-4)
 
         for n in range(1, 10):
             for m in range(1, 10):
+                _test_gelu(n, m, torch.bfloat16, True, 1e-2, 0)
+                _test_gelu(n, m, torch.bfloat16, False, 1e-2, 0)
                 _test_gelu(n, m, torch.float32, True)
                 _test_gelu(n, m, torch.float32, False)
                 _test_gelu(n, m, torch.float64, True)
@@ -6546,6 +7097,10 @@ class TestNN(NNTestCase):
                 torch.nn.L1Loss()(input, torch.zeros_like(input)),
                 input.abs().mean())
 
+    def test_smoothl1loss_negative_beta_not_supported(self):
+        with self.assertRaises(RuntimeError):
+            F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
+
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
@@ -6611,6 +7166,9 @@ class TestNN(NNTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "expected input to have non-empty spatial dimensions"):
             F.grid_sample(torch.empty(1, 1, 0, 2), grid, align_corners=False)
+
+        with self.assertRaisesRegex(RuntimeError, "bicubic interpolation only supports 4D input"):
+            F.grid_sample(torch.empty(1, 1, 2, 2, 2), torch.empty(1, 1, 1, 1, 3), mode='bicubic')
 
         if TEST_CUDA:
             with self.assertRaisesRegex(RuntimeError, "expected input and grid to be on same device"):
@@ -6725,6 +7283,28 @@ class TestNN(NNTestCase):
                     gradients = torch.randn_like(out_cpu)
                     out_cpu.backward(gradients)
 
+
+                    # Compare against unvectorized CPU fallback
+
+                    # NOTE [ grid_sample CPU fallback ]
+                    # grid_sample uses AVX for 2d images, but that requires 32-bit indexing for
+                    # 32-bit floats. So we also have a fallback that is used only for float tensors
+                    # requiring 64-bit indexing. That requires too much memory to run on CI, so we
+                    # also export the fallback and test it here to ensure feature parity with
+                    # the vectorized version.
+                    input_fallback = input_cpu.float().detach_().requires_grad_()
+                    grid_fallback = grid_cpu.float().detach_().requires_grad_()
+                    out_fallback = torch._grid_sampler_2d_cpu_fallback(
+                        input_fallback, grid_fallback,
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners)
+                    self.assertEqual(out_fallback, out_cpu.float(), atol=1e-5, rtol=5e-5)
+
+                    out_fallback.backward(gradients.float())
+                    self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-4, rtol=5e-5)
+                    self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-4, rtol=5e-5)
+
                     if TEST_CUDA:
                         input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
                         grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
@@ -6801,14 +7381,14 @@ class TestNN(NNTestCase):
             W = random.randint(3, IW + 2)
             test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners)
 
-        for mode in ('bilinear', 'nearest'):
+        for mode in ('bilinear', 'nearest', 'bicubic'):
             for padding_mode in ('zeros', 'border', 'reflection'):
                 for align_corners in (True, False):
                     # test known input on CPU
                     input = torch.arange(1., 11).view(1, 1, 2, 5)
                     grid = torch.tensor(
-                        [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-10], [0.5, 1.0]],
-                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-10], [1.5, 0.5]]]).view(1, 2, 5, 2)
+                        [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
+                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]]).view(1, 2, 5, 2)
                     if mode == 'bilinear':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -6869,6 +7449,37 @@ class TestNN(NNTestCase):
                                      [1., 8., 5., 8., 9.]]).view(1, 1, 2, 5)
                         else:
                             raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                    elif mode == 'bicubic':
+                        if padding_mode == 'zeros':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[-0.10424726, 7.1400003, 5.0000, 5.7842274, 9.0000],
+                                     [2.4492188, 7.4814040, 5.0000, 6.0277520, 0.0000]]).view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[0.00000, 7.6287503, 1.0625, 5.5977230, 5.3270264],
+                                     [0.40625, 8.0288770, 1.0625, 5.9375067, -0.3515625]]).view(1, 1, 2, 5)
+                        elif padding_mode == 'border':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[1.1520010, 6.0599990, 5.0000, 4.870930, 9.0000000],
+                                     [2.1328125, 6.4258375, 5.0000, 5.076003, 8.8671875]]).view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[0.894531, 6.6050020, 4.625, 4.7138715, 9.800781],
+                                     [0.906250, 7.2822485, 4.625, 5.0000052, 10.00000]]).view(1, 1, 2, 5)
+                        elif padding_mode == 'reflection':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[3.1822524, 6.239998, 5.0000, 4.8709273, 9.00000],
+                                     [1.7812500, 6.703594, 5.0000, 5.0760007, 8.21875]]).view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[2.7993753, 6.6050020, 4.25, 4.7138715, 10.269531],
+                                     [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]]).view(1, 1, 2, 5)
+                        else:
+                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+
                     else:
                         raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
@@ -6876,6 +7487,14 @@ class TestNN(NNTestCase):
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg="groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
+
+                    # See NOTE [ grid_sample CPU fallback ]
+                    output = torch._grid_sampler_2d_cpu_fallback(
+                        input.float(), grid.float(),
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners)
+                    self.assertEqual(output, groundtruth.float(), atol=1e-5, rtol=0)
 
                     # explicit check for gradient edge cases
                     input = torch.arange(0., 5).expand((1, 1, 5, 5)).requires_grad_()
@@ -6916,13 +7535,53 @@ class TestNN(NNTestCase):
                         groundtruth = torch.tensor(
                             [[[[-0., -0.], [-0., 0.], [-0., -0.], [-0., 0.]],
                               [[0., 0.], [0., 0.], [0., 0.], [0., 0.]]]]).view(1, 2, 4, 2)
+                    elif mode == 'bicubic':
+                        if padding_mode == 'zeros':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[[[-4.5, -6.], [-4.5, 6.], [2.725679, 0.740878], [2.725679, -0.740878]],
+                                      [[1.5, 0.], [1.5, 0.], [1.927921, -0.05688], [1.927921, 0.05688]]]]).view(1, 2, 4, 2)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[[[-5.859375, -5.888672], [-5.859375, 5.888672], [-5.6250, -7.5000], [-5.6250, 7.5000]],
+                                      [[-0.234375, -0.263672], [-0.234375, 0.263672], [1.8750, 0.], [1.8750, 0.]]]]
+                                ).view(1, 2, 4, 2)
+                        elif padding_mode == 'border':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[[[1.5, 0.], [1.5, 0.], [1.74, 0.], [1.74, 0.]],
+                                      [[1.5, 0.], [1.5, 0.], [1.74, 0.], [1.74, 0.]]]]).view(1, 2, 4, 2)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[[[-0.46875, 0.], [-0.46875, 0.], [1.8750, 0.], [1.8750, 0.]],
+                                      [[-0.46875, 0.], [-0.46875, 0.], [1.8750, 0.], [1.8750, 0.]]]]).view(1, 2, 4, 2)
+                        elif padding_mode == 'reflection':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[[[0., 0.], [0., 0.], [1.92, 0.], [1.92, 0.]],
+                                      [[0., 0.], [0., 0.], [1.92, 0.], [1.92, 0.]]]]).view(1, 2, 4, 2)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[[[0., 0.], [0., 0.], [1.875, 0.], [1.875, 0.]],
+                                      [[0., 0.], [0., 0.], [1.875, 0.], [1.875, 0.]]]]).view(1, 2, 4, 2)
+                        else:
+                            raise AssertionError("missing gradient groundtruth test for padding mode '{}'".format(padding_mode))
                     else:
                         raise AssertionError("missing gradient groundtruth test for interpolation mode '{}'".format(mode))
                     F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                   align_corners=align_corners).sum().backward()
-                    self.assertEqual(grid.grad, groundtruth,
+                    self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0,
                                      msg="gradient groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
+
+                    # See NOTE [ grid_sample CPU fallback ]
+                    grid.grad.zero_()
+                    torch._grid_sampler_2d_cpu_fallback(
+                        input.float(), grid.float(),
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners).sum().backward()
+                    self.assertEqual(grid.grad, groundtruth, atol=1e-5, rtol=0)
 
                     # do gradcheck
                     N = random.randint(2, 8)
@@ -7159,236 +7818,6 @@ class TestNN(NNTestCase):
                 out_cuda.backward(gradients.cuda())
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)
-
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
-    def test_affine_2d_rotate0(self):
-        # scipy before 1.0.0 do not support homogeneous coordinate
-        # scipy.ndimage.affine_transform, so we need to skip.
-        for device in device_():
-            input_size = [1, 1, 3, 3]
-            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
-            output_size = [1, 1, 5, 5]
-            angle_rad = 0.
-
-            transform_tensor, transform_ary, offset = \
-                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
-
-            scipy_ary = scipy.ndimage.affine_transform(
-                input_ary[0, 0],
-                transform_ary,
-                offset=offset,
-                output_shape=output_size[2:],
-                order=1,
-                mode='nearest',
-                prefilter=False)
-
-            affine_tensor = torch.nn.functional.affine_grid(
-                transform_tensor,
-                torch.Size(output_size),
-                align_corners=True
-            )
-
-            gridsample_ary = torch.nn.functional.grid_sample(
-                torch.tensor(input_ary, device=device).to(device),
-                affine_tensor,
-                padding_mode='border',
-                align_corners=True
-            ).to('cpu').numpy()
-
-            assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
-            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
-
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
-    def test_affine_2d_rotate90(self):
-        # scipy before 1.0.0 do not support homogeneous coordinate
-        # scipy.ndimage.affine_transform, so we need to skip.
-        for device, input_size2dsq, output_size2dsq in \
-                itertools.product(device_(), input_size2dsq_(), output_size2dsq_()):
-            input_size = input_size2dsq
-            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
-            output_size = output_size2dsq
-            angle_rad = 0.25 * math.pi * 2
-
-            transform_tensor, transform_ary, offset = \
-                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
-
-            scipy_ary = scipy.ndimage.affine_transform(
-                input_ary[0, 0],
-                transform_ary,
-                offset=offset,
-                output_shape=output_size[2:],
-                order=1,
-                mode='nearest',
-                prefilter=True)
-
-            if input_size2dsq == output_size2dsq:
-                assert np.abs(scipy_ary.mean() - input_ary.mean()) < 1e-6
-            assert np.abs(scipy_ary[0, 0] - input_ary[0, 0, 0, -1]).max() < 1e-6
-            assert np.abs(scipy_ary[0, -1] - input_ary[0, 0, -1, -1]).max() < 1e-6
-            assert np.abs(scipy_ary[-1, -1] - input_ary[0, 0, -1, 0]).max() < 1e-6
-            assert np.abs(scipy_ary[-1, 0] - input_ary[0, 0, 0, 0]).max() < 1e-6
-
-            affine_tensor = torch.nn.functional.affine_grid(
-                transform_tensor,
-                torch.Size(output_size),
-                align_corners=True
-            )
-
-            gridsample_ary = torch.nn.functional.grid_sample(
-                torch.tensor(input_ary, device=device).to(device),
-                affine_tensor,
-                padding_mode='border',
-                align_corners=True
-            ).to('cpu').numpy()
-
-            assert np.abs(scipy_ary.mean() - gridsample_ary.mean()) < 1e-6
-            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
-
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
-    def test_affine_2d_rotate45(self):
-        # scipy before 1.0.0 do not support homogeneous coordinate
-        # scipy.ndimage.affine_transform, so we need to skip.
-        for device in device_():
-            input_size = [1, 1, 3, 3]
-            input_ary = np.array(np.zeros(input_size), dtype=np.float32)
-            input_ary[0, 0, 0, :] = 0.5
-            input_ary[0, 0, 2, 2] = 1.0
-            output_size = [1, 1, 3, 3]
-            angle_rad = 0.125 * math.pi * 2
-
-            transform_tensor, transform_ary, offset = \
-                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
-
-            scipy_ary = scipy.ndimage.affine_transform(
-                input_ary[0, 0],
-                transform_ary,
-                offset=offset,
-                output_shape=output_size[2:],
-                order=1,
-                mode='nearest',
-                prefilter=False)
-
-            affine_tensor = torch.nn.functional.affine_grid(
-                transform_tensor,
-                torch.Size(output_size),
-                align_corners=True
-            )
-
-            gridsample_ary = torch.nn.functional.grid_sample(
-                torch.tensor(input_ary, device=device).to(device),
-                affine_tensor,
-                padding_mode='border',
-                align_corners=True
-            ).to('cpu').numpy()
-
-            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-6
-
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
-    def test_affine_2d_rotateRandom(self):
-        # scipy before 1.0.0 do not support homogeneous coordinate
-        # scipy.ndimage.affine_transform, so we need to skip.
-        for device, angle_rad, input_size2d, output_size2d in \
-                itertools.product(device_(), angle_rad_(), input_size2d_(), output_size2d_()):
-
-            input_size = input_size2d
-            input_ary = np.array(np.random.random(input_size), dtype=np.float32).round(3)
-            output_size = output_size2d
-
-            input_ary[0, 0, 0, 0] = 2
-            input_ary[0, 0, 0, -1] = 4
-            input_ary[0, 0, -1, 0] = 6
-            input_ary[0, 0, -1, -1] = 8
-
-            transform_tensor, transform_ary, grid_ary = \
-                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
-
-            scipy_ary = scipy.ndimage.affine_transform(
-                input_ary[0, 0],
-                transform_ary,
-                output_shape=output_size[2:],
-                order=1,
-                mode='nearest',
-                prefilter=False)
-
-            affine_tensor = torch.nn.functional.affine_grid(
-                transform_tensor,
-                torch.Size(output_size),
-                align_corners=True
-            )
-
-            gridsample_ary = torch.nn.functional.grid_sample(
-                torch.tensor(input_ary, device=device).to(device),
-                affine_tensor,
-                padding_mode='border',
-                align_corners=True
-            ).to('cpu').numpy()
-
-            affine_tensor = affine_tensor.to('cpu')
-
-            for r in range(affine_tensor.size(1)):
-                for c in range(affine_tensor.size(2)):
-                    grid_out = np.dot(grid_ary, [r, c, 1])
-                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2])
-
-            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
-
-    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
-                     "Scipy v1.0 and/or numpy not found")
-    def test_affine_3d_rotateRandom(self):
-        # scipy before 1.0.0 do not support homogeneous coordinate
-        # scipy.ndimage.affine_transform, so we need to skip.
-        for device, angle_rad, axis_vector, input_size3d, output_size3d in \
-                itertools.product(device_(), angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
-            input_size = input_size3d
-            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
-            output_size = output_size3d
-
-            input_ary[0, 0, 0, 0, 0] = 2
-            input_ary[0, 0, 0, 0, -1] = 3
-            input_ary[0, 0, 0, -1, 0] = 4
-            input_ary[0, 0, 0, -1, -1] = 5
-            input_ary[0, 0, -1, 0, 0] = 6
-            input_ary[0, 0, -1, 0, -1] = 7
-            input_ary[0, 0, -1, -1, 0] = 8
-            input_ary[0, 0, -1, -1, -1] = 9
-
-            transform_tensor, transform_ary, grid_ary = \
-                _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_rad, axis_vector)
-
-            scipy_ary = scipy.ndimage.affine_transform(
-                input_ary[0, 0],
-                transform_ary,
-                output_shape=output_size[2:],
-                order=1,
-                mode='nearest',
-                prefilter=False)
-
-            affine_tensor = torch.nn.functional.affine_grid(
-                transform_tensor,
-                torch.Size(output_size),
-                align_corners=True
-            )
-
-            gridsample_ary = torch.nn.functional.grid_sample(
-                torch.tensor(input_ary, device=device).to(device),
-                affine_tensor,
-                padding_mode='border',
-                align_corners=True
-            ).to('cpu').numpy()
-
-            affine_tensor = affine_tensor.to('cpu')
-
-            for i in range(affine_tensor.size(1)):
-                for r in range(affine_tensor.size(2)):
-                    for c in range(affine_tensor.size(3)):
-                        grid_out = np.dot(grid_ary, [i, r, c, 1])
-                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3])
-
-            assert np.abs(scipy_ary - gridsample_ary).max() < 1e-5
 
     def test_channel_shuffle(self):
         #  3D tensor
@@ -8326,6 +8755,15 @@ class TestNN(NNTestCase):
             torch.nn.grad._grad_input_padding(torch.rand(1, 2, 3), [1, 2, 5], (1,), (0,), (3,))
         self.assertEqual(len(w), 1)
 
+    def test_flatten(self):
+        tensor_input = torch.randn(2, 1, 2, 3)
+
+        # Flatten Tensor
+
+        flatten = nn.Flatten(start_dim=1, end_dim=-1)
+        tensor_output = flatten(tensor_input)
+        self.assertEqual(tensor_output.size(), torch.Size([2, 6]))
+
     def test_unflatten(self):
         tensor_input = torch.randn(2, 50)
 
@@ -8833,6 +9271,18 @@ class TestFusionEval(TestCase):
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN fusion results are off")
 
+        na_bn_ref = torch.nn.BatchNorm2d(oC, affine=False)
+        na_bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
+        na_bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
+        na_bn_ref.eval()
+
+        Y_ref = na_bn_ref(conv_ref(inputs))
+        conv_na_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(conv_ref,
+                                                                   na_bn_ref)
+        Y_hat = conv_na_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
+
 
 class TestAddRelu(TestCase):
     def test_add_relu(self):
@@ -8844,7 +9294,7 @@ class TestAddRelu(TestCase):
         a = a + 5
         add_res = a + b
         relu_res = torch.relu(add_res)
-        add_relu_res = torch.add_relu(a, b)
+        add_relu_res = torch._VF._add_relu(a, b)
 
         self.assertTrue(torch.allclose(add_relu_res, relu_res))
 
@@ -8858,7 +9308,8 @@ def add_test(test, decorator=None):
         setattr(TestNN, test_name, fn)
 
     test_name = test.get_name()
-    add(test_name, lambda self, test=test: test(self))
+    if not hasattr(test, 'test_cpu') or test.test_cpu:
+        add(test_name, lambda self, test=test: test(self))
     cuda_test_name = test_name + '_cuda'
     # With dtype enable, it's good enough to test against three floating types
     kwargs = {}
@@ -8866,8 +9317,22 @@ def add_test(test, decorator=None):
         kwargs['extra_args'] = test.extra_args
 
     if 'dtype' in get_function_arglist(test.test_cuda):
-        add(cuda_test_name + '_float', lambda self,
-            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
+        if tf32_is_not_fp32() and test.with_tf32:
+
+            def with_tf32_off(self, test=test, kwargs=kwargs):
+                with tf32_off():
+                    test.test_cuda(self, dtype=torch.float, **kwargs)
+
+            add(cuda_test_name + '_fp32', with_tf32_off)
+
+            def with_tf32_on(self, test=test, kwargs=kwargs):
+                with tf32_on(self, test.tf32_precision):
+                    test.test_cuda(self, dtype=torch.float, **kwargs)
+
+            add(cuda_test_name + '_tf32', with_tf32_on)
+        else:
+            add(cuda_test_name + '_float', lambda self,
+                test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
         add(cuda_test_name + '_double', lambda self,
             test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
 
@@ -8882,7 +9347,21 @@ def add_test(test, decorator=None):
             add(cuda_test_name + '_bfloat16', test_bfloat16)
 
     else:
-        add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
+        if tf32_is_not_fp32() and test.with_tf32:
+
+            def with_tf32_off(self, test=test, kwargs=kwargs):
+                with tf32_off():
+                    test.test_cuda(self, **kwargs)
+
+            add(cuda_test_name + '_fp32', with_tf32_off)
+
+            def with_tf32_on(self, test=test, kwargs=kwargs):
+                with tf32_on(self, test.tf32_precision):
+                    test.test_cuda(self, **kwargs)
+
+            add(cuda_test_name + '_tf32', with_tf32_on)
+        else:
+            add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
 
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
@@ -8961,10 +9440,10 @@ for test_params in module_tests + new_module_tests:
 
         add_test(test, decorator)
 
-for test_params in criterion_tests + new_criterion_tests:
+for test_params in criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
-    test = NewCriterionTest(**test_params)
+    test = CriterionTest(**test_params)
     decorator = test_params.pop('decorator', None)
     add_test(test, decorator)
     if 'check_sum_reduction' in test_params:
@@ -8979,7 +9458,7 @@ for test_params in criterion_tests + new_criterion_tests:
             return sum_reduction_constructor
 
         test_params['constructor'] = gen_sum_reduction_constructor(test_params['constructor'])
-        test = NewCriterionTest(**test_params)
+        test = CriterionTest(**test_params)
         add_test(test, decorator)
 
 
@@ -9022,7 +9501,9 @@ class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
 add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
-    fullname='AdaptiveLogSoftmax'))
+    fullname='AdaptiveLogSoftmax',
+    with_tf32=True,
+    tf32_precision=0.005))
 
 
 # The following are helpers for TestNN.test_affine_*
@@ -9373,8 +9854,10 @@ class TestNNDeviceType(NNTestCase):
             (2, 6, 4, 2, 2): 3,
             (1, 256, 1, 1): 32,
         }
-        for shape, g in good_shape_g.items():
+        for shape_g, grad in product(good_shape_g.items(), [True, False]):
+            shape, g = shape_g
             x = torch.empty(*shape, device=device, dtype=dtype).uniform_(0, 10)
+            x.requires_grad_(grad)
             b = shape[0]
             c = shape[1]
 
@@ -9386,8 +9869,13 @@ class TestNNDeviceType(NNTestCase):
             out_reshaped = output.view(b, g, -1)
             mean = out_reshaped.mean(-1)
             var = out_reshaped.var(-1, unbiased=False)
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
+            # TODO: fix numerical issue. See #44863
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
+
+            output.backward(torch.randn_like(output))
+            if output.is_cuda:
+                torch.cuda.synchronize()
 
             # test that GN applies weight and bias correctly
             scale = torch.empty(c, device=device, dtype=dtype).uniform_(0.2, 2)
@@ -9400,8 +9888,9 @@ class TestNNDeviceType(NNTestCase):
             out_normed_reshaped = out_normed.view(b, g, -1)
             mean = out_normed_reshaped.mean(-1)
             var = out_normed_reshaped.var(-1, unbiased=False)
-            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
-            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
+            # TODO: fix numerical issue. See #44863
+            self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-3, rtol=1e-3)
+            self.assertEqual(torch.abs(var).mean(), 1, atol=1e-3, rtol=1e-3)
 
         bad_shape_g = {
             (1, 2, 3, 4): 3,
@@ -9432,6 +9921,239 @@ class TestNNDeviceType(NNTestCase):
             if p.requires_grad:
                 self.assertEqual(p.grad, torch.zeros_like(p.grad))
         self.assertEqual(inp.grad, torch.zeros_like(inp))
+
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
+    @tf32_on_and_off()
+    def test_affine_2d_rotate0(self, device):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
+        input_size = [1, 1, 3, 3]
+        input_ary = np.array(np.random.random(input_size), dtype=np.float32)
+        output_size = [1, 1, 5, 5]
+        angle_rad = 0.
+
+        transform_tensor, transform_ary, offset = \
+            _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+        scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
+            input_ary[0, 0],
+            transform_ary,
+            offset=offset,
+            output_shape=output_size[2:],
+            order=1,
+            mode='nearest',
+            prefilter=False))
+
+        affine_tensor = torch.nn.functional.affine_grid(
+            transform_tensor,
+            torch.Size(output_size),
+            align_corners=True
+        )
+
+        gridsample_ary = torch.nn.functional.grid_sample(
+            torch.tensor(input_ary, device=device).to(device),
+            affine_tensor,
+            padding_mode='border',
+            align_corners=True
+        ).to('cpu')
+
+        self.assertEqual(scipy_ary.mean(), gridsample_ary.mean())
+        self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
+    @tf32_on_and_off(0.001)
+    def test_affine_2d_rotate90(self, device):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
+        for input_size2dsq, output_size2dsq in \
+                itertools.product(input_size2dsq_(), output_size2dsq_()):
+            input_size = input_size2dsq
+            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
+            output_size = output_size2dsq
+            angle_rad = 0.25 * math.pi * 2
+
+            transform_tensor, transform_ary, offset = \
+                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+            scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                offset=offset,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=True))
+
+            if input_size2dsq == output_size2dsq:
+                self.assertEqual(scipy_ary.mean(), input_ary.mean())
+            self.assertEqual(scipy_ary[0, 0], input_ary[0, 0, 0, -1])
+            self.assertEqual(scipy_ary[0, -1], input_ary[0, 0, -1, -1])
+            self.assertEqual(scipy_ary[-1, -1], input_ary[0, 0, -1, 0])
+            self.assertEqual(scipy_ary[-1, 0], input_ary[0, 0, 0, 0])
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size),
+                align_corners=True
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border',
+                align_corners=True
+            ).to('cpu')
+
+            self.assertEqual(scipy_ary.mean(), gridsample_ary.mean())
+            self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
+    @tf32_on_and_off(0.005)
+    def test_affine_2d_rotate45(self, device):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
+        input_size = [1, 1, 3, 3]
+        input_ary = np.array(np.zeros(input_size), dtype=np.float32)
+        input_ary[0, 0, 0, :] = 0.5
+        input_ary[0, 0, 2, 2] = 1.0
+        output_size = [1, 1, 3, 3]
+        angle_rad = 0.125 * math.pi * 2
+
+        transform_tensor, transform_ary, offset = \
+            _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+        scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
+            input_ary[0, 0],
+            transform_ary,
+            offset=offset,
+            output_shape=output_size[2:],
+            order=1,
+            mode='nearest',
+            prefilter=False))
+
+        affine_tensor = torch.nn.functional.affine_grid(
+            transform_tensor,
+            torch.Size(output_size),
+            align_corners=True
+        )
+
+        gridsample_ary = torch.nn.functional.grid_sample(
+            torch.tensor(input_ary, device=device).to(device),
+            affine_tensor,
+            padding_mode='border',
+            align_corners=True
+        ).to('cpu')
+
+        self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
+    @tf32_on_and_off(0.005)
+    def test_affine_2d_rotateRandom(self, device):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
+        for angle_rad, input_size2d, output_size2d in \
+                itertools.product(angle_rad_(), input_size2d_(), output_size2d_()):
+
+            input_size = input_size2d
+            input_ary = np.array(np.random.random(input_size), dtype=np.float32).round(3)
+            output_size = output_size2d
+
+            input_ary[0, 0, 0, 0] = 2
+            input_ary[0, 0, 0, -1] = 4
+            input_ary[0, 0, -1, 0] = 6
+            input_ary[0, 0, -1, -1] = 8
+
+            transform_tensor, transform_ary, grid_ary = \
+                _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_rad)
+
+            scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=False))
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size),
+                align_corners=True
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border',
+                align_corners=True
+            ).to('cpu')
+
+            affine_tensor = affine_tensor.to('cpu')
+
+            for r in range(affine_tensor.size(1)):
+                for c in range(affine_tensor.size(2)):
+                    grid_out = np.dot(grid_ary, [r, c, 1])
+                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2])
+
+            self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
+    @tf32_on_and_off(0.005)
+    def test_affine_3d_rotateRandom(self, device):
+        # scipy before 1.0.0 do not support homogeneous coordinate
+        # scipy.ndimage.affine_transform, so we need to skip.
+        for angle_rad, axis_vector, input_size3d, output_size3d in \
+                itertools.product(angle_rad_(), axis_vector_(), input_size3d_(), output_size3d_()):
+            input_size = input_size3d
+            input_ary = np.array(np.random.random(input_size), dtype=np.float32)
+            output_size = output_size3d
+
+            input_ary[0, 0, 0, 0, 0] = 2
+            input_ary[0, 0, 0, 0, -1] = 3
+            input_ary[0, 0, 0, -1, 0] = 4
+            input_ary[0, 0, 0, -1, -1] = 5
+            input_ary[0, 0, -1, 0, 0] = 6
+            input_ary[0, 0, -1, 0, -1] = 7
+            input_ary[0, 0, -1, -1, 0] = 8
+            input_ary[0, 0, -1, -1, -1] = 9
+
+            transform_tensor, transform_ary, grid_ary = \
+                _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_rad, axis_vector)
+
+            scipy_ary = torch.from_numpy(scipy.ndimage.affine_transform(
+                input_ary[0, 0],
+                transform_ary,
+                output_shape=output_size[2:],
+                order=1,
+                mode='nearest',
+                prefilter=False))
+
+            affine_tensor = torch.nn.functional.affine_grid(
+                transform_tensor,
+                torch.Size(output_size),
+                align_corners=True
+            )
+
+            gridsample_ary = torch.nn.functional.grid_sample(
+                torch.tensor(input_ary, device=device).to(device),
+                affine_tensor,
+                padding_mode='border',
+                align_corners=True
+            ).to('cpu')
+
+            affine_tensor = affine_tensor.to('cpu')
+
+            for i in range(affine_tensor.size(1)):
+                for r in range(affine_tensor.size(2)):
+                    for c in range(affine_tensor.size(3)):
+                        grid_out = np.dot(grid_ary, [i, r, c, 1])
+                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3])
+
+            self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
     def test_Dropout(self, device):
         input = torch.Tensor(1000)
@@ -9503,12 +10225,13 @@ class TestNNDeviceType(NNTestCase):
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
-        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+        if self.device_type == 'cuda':
             self._test_LayerNorm_general(device, dtype=torch.bfloat16)
 
         if self.device_type == 'cuda':
             self._test_LayerNorm_cuda_half(device)
 
+    @onlyOnCPUAndCUDA
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
 
@@ -9529,6 +10252,34 @@ class TestNNDeviceType(NNTestCase):
                 self._test_module_empty_input(mod, inp)
 
     @onlyOnCPUAndCUDA
+    def test_ReplicationPad_empty(self, device):
+        for mod, inp in [
+                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device)),
+                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device)),
+                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device))]:
+            self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 0, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
+            mod = torch.nn.ReplicationPad2d((2, 2, 2, 2))
+            inp = torch.randn(43, 0, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 4D or 5D'):
+            mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
+            inp = torch.randn(3, 0, 10, 10, 10, device=device)
+            mod(inp)
+
+    @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device)),
@@ -9544,6 +10295,85 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_Unfold_empty(self, device):
+        inp = torch.randn(0, 3, 3, 4, device=device)
+        unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
+        self._test_module_empty_input(unfold, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
+            inp = torch.randn(3, 0, 3, 4, device=device)
+            unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
+            unfold(inp)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    @tf32_on_and_off(0.005)
+    def test_rnn_fused(self, device, dtype):
+
+        def copy_rnn(rnn1, rnn2):
+            for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
+                for x, y in zip(x_layer, y_layer):
+                    x.data.copy_(y.data)
+
+        def check_rnn_grads(rnn1, rnn2):
+            for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
+                for x, y in zip(x_layer, y_layer):
+                    self.assertEqual(x.grad, y.grad, atol=5e-5, rtol=0)
+
+        input_size = 10
+        hidden_size = 6
+        num_layers = 2
+        seq_length = 7
+        batch = 6
+        input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
+        grad_output = torch.randn(seq_length, batch, hidden_size, dtype=dtype)
+        hx_val = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
+        grad_hy = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
+        with torch.backends.cudnn.flags(enabled=False, allow_tf32=None):
+            for module in (nn.GRU, nn.LSTM):
+                for bias in (True, False):
+                    rnn = module(input_size, hidden_size, num_layers, bias=bias).to(dtype)
+                    rnn_device = module(input_size, hidden_size, num_layers, bias=bias).to(device, dtype)
+                    copy_rnn(rnn, rnn_device)
+
+                    is_lstm = isinstance(rnn, nn.LSTM)
+                    if is_lstm:
+                        hx = (hx_val.clone().requires_grad_(True),
+                              hx_val.clone().add(1).requires_grad_(True))
+                        hx_device = (hx_val.clone().to(device).requires_grad_(True),
+                                     hx_val.clone().to(device).add(1).requires_grad_(True))
+                    else:
+                        hx = hx_val.clone().requires_grad_(True)
+                        hx_device = hx_val.clone().to(device).requires_grad_(True)
+
+                    inp = input_val.clone().requires_grad_(True)
+                    inp_cu = input_val.clone().to(device).requires_grad_(True)
+                    output1, hy1 = rnn(inp, hx)
+                    output2, hy2 = rnn_device(inp_cu, hx_device)
+                    if is_lstm:
+                        torch.autograd.backward(
+                            [output1, hy1[0], hy1[1]], [grad_output, grad_hy, grad_hy + 1]
+                        )
+                        torch.autograd.backward(
+                            [output2, hy2[0], hy2[1]],
+                            [grad_output.to(device), grad_hy.to(device), (grad_hy + 1).to(device)]
+                        )
+                    else:
+                        torch.autograd.backward([output1, hy1], [grad_output, grad_hy])
+                        torch.autograd.backward([output2, hy2], [grad_output.to(device), grad_hy.to(device)])
+
+                    self.assertEqual(output1, output2)
+                    self.assertEqual(hy1, hy2)
+
+                    check_rnn_grads(rnn, rnn_device)
+                    self.assertEqual(inp.grad, inp_cu.grad)
+                    if is_lstm:
+                        self.assertEqual(hx[0].grad, hx_device[0].grad)
+                        self.assertEqual(hx[1].grad, hx_device[1].grad)
+                    else:
+                        self.assertEqual(hx.grad, hx_device.grad)
 
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)
@@ -9583,7 +10413,7 @@ class TestNNDeviceType(NNTestCase):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
     @onlyCUDA
-    @largeCUDATensorTest('16GB')
+    @largeTensorTest('16GB')
     def test_prelu_backward_32bit_indexing(self, device):
         m = torch.nn.PReLU().cuda().half()
         input_ = torch.ones((1024, 1024, 1024, 2), dtype=torch.half, device=device)
@@ -9687,6 +10517,50 @@ class TestNNDeviceType(NNTestCase):
                     output = m(sigmoid(input), target)
                     verify_reduction_scalars(input, reduction, output)
 
+    # verify that bogus reduction strings are errors
+    @onlyOnCPUAndCUDA
+    def test_invalid_reduction_strings(self, device):
+        input = torch.randn(3, 5, requires_grad=True, device=device)
+        target = torch.tensor([1, 0, 4], device=device)
+
+        for reduction in ['none', 'invalid']:
+            def v(fn):
+                if reduction == 'invalid':
+                    self.assertRaises(ValueError, lambda: fn())
+                else:
+                    fn()
+
+            v(lambda: F.nll_loss(input, target, reduction=reduction))
+            v(lambda: F.cross_entropy(input, target, reduction=reduction))
+            v(lambda: F.multi_margin_loss(input, target, reduction=reduction))
+
+            v(lambda: F.kl_div(input, input, reduction=reduction))
+            v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
+            v(lambda: F.l1_loss(input, input, reduction=reduction))
+            v(lambda: F.mse_loss(input, input, reduction=reduction))
+            v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
+            v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
+            v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
+
+            zeros = torch.zeros_like(input).to(torch.int64)
+            v(lambda: F.multilabel_soft_margin_loss(input, zeros, reduction=reduction))
+            v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
+
+            v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
+            v(lambda: F.triplet_margin_with_distance_loss(input, input, input, reduction=reduction))
+            v(lambda: F.margin_ranking_loss(input, input, input.sign(), reduction=reduction))
+            v(lambda: F.cosine_embedding_loss(input, input, input[:, 0].sign(), reduction=reduction))
+
+            log_probs = torch.randn(50, 16, 20, requires_grad=True, device=device).log_softmax(2)
+            targets = torch.randint(1, 20, (16, 30), dtype=torch.long, device=device)
+            input_lengths = torch.full((16,), 50, dtype=torch.long, device=device)
+            target_lengths = torch.randint(10, 30, (16,), dtype=torch.long, device=device)
+            v(lambda: F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction=reduction))
+
+            # FIXME: should we allow derivatives on these?
+            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
+            v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
+
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
     def test_nonlinearity_propagate_nan(self, device):
@@ -9720,6 +10594,55 @@ class TestNNDeviceType(NNTestCase):
         test('leaky_relu', 0.2)
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
+
+    def test_pooling_shape(self, device):
+        ''' Test the output shape calculation for pooling functions '''
+
+        # Checks output shape against expected for 1D, 2D and 3D
+        def check(expected_out_shape, sizes, *args, **kwargs):
+            for kernel in ['max', 'avg']:
+                for i in [1, 2, 3]:
+                    if hasattr(torch.nn.functional, f'{kernel}_pool{i}d'):
+                        op = getattr(torch.nn.functional, f'{kernel}_pool{i}d')
+                        t = torch.randn(sizes[:i + 2], device=device)
+                        self.assertEqual(op(t, *args, **kwargs).shape, expected_out_shape[:i + 2])
+
+        check((1, 1, 3, 3, 4), (1, 1, 5, 6, 7), kernel_size=1, stride=2, padding=0, ceil_mode=True)
+        check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=False)
+        check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=True)
+
+        # Test case from issue https://github.com/pytorch/pytorch/issues/45357
+        x = torch.randn(1, 1, 6, 7, device=device)
+        y = torch.nn.functional.max_pool2d(x, 1, stride=(2, 2), padding=0, ceil_mode=True)
+        self.assertEqual(y.size(), (1, 1, 3, 4))
+
+    @onlyOnCPUAndCUDA   # TODO: fix on XLA
+    def test_adaptive_avg_pool2d_output_size_one(self, device):
+        def helper(size, memory_format):
+            x = torch.randint(1, 10, size, dtype=torch.float, device=device, requires_grad=True)
+            if memory_format == 'non_contiguous':
+                x = x[::2, ::2, ::2, ::2]
+            else:
+                x = x.to(memory_format=memory_format)
+
+            net = torch.nn.AdaptiveAvgPool2d((1, 1))
+            out = net(x)
+            ref_out = x.contiguous().mean((-1, -2)).view((x.size(0), x.size(1), 1, 1))
+
+            out.sum().backward()    # make sure it doesn't crash
+
+            self.assertEqual(out, ref_out)
+            if memory_format == torch.channels_last:
+                self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+                c = out.size(1)
+                self.assertEqual(out.stride(), [c, 1, c, c])
+            else:
+                self.assertTrue(out.is_contiguous())
+                c = out.size(1)
+                self.assertEqual(out.stride(), [c, 1, 1, 1])
+
+        for mf in (torch.contiguous_format, torch.channels_last, 'non_contiguous'):
+            helper((2, 3, 6, 6), mf)
 
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
@@ -9760,6 +10683,72 @@ class TestNNDeviceType(NNTestCase):
         helper(4, 8, 7, 7, 3, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
+
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_max_pool1d_errors(self, device, dtype):
+        def check(x, args, message):
+            model = torch.nn.MaxPool1d(*args)
+            with self.assertRaisesRegex(RuntimeError, r'max_pool1d\(\) ' + message):
+                model(torch.tensor(x, device=device, dtype=dtype))
+
+        # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
+        check(0, (1,), "input tensor must have 2 or 3 dimensions but got 0")
+        check([], (1,), "input tensor must have 2 or 3 dimensions but got 1")
+        check([[]], (1, 0), "stride must be greater than zero, but got 0")
+        check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
+        check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
+        check([[]], (1, 1, 0, 0), "dilation must be greater than zero, but got 0")
+        check([[]], (5, 1, 0, 1), "Invalid computed output size: -4")
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_max_pool1d_corner_cases(self, device, dtype):
+        def check(x, args, expected):
+            model = torch.nn.MaxPool1d(*args)
+            if isinstance(x, list):
+                x = torch.tensor(x, device=device, dtype=dtype)
+                expected = torch.tensor(expected, device=device, dtype=dtype)
+            self.assertEqual(model(x), expected)
+
+        # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
+        check([[]], (1, None, 0, 1, False, False), [[]])
+        check([[[]]], (1, None, 0, 1, False, False), [[[]]])
+        check([[[]]], (2, 1, 1, 2, False, True), [[[]]])
+        check([[1]], (1, None, 0, 1, False, False), [[1]])
+        check([[1]], (2, None, 1, 2, False, False), [[float('-inf')]])
+        check([[1], [1]], (2, None, 1, 2, False, False), [[float('-inf')], [float('-inf')]])
+        check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
+        check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
+
+        empty_tensor = torch.empty((2, 0, 1), device=device, dtype=dtype)
+        check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_max_pool1d(self, device, dtype):
+        # FIXME For now compare against max_pool1d with indices
+        def check(x, *args, **kwargs):
+            model = torch.nn.MaxPool1d(*args, **kwargs)
+            ref_model = torch.nn.MaxPool1d(*args, **kwargs, return_indices=True)
+            self.assertEqual(model(x), ref_model(x)[0])
+
+        sizes = [random.sample(range(8, 128), 3) for _ in range(3)]
+        kernel_sizes = random.sample(range(1, 5), 3)
+        strides = random.sample(range(1, 5), 3)
+        dilations = random.sample(range(1, 5), 3)
+        ceil_modes = [True, False]
+
+        for size, kernel_size, stride, dilation, ceil_mode in \
+                itertools.product(sizes, kernel_sizes, strides, dilations, ceil_modes):
+            padding = random.sample(range(0, math.floor(kernel_size / 2) + 1), 1)
+            check(torch.randn(size, device=device, dtype=dtype),
+                  kernel_size, stride, padding, dilation, ceil_mode=ceil_mode)
+
+        # Non-contiguous test
+        tensor = torch.randn(5, 151, 33, device=device, dtype=dtype)[::2, ::3, ::2]
+        check(tensor, 3, 2, 1, 2, ceil_mode=True)
+        check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
 
     @onlyCUDA
     def test_max_pool2d(self, device):
@@ -9852,6 +10841,21 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
+        def fn_wrapper(device):
+            def padding_fn(weight):
+                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
+                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
+            return padding_fn
+
+        fn = fn_wrapper(device)
+        _assertGradAndGradgradChecks(self, fn, (weight, ))
+
+    def test_embedding_scalar_weight_error(self, device):
+        indices = torch.rand(2, 2, device=device).long()
+        weight = torch.tensor(1.0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "'weight' must be at least 1-D"):
+            torch.nn.functional.embedding(indices, weight)
+
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypes(torch.float64)
     def test_embedding_backward(self, device, dtype):
@@ -9942,7 +10946,7 @@ class TestNNDeviceType(NNTestCase):
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
 
-    # test is flaky on ROCm CI
+    # Test fails on Vg20
     @skipCUDAIfRocm
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
@@ -9994,7 +10998,8 @@ class TestNNDeviceType(NNTestCase):
             # test non-persistent softmax kernel
             _test_helper((4, 1536))
 
-    @largeCUDATensorTest('12GB')
+    @slowTest
+    @largeTensorTest('12GB')
     def test_conv_large_nosplit(self, device):
         # Here we just test the convolution correctly route to the fallback implementation
         # that is, it does not crash. The correctness of fallback implementation should be
@@ -10047,6 +11052,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out1, out2)
 
     @onlyCUDA
+    @tf32_on_and_off(0.005)
     def test_grid_sample_large(self, device):
         def issue_35202():
             input_tensor = torch.rand(1, 1, 480, 640, dtype=torch.float, device=device, requires_grad=True)
@@ -10073,7 +11079,7 @@ class TestNNDeviceType(NNTestCase):
             result.backward(torch.ones_like(result))
             expected_grad = torch.ones_like(image)
             expected_grad[0, 0, 1, 1, 1] = 0
-            self.assertTrue(torch.allclose(image.grad, expected_grad, atol=1e-3))
+            self.assertEqual(image.grad, expected_grad, atol=0.005, rtol=0)
         issue_24823_1(torch.half)
         issue_24823_1(torch.float)
         issue_24823_1(torch.double)
@@ -10088,7 +11094,114 @@ class TestNNDeviceType(NNTestCase):
             torch.cuda.synchronize()
         issue_24823_2()
 
-    @largeCUDATensorTest('12GB')
+    @onlyCUDA
+    @expectedAlertNondeterministic('grid_sampler_2d_backward_cuda', fn_has_device_arg=False)
+    def test_grid_sample_2d_alert_nondeterministic(self, device):
+        input = torch.empty(1, 1, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, device=device)
+        input.requires_grad = True
+        output = F.grid_sample(input, grid, align_corners=False)
+        output.sum().backward()
+
+    @onlyCUDA
+    @expectedAlertNondeterministic('grid_sampler_3d_backward_cuda', fn_has_device_arg=False)
+    def test_grid_sample_3d_alert_nondeterministic(self, device):
+        input = torch.empty(1, 1, 2, 2, 2, device=device)
+        grid = torch.empty(1, 1, 1, 2, 3, device=device)
+        input.requires_grad = True
+        output = F.grid_sample(input, grid, align_corners=False)
+        output.sum().backward()
+
+    @dtypes(torch.float, torch.double)
+    @largeTensorTest(lambda self, device, dtype:
+                     # Compute sum of the large tensor sizes:
+                     # (im.numel() + small_image.numel() + small_image.grad.numel() +
+                     #   large_view.grad.numel()) * sizeof(dtype)
+                     32769 * (65536 + 3 * 65536 / 128) *
+                     torch.tensor([], dtype=dtype).element_size())
+    def test_grid_sample_large_index_2d(self, device, dtype):
+        # Test 64-bit indexing with grid_sample (gh-41656)
+        # Try accessing the corners, there should be no segfault
+        coords = torch.tensor([[[-1., -1.],
+                                [+1., -1.]],
+
+                               [[-1., +1.],
+                                [+1., +1.]]], device=device, dtype=dtype)
+        coords = coords.expand(1, 2, 2, 2)
+        im = torch.zeros([1, 1, 32769, 65536], device=device, dtype=dtype)
+
+        # Compare sampling with large strides to the same op on a contiguous tensor
+        coords = torch.rand(1, 4, 4, 2, device=device, dtype=dtype)
+        large_view = im[..., 127::128]
+        small_image = torch.rand_like(large_view)
+        large_view[...] = small_image
+        large_view.requires_grad, small_image.requires_grad = True, True
+        self.assertTrue(
+            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
+            msg="View must use 64-bit indexing")
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear', 'bicubic'), ('zeros', 'border', 'reflection'), (True, False)):
+            a = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            a.sum().backward()
+
+            b = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            b.sum().backward()
+
+            self.assertEqual(a, b)
+            self.assertEqual(small_image.grad, large_view.grad)
+
+            small_image.grad.zero_()
+            large_view.grad.zero_()
+
+    @dtypes(torch.float, torch.double)
+    @largeTensorTest(lambda self, device, dtype:
+                     # Compute sum of the large tensor sizes:
+                     # (im.numel() + small_image.numel() + small_image.grad.numel() +
+                     #   large_view.grad.numel()) * sizeof(dtype)
+                     2 * 32769 * (32768 + 3 * 32768 / 128) *
+                     torch.tensor([], dtype=dtype).element_size())
+    def test_grid_sample_large_index_3d(self, device, dtype):
+        # Test 64-bit indexing with grid_sample (gh-41656)
+        # Try accessing the corners, there should be no segfault
+        coords = torch.full((1, 2, 2, 2, 3), 1., device=device, dtype=dtype)
+        im = torch.zeros([1, 1, 2, 32769, 32768], device=device, dtype=dtype)
+
+        result = F.grid_sample(im, coords, align_corners=False)
+        self.assertEqual(result, torch.zeros((1, 1, 2, 2, 2), device=device, dtype=dtype))
+
+        # Compare sampling with large strides to the same op on a contiguous tensor
+        coords = torch.rand(1, 1, 4, 4, 3, device=device, dtype=dtype)
+        large_view = im[..., 127::128]
+        small_image = torch.rand_like(large_view)
+        large_view[...] = small_image
+        small_image.requires_grad, large_view.requires_grad = True, True
+        self.assertTrue(
+            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
+            msg="View must use 64-bit indexing")
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+            a = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            a.sum().backward()
+
+            b = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            b.sum().backward()
+
+            self.assertEqual(a, b)
+            self.assertEqual(small_image.grad, large_view.grad)
+
+            small_image.grad.zero_()
+            large_view.grad.zero_()
+
+    @slowTest
+    @largeTensorTest('12GB')
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -10104,8 +11217,9 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff2, 0)
         self.assertEqual(maxdiff3, 0)
 
+    @slowTest
     @skipCUDAIfRocm
-    @largeCUDATensorTest('12GB')
+    @largeTensorTest('12GB')
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -10299,6 +11413,63 @@ class TestNNDeviceType(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
+    @onlyCUDA
+    def test_Conv2d_size_1_kernel(self, device):
+        x_cpu = torch.randn(2, 3, 5, 5)
+        conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
+        y_cpu = conv_cpu(x_cpu)
+        y = torch.rand_like(y_cpu)
+        y_cpu.backward(y)
+
+        with cudnn.flags(enabled=False):
+            conv_cuda = torch.nn.Conv2d(3, 3, kernel_size=1).to(device)
+            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
+            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
+            y_cuda = conv_cuda(x_cpu.to(device))
+            y_cuda.backward(y.to(device))
+
+        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
+
+    @onlyCUDA
+    def test_ConvTranspose2d_size_1_kernel(self, device):
+        x_cpu = torch.randn(2, 3, 5, 5)
+        conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
+        y_cpu = conv_cpu(x_cpu)
+        y = torch.rand_like(y_cpu)
+        y_cpu.backward(y)
+
+        with cudnn.flags(enabled=False):
+            conv_cuda = torch.nn.ConvTranspose2d(3, 3, kernel_size=1).to(device)
+            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
+            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
+            y_cuda = conv_cuda(x_cpu.to(device))
+            y_cuda.backward(y.to(device))
+
+        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
+
+    @onlyCUDA
+    def test_ConvTranspose3d_size_1_kernel(self, device):
+        x_cpu = torch.randn(2, 3, 3, 5, 5)
+        conv_cpu = torch.nn.ConvTranspose3d(3, 3, kernel_size=1)
+        y_cpu = conv_cpu(x_cpu)
+        y = torch.rand_like(y_cpu)
+        y_cpu.backward(y)
+
+        with cudnn.flags(enabled=False):
+            conv_cuda = torch.nn.ConvTranspose3d(3, 3, kernel_size=1).to(device)
+            conv_cuda.bias.data.copy_(conv_cpu.bias.data)
+            conv_cuda.weight.data.copy_(conv_cpu.weight.data)
+            y_cuda = conv_cuda(x_cpu.to(device))
+            y_cuda.backward(y.to(device))
+
+        self.assertEqual(y_cpu, y_cuda, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
+        self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
+
     def _ordered_sequence(self, device, dtype):
         """Create ordered list of random sequences"""
         seqs = [torch.empty(random.randint(1, 6), device=device, dtype=dtype)
@@ -10310,7 +11481,7 @@ class TestNNDeviceType(NNTestCase):
     def _padded_sequence(self, device, dtype):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(device, dtype)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
@@ -10352,7 +11523,8 @@ class TestNNDeviceType(NNTestCase):
             m = nn.Linear(20, 10)
             mw = m.weight[:]
             m.to(device)
-            mw[0][0] = 5
+            with torch.no_grad():
+                mw[0][0] = 5
             self.assertTrue(mw[0][0] == mw._base[0][0])
 
             # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
@@ -10378,9 +11550,9 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
-    # test is flaky on ROCm CI
-    @onlyCUDA
+    # Test fails on Vg20
     @skipCUDAIfRocm
+    @onlyCUDA
     @dtypes(torch.half, torch.float)
     def test_softmax(self, device, dtype):
         input = torch.rand(32, 100, device=device, dtype=dtype, requires_grad=True)
@@ -10429,25 +11601,36 @@ class TestNNDeviceType(NNTestCase):
 
         y.backward(grad)
 
-    def test_embedding_bag_empty_input(self, device):
+    def test_pooling_size_empty(self, device):
+        t = torch.rand([1, 2, 3, 4], device=device)
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool1d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool2d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool3d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool1d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
+
+    @dtypes(torch.int, torch.long)
+    def test_embedding_bag_empty_input(self, device, dtype):
         m = 4
         n = 3
-        x = torch.tensor([], device=device, dtype=torch.long)
+        x = torch.tensor([], device=device, dtype=dtype)
         for sparse in [True, False]:
             Embed = torch.nn.EmbeddingBag(m, n, sparse=sparse)
             Embed.to(device)
 
-            output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=torch.long))
+            output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=dtype))
             self.assertEqual(output, torch.zeros_like(output))
 
-            output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=torch.long))
+            output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=dtype))
             self.assertEqual(output, torch.zeros_like(output))
 
-    def test_EmbeddingBag_per_sample_weights_failures(self, device):
+    @dtypes(torch.int, torch.long)
+    def test_EmbeddingBag_per_sample_weights_failures(self, device, dtype):
         # Failure 1: mismatched embeddings / per_sample_weights dtype
         es = nn.EmbeddingBag(5, 2, mode='sum').to(dtype=torch.float, device=device)
-        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long, device=device)
-        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long, device=device)
+        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=dtype, device=device)
+        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=dtype, device=device)
         per_sample_weights = torch.randn_like(input, dtype=torch.double, device=device)
         if device == 'cpu':
             with self.assertRaisesRegex(RuntimeError, 'have the same type as'):
@@ -10457,14 +11640,14 @@ class TestNNDeviceType(NNTestCase):
                 es(input, offsets, per_sample_weights)
 
         # Failure 2.1: input/per_sample_weights have different sizes (1d input)
-        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long, device=device)
-        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long, device=device)
+        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=dtype, device=device)
+        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=dtype, device=device)
         per_sample_weights = torch.randn(5, dtype=torch.float, device=device)
         with self.assertRaisesRegex(ValueError, 'same shape as the input'):
             es(input, offsets, per_sample_weights)
 
         # Failure 2.2: input/per_sample_weights have different sizes (2d input)
-        input = torch.randint(5, (7, 3), dtype=torch.long, device=device)
+        input = torch.randint(5, (7, 3), dtype=dtype, device=device)
         offsets = None
         per_sample_weights = torch.randn(7 * 3, dtype=torch.float, device=device)
         with self.assertRaisesRegex(ValueError, 'same shape as the input'):
@@ -10474,7 +11657,7 @@ class TestNNDeviceType(NNTestCase):
         for unsupported_mode in ('max', 'mean'):
             es = nn.EmbeddingBag(5, 2, mode=unsupported_mode).to(
                 dtype=torch.float, device=device)
-            input = torch.randint(5, (7, 3), dtype=torch.long, device=device)
+            input = torch.randint(5, (7, 3), dtype=dtype, device=device)
             offsets = None
             per_sample_weights = torch.randn(7, 3, dtype=torch.float, device=device)
             with self.assertRaisesRegex(NotImplementedError,
@@ -10483,38 +11666,71 @@ class TestNNDeviceType(NNTestCase):
 
     def _embedding_bag_reference_impl(self, input, weight, offsets=None, mode='sum',
                                       per_sample_weights=None, include_last_offset=False):
-        assert mode == 'sum'
+        assert mode == 'sum' or per_sample_weights is None
         assert offsets is not None
         if per_sample_weights is None:
-            per_sample_weights = torch.ones(input.size())
+            per_sample_weights = torch.ones(input.size()).to(
+                dtype=weight.dtype, device=weight.device
+            )
         assert input.numel() == per_sample_weights.numel()
 
         bags = []
-        embeddings = weight.index_select(0, input) * per_sample_weights.unsqueeze(1)
+        long_input = input.to(torch.long)
+        embeddings = weight.index_select(0, long_input) * per_sample_weights.unsqueeze(1)
         if include_last_offset:
             for index in range(len(offsets) - 1):
                 offset = offsets[index]
                 next_offset = offsets[index + 1]
                 length = next_offset - offset
-                bags.append(embeddings.narrow(0, offset, length).sum(0))
+                if length == 0:
+                    bags.append(
+                        torch.Tensor([0] * weight.size(1)).to(
+                            dtype=embeddings.dtype, device=embeddings.device
+                        )
+                    )
+                else:
+                    if mode == 'sum':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0))
+                    elif mode == 'mean':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0).div(length))
+                    else:
+                        assert mode == 'max'
+                        bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         else:
             for index, offset in enumerate(offsets):
                 if index + 1 < len(offsets):
                     next_offset = offsets[index + 1]
                 else:
-                    next_offset = len(input)
+                    next_offset = len(long_input)
                 length = next_offset - offset
-                bags.append(embeddings.narrow(0, offset, length).sum(0))
+                if length == 0:
+                    bags.append(
+                        torch.Tensor([0] * weight.size(1)).to(
+                            dtype=embeddings.dtype, device=embeddings.device
+                        )
+                    )
+                else:
+                    if mode == 'sum':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0))
+                    elif mode == 'mean':
+                        bags.append(embeddings.narrow(0, offset, length).sum(0).div(length))
+                    else:
+                        assert mode == 'max'
+                        bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         return torch.stack(bags)
 
-    def test_EmbeddingBag_per_sample_weights_and_offsets(self, device):
-        def test_per_sample_weights(mode, dtype, trainable_scale):
-            es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtype, device=device)
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
+    def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
+        # Test empty input and per sample weight, and backward pass. There was a CUDA
+        # invalid configuration bug (more context in #46572)
+        def test_per_sample_weights(mode, trainable_scale):
+            es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[1], device=device)
             es.weight.data.copy_(
-                torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
-            input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
-            offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
-            per_sample_weights = torch.randn_like(input, dtype=dtype) \
+                torch.arange(1, 11, device=device, dtype=dtypes[1]).view_as(es.weight))
+            input = torch.tensor([], device=device, dtype=dtypes[0])
+            offsets = torch.tensor([0, 0, 0, 0, 0], device=device, dtype=dtypes[0])
+            per_sample_weights = torch.randn_like(input, dtype=dtypes[1]) \
                                       .requires_grad_(trainable_scale)
             ref_per_sample_weights = \
                 per_sample_weights.detach().requires_grad_(trainable_scale)
@@ -10523,87 +11739,128 @@ class TestNNDeviceType(NNTestCase):
             expected = self._embedding_bag_reference_impl(
                 input, reference_weights, offsets, mode, ref_per_sample_weights)
             result = es(input, offsets, per_sample_weights)
-            self.assertEqual(result, expected, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(result, expected, atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
 
             grad = torch.randn_like(expected)
             result.backward(grad)
-            expected.backward(grad)
-            self.assertEqual(es.weight.grad, reference_weights.grad,
-                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            # the reference impl doesn't have grad fn for empty input; but the grad should
+            # simply be a zero tensor
+            ref_weights_grad = torch.zeros_like(es.weight)
+            self.assertEqual(es.weight.grad, ref_weights_grad,
+                             atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
             if trainable_scale:
-                self.assertEqual(per_sample_weights.grad, ref_per_sample_weights.grad,
-                                 atol=dtype2prec_DONTUSE[dtype], rtol=0)
+                ref_per_sample_weights_grad = torch.empty_like(per_sample_weights)
+                self.assertEqual(per_sample_weights.grad, ref_per_sample_weights_grad,
+                                 atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
 
-        if device == 'cuda':
-            dtypes = (torch.float, torch.double, torch.half)
-        else:
-            dtypes = (torch.float, torch.double)
         modes = ('sum',)
         trainable_scale = (True, False)
-        for dtype, mode, trainable in itertools.product(dtypes, modes, trainable_scale):
-            test_per_sample_weights(mode, dtype, trainable)
+        for mode, trainable in itertools.product(modes, trainable_scale):
+            test_per_sample_weights(mode, trainable)
 
-    def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device):
-        def test_per_sample_weights_new_offsets(mode, dtype, trainable_scale, include_last_offset):
-            es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtype, device=device)
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
+    def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
+        def test_per_sample_weights(mode, trainable_scale):
+            es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[1], device=device)
             es.weight.data.copy_(
-                torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
-            input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
-            offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
-
-            if include_last_offset is True and mode == 'sum':
-                offsets = torch.cat((offsets, torch.tensor([input.size(0)], device=device, dtype=torch.long)), 0)
-
-            per_sample_weights = torch.randn_like(input, device=device, dtype=dtype) \
+                torch.arange(1, 11, device=device, dtype=dtypes[1]).view_as(es.weight))
+            input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=dtypes[0])
+            offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=dtypes[0])
+            per_sample_weights = torch.randn_like(input, dtype=dtypes[1]) \
                                       .requires_grad_(trainable_scale)
             ref_per_sample_weights = \
                 per_sample_weights.detach().requires_grad_(trainable_scale)
             reference_weights = es.weight.detach().requires_grad_()
 
             expected = self._embedding_bag_reference_impl(
-                input, reference_weights, offsets, mode, ref_per_sample_weights, include_last_offset)
+                input, reference_weights, offsets, mode, ref_per_sample_weights)
             result = es(input, offsets, per_sample_weights)
-            self.assertEqual(result, expected, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            self.assertEqual(result, expected, atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
 
             grad = torch.randn_like(expected)
             result.backward(grad)
             expected.backward(grad)
             self.assertEqual(es.weight.grad, reference_weights.grad,
-                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+                             atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
             if trainable_scale:
                 self.assertEqual(per_sample_weights.grad, ref_per_sample_weights.grad,
-                                 atol=dtype2prec_DONTUSE[dtype], rtol=0)
+                                 atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
 
-        if device == 'cuda':
-            dtypes = (torch.float, torch.double, torch.half)
-        else:
-            dtypes = (torch.float, torch.double)
         modes = ('sum',)
         trainable_scale = (True, False)
+        for mode, trainable in itertools.product(modes, trainable_scale):
+            test_per_sample_weights(mode, trainable)
+
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
+    def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
+        def test_per_sample_weights_new_offsets(mode, trainable_scale, include_last_offset, has_weight=True):
+            es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtypes[1], device=device)
+            es.weight.data.copy_(
+                torch.arange(1, 11, device=device, dtype=dtypes[1]).view_as(es.weight))
+            input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=dtypes[0])
+            offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=dtypes[0])
+
+            if include_last_offset:
+                offsets = torch.cat((offsets, torch.tensor([input.size(0)], device=device, dtype=dtypes[0])), 0)
+
+            if has_weight:
+                per_sample_weights = torch.randn_like(input, device=device, dtype=dtypes[1]) \
+                                          .requires_grad_(trainable_scale)
+                ref_per_sample_weights = \
+                    per_sample_weights.detach().requires_grad_(trainable_scale)
+            else:
+                per_sample_weights = None
+                ref_per_sample_weights = None
+
+            reference_weights = es.weight.detach().requires_grad_()
+
+            expected = self._embedding_bag_reference_impl(
+                input, reference_weights, offsets, mode, ref_per_sample_weights, include_last_offset)
+            result = es(input, offsets, per_sample_weights)
+            self.assertEqual(result, expected, atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
+
+            grad = torch.randn_like(expected)
+            result.backward(grad)
+            expected.backward(grad)
+            self.assertEqual(es.weight.grad, reference_weights.grad,
+                             atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
+            if has_weight and trainable_scale:
+                self.assertEqual(per_sample_weights.grad, ref_per_sample_weights.grad,
+                                 atol=dtype2prec_DONTUSE[dtypes[1]], rtol=0)
+
+        trainable_scale = (True, False)
         include_last_offset = (True, False)
-        for dtype, mode, trainable, include_last_offset in itertools.product(dtypes, modes, trainable_scale, include_last_offset):
-            test_per_sample_weights_new_offsets(mode, dtype, trainable, include_last_offset)
+        modes = (('sum', False), ('sum', True), ('max', False), ('mean', False))
+        for (mode, has_weight), trainable, include_last_offset in itertools.product(
+            modes, trainable_scale, include_last_offset
+        ):
+            test_per_sample_weights_new_offsets(
+                mode, trainable, include_last_offset, has_weight
+            )
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
                                         device='cpu',
-                                        dtype=torch.float,
+                                        wdtype=torch.float,
+                                        dtype=torch.long,
                                         test_per_sample_weights=False,
                                         trainable_per_sample_weights=False,
                                         sparse=False,
                                         test_backward=True,
                                         backward_prec=None):
-        es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse, max_norm=max_norm).to(device, dtype)
-        e = nn.Embedding(N, D, max_norm=max_norm).to(device, dtype)
+        es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse, max_norm=max_norm).to(device, wdtype)
+        e = nn.Embedding(N, D, max_norm=max_norm).to(device, wdtype)
         e.weight.data.copy_(es.weight)
-        input = torch.randint(N, (B, L), device=device, dtype=torch.long)
-        offsets = torch.arange(0, B, device=device, dtype=torch.long).mul_(L)
-        grad_output = torch.rand(B, D, device=device, dtype=dtype)
+        input = torch.randint(N, (B, L), device=device, dtype=dtype)
+        offsets = torch.arange(0, B, device=device, dtype=dtype).mul_(L)
+        grad_output = torch.rand(B, D, device=device, dtype=wdtype)
 
         if test_per_sample_weights:
             # To prevent large gradients, weights should sum to 1 for each bag
             per_sample_weights = \
-                torch.randn(B, L, device=device, dtype=dtype).softmax(dim=-1)
+                torch.randn(B, L, device=device, dtype=wdtype).softmax(dim=-1)
             per_sample_weights_reference = \
                 per_sample_weights.clone().requires_grad_(trainable_per_sample_weights)
             per_sample_weights.requires_grad_(trainable_per_sample_weights)
@@ -10625,7 +11882,7 @@ class TestNNDeviceType(NNTestCase):
             assert not test_per_sample_weights
             ref_output = e(input).max(1)[0]
 
-        self.assertEqual(output, ref_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+        self.assertEqual(output, ref_output, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
 
         if not test_backward:
             return
@@ -10638,7 +11895,7 @@ class TestNNDeviceType(NNTestCase):
 
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
-            needed_prec = dtype2prec_DONTUSE[dtype] * 3
+            needed_prec = dtype2prec_DONTUSE[wdtype] * 3
         else:
             needed_prec = backward_prec
 
@@ -10646,13 +11903,15 @@ class TestNNDeviceType(NNTestCase):
 
         if test_per_sample_weights and trainable_per_sample_weights:
             self.assertEqual(per_sample_weights.grad, per_sample_weights_reference.grad,
-                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+                             atol=dtype2prec_DONTUSE[wdtype], rtol=0)
 
     @skipCUDAIf(True, "Temporarily disabled. See t54369166")
-    def test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device):
-        def run_tests(dtype, mode, sparse, trainable_per_sample_weights):
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.half, torch.float, torch.double)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
+    def test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device, dtypes):
+        def run_tests(mode, sparse, trainable_per_sample_weights):
             kwargs = dict(test_per_sample_weights=True, device=device,
-                          mode=mode, dtype=dtype, sparse=sparse,
+                          mode=mode, wdtype=dtypes[1], dtype=dtypes[0], sparse=sparse,
                           trainable_per_sample_weights=trainable_per_sample_weights)
 
             # Simple case
@@ -10667,78 +11926,76 @@ class TestNNDeviceType(NNTestCase):
             # Large embedding_dim
             self._test_EmbeddingBag_vs_Embedding(2, 101, 3, 7, **kwargs)
 
-        dtypes = (torch.float, torch.double)
         modes = ('sum',)
         sparsity = (True, False)
         trainable_scale = (True, False)
-        for dtype, mode, sparse, trainable_per_sample_weights in \
-                itertools.product(dtypes, modes, sparsity, trainable_scale):
-            run_tests(dtype, mode, sparse, trainable_per_sample_weights)
+        for mode, sparse, trainable_per_sample_weights in \
+                itertools.product(modes, sparsity, trainable_scale):
+            run_tests(mode, sparse, trainable_per_sample_weights)
 
         # Test CUDA Dense on half precision
         if device == 'cuda':
-            dtypes = (torch.half,)
             modes = ('sum',)
             sparsity = (False,)
             trainable_scale = (True, False)
-            for dtype, mode, sparse, trainable_per_sample_weights in \
-                    itertools.product(dtypes, modes, sparsity, trainable_scale):
-                run_tests(dtype, mode, sparse, trainable_per_sample_weights)
+            for mode, sparse, trainable_per_sample_weights in \
+                    itertools.product(modes, sparsity, trainable_scale):
+                run_tests(mode, sparse, trainable_per_sample_weights)
 
-    def _test_EmbeddingBag(self, device, mode, sparse, dtype=torch.double, test_backward=True):
+    def _test_EmbeddingBag(self, device, mode, sparse, wdtype=torch.double, dtype=torch.long, test_backward=True):
         # check a known test example
-        es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, dtype)
-        es.weight.data.copy_(torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
-        input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
-        offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
+        es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, wdtype)
+        es.weight.data.copy_(torch.arange(1, 11, device=device, dtype=wdtype).view_as(es.weight))
+        input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=dtype)
+        offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=dtype)
 
         grad_output = torch.tensor(
             [1, 2,
-             3, 4], device=device, dtype=dtype).view(2, 2)
+             3, 4], device=device, dtype=wdtype).view(2, 2)
         grad_output_with_empty = torch.tensor(
             [99, 99,
              1, 2,
              99, 99,
              3, 4,
-             99, 99], device=device, dtype=dtype).view(5, 2)
+             99, 99], device=device, dtype=wdtype).view(5, 2)
 
         if mode == "sum" or mode == "mean":
             denominator = 1 if mode == "sum" else 3
             expected_output = torch.tensor(
                 [[13, 16],
-                 [13, 16]], device=device, dtype=dtype) / denominator
+                 [13, 16]], device=device, dtype=wdtype) / denominator
 
             expected_output_with_empty = torch.tensor(
                 [[0, 0],
                  [13, 16],
                  [0, 0],
                  [13, 16],
-                 [0, 0]], device=device, dtype=dtype) / denominator
+                 [0, 0]], device=device, dtype=wdtype) / denominator
 
             expected_grad_weight = torch.tensor(
                 [[3, 4],
                  [5, 8],
                  [0, 0],
                  [1, 2],
-                 [3, 4]], device=device, dtype=dtype) / denominator
+                 [3, 4]], device=device, dtype=wdtype) / denominator
         elif mode == "max":
             expected_output = torch.tensor(
                 [[7, 8],
-                 [9, 10]], device=device, dtype=dtype)
+                 [9, 10]], device=device, dtype=wdtype)
 
             expected_output_with_empty = torch.tensor(
                 [[0, 0],
                  [7, 8],
                  [0, 0],
                  [9, 10],
-                 [0, 0]], device=device, dtype=dtype)
+                 [0, 0]], device=device, dtype=wdtype)
 
             expected_grad_weight = torch.tensor(
                 [[0, 0],
                  [0, 0],
                  [0, 0],
                  [1, 2],
-                 [3, 4]], device=device, dtype=dtype)
+                 [3, 4]], device=device, dtype=wdtype)
         output = es(input, offsets)
         output.backward(grad_output_with_empty)
 
@@ -10746,7 +12003,7 @@ class TestNNDeviceType(NNTestCase):
         if sparse:
             es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output_with_empty)
-        self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+        self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
 
         # check same example except as 2D (2 x 3)
         input = input.view(2, -1)
@@ -10758,12 +12015,12 @@ class TestNNDeviceType(NNTestCase):
         if sparse:
             es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output)
-        self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+        self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
 
         # test all empty bags
         es.zero_grad()
-        inputs = torch.tensor([], dtype=torch.long, device=device)
-        offsets = torch.tensor([0, 0, 0, 0], device=device)
+        inputs = torch.tensor([], dtype=dtype, device=device)
+        offsets = torch.tensor([0, 0, 0, 0], dtype=dtype, device=device)
         es(inputs, offsets).sum().backward()
         dense_grad = es.weight.grad
         if dense_grad.is_sparse:
@@ -10772,7 +12029,7 @@ class TestNNDeviceType(NNTestCase):
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
-        kwargs = dict(mode=mode, sparse=sparse, device=device, dtype=dtype, test_backward=test_backward)
+        kwargs = dict(mode=mode, sparse=sparse, device=device, wdtype=wdtype, dtype=dtype, test_backward=test_backward)
         self._test_EmbeddingBag_vs_Embedding(N, D, B, L, **kwargs)
         for max_norm in (None, 3):
             for p in itertools.product([1, 2], repeat=4):
@@ -10780,8 +12037,8 @@ class TestNNDeviceType(NNTestCase):
 
         # check that giving illegal input combos raises error
         es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
-        input = torch.ones(3, 4, dtype=torch.long)
-        offset = torch.arange(0, 3)
+        input = torch.ones(3, 4, dtype=dtype)
+        offset = torch.arange(0, 3, dtype=dtype)
         self.assertRaises(ValueError, lambda: es(input, offset))
         self.assertRaises(ValueError, lambda: es(input.view(-1)))
         offset[0] = 1
@@ -10791,31 +12048,57 @@ class TestNNDeviceType(NNTestCase):
             offset[-1] = 100
             self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
-    def test_embedding_bag_device(self, device, dtype):
-        self._test_EmbeddingBag(device, 'sum', False, dtype)
-        self._test_EmbeddingBag(device, 'mean', False, dtype)
-        self._test_EmbeddingBag(device, 'max', False, dtype)
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
+    def test_embedding_bag_device(self, device, dtypes):
+        self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[1], dtype=dtypes[0])
+        self._test_EmbeddingBag(device, 'mean', False, wdtype=dtypes[1], dtype=dtypes[0])
+        self._test_EmbeddingBag(device, 'max', False, wdtype=dtypes[1], dtype=dtypes[0])
 
         test_backward = False
         if self.device_type == 'cuda':
             # see 'todo' in test_embedding_bag.
-            test_backward = dtype is not torch.float16
+            test_backward = dtypes[1] is not torch.float16
         elif self.device_type == 'cpu':
             # TODO: figure out why precision on sparse embeddings isn't the
             # same as for dense.
-            test_backward = dtype is not torch.float
+            test_backward = dtypes[1] is not torch.float
 
-        self._test_EmbeddingBag(device, 'sum', True, dtype, test_backward=test_backward)
-        self._test_EmbeddingBag(device, 'mean', True, dtype, test_backward=test_backward)
+        self._test_EmbeddingBag(device, 'sum', True, wdtype=dtypes[1], dtype=dtypes[0], test_backward=test_backward)
+        self._test_EmbeddingBag(device, 'mean', True, wdtype=dtypes[1], dtype=dtypes[0], test_backward=test_backward)
+
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
+    def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
+        weight_tensor = torch.randn(3, 4, dtype=dtypes[1], device=device)
+
+        weight_tensor_non_contig = weight_tensor[:, :3]  # This is non-contiguous strided.
+        weight_tensor_contig = weight_tensor_non_contig.clone().contiguous()  # Contig-strided.
+
+        index = torch.tensor([0, 1, 2], dtype=dtypes[0], device=device)
+        offsets = torch.tensor([0, 2], dtype=dtypes[0], device=device)
+        for mode in ['sum', 'mean', 'max']:
+            output_non_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_non_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+            output_contig = F.embedding_bag(
+                input=index,
+                weight=weight_tensor_contig,
+                offsets=offsets,
+                mode=mode,
+            )
+        self.assertEqual(output_non_contig, output_contig)
 
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    def test_embedding_bag_bfloat16(self, device):
-        self._test_EmbeddingBag(device, 'sum', True, dtype=torch.bfloat16, test_backward=True)
-        self._test_EmbeddingBag(device, 'mean', True, dtype=torch.bfloat16, test_backward=True)
+    @dtypes(torch.int, torch.long)
+    def test_embedding_bag_bfloat16(self, device, dtype):
+        self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtype, test_backward=True)
+        self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtype, test_backward=True)
 
 
     @onlyCUDA
@@ -10833,7 +12116,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(q.size(), out[0].size())
         self.assertEqual(dtype, out[0].dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
     @dtypes(torch.float)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
@@ -11083,32 +12366,32 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"))
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
@@ -11121,15 +12404,33 @@ class TestNNDeviceType(NNTestCase):
             for num_dim in [1, 2, 3]:
                 fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
                 fn = getattr(F, fn_name)
+
                 x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
                 res = fn(x, 1 if adaptive else 3)
                 res.backward(torch.randn_like(res))
+                self.assertTrue(math.isnan(res.item()))
+                x.requires_grad_(False)
+                res = fn(x, 1 if adaptive else 3)
                 self.assertTrue(math.isnan(res.item()))
 
                 x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype, requires_grad=True)
                 res2 = fn(x2, 1 if adaptive else 3)
                 res2.backward(torch.randn_like(res2))
                 self.assertTrue(math.isinf(res2.item()))
+                x2.requires_grad_(False)
+                res2 = fn(x2, 1 if adaptive else 3)
+                self.assertTrue(math.isinf(res2.item()))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_grid_sample_nan_inf(self, device, dtype):
+        input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
+        grid = torch.tensor([[[[nan, 0], [0, inf]]]], device=device, dtype=dtype)
+        for padding_mode in ('reflection', 'border', 'zeros'):
+            sample = torch.nn.functional.grid_sample(input=input, grid=grid, mode='nearest',
+                                                     padding_mode=padding_mode, align_corners=False)
+            self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
+
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
@@ -11148,7 +12449,22 @@ class TestNNDeviceType(NNTestCase):
             res2.backward(torch.randn_like(res2))
             self.assertTrue(math.isinf(res2.item()))
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @onlyOnCPUAndCUDA  # TODO: RuntimeError message different on XLA
+    def test_pooling_zero_stride(self, device):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                x = torch.ones([1, 2] + num_dim * [4], device=device, dtype=torch.float)
+                self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
+                                       lambda: fn(x, kernel_size=2, stride=0))
+
+                fn_module_name = '{}Pool{}d'.format(op.title(), num_dim)
+                fn_module = getattr(nn, fn_module_name)(kernel_size=2, stride=0)
+                self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
+                                       lambda: fn_module(x))
+
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -11162,12 +12478,16 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(*ALL_TENSORTYPES2)
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
                 fn_name = '{}_pool{}d'.format(op, num_dim)
+                if op == 'max':
+                    # New implementation without indices supports empty tensors
+                    # TODO(Heitor) change once with_indices code is updated
+                    fn_name += '_with_indices'
                 fn = getattr(F, fn_name)
                 # use a configuration that gives zero outputs only
                 # when doing a correct floor division by the stride
@@ -11340,7 +12660,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_activations_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)
         self._test_bfloat16_ops(torch.nn.Threshold(0.1, 20), device, inp_dims=(5), prec=1e-2)
@@ -11351,7 +12670,6 @@ class TestNNDeviceType(NNTestCase):
         self._test_bfloat16_ops(torch.nn.LeakyReLU(), device, inp_dims=(5), prec=1e-2)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_pooling_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.AvgPool1d(3, stride=2), device, inp_dims=(8, 4, 16), prec=0.05)
         self._test_bfloat16_ops(torch.nn.AvgPool2d(3, stride=2), device, inp_dims=(8, 4, 16, 16), prec=0.05)
@@ -11361,7 +12679,6 @@ class TestNNDeviceType(NNTestCase):
         self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_softmax_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
 
@@ -11457,6 +12774,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
+    @tf32_on_and_off(0.05)
     def test_conv_cudnn_mismatch_memory_format(self, device):
         configs = [
             [4, 2, 8, 8, 4, 2],
@@ -11642,6 +12960,140 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(norm, expected)
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
+
+    def test_elu_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.elu(x, inplace=True)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.elu_(x)
+
+    def test_hardswish_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.hardswish(x, inplace=True)
+
+    def test_silu_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.silu(x, inplace=True)
+
+    def test_softplus_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.softplus(x, out=x)
+
+    def test_softshrink_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.softshrink(x, out=x)
+
+    def test_leaky_relu_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.leaky_relu(x, inplace=True)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.leaky_relu_(x)
+
+    def test_threshold_inplace_overlap(self, device):
+        # Inplace threshold is okay, because it is idempotent
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        F.threshold(x, 0.5, 0.5, inplace=True)
+        F.threshold_(x, 0.5, 0.5)
+
+    @onlyOnCPUAndCUDA
+    def test_triplet_margin_with_distance_loss_default_parity(self, device):
+        # Test for `nn.TripletMarginWithDistanceLoss` and
+        # `F.triplet_margin_with_distance_loss`.  Checks
+        # for parity against the respective non-distance-agnostic
+        # implementations of triplet margin loss (``nn.TripletMarginLoss`
+        # and `F.triplet_margin_loss`) under *default args*.
+
+        for extra_args in \
+                itertools.product((0.5, 1, 1.5), (True, False), ('none', 'mean', 'sum')):
+            kwargs = {'margin': extra_args[0], 'swap': extra_args[1], 'reduction': extra_args[2]}
+
+            anchor = torch.randn(5, 10, device=device, requires_grad=True)
+            positive = torch.randn(5, 10, device=device, requires_grad=True)
+            negative = torch.randn(5, 10, device=device, requires_grad=True)
+
+            # Test forward, functional
+            expected = F.triplet_margin_loss(anchor, positive, negative, **kwargs)
+            actual = F.triplet_margin_with_distance_loss(anchor, positive, negative, **kwargs)
+            self.assertEqual(actual, expected, rtol=1e-6, atol=1e-6)
+
+            # Test forward, module
+            loss_ref = nn.TripletMarginLoss(**kwargs)
+            loss_op = nn.TripletMarginWithDistanceLoss(**kwargs)
+            self.assertEqual(loss_op(anchor, positive, negative),
+                             loss_ref(anchor, positive, negative),
+                             rtol=1e-6, atol=1e-6)
+
+            # Test backward
+            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_with_distance_loss(
+                a, p, n, **kwargs), (anchor, positive, negative)))
+            self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
+                            (anchor, positive, negative)))
+
+    @onlyOnCPUAndCUDA
+    def test_triplet_margin_with_distance_loss(self, device):
+        # Test for parity between `nn.TripletMarginWithDistanceLoss` and
+        # `F.triplet_margin_with_distance_loss`.
+
+        pairwise_distance = nn.PairwiseDistance()
+
+        def cosine_distance(x, y):
+            return 1.0 - F.cosine_similarity(x, y)
+
+        distance_functions = (pairwise_distance, cosine_distance,
+                              lambda x, y: 1.0 - F.cosine_similarity(x, y))
+
+        reductions = ('mean', 'none', 'sum')
+        margins = (1.0, 1.5, 0.5)
+        swaps = (True, False)
+
+        for distance_fn, reduction, margin, swap \
+                in itertools.product(distance_functions, reductions, margins, swaps):
+            anchor = torch.randn(5, 10, device=device, requires_grad=True)
+            positive = torch.randn(5, 10, device=device, requires_grad=True)
+            negative = torch.randn(5, 10, device=device, requires_grad=True)
+
+            # Test backward
+            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_with_distance_loss(
+                a, p, n, distance_function=distance_fn, reduction=reduction, margin=margin, swap=swap),
+                (anchor, positive, negative)))
+            loss_op = nn.TripletMarginWithDistanceLoss(distance_function=distance_fn,
+                                                       reduction=reduction, margin=margin, swap=swap)
+            self.assertTrue(gradcheck(lambda a, p, n: loss_op(
+                a, p, n), (anchor, positive, negative)))
+            traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
+            self.assertTrue(gradcheck(lambda a, p, n: traced_loss_op(
+                a, p, n), (anchor, positive, negative)))
+
+            # Test forward parity
+            functional = F.triplet_margin_with_distance_loss(anchor, positive, negative,
+                                                             distance_function=distance_fn,
+                                                             reduction=reduction, margin=margin, swap=swap)
+            modular = loss_op(anchor, positive, negative)
+            traced = traced_loss_op(anchor, positive, negative)
+            self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
+            self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
+
+    def test_to_complex(self, device):
+        m = nn.Linear(3, 5).to(device)
+        self.assertIs(m, m.to(device))
+        m.to(torch.cfloat)
+        self.assertIs(m.weight.dtype, torch.cfloat)
+        m.to(torch.cdouble)
+        self.assertIs(m.weight.dtype, torch.cdouble)
+        m.to(torch.float)
+        self.assertIs(m.weight.dtype, torch.float)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            m.to(torch.cfloat)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
 
 
 class TestModuleGlobalHooks(TestCase):
@@ -11851,6 +13303,199 @@ class TestModuleGlobalHooks(TestCase):
 
         output.backward(torch.ones(5, 5), retain_graph=True)
         self.assertTrue(local_backward_called and global_backward_called)
+
+
+class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+    pass
+
+
+class TestLazyModules(TestCase):
+
+    @suppress_warnings
+    def test_lazy_module_parameter(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        state_dict = module.state_dict()
+        self.assertIsInstance(state_dict['test_param'], UninitializedParameter)
+        new_module = LazyModule()
+        # An error is raised when there is an attempt to replace an existing parameter
+        # with an uninitialized one
+        new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            new_module.load_state_dict(state_dict)
+        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        new_module = LazyModule()
+        new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
+        module.load_state_dict(new_module.state_dict())
+        self.assertEqual(module.test_param, torch.ones((5, 5)))
+
+        # Uninitialized parameters are left unchanged
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+
+        new_module = LazyModule()
+        new_module.register_parameter('test_param', UninitializedParameter())
+        module.load_state_dict(new_module.state_dict())
+        self.assertTrue(module.has_uninitialized_params())
+
+    @suppress_warnings
+    def test_lazy_module_jit(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        with self.assertRaisesRegex(RuntimeError, 'run a forward pass'):
+            torch.jit.script(module)
+
+    @suppress_warnings
+    def test_lazy_share_memory(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        with self.assertRaisesRegex(RuntimeError, 'share memory on an uninitialized'):
+            module.share_memory()
+
+    @suppress_warnings
+    def test_linear(self):
+        module = nn.LazyLinear(10)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(5, 5)
+        module(input)
+        self.assertIsInstance(module, nn.Linear)
+        self.assertNotIsInstance(module, nn.LazyLinear)
+        self.assertTrue(module.weight.shape == (10, 5))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_linear_pickle(self):
+        module = nn.LazyLinear(10)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyLinear)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(5, 5)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.Linear)
+        self.assertNotIsInstance(new_module, nn.LazyLinear)
+        self.assertTrue(new_module.weight.shape == (10, 5))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_linear_state(self):
+        module = nn.Linear(5, 10)
+        lazy_module = nn.LazyLinear(10)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Linear one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertTrue(lazy_module.weight.shape == (10, 5))
+
+        module = nn.Linear(5, 10)
+        lazy_module = nn.LazyLinear(10)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_materialize_dtype(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.dtype == torch.float64)
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.half()
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.dtype == torch.float16)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @suppress_warnings
+    def test_materialize_device(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.device.type == 'cpu')
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.cuda()
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.device.type == 'cuda')
+
+    @suppress_warnings
+    def test_chained_initialization(self):
+        class MyNetwork(torch.nn.Module):
+            def __init__(self):
+                super(MyNetwork, self).__init__()
+                self.linear_1 = torch.nn.LazyLinear(15)
+                self.linear_2 = torch.nn.LazyLinear(10)
+
+            def forward(self, x):
+                y = self.linear_1(x)
+                return self.linear_2(y)
+
+        net = MyNetwork()
+        net(torch.ones(5, 10))
+        self.assertTrue(net.linear_1.weight.shape == (15, 10))
+        self.assertTrue(net.linear_2.weight.shape == (10, 15))
+
+    @suppress_warnings
+    def test_optimizer_pass(self):
+        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam,
+                      torch.optim.AdamW, torch.optim.Adamax,
+                      torch.optim.ASGD, torch.optim.SGD, torch.optim.Rprop,
+                      torch.optim.RMSprop, torch.optim.LBFGS]
+
+        def run_step(module, optim):
+            self.assertIsInstance(optim.param_groups[0]['params'][0], UninitializedParameter)
+            module.test_param.materialize(10)
+            self.assertIsInstance(optim.param_groups[0]['params'][0], Parameter)
+            self.assertNotIsInstance(optim.param_groups[0]['params'][0], UninitializedParameter)
+            for p in module.parameters():
+                p.grad = torch.rand_like(p)
+            if isinstance(optim, torch.optim.LBFGS):
+                optim.step(lambda: 1.0)
+            else:
+                optim.step()
+
+        for optim_cls in optimizers:
+            module = LazyModule()
+            module.register_parameter('test_param', UninitializedParameter())
+            if optim_cls is torch.optim.SGD:
+                optim = optim_cls(module.parameters(), lr=0.0)
+            elif optim_cls is torch.optim.Adagrad:
+                with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+                    optim = optim_cls(module.parameters())
+                continue
+            else:
+                optim = optim_cls(module.parameters())
+            run_step(module, optim)
+
+    @suppress_warnings
+    def test_weight_norm(self):
+        m = nn.LazyLinear(7)
+        with self.assertRaisesRegex(ValueError, 'have uninitialized parameters.'):
+            m = torch.nn.utils.weight_norm(m)
+
+    @suppress_warnings
+    def test_spectral_norm(self):
+        m = nn.LazyLinear(7)
+        with self.assertRaisesRegex(ValueError, 'have uninitialized parameters.'):
+            m = torch.nn.utils.spectral_norm(m)
+
+    @suppress_warnings
+    def test_invalid_functions(self):
+        param = torch.nn.parameter.UninitializedParameter()
+        with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+            torch.empty_like(param)
+
+        with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+            torch.add(param, param)
+
+        with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+            param + param
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

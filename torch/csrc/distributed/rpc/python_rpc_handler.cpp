@@ -68,28 +68,39 @@ void cleanupPyObj(py::object& obj) {
 
 } // namespace
 
-PythonRpcHandler::PythonRpcHandler() {
-  PROFILE_GIL_SCOPED_ACQUIRE;
-  py::object rpcInternal = py::module::import(kInternalModule);
-  py::object rpcApi = py::module::import("torch.distributed.rpc.api");
-  py::object rrefProxy = py::module::import("torch.distributed.rpc.rref_proxy");
+void PythonRpcHandler::init() {
+  std::lock_guard<std::mutex> guard(init_lock_);
+  if (!initialized_) {
+    PROFILE_GIL_SCOPED_ACQUIRE;
+    py::object rpcInternal = py::module::import(kInternalModule);
+    py::object rpcApi = py::module::import("torch.distributed.rpc.api");
+    py::object rrefProxy =
+        py::module::import("torch.distributed.rpc.rref_proxy");
 
-  pyRunFunction_ = getFunction(rpcInternal, "_run_function");
-  pySerialize_ = getFunction(rpcInternal, "serialize");
-  pyDeserialize_ = getFunction(rpcInternal, "deserialize");
-  pyHandleException_ = getFunction(rpcInternal, "_handle_exception");
+    pyRunFunction_ = getFunction(rpcInternal, "_run_function");
+    pySerialize_ = getFunction(rpcInternal, "serialize");
+    pyDeserialize_ = getFunction(rpcInternal, "deserialize");
+    pyHandleException_ = getFunction(rpcInternal, "_handle_exception");
 
-  rrefProxyFunctions_.rpcSync_ = getFunction(rpcApi, "rpc_sync");
-  rrefProxyFunctions_.rpcAsync_ = getFunction(rpcApi, "rpc_async");
-  rrefProxyFunctions_.remote_ = getFunction(rpcApi, "remote");
-  rrefProxyFunctions_.rrefProxyCtor_ = getFunction(rrefProxy, "RRefProxy");
+    rrefTypeFunctions_.onOwner_ = getFunction(rpcApi, "_rref_typeof_on_owner");
+    rrefTypeFunctions_.onUser_ = getFunction(rpcApi, "_rref_typeof_on_user");
 
-  jitCompilationUnit_ = torch::jit::get_python_cu();
-  typeParser_ = std::make_shared<jit::ScriptTypeParser>(
-      std::make_shared<PythonTypeResolver>());
+    rrefProxyFunctions_.rpcSync_ = getFunction(rpcApi, "rpc_sync");
+    rrefProxyFunctions_.rpcAsync_ = getFunction(rpcApi, "rpc_async");
+    rrefProxyFunctions_.remote_ = getFunction(rpcApi, "remote");
+    rrefProxyFunctions_.rrefProxyCtor_ = getFunction(rrefProxy, "RRefProxy");
+
+    jitCompilationUnit_ = torch::jit::get_python_cu();
+    typeParser_ = std::make_shared<jit::ScriptTypeParser>(
+        std::make_shared<PythonTypeResolver>());
+    initialized_ = true;
+  }
 }
 
+PythonRpcHandler::PythonRpcHandler() : initialized_(false) {}
+
 void PythonRpcHandler::cleanup() {
+  std::lock_guard<std::mutex> guard(init_lock_);
   PROFILE_GIL_SCOPED_ACQUIRE;
   cleanupPyObj(pyRunFunction_);
   cleanupPyObj(pySerialize_);
@@ -103,6 +114,7 @@ void PythonRpcHandler::cleanup() {
 
   jitCompilationUnit_ = nullptr;
   typeParser_ = nullptr;
+  initialized_ = false;
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
@@ -117,6 +129,7 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   TORCH_INTERNAL_ASSERT(!PyGILState_Check());
   // Leaky singleton to avoid module destructor race.
   static PythonRpcHandler* handler = new PythonRpcHandler();
+  handler->init();
   return *handler;
 }
 
@@ -177,6 +190,11 @@ TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
 const PythonRpcHandler::RRefProxyFunctions& PythonRpcHandler::
     getRRefProxyFunctions() const {
   return rrefProxyFunctions_;
+}
+
+const PythonRpcHandler::RRefTypeFunctions& PythonRpcHandler::
+    getRRefTypeFunctions() const {
+  return rrefTypeFunctions_;
 }
 
 } // namespace rpc

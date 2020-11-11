@@ -1,9 +1,13 @@
-import unittest
 import torch
 import torch.nn as nn
 from torch.testing._internal.jit_utils import JitTestCase
 
 from torch.testing import FileCheck
+from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+
+from torch.jit._recursive import wrap_cpp_module
+from typing import Any
 
 import io
 
@@ -13,7 +17,6 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestFreezing(JitTestCase):
-    @unittest.skip("temporarily disable the test for fwd compatibility")
     def test_freeze_module(self):
         class M(nn.Module):
             def __init__(self):
@@ -108,7 +111,7 @@ class TestFreezing(JitTestCase):
         m.eval()
         input = torch.randn(2, 2)
         output_s = m.forward(input)
-        mf = torch._C._freeze_module(m._c)
+        mf = torch.jit.freeze(m)
 
         # Check if frozen module looks as below:
         # module m {
@@ -127,6 +130,7 @@ class TestFreezing(JitTestCase):
         #     }
         #   }
         # }
+        mf = mf._c
         self.assertFalse(mf.hasattr('sub1'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
@@ -234,8 +238,8 @@ class TestFreezing(JitTestCase):
 
     def test_freeze_module_with_fork2(self):
         @torch.jit.script
-        def foo(x, y):
-            return x * y
+        def foo(x):
+            return x * 2
 
         class TestModule(nn.Module):
             def __init__(self):
@@ -244,8 +248,8 @@ class TestFreezing(JitTestCase):
                 self.b = torch.ones(20, 20)
 
             def forward(self, x):
-                fut = torch.jit._fork(foo, self.a, self.b)
-                y_hat = foo(self.a, self.b)
+                fut = torch.jit._fork(foo, self.a)
+                y_hat = foo(self.b)
                 y = torch.jit._wait(fut)
                 return y_hat + y
 
@@ -269,6 +273,50 @@ class TestFreezing(JitTestCase):
         # conservatively assumes there is a mutation because attributes are
         # passed to fork subgraph. both 'a' and 'b' are preserved.
         self.assertTrue(mf.hasattr('a'))
+        self.assertFalse(mf.hasattr('b'))
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_fork_calling_module_method(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x * y
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.a = torch.ones(20, 20)
+                self.b = torch.ones(20, 20)
+
+            @torch.jit.export
+            def foo(self, x):
+                return x * self.a
+
+            @torch.jit.export
+            def bar(self, x):
+                return x * self.b
+
+            def forward(self, x):
+                fut = torch.jit._fork(self.foo, self.b)
+                y_hat = self.bar(self.a)
+                y = torch.jit._wait(fut)
+                return y_hat + y
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        mf = torch._C._freeze_module(m._c)
+        # Check if frozen module looks as below:
+        # module m {
+        #   attributes {
+        #     self.b = ..
+        #   }
+        #   ...
+        # TODO:  Although there are no mutation, the alias analysis
+        # conservatively assumes there is a mutation because attributes are
+        # passed to fork subgraph. 'b' is preserved.
+        self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
@@ -477,6 +525,77 @@ class TestFreezing(JitTestCase):
         self.assertEqual(output_s, output_f)
 
 
+    def test_freeze_module_with_preserve_sub_module(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = 2.2
+
+            def forward(self, x):
+                return self.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()  # aliasing
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub2(x) + self.sub1(x)
+        m = TestModule()
+        ms = torch.jit.script(m)
+        ms.eval()
+        mf = torch._C._freeze_module(ms._c, ["sub1"])
+
+        # Test that 'sub1' is preserved entirely and 'sub2' is completely folded
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertTrue(mf.sub1.hasattr('b'))
+        self.assertFalse(mf.hasattr('sub2'))
+        input = torch.randn(2, 2)
+        output_s = ms.forward(input)
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_preserve_sub_module_and_mutation(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = 2.2
+
+            def forward(self, x):
+                self.a[0] = 3.3
+                return self.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()  # aliasing
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub2(x) + self.sub1(x)
+        m = TestModule()
+        ms = torch.jit.script(m)
+        ms.eval()
+        mf = torch._C._freeze_module(ms._c, ["sub1"])
+
+        # Test that be both sub1 and sub1 are preserved and 'b' is preserved
+        # even if it is not used. To fulfill user request to preserve 'sub1'
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertTrue(mf.sub1.hasattr('b'))
+        self.assertTrue(mf.hasattr('sub2'))
+        self.assertTrue(mf.sub2.hasattr('a'))
+        self.assertTrue(mf.sub2.hasattr('b'))
+        input = torch.randn(2, 2)
+        output_s = ms.forward(input)
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+
     def test_freeze_module_with_helperfunction(self):
         class SubModule(nn.Module):
             def __init__(self):
@@ -507,7 +626,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('sub'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
-        with self.assertRaisesRegex(RuntimeError, "TestModule does not have a field with name '_forward'"):
+        with self.assertRaisesRegex(AttributeError, "TestModule does not have a field with name '_forward'"):
             mf._forward(x)
 
     def test_freeze_module_with_inplace_mutable(self):
@@ -929,7 +1048,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mEval_freezed.hasattr('fc1'))
         self.assertFalse(mEval_freezed.hasattr('dropout2'))
         self.assertFalse(mEval_freezed.hasattr('fc2'))
-        with self.assertRaisesRegex(RuntimeError, "does not have a field with name 'state_dict'"):
+        with self.assertRaisesRegex(AttributeError, "does not have a field with name 'state_dict'"):
             print(mEval_freezed.state_dict())
         buffer = io.BytesIO()
         torch.jit.save(mEval_freezed, buffer)
@@ -950,7 +1069,8 @@ class TestFreezing(JitTestCase):
         inp = torch.ones(1, 8, 32, 32)
         out1 = fmod.forward(inp)
         # FIXME: frozen module mutated from outside (original module).
-        smod.weight[0, 0, 0, 0] += 100.0
+        with torch.no_grad():
+            smod.weight[0, 0, 0, 0] += 100.0
         out2 = fmod.forward(inp)
         out3 = smod(inp)
         self.assertNotEqual(out1, out2)
@@ -1025,3 +1145,113 @@ class TestFreezing(JitTestCase):
         fm = torch._C._freeze_module(m._c, ["modify_a"])
         FileCheck().check('prim::GetAttr[name="a"]').run(fm.forward.graph)
         FileCheck().check('prim::GetAttr[name="b"]').run(fm.modify_a.graph)
+
+    @skipIfNoFBGEMM
+    def test_module_with_shared_type_instances(self):
+        class Child(nn.Module):
+            def __init__(self):
+                super(Child, self).__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1).to(dtype=torch.float32)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                return x
+
+        class Parent(nn.Module):
+            def __init__(self):
+                super(Parent, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv1 = nn.Conv2d(1, 1, 1).to(dtype=torch.float32)
+                self.child = Child()
+                self.child2 = Child()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.child(x)
+                x = self.child2(x)
+                x = self.dequant(x)
+                return x
+
+        def _static_quant(model):
+            qModel = torch.quantization.QuantWrapper(model)
+            qModel.qconfig = torch.quantization.default_qconfig
+            torch.quantization.prepare(qModel, inplace=True)
+            qModel(torch.rand(4, 1, 4, 4, dtype=torch.float32))
+            torch.quantization.convert(qModel, inplace=True)
+            return model
+
+        with override_quantized_engine('fbgemm'):
+            data = torch.randn(4, 1, 4, 4, dtype=torch.float32)
+            m = Parent().to(torch.float32)
+            m = _static_quant(m)
+            m = torch.jit.script(m)
+            m.eval()
+            torch._C._jit_pass_inline(m.graph)
+            m_frozen = wrap_cpp_module(torch._C._freeze_module(m._c))
+            # Earlier bug resulted in _packed_params set to false.
+            FileCheck().check_not('_packed_params = False').run(m_frozen._c.dump_to_str(True, True, False))
+
+            m_res = m(data)
+            # It used to segfault while running frozen module.
+            m_frozen_res = m_frozen(data)
+            self.assertEqual(m_res, m_frozen_res)
+
+    def test_module_getattr_indirection(self):
+        @torch.jit.script
+        class ValHolder(object):
+            def __init__(self, val: int):
+                self.val: int = val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    mod = self.mod1
+                else:
+                    mod = self.mod2
+                return mod.val
+
+        mod = Mod()
+        mod.eval()
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod))
+        mod_eager = Mod()
+        self.assertEqual(mod_eager(True), frozen_mod(True))
+        self.assertEqual(mod_eager(False), frozen_mod(False))
+
+    def test_freeze_module_with_non_static_module_dict_index(self):
+        """
+        Test that a Module contained a non-static ModuleDict index
+        cannot be frozen.
+        """
+        @torch.jit.interface
+        class ModuleInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                pass
+
+        class ImplementsInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                if isinstance(inp, torch.Tensor):
+                    return torch.max(inp, dim=0)
+
+                return inp
+
+        # Test annotation of submodule.
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                value: ModuleInterface = self.d[key]
+                return value.forward(x)
+
+        m = torch.jit.script(Mod())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
+            mf = torch._C._freeze_module(m._c)

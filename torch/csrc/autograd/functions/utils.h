@@ -36,6 +36,11 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
       out = true;
     }
   }
+  void operator()(const c10::optional<at::Tensor>& tensor) {
+    if (tensor.has_value()) {
+      (*this)(*tensor);
+    }
+  }
   bool short_circuit() {
     return out;
   }

@@ -2,7 +2,7 @@
 #
 
 # You can set these variables from the command line.
-SPHINXOPTS    ?= -j auto
+SPHINXOPTS    ?= -j auto -WT --keep-going
 SPHINXBUILD   ?= sphinx-build
 SPHINXPROJ    ?= PyTorch
 SOURCEDIR     ?= source
@@ -38,5 +38,5 @@ html-stable:
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 clean:
-	@echo "Removing everything under 'build'.."
-	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees
+	@echo "Removing everything under 'build' and 'source/generated'.."
+	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees $(SOURCEDIR)/generated

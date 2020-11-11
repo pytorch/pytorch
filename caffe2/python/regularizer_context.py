@@ -1,9 +1,9 @@
 # @package regularizer_context
 # Module caffe2.python.regularizer_context
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import context
 from caffe2.python.modifier_context import (

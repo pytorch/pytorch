@@ -1,5 +1,5 @@
 from .module import Module
-from .linear import Identity, Linear, Bilinear
+from .linear import Identity, Linear, Bilinear, LazyLinear
 from .conv import Conv1d, Conv2d, Conv3d, \
     ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
@@ -8,8 +8,8 @@ from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
     Hardsigmoid, Hardswish, SiLU
 from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, BCEWithLogitsLoss, NLLLoss2d, \
     CosineEmbeddingLoss, CTCLoss, HingeEmbeddingLoss, MarginRankingLoss, \
-    MultiLabelMarginLoss, MultiLabelSoftMarginLoss, MultiMarginLoss, \
-    SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss, TripletMarginLoss, PoissonNLLLoss
+    MultiLabelMarginLoss, MultiLabelSoftMarginLoss, MultiMarginLoss, SmoothL1Loss, \
+    SoftMarginLoss, CrossEntropyLoss, TripletMarginLoss, TripletMarginWithDistanceLoss, PoissonNLLLoss
 from .container import Container, Sequential, ModuleList, ModuleDict, ParameterList, ParameterDict
 from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxPool3d, \
     MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, FractionalMaxPool3d, LPPool1d, LPPool2d, \
@@ -31,6 +31,7 @@ from .adaptive import AdaptiveLogSoftmaxWithLoss
 from .transformer import TransformerEncoder, TransformerDecoder, \
     TransformerEncoderLayer, TransformerDecoderLayer, Transformer
 from .flatten import Flatten, Unflatten
+from .channelshuffle import ChannelShuffle
 
 __all__ = [
     'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
@@ -53,6 +54,6 @@ __all__ = [
     'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
-    'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
-    'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU',
+    'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer', 'LazyLinear',
+    'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU', 'TripletMarginWithDistanceLoss', 'ChannelShuffle'
 ]

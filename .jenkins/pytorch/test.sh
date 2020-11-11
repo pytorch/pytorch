@@ -11,61 +11,27 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [ -n "${IN_CIRCLECI}" ]; then
-  # TODO move this to docker
-  pip_install unittest-xml-reporting
+if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+  export PYTORCH_TEST_WITH_SLOW=1
+  export PYTORCH_TEST_SKIP_FAST=1
+fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get -qq update
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
-  fi
-
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get -qq update
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
-    sudo mkdir -p /var/run/sshd
-  fi
-
-  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
-    export PYTORCH_TEST_WITH_SLOW=1
-    export PYTORCH_TEST_SKIP_FAST=1
-  fi
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  export PYTORCH_COLLECT_COVERAGE=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | egrep 'Name:.*\sgfx|Marketing'
-  # TODO: Move this to Docker
-  sudo apt-get -qq update
-  sudo apt-get -qq install --no-install-recommends libsndfile1
-
-  # TODO: Remove this once ROCm CI images are >= ROCm 3.5
-  # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
-  # Detect kernel version and upgrade thunk if this is a ROCm 3.3 container running on a 3.5 kernel.
-  ROCM_ASD_FW_VERSION=$(/opt/rocm/bin/rocm-smi --showfwinfo -d 1 | grep ASD |  awk '{print $6}')
-  if [[ $ROCM_ASD_FW_VERSION = 553648174 && "$BUILD_ENVIRONMENT" == *rocm3.3* ]]; then
-    # upgrade thunk to 3.5
-    mkdir rocm3.5-thunk
-    pushd rocm3.5-thunk
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct3.5.0/hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct-dev3.5.0/hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    dpkg-deb -vx hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    dpkg-deb -vx hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    sudo cp -r opt/rocm-3.5.0/* /opt/rocm-3.3.0/
-    popd
-    rm -rf rocm3.5-thunk
-  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
-  # ninja is installed in /var/lib/jenkins/.local/bin
-  export PATH="/var/lib/jenkins/.local/bin:$PATH"
+  # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
+  # but this script should be runnable by any user, including root
+  export PATH="$HOME/.local/bin:$PATH"
 
   # TODO: Please move this to Docker
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
@@ -139,28 +105,23 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-test_python_nn() {
-  time python test/run_test.py --include test_nn --verbose --determine-from="$DETERMINE_FROM"
+test_python_legacy_jit() {
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
-test_python_ge_config_profiling() {
-  time python test/run_test.py --include test_jit_cuda_fuser_profiling test_jit_profiling test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+test_python_shard1() {
+  time python test/run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
-test_python_ge_config_legacy() {
-  time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
-}
-
-test_python_all_except_nn_and_cpp_extensions() {
-  time python test/run_test.py --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+test_python_shard2() {
+  time python test/run_test.py --exclude-jit-executor --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -228,6 +189,36 @@ test_libtorch() {
   fi
 }
 
+test_vulkan() {
+  if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
+    mkdir -p test/test-reports/cpp-vulkan
+    build/bin/vulkan_test --gtest_output=xml:test/test-reports/cpp-vulkan/vulkan_test.xml
+  fi
+}
+
+test_distributed() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    echo "Testing distributed C++ tests"
+    mkdir -p test/test-reports/cpp-distributed
+    build/bin/FileStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/FileStoreTest.xml
+    build/bin/HashStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/HashStoreTest.xml
+    build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
+
+    build/bin/ProcessGroupGlooTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupGlooTest.xml
+    build/bin/ProcessGroupNCCLTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLTest.xml
+    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLErrorsTest.xml
+  fi
+}
+
+test_rpc() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    echo "Testing RPC C++ tests"
+    mkdir -p test/test-reports/cpp-rpc
+    build/bin/test_cpp_rpc --gtest_output=xml:test/test-reports/cpp-rpc/test_cpp_rpc.xml
+  fi
+}
+
 test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
@@ -292,16 +283,21 @@ test_xla() {
   assert_git_not_dirty
 }
 
-# Do NOT run this test before any other tests, like test_python_nn, etc.
+# Do NOT run this test before any other tests, like test_python_shard1, etc.
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
 test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
-  python dump_all_function_schemas.py --filename new_schemas.txt
-  pip_uninstall torch
+  python -m venv venv
+  . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
-  python check_backward_compatibility.py --new-schemas new_schemas.txt
+  pip show torch
+  python dump_all_function_schemas.py --filename nightly_schemas.txt
+  deactivate
+  rm -r venv
+  pip show torch
+  python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
   popd
   set +x
   assert_git_not_dirty
@@ -315,10 +311,42 @@ test_bazel() {
   tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
+test_benchmarks() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+    pip_install --user "pytest-benchmark==3.2.3"
+    pip_install --user "requests"
+    BENCHMARK_DATA="benchmarks/.data"
+    mkdir -p ${BENCHMARK_DATA}
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_legacy_old.json --fuser=old --executor=legacy
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
+    assert_git_not_dirty
+  fi
+}
+
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
+}
+
+test_vec256() {
+  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    echo "Testing vec256 instructions"
+    mkdir -p test/test-reports/vec256
+    pushd build/bin
+    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
+    for vec256_exec in $vec256_tests
+    do
+      $vec256_exec --gtest_output=xml:test/test-reports/vec256/$vec256_exec.xml
+    done
+    popd
+    assert_git_not_dirty
+  fi
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -332,24 +360,24 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
-  test_python_ge_config_legacy
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_profiling* || "${JOB_BASE_NAME}" == *ge_config_profiling* ]]; then
-  test_python_ge_config_profiling
+elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
+  test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  test_python_nn
-  test_cpp_extensions
+  install_torchvision
+  test_python_shard1
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
-  test_python_all_except_nn_and_cpp_extensions
+  test_python_shard2
   test_aten
   test_libtorch
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
+  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
@@ -358,12 +386,26 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
   test_cpp_extensions
 else
   install_torchvision
-  test_python_nn
-  test_python_all_except_nn_and_cpp_extensions
-  test_cpp_extensions
+  test_python_shard1
+  test_python_shard2
   test_aten
+  test_vec256
   test_libtorch
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+  test_distributed
+  test_benchmarks
+  test_rpc
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  pushd test
+  echo "Generating XML coverage report"
+  time python -mcoverage xml
+  popd
+  pushd build
+  echo "Generating lcov coverage report for C++ sources"
+  time lcov --capture --directory . --output-file coverage.info
+  popd
 fi

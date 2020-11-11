@@ -227,7 +227,7 @@ Engine::~Engine() {
     // Do not wait for termination of global threads on Windows
     // Because CRT terminates DLL threads before calling
     // global object destructors
-#if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
+#if !defined(_WIN32) || defined(C10_USE_MSVC_STATIC_RUNTIME)
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
       non_reentrant_device_thread_condvar_.wait(lk);
@@ -375,6 +375,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // queue_callback() to find the target GraphTask to append final
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
+          NodeGuard ndguard(task.fn_);
           evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
@@ -441,7 +442,7 @@ void Engine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
-  graph_task->set_exception(e, fn);
+  graph_task->set_exception(std::current_exception(), fn);
 }
 
 bool GraphTask::completed() {
@@ -454,8 +455,8 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
   if (future_completed_.exchange(true)) {
     // Future is already marked complete, or being marked as such.
     // In case the marking complete is only in progress, we add a
-    // waitNoThrow() to guarantee the future is marked complete on exit.
-    future_result_->waitNoThrow();
+    // wait() to guarantee the future is marked complete on exit.
+    future_result_->wait();
     return;
   }
 
@@ -472,7 +473,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     lock.unlock();
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
-    future_result_->setErrorIfNeeded(e.what());
+    future_result_->setErrorIfNeeded(std::current_exception());
   }
 }
 
@@ -512,21 +513,19 @@ void GraphTask::exec_post_processing() {
 }
 
 void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (!has_error_.load()) {
+  if (!has_error_.exchange(true)) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack(fn->name());
     }
-    has_error_ = true;
   }
 }
 
 void GraphTask::set_exception(
-    std::exception& e,
+    std::exception_ptr eptr,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
-    future_result_->setError(e.what());
+    future_result_->setError(std::move(eptr));
   }
 }
 
@@ -844,6 +843,7 @@ auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
                      bool create_graph,
+                     bool accumulate_grad,
                      const edge_list& outputs) -> variable_list {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
@@ -868,10 +868,16 @@ auto Engine::execute(const edge_list& roots,
   compute_dependencies(graph_root.get(), *graph_task);
 
   if (!outputs.empty()) {
-    graph_task->init_to_execute(*graph_root, outputs);
+    graph_task->init_to_execute(*graph_root, outputs, accumulate_grad);
   }
 
-  return execute_with_graph_task(graph_task, graph_root)->wait();
+  execute_with_graph_task(graph_task, graph_root);
+  // Avoid a refcount bump for the Future, since we check for refcount in
+  // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
+  // in dist_engine.cpp).
+  auto& fut = graph_task->future_result_;
+  fut->wait();
+  return fut->value().toTensorVector();
 }
 
 void Engine::initialize_device_threads_pool() {
@@ -882,7 +888,7 @@ void Engine::initialize_device_threads_pool() {
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 
-std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
+std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   initialize_device_threads_pool();
@@ -1074,16 +1080,21 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs) {
+void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad) {
   exec_info_[&graph_root].needed_ = true;
 
   int output_idx = 0;
   for (auto & output_edge : outputs) {
     Node *output = output_edge.function.get();
     auto & info = exec_info_[output];
-    if (!info.captures_)
-      info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
-    info.captures_->emplace_back(output_edge.input_nr, output_idx++);
+    if (accumulate_grad) {
+      info.needed_ = true;
+    } else {
+      if (!info.captures_) {
+        info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
+      }
+      info.captures_->emplace_back(output_edge.input_nr, output_idx++);
+    }
   }
   captured_vars_.resize(output_idx);
 
@@ -1131,7 +1142,7 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs) {
               auto it = exec_info_.find(edge.function.get());
               return it != exec_info_.end() && it->second.should_execute();
             });
-        exec_info_[frame.fn_].needed_ = needed;
+        exec_info_[frame.fn_].needed_ |= needed;
         stack.pop_back();
       }
     }

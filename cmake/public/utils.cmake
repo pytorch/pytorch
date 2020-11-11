@@ -48,15 +48,17 @@ macro(caffe2_interface_library SRC DST)
     # In the case of static library, we will need to add whole-static flags.
     if(APPLE)
       target_link_libraries(
-          ${DST} INTERFACE -Wl,-force_load,$<TARGET_FILE:${SRC}>)
+          ${DST} INTERFACE -Wl,-force_load,\"$<TARGET_FILE:${SRC}>\")
     elseif(MSVC)
       # In MSVC, we will add whole archive in default.
       target_link_libraries(
-          ${DST} INTERFACE -WHOLEARCHIVE:$<TARGET_FILE:${SRC}>)
+         ${DST} INTERFACE "$<TARGET_FILE:${SRC}>")
+      target_link_options(
+         ${DST} INTERFACE "-WHOLEARCHIVE:$<TARGET_FILE:${SRC}>")
     else()
       # Assume everything else is like gcc
       target_link_libraries(${DST} INTERFACE
-          "-Wl,--whole-archive,$<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
+          "-Wl,--whole-archive,\"$<TARGET_FILE:${SRC}>\" -Wl,--no-whole-archive")
     endif()
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
@@ -80,7 +82,7 @@ macro(caffe2_interface_library SRC DST)
   elseif(${__src_target_type} STREQUAL "SHARED_LIBRARY")
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
       target_link_libraries(${DST} INTERFACE
-          "-Wl,--no-as-needed,$<TARGET_FILE:${SRC}> -Wl,--as-needed")
+          "-Wl,--no-as-needed,\"$<TARGET_FILE:${SRC}>\" -Wl,--as-needed")
     else()
       target_link_libraries(${DST} INTERFACE ${SRC})
     endif()

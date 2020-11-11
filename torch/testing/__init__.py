@@ -6,6 +6,7 @@ import torch
 import random
 import math
 from typing import cast, List, Optional, Tuple, Union
+from .check_kernel_launches import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
 
 FileCheck = torch._C.FileCheck
 
@@ -23,6 +24,9 @@ def is_integral(dtype: torch.dtype) -> bool:
     # Skip complex/quantized types
     dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
     return dtype in dtypes and not dtype.is_floating_point
+
+def is_quantized(dtype: torch.dtype) -> bool:
+    return dtype in (torch.quint8, torch.qint8, torch.qint32, torch.quint4x2)
 
 # Helper function that maps a flattened index back into the given shape
 # TODO: consider adding torch.unravel_index
@@ -70,7 +74,11 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     debug_msg : Optional[str]
     # Integer (including bool) comparisons are identity comparisons
     # when rtol is zero and atol is less than one
-    if (is_integral(a.dtype) and rtol == 0 and atol < 1) or a.dtype is torch.bool:
+    if (
+        (is_integral(a.dtype) and rtol == 0 and atol < 1)
+        or a.dtype is torch.bool
+        or is_quantized(a.dtype)
+    ):
         if (a == b).all().item():
             return (True, None)
 
@@ -251,22 +259,87 @@ def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     return input.data
 
 
-def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True) -> List[torch.dtype]:
+# Functions and classes for describing the dtypes a function supports
+# NOTE: these helpers should correspond to PyTorch's C++ dispatch macros
+
+# Verifies each given dtype is a torch.dtype
+def _validate_dtypes(*dtypes):
+    for dtype in dtypes:
+        assert isinstance(dtype, torch.dtype)
+    return dtypes
+
+# class for tuples corresponding to a PyTorch dispatch macro
+class _dispatch_dtypes(tuple):
+    def __add__(self, other):
+        assert isinstance(other, tuple)
+        return _dispatch_dtypes(tuple.__add__(self, other))
+
+_floating_types = _dispatch_dtypes((torch.float32, torch.float64))
+def floating_types():
+    return _floating_types
+
+_floating_types_and_half = _floating_types + (torch.half,)
+def floating_types_and_half():
+    return _floating_types_and_half
+
+def floating_types_and(*dtypes):
+    return _floating_types + _validate_dtypes(*dtypes)
+
+_floating_and_complex_types = _floating_types + (torch.cfloat, torch.cdouble)
+def floating_and_complex_types():
+    return _floating_and_complex_types
+
+def floating_and_complex_types_and(*dtypes):
+    return _floating_and_complex_types + _validate_dtypes(*dtypes)
+
+_integral_types = _dispatch_dtypes((torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64))
+def integral_types():
+    return _integral_types
+
+def integral_types_and(*dtypes):
+    return _integral_types + _validate_dtypes(*dtypes)
+
+_all_types = _floating_types + _integral_types
+def all_types():
+    return _all_types
+
+def all_types_and(*dtypes):
+    return _all_types + _validate_dtypes(*dtypes)
+
+_complex_types = (torch.cfloat, torch.cdouble)
+def complex_types():
+    return _complex_types
+
+_all_types_and_complex = _all_types + _complex_types
+def all_types_and_complex():
+    return _all_types_and_complex
+
+def all_types_and_complex_and(*dtypes):
+    return _all_types_and_complex + _validate_dtypes(*dtypes)
+
+_all_types_and_half = _all_types + (torch.half,)
+def all_types_and_half():
+    return _all_types_and_half
+
+def get_all_dtypes(include_half=True,
+                   include_bfloat16=True,
+                   include_bool=True,
+                   include_complex=True,
+                   include_complex32=False
+                   ) -> List[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(include_half=include_half, include_bfloat16=include_bfloat16)
     if include_bool:
         dtypes.append(torch.bool)
     if include_complex:
-        dtypes += get_all_complex_dtypes()
+        dtypes += get_all_complex_dtypes(include_complex32)
     return dtypes
-
 
 def get_all_math_dtypes(device) -> List[torch.dtype]:
     return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'),
                                                     include_bfloat16=False) + get_all_complex_dtypes()
 
-
-def get_all_complex_dtypes() -> List[torch.dtype]:
-    return [torch.complex64, torch.complex128]
+def get_all_complex_dtypes(include_complex32=False) -> List[torch.dtype]:
+    return [torch.complex32, torch.complex64, torch.complex128] if include_complex32 else [torch.complex64, torch.complex128]
 
 
 def get_all_int_dtypes() -> List[torch.dtype]:

@@ -2,6 +2,11 @@
 
 #include <cublas_v2.h>
 #include <cusparse.h>
+
+#ifdef CUDART_VERSION
+#include <cusolver_common.h>
+#endif
+
 #include <ATen/Context.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
@@ -14,20 +19,23 @@ class CuDNNError : public c10::Error {
 
 }  // namespace c10
 
+#define AT_CUDNN_CHECK_WITH_SHAPES(EXPR, ...) AT_CUDNN_CHECK(EXPR, "\n", ##__VA_ARGS__)
+
 // See Note [CHECK macro]
-#define AT_CUDNN_CHECK(EXPR)                                                                  \
-  do {                                                                                        \
-    cudnnStatus_t status = EXPR;                                                              \
-    if (status != CUDNN_STATUS_SUCCESS) {                                                     \
-      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                             \
-        TORCH_CHECK_WITH(CuDNNError, false,                                                   \
-            "cuDNN error: ",                                                                  \
-            cudnnGetErrorString(status),                                                      \
-            ". This error may appear if you passed in a non-contiguous input.");              \
-      } else {                                                                                \
-        TORCH_CHECK_WITH(CuDNNError, false, "cuDNN error: ", cudnnGetErrorString(status));    \
-      }                                                                                       \
-    }                                                                                         \
+#define AT_CUDNN_CHECK(EXPR, ...)                                                               \
+  do {                                                                                          \
+    cudnnStatus_t status = EXPR;                                                                \
+    if (status != CUDNN_STATUS_SUCCESS) {                                                       \
+      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                               \
+        TORCH_CHECK_WITH(CuDNNError, false,                                                     \
+            "cuDNN error: ",                                                                    \
+            cudnnGetErrorString(status),                                                        \
+            ". This error may appear if you passed in a non-contiguous input.", ##__VA_ARGS__); \
+      } else {                                                                                  \
+        TORCH_CHECK_WITH(CuDNNError, false,                                                     \
+            "cuDNN error: ", cudnnGetErrorString(status), ##__VA_ARGS__);                       \
+      }                                                                                         \
+    }                                                                                           \
   } while (0)
 
 namespace at { namespace cuda { namespace blas {
@@ -54,7 +62,27 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
                 " when calling `" #EXPR "`");                   \
   } while (0)
 
+// cusolver related headers are only supported on cuda now
+#ifdef CUDART_VERSION
+
+#define TORCH_CUSOLVER_CHECK(EXPR)                              \
+  do {                                                          \
+    cusolverStatus_t __err = EXPR;                              \
+    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,               \
+                "cusolver error: ", __err,                      \
+                ", when calling `" #EXPR "`");                  \
+  } while (0)
+
+#else
+#define TORCH_CUSOLVER_CHECK(EXPR) EXPR
+#endif
+
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
+
+// This should be used directly after every kernel launch to ensure
+// the launch happened correctly and provide an early, close-to-source
+// diagnostic if it didn't.
+#define TORCH_CUDA_KERNEL_LAUNCH_CHECK() AT_CUDA_CHECK(cudaGetLastError())
 
 // For CUDA Driver API
 //

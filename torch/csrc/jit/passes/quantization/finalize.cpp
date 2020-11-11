@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/quantization/finalize.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/quantization/quantization_patterns.h>
@@ -65,20 +66,36 @@ void InsertPrepackUnpack(Module& module) {
 void FoldQuantizedPrepackingOps(Module& module) {
   auto filter_fn = [](const Node* n) -> bool {
     return (
-        (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("quantized::linear_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv1d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv2d_prepack") ||
-        n->kind() == Symbol::fromQualString("quantized::conv3d_prepack"));
+        n->kind() == Symbol::fromQualString("quantized::conv3d_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString("quantized::conv_transpose1d_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString("quantized::conv_transpose2d_prepack"));
   };
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-Module Finalize(Module& module, QuantType quant_type) {
+Module Finalize(
+    Module& module,
+    QuantType quant_type,
+    const std::vector<std::string>& preserved_attrs) {
+  // Tracing annotates the resulting graph with shape information. In many case,
+  // user applies different input shapes to traced graph. It is on the user to
+  // know it is correct to do so. The quantized module needs to be clean up and
+  // To prevent the JIT optimizations from leveraging the annotated shape info,
+  // clear shape information in the graph.
+  for (auto func : module.type()->methods()) {
+    ClearProfilingInformation(func->graph());
+  }
+
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
   GRAPH_DUMP("Before QuantFusion:", graph);
   QuantFusion(graph, quant_type);
-  auto frozen = freeze_module(module);
+  auto frozen = freeze_module(module, preserved_attrs);
   FoldQuantizedPrepackingOps(frozen);
   return frozen;
 }

@@ -437,7 +437,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         IntArrayRef fn_batch_sizes, const Tensor& fn_dropout_state
         ) {
 
-    check_device(input_r, weight, {hx, cx});
+    check_attributes(input_r, weight, {hx, cx});
     auto input = input_r;
 
     RNNParams fn;

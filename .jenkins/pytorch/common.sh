@@ -12,6 +12,8 @@ SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
 # Figure out which Python to use for ROCm
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+  unset HIP_PLATFORM
   PYTHON=$(which "python${BASH_REMATCH[1]}")
   # non-interactive bashs do not expand aliases by default
   shopt -s expand_aliases
@@ -69,9 +71,13 @@ if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
     # Save sccache logs to file
     sccache --stop-server || true
     rm ~/sccache_error.log || true
-    # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
-    # https://github.com/pytorch/pytorch/pull/16645
-    SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+    else
+      # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+      # https://github.com/pytorch/pytorch/pull/16645
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    fi
 
     # Report sccache stats for easier debugging
     sccache --zero-stats

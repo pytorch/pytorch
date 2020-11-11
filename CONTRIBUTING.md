@@ -2,6 +2,7 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
+  - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
@@ -58,6 +59,9 @@ PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.r
 
 ## Developing PyTorch
 
+A full set of instructions on installing PyTorch from source is here:
+https://github.com/pytorch/pytorch#from-source
+
 To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing PyTorch installs:
@@ -87,8 +91,6 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 
 3. Install PyTorch in `develop` mode:
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
@@ -116,10 +118,69 @@ For example:
 - modify your Python file `torch/__init__.py`
 - test functionality
 
-You do not need to repeatedly install after modifying Python files.
+You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
+if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `develop` mode again.
+
+### Tips and Debugging
+* A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
+with `brew install cmake` if you are developing on MacOS or Linux system.
+* Our `setup.py` requires Python >= 3.6
+* If you run into errors when running `python setup.py develop`, here are some debugging steps:
+  1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
+  your CMake works and can compile this simple Hello World program without errors.
+  2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
+  details along the way, which saves time the next time you build. If you're running into issues, you can always
+  `rm -rf build` from the toplevel `pytorch` directory and start over.
+  3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
+  following commands (note that clean _really_ removes all untracked files and changes.):
+  ```bash
+  git submodule deinit -f .
+  git clean -xdf
+  python setup.py clean
+  git submodule update --init --recursive # very important to sync the submodules
+  python setup.py develop                 # then try running the command again
+  ```
+  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  experiment with some environment variables, you can pass them into the command:
+  ```bash
+  ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+  ```
+
+## Nightly Checkout & Pull
+
+The `tools/nightly.py` script is provided to ease pure Python development of
+PyTorch. This uses `conda` and `git` to check out the nightly development
+version of PyTorch and installs pre-built binaries into the current repository.
+This is like a development or editable install, but without needing the ability
+to compile any C++ code.
+
+You can use this script to check out a new nightly branch with the following:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch
+conda activate pytorch-deps
+```
+
+Or if you would like to re-use an existing conda environment, you can pass in
+the regular environment parameters (`--name` or `--prefix`):
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch -n my-env
+conda activate my-env
+```
+
+You can also use this tool to pull the nightly commits into the current branch:
+
+```bash
+./tools/nightly.py pull -n my-env
+conda activate my-env
+```
+
+Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
+into the repo directory.
 
 ## Codebase structure
 
@@ -454,8 +515,7 @@ only interested in a specific component.
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
-- Don't need Caffe2?  Pass `BUILD_CAFFE2_OPS=0` to disable build of
-  Caffe2 operators.
+- Don't need Caffe2?  Pass `BUILD_CAFFE2=0` to disable Caffe2 build.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
@@ -790,8 +850,9 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
-in our CI to make sure that new C++ code is safe, sane and efficient. See our
-[.travis.yml](https://github.com/pytorch/pytorch/blob/master/.travis.yml) file
+in our CI to make sure that new C++ code is safe, sane and efficient. See the
+[`clang-tidy` job in our GitHub Workflow's
+lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:

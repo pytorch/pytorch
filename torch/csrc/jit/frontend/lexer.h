@@ -110,7 +110,9 @@ namespace jit {
   _(TK_IMPORT, "import", "import")               \
   _(TK_WITH, "with", "with")                     \
   _(TK_WITH_ITEM, "withitem", "")                \
-  _(TK_AS, "as", "as")
+  _(TK_AS, "as", "as")                           \
+  _(TK_PROP, "property", "")                     \
+  _(TK_ELLIPSIS, "Ellipsis", "Ellipsis")
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters

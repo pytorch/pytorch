@@ -4,12 +4,23 @@ PyTorch Mobile PR builds (use linux host toolchain + mobile build options)
 
 import cimodel.lib.miniutils as miniutils
 import cimodel.data.simple.util.branch_filters
-from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_ASAN, DOCKER_IMAGE_NDK
+from cimodel.data.simple.util.docker_constants import (
+    DOCKER_IMAGE_ASAN,
+    DOCKER_REQUIREMENT_ASAN,
+    DOCKER_IMAGE_NDK,
+    DOCKER_REQUIREMENT_NDK
+)
 
 
 class MobileJob:
-    def __init__(self, docker_image, variant_parts, is_master_only=False):
+    def __init__(
+            self,
+            docker_image,
+            docker_requires,
+            variant_parts,
+            is_master_only=False):
         self.docker_image = docker_image
+        self.docker_requires = docker_requires
         self.variant_parts = variant_parts
         self.is_master_only = is_master_only
 
@@ -30,6 +41,7 @@ class MobileJob:
             "build_environment": build_env_name,
             "build_only": miniutils.quote(str(int(True))),
             "docker_image": self.docker_image,
+            "requires": self.docker_requires,
             "name": full_job_name,
         }
 
@@ -40,14 +52,27 @@ class MobileJob:
 
 
 WORKFLOW_DATA = [
-    MobileJob(DOCKER_IMAGE_ASAN, ["build"]),
-    MobileJob(DOCKER_IMAGE_ASAN, ["custom", "build", "static"]),
+    MobileJob(
+        DOCKER_IMAGE_ASAN,
+        [DOCKER_REQUIREMENT_ASAN],
+        ["build"]
+    ),
 
     # Use LLVM-DEV toolchain in android-ndk-r19c docker image
-    MobileJob(DOCKER_IMAGE_NDK, ["custom", "build", "dynamic"]),
+    MobileJob(
+        DOCKER_IMAGE_NDK,
+        [DOCKER_REQUIREMENT_NDK],
+        ["custom", "build", "dynamic"]
+    ),
 
     # Use LLVM-DEV toolchain in android-ndk-r19c docker image
-    MobileJob(DOCKER_IMAGE_NDK, ["code", "analysis"]),
+    # Most of this CI is already covered by "mobile-custom-build-dynamic" job
+    MobileJob(
+        DOCKER_IMAGE_NDK,
+        [DOCKER_REQUIREMENT_NDK],
+        ["code", "analysis"],
+        True
+    ),
 ]
 
 

@@ -75,50 +75,6 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 
 #if !defined(TH_REAL_IS_HALF) /* non half part */
 
-void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
-{
-  at::NoNamesGuard guard;
-  ptrdiff_t numel = THTensor_wrap(mask).sum().item<int64_t>();
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
-                   if (*mask_data > 1)
-                   {
-                     THFree(mask_counter);
-                     THFree(src_counter);
-                     THError("Mask tensor can take 0 and 1 values only");
-                   }
-                   else if (*mask_data == 1)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
-void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
-{
-  at::NoNamesGuard guard;
-  ptrdiff_t numel = THTensor_wrap(mask).sum().item<int64_t>();
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
-                   if (*mask_data)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 {
   THTensor *srct = THTensor_(newContiguous)(src);
@@ -258,50 +214,6 @@ static inline void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t nume
 
 static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
-}
-
-void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
-{
-  THTensor_(resizeNd)(r_, index->dim(), THTensor_getSizePtr(index), NULL);
-  THTensor* dst = THTensor_(newContiguous)(r_);
-
-  index = THLongTensor_newContiguous(index);
-  int64_t* index_data = THLongTensor_data(index);
-  ptrdiff_t srcElements = THTensor_(nElement)(src);
-  scalar_t* src_data = src->data<scalar_t>();
-  scalar_t* dst_data = dst->data<scalar_t>();
-  ptrdiff_t nIndices = THLongTensor_nElement(index);
-  int isContiguous = THTensor_(isContiguous)(src);
-
-  // Exceptions must not be thrown across parallel sections, so we
-  // record the position of the invalid index and throw the exception after the
-  // loop.
-  std::atomic<int64_t> invalidIdxPos(-1);
-
-  at::parallel_for(0, nIndices, TH_OMP_OVERHEAD_THRESHOLD,
-      [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t idx = index_data[i];
-      if (idx < srcElements && idx >= -srcElements) {
-        idx = THTensor_(wrapLinearIndex)(idx, srcElements);
-        if (isContiguous) {
-          dst_data[i] = src_data[idx];
-        } else {
-          dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
-        }
-      } else {
-        int64_t tmp = -1;
-        invalidIdxPos.compare_exchange_strong(tmp, i);
-      }
-    }
-  });
-
-  if (invalidIdxPos >= 0) {
-    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
-  }
-
-  THLongTensor_free(index);
-  THTensor_(freeCopyTo)(dst, r_);
 }
 
 void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)

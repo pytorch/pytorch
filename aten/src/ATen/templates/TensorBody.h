@@ -4,8 +4,10 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Stream.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
@@ -17,6 +19,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/QuantizerBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
@@ -48,12 +51,7 @@ namespace at {
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 
-struct Quantizer;
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
+using Stream = c10::Stream;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
@@ -61,7 +59,8 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
+  return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
 }
@@ -210,7 +209,7 @@ class CAFFE2_API Tensor {
     return impl_->strides();
   }
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  optional<DimnameList> opt_names() const {
+  c10::optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.
@@ -334,6 +333,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;
 
+  /// Returns if a `Tensor` is metal tensor.
+  bool is_metal() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
@@ -452,6 +454,7 @@ class CAFFE2_API Tensor {
   Tensor cuda() const;
   Tensor hip() const;
   Tensor vulkan() const;
+  Tensor metal() const;
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -492,7 +495,7 @@ class CAFFE2_API Tensor {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false) const;
+  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -519,6 +522,23 @@ class CAFFE2_API Tensor {
   /// \param create_graph If ``true``, graph of the derivative will
   ///     be constructed, allowing to compute higher order derivative
   ///     products. Defaults to ``false``.
+  /// \param inputs Inputs w.r.t. which the gradient will be accumulated into
+  ///     ``at::Tensor::grad``. All other Tensors will be ignored. If not
+  ///     provided, the gradient is accumulated into all the leaf Tensors
+  ///     that were used to compute the current tensor. All the provided inputs
+  ///     must be leaf Tensors.
+  void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
+    // NB: Adding this wrapper to _backward here because we'd like our
+    // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
+    // currently does not support optional of TensorList our approach is to replace
+    // backward in native_functions.yaml with _backward and call it here instead.
+    if (inputs.has_value()) {
+      TORCH_CHECK(inputs.value().size() > 0, "'inputs' argument to backward cannot be empty")
+      this->_backward(inputs.value(), gradient, retain_graph, create_graph);
+    } else {
+      this->_backward({}, gradient, retain_graph, create_graph);
+    }
+  }
 
   /// \fn Tensor detach() const;
   ///

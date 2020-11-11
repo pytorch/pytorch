@@ -1,4 +1,3 @@
-from __future__ import print_function
 import sys
 import os
 import re
@@ -123,8 +122,7 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        # python_error in case of py2_7_9.
-        with self.assertRaisesRegex(RuntimeError, "(Checkpointing is not compatible)|(python_error)"):
+        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
@@ -267,6 +265,25 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
+    def test_checkpoint_partial_grad(self):
+        def run_fn(tensor1, tensor2):
+            # tensor 2 is used for other application logic
+            return tensor1, tensor2
+        input_var = torch.randn(1, 4, requires_grad=True)
+        input_var2 = torch.randn(1, 4, requires_grad=False)
+        out = checkpoint(run_fn, input_var, input_var2)
+        out[0].sum().backward()
+
+        def run_fn(tensor1, tensor2):
+            return tensor1
+        input_var = torch.randn(1, 4, requires_grad=False)
+        input_var2 = torch.randn(1, 4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
+        ):
+            out = checkpoint(run_fn, input_var, input_var2)
+            out.sum().backward()
 
 class TestDataLoader(TestCase):
     def setUp(self):
@@ -513,6 +530,20 @@ class TestHub(TestCase):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
             'mnist',
+            source='github',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_from_local_dir(self):
+        local_dir = hub._get_cache_or_reload(
+            'ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(
+            local_dir,
+            'mnist',
+            source='local',
             pretrained=True,
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
@@ -571,6 +602,18 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
+    # Test the default zipfile serialization format produced by >=1.6 release.
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_zip_1_6_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
@@ -589,6 +632,14 @@ class TestHub(TestCase):
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python # noqa
+
+
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertions work as expected
+        torch.Assert(True, "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch.Assert(False, "bar")
 
 
 if __name__ == '__main__':

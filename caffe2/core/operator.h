@@ -205,7 +205,11 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE(
         ival.isTensor(),
         "Input(int, DeviceType) is only available for IValues that store Tensors");
-    Tensor tensor = caffe2::Tensor(ival.toTensor());
+    auto t = ival.toTensor();
+    if (!t.is_contiguous()) {
+      t = t.contiguous();
+    }
+    Tensor tensor = caffe2::Tensor(std::move(t));
     CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
     input_tensors_[idx] = std::move(tensor);
     return input_tensors_[idx];
@@ -479,6 +483,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   virtual void CancelAsyncCallback() {}
+
+  virtual void Cancel() {}
 
   // RunAsync, if implemented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
@@ -1240,7 +1246,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename FirstType, typename... Types, typename... ExtraArgs>      \
   struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {      \
     template <typename Op>                                                     \
-    static bool call(Op* op, const TypeMeta& meta) {                           \
+    static bool call(Op* op, const TypeMeta meta) {                           \
       static_assert(                                                           \
           !std::is_same<GenericTensorImplementation, FirstType>::value,        \
           "GenericTensorImplementation must be the last in TensorTypes list"); \
@@ -1263,7 +1269,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename... ExtraArgs>                                             \
   struct DispatchHelper<TensorTypes<>, ExtraArgs...> {                         \
     template <typename Op>                                                     \
-    static bool call(Op* /* unused */, const TypeMeta& meta) {                 \
+    static bool call(Op* /* unused */, const TypeMeta meta) {                 \
       CAFFE_THROW("Unsupported type of tensor: ", meta.name());                \
     }                                                                          \
     template <typename Op>                                                     \
@@ -1281,7 +1287,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
       TensorTypes<GenericTensorImplementation>,                                \
       ExtraArgs...> {                                                          \
     template <typename Op>                                                     \
-    static bool call(Op* op, const TypeMeta&) {                                \
+    static bool call(Op* op, const TypeMeta) {                                \
       return op->template DoRunWithOtherType<ExtraArgs...>();                  \
     }                                                                          \
     template <typename Op>                                                     \

@@ -11,7 +11,7 @@
 /** \brief Freeze Module, i.e., Assume all atrributes are constants.
  *
  * Freezing module is a functionality that allows the JIT to internalize
- * imutable attributes. Combined with inlinig, the module is aggressively
+ * immutable attributes. Combined with inlining, the module is aggressively
  * optimized and significant overhead is optimized away. The freezeModule API
  * produces a cloned frozen module.
  */
@@ -21,7 +21,8 @@ namespace jit {
 
 TORCH_API Module freeze_module(
     const Module& module,
-    std::vector<std::string> preservedAttrs = std::vector<std::string>());
+    std::vector<std::string> preservedAttrs = std::vector<std::string>(),
+    bool freezeInterfaces = true);
 
 } // namespace jit
 } // namespace torch

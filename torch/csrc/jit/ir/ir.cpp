@@ -93,8 +93,10 @@ std::ostream& operator<<(
       out << l.delim;
     }
     printValueRef(out, n);
-    out << " : ";
-    out << *n->type();
+    if (c10::type_verbosity() >= c10::TypeVerbosity::Type) {
+      out << " : ";
+      out << *n->type();
+    }
   }
   return out;
 }
@@ -324,6 +326,8 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
         << *fg->g(attr::Subgraph);
   }
+  out.flush();
+
   /*
   // Uncomment this to debug all_nodes issues
   {
@@ -842,22 +846,40 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
       uses_.end());
 }
 
-size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
-  auto name_str = name.toUnqualString();
+size_t findArgument(
+    const FunctionSchema& the_schema,
+    const std::string& unqualName) {
   for (size_t i = 0; i < the_schema.arguments().size(); ++i) {
     const Argument* arg = &the_schema.arguments()[i];
-    if (arg->name() == name_str) {
+    if (arg->name() == unqualName) {
       return i;
     }
   }
   throw std::runtime_error(
-      std::string("Couldn't find an argument called ") + name.toQualString());
+      std::string("Couldn't find an argument called ") + unqualName);
+}
+
+size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
+  const auto unqualName = name.toUnqualString();
+  return findArgument(the_schema, unqualName);
 }
 
 c10::optional<IValue> Node::get(Symbol name) const {
   return toIValue(namedInput(name));
 }
 
+bool Node::hasNamedInput(const std::string& name) const {
+  for (const auto& argument : schema().arguments()) {
+    if (argument.name() == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Value* Node::namedInput(const std::string& unqualName) const {
+  return input(findArgument(schema(), unqualName));
+}
 Value* Node::namedInput(Symbol name) const {
   return input(findArgument(schema(), name));
 }
@@ -1051,6 +1073,8 @@ bool Node::hasSideEffects() const {
     case prim::BailoutTemplate:
     case prim::BailOut:
     case prim::rpc_async: // It represents RPC message sent.
+    case prim::rpc_sync: // It represents RPC message sent.
+    case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
     case prim::Enter:
     case prim::Exit:
@@ -1595,6 +1619,21 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
   return n;
 }
 
+Node* Graph::createEnumName(Value* e) {
+  e->type()->expect<EnumType>();
+  assert(e->type()->cast<EnumType>());
+  auto n = create(prim::EnumName, {e});
+  n->output()->setType(StringType::get());
+  return n;
+}
+
+Node* Graph::createEnumValue(Value* e) {
+  auto enum_type = e->type()->expect<EnumType>();
+  auto n = create(prim::EnumValue, {e});
+  n->output()->setType(enum_type->getValueType());
+  return n;
+}
+
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
@@ -1858,6 +1897,19 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
+  c10::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  if (to_replace->kind() == prim::CallMethod) {
+    auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
+    if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
+      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+          class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+    } else {
+      std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
+      module_instance_info = c10::make_optional(
+          ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+    }
+  }
+
   // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
@@ -1876,11 +1928,14 @@ std::vector<Value*> inlineCallTo(
       if (new_node_cs) {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs, callee, to_replace->sourceRange());
+                *new_node_cs,
+                callee,
+                to_replace->sourceRange(),
+                module_instance_info);
       } else {
         new_callstack_entries[raw_callstack_ptr] =
             c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange());
+                callee, to_replace->sourceRange(), module_instance_info);
       }
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
@@ -1956,8 +2011,19 @@ void ProfileOp::cloneFrom(Node* other_) {
   auto other = other_->cast<ProfileOp>();
   this->callback_ = other->getCallback();
 }
+
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+void ProfileOptionalOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileOptionalOp>();
+  this->callback_ = other->getCallback();
+}
+
+Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
+  return new ProfileOptionalOp(g, {nullptr});
 }
 
 TypePtr NamedValue::type() const {
@@ -1969,6 +2035,7 @@ TypePtr NamedValue::type() const {
 }
 
 constexpr Symbol ProfileOp::Kind;
+constexpr Symbol ProfileOptionalOp::Kind;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {

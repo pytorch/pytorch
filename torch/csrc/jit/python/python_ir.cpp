@@ -3,6 +3,8 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -12,7 +14,6 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
-
 #include <iostream>
 #include <sstream>
 
@@ -235,8 +236,10 @@ void initPythonIRBindings(PyObject* module_) {
              bool use_external_data_format,
              const std::string& onnx_file_path) {
             std::string graph;
+            std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
             RawDataExportMap export_map;
-            std::tie(graph, export_map) = export_onnx(
+            SymbolDimMap symbol_map;
+            std::tie(model_proto, export_map, symbol_map) = export_onnx(
                 g,
                 initializers,
                 onnx_opset_version,
@@ -249,6 +252,7 @@ void initPythonIRBindings(PyObject* module_) {
                 add_node_names,
                 use_external_data_format,
                 onnx_file_path);
+            graph = serialize_model_proto_to_string(model_proto);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -260,6 +264,7 @@ void initPythonIRBindings(PyObject* module_) {
               python_serialized_export_map[kv.first] =
                   py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
             }
+            graph = serialize_model_proto_to_string(model_proto);
             return std::make_tuple(
                 py::bytes(graph), python_serialized_export_map);
           },
@@ -466,7 +471,16 @@ void initPythonIRBindings(PyObject* module_) {
             return py::make_iterator(b.outputs().begin(), b.outputs().end());
           })
       .def("returnNode", [](Block& b) { return b.return_node(); })
-      .def("paramNode", [](Block& b) { return b.param_node(); });
+      .def("paramNode", [](Block& b) { return b.param_node(); })
+      .def(
+          "addNode",
+          [](Block& b, const char* str, const std::vector<Value*>& inputs) {
+            return addNodeToBlock(&b, Symbol::fromQualString(str), inputs);
+          })
+      .def("addInputToBlock", [](Block& b) { return addInputToBlock(&b); })
+      .def("registerOutput", [](Block& b, Value* value) {
+        return b.registerOutput(value);
+      });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
@@ -479,6 +493,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
+      .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
@@ -518,6 +533,8 @@ void initPythonIRBindings(PyObject* module_) {
       .NS(replaceAllUsesWith)
       .NS(insertBefore)
       .NS(insertAfter)
+      .NS(isBefore)
+      .NS(isAfter)
       .NS(moveAfter)
       .NS(moveBefore)
       .NS(removeInput)
@@ -731,7 +748,8 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
-      .def_static("get", &TensorType::get);
+      .def_static("get", &TensorType::get)
+      .def_static("getInferred", &TensorType::getInferred);
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
@@ -739,6 +757,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(
       m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  py::class_<StreamObjType, Type, std::shared_ptr<StreamObjType>>(
+      m, "StreamObjType")
+      .def_static("get", &StreamObjType::get);
   py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
       m, "PyObjectType")
       .def_static("get", &PyObjectType::get);
@@ -787,10 +808,20 @@ void initPythonIRBindings(PyObject* module_) {
       }))
       .def("name", [](ClassType& self) { return self.name()->name(); });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
-      .def(py::init([](const std::string& qualified_name, TypePtr value) {
+      .def(py::init([](const std::string& qualified_name,
+                       TypePtr value_type,
+                       const std::vector<py::object>& enum_names_values) {
+        std::vector<std::pair<std::string, IValue>> names_values;
+        names_values.reserve(enum_names_values.size());
+        for (const auto& enum_name_value : enum_names_values) {
+          auto enum_name = py::cast<std::string>(enum_name_value.attr("name"));
+          auto enum_value = toIValue(enum_name_value.attr("value"), value_type);
+          names_values.emplace_back(std::make_pair(enum_name, enum_value));
+        }
         return EnumType::create(
             c10::QualifiedName(qualified_name),
-            std::move(value),
+            std::move(value_type),
+            std::move(names_values),
             get_python_cu());
       }));
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
@@ -815,7 +846,10 @@ void initPythonIRBindings(PyObject* module_) {
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)
-      .def_readonly("offset", &Use::offset);
+      .def_readonly("offset", &Use::offset)
+      .def("isAfter", [](Use& self, Use& other_use) {
+        return isBeforeOrAfter(self, other_use, false);
+      });
 }
 } // namespace jit
 } // namespace torch

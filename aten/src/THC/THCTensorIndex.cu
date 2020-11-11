@@ -219,20 +219,6 @@ struct WrapIndexOp {
 };
 
 template <typename T, typename IndexType, int Dims>
-struct TensorTakeOp {
-  TensorTakeOp(TensorInfo<T, IndexType> info, IndexType numel, int64_t*, int64_t*)
-    : info(info), numel(numel) {}
-
-  __device__ __forceinline__ void operator()(T* out, int64_t* index) {
-    auto offset = indexToOffset<Dims>(info, *index, numel);
-    *out = info.data[offset];
-  }
-
-  const TensorInfo<T, IndexType> info;
-  IndexType numel;
-};
-
-template <typename T, typename IndexType, int Dims>
 struct TensorPutOp {
   TensorPutOp(TensorInfo<T, IndexType> info, IndexType numel, int64_t*, int64_t*)
     : info(info), numel(numel) {}
