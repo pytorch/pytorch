@@ -239,20 +239,20 @@ void initJITBindings(PyObject* module) {
           [](Module& module,
              const std::string& method_name,
              const py::dict& qconfig_dict,
-             bool inplace) {
+             bool inplace,
+             int quant_type_int) {
             auto dict = py::cast<std::unordered_map<
                 std::string,
-                c10::optional<std::tuple<
-                    Module,
-                    Module,
-                    int // quant_type_int
-                    >>>>(qconfig_dict);
-            return InsertObservers(module, method_name, dict, inplace);
+                c10::optional<std::tuple<Module, Module>>>>(qconfig_dict);
+            auto quant_type = static_cast<QuantType>(quant_type_int);
+            return InsertObservers(
+                module, method_name, dict, inplace, quant_type);
           },
           py::arg("module"),
           py::arg("method_name"),
           py::arg("qconfig_dict"),
-          py::arg("inplace"))
+          py::arg("inplace"),
+          py::arg("quant_type_int") = 1)
       .def(
           "_jit_pass_insert_quant_dequant",
           [](Module& module,

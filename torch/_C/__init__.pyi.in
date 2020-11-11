@@ -194,7 +194,8 @@ def _jit_pass_fold_convbn(module: 'torch.jit.ScriptModule'): ...
 def _jit_pass_insert_observers(module: 'torch.jit.ScriptModule',
                                method_name: str,
                                qconfig_dict: Dict[str, Any],
-                               inplace: _bool): ...
+                               inplace: _bool,
+                               quant_type: _int): ...
 def _jit_pass_insert_quant_dequant(module: 'torch.jit.ScriptModule',
                                    method_name: str,
                                    inplace: _bool,

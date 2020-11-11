@@ -25,9 +25,8 @@ struct OptionalQConfigHash {
     if (qconfig_opt.has_value()) {
       const auto& m1 = std::get<0>(*qconfig_opt);
       const auto& m2 = std::get<1>(*qconfig_opt);
-      const int m3 = std::get<2>(*qconfig_opt);
       constexpr int CONST = 7;
-      return std::hash<Module>()(m1) + CONST * (std::hash<Module>()(m2) + m3);
+      return std::hash<Module>()(m1) + CONST * std::hash<Module>()(m2);
     }
     return 0;
   }
@@ -49,11 +48,8 @@ void fillQConfigMap(
     const c10::optional<QConfig>& parent_qconfig = c10::nullopt) {
   c10::optional<QConfig> qconfig;
   if (qconfig_dict.find(key) != qconfig_dict.end()) {
+    GRAPH_DEBUG("Got module config for key:", key);
     qconfig = qconfig_dict.at(key);
-    GRAPH_DEBUG("Got module config for key: ", key);
-    if (qconfig.has_value()) {
-      GRAPH_DEBUG(key, "'s QuantType is ", std::get<2>(*qconfig));
-    }
   } else {
     GRAPH_DEBUG("Inheriting qconfig from parent module:", key);
     qconfig = parent_qconfig;
@@ -286,8 +282,10 @@ class ModuleCloneHelper {
 
 class InsertObserversHelper {
  public:
-  explicit InsertObserversHelper(const ModuleQConfigMap& map)
-      : module_qconfig_map_(map) {}
+  explicit InsertObserversHelper(
+      const ModuleQConfigMap& map,
+      QuantType quant_type)
+      : module_qconfig_map_(map), quant_type_(quant_type) {}
 
   // TODO: replace (module, method_name) with graph?
   // preprocess to clean up the graph from tracing
@@ -498,6 +496,8 @@ class InsertObserversHelper {
   // want to add to the module instance that has the block
   std::unordered_map<Block*, NameModuleVector> block_observer_map_;
 
+  // Type of quantization for this pass.
+  QuantType quant_type_ = QuantType::STATIC;
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
@@ -1177,17 +1177,16 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
       isEmbeddingBagNonInput(v)) {
     return false;
   }
-  const auto& quant_type = static_cast<QuantType>(std::get<2>(qconfig));
   // For dynamic quantization we only insert observers at the input
   // of the quantizable function.
-  if (quant_type == QuantType::STATIC) {
+  if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
     if (!isWeightOnlyStaticQuantOp(v->node()) &&
         (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node()))) {
       return true;
     }
   }
-  if (quant_type == QuantType::DYNAMIC) {
+  if (quant_type_ == QuantType::DYNAMIC) {
     // Check the dtype of the observer module.
     Module observer_module = getObserverModuleFor(v, qconfig);
     auto scalar_type = observer_module.attr("dtype");
@@ -1199,7 +1198,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
   }
   // Check whether node input value is quantizable
   for (const auto& use : v->uses()) {
-    if (useQuantizable(use, quant_type)) {
+    if (useQuantizable(use, quant_type_)) {
       return true;
     }
   }
@@ -1586,7 +1585,8 @@ Module InsertObservers(
     Module& input_module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
-    bool inplace) {
+    bool inplace,
+    QuantType quant_type) {
   ModuleQConfigMap map_before_clone;
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
@@ -1595,7 +1595,8 @@ Module InsertObservers(
   // Since the types are changed after clone, we need to fill
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  InsertObserversHelper helper(module_qconfig_map);
+  GRAPH_DEBUG("Quant type:", quant_type);
+  InsertObserversHelper helper(module_qconfig_map, quant_type);
   helper.preprocess(module, method_name);
   helper.fillBoundaryValueMap(module, method_name);
   // analyze needs to run after fillBoundaryValueMap

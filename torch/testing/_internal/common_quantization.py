@@ -604,8 +604,7 @@ class QuantizationTestCase(TestCase):
         return str_to_print
 
     if HAS_FX:
-        def checkGraphModeFxOp(self, model, inputs,
-                               quant_type=None,
+        def checkGraphModeFxOp(self, model, inputs, quant_type,
                                expected_node=None,
                                expected_node_occurrence=None,
                                expected_node_list=None,
@@ -635,19 +634,19 @@ class QuantizationTestCase(TestCase):
             if type(inputs) == list:
                 inputs = inputs[0]
 
-            if custom_qconfig is None:
-                if quant_type == QuantType.QAT:
-                    qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
-                    model.train()
-                elif quant_type == QuantType.STATIC:
-                    qconfig = get_default_qconfig(torch.backends.quantized.engine)
-                    model.eval()
-                else:
-                    qconfig = default_dynamic_qconfig
-                    model.eval()
+            if quant_type == QuantType.QAT:
+                qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+                model.train()
+            elif quant_type == QuantType.STATIC:
+                qconfig = get_default_qconfig(torch.backends.quantized.engine)
+                model.eval()
             else:
+                qconfig = default_dynamic_qconfig
+                model.eval()
+
+            # overwrite qconfig with custom_qconfig
+            if custom_qconfig is not None:
                 qconfig = custom_qconfig
-                quant_type = qconfig.quant_type
 
             if quant_type == QuantType.QAT:
                 prepare = prepare_qat_fx

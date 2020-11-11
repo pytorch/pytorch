@@ -1403,7 +1403,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         model = MainModule().eval()
         traced = torch.jit.trace(model, (torch.randn(5, 5),))
-        model = prepare_dynamic_jit(traced, {'' : default_dynamic_qconfig})
+        model = prepare_dynamic_jit(traced, {'' : default_qconfig})
         model = convert_dynamic_jit(model)
         FileCheck().check("quantized::linear_dynamic") \
                    .run(model.graph)

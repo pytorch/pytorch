@@ -17,7 +17,7 @@ struct hash<torch::jit::Module> {
 namespace torch {
 namespace jit {
 
-using QConfig = std::tuple<Module, Module, int>;
+using QConfig = std::tuple<Module, Module>;
 using QConfigDict = std::unordered_map<std::string, c10::optional<QConfig>>;
 
 /** \brief Insert observer module and observer function call for
@@ -39,7 +39,8 @@ TORCH_API Module InsertObservers(
     Module& module,
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
-    bool inplace);
+    bool inplace,
+    QuantType quant_type = QuantType::STATIC);
 
 } // namespace jit
 } // namespace torch
