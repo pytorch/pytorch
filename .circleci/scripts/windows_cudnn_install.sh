@@ -6,7 +6,7 @@ if [[ "$CUDA_VERSION" == "10" ]]; then
     cudnn_installer_name="cudnn-10.1-windows10-x64-v7.6.4.38"
 elif [[ "$CUDA_VERSION" == "11" ]]; then
     cuda_complete_version="11.1"
-    cudnn_installer_name="cudnn-11.1-windows-x64-v8.0.5.39.zip"
+    cudnn_installer_name="cudnn-11.1-windows-x64-v8.0.5.39"
 else
     echo "CUDNN for CUDA_VERSION $CUDA_VERSION is not supported yet"
     exit 1
