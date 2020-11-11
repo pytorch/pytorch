@@ -1283,8 +1283,21 @@ def method_tests():
          'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
         ('slogdet', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
+         # loss functions for complex-valued svd have to be "gauge invariant",
+         # i.e. loss functions shouldn't change when sigh of the singular vectors change.
+         # the simplest choice to satisfy this requirement is to apply 'abs'.
         ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
-            NO_ARGS, 'return_s', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: usv[1]),
+         NO_ARGS, 'check_grad_s', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: usv[1]),
+        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+         NO_ARGS, 'check_grad_u', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: abs(usv[0])),
+        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+         NO_ARGS, 'check_grad_v', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: abs(usv[2])),
+        # TODO: replace lambda usv: usv[0][0, 0] * usv[2][0, 0] with lambda usv: usv[0][0, 0] * usv[2][0, 0].conj()
+        # once https://github.com/pytorch/pytorch/issues/45821 is resolved
+        # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
+        # and when the loss function depends both on 'u' and 'v'
+        ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+         NO_ARGS, 'check_grad_uv', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: usv[0][0, 0] * usv[2][0, 0]),
         ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)], NO_ARGS,
          'wide', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),
         ('svd', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)], NO_ARGS,
