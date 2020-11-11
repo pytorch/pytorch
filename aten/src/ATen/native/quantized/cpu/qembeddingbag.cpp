@@ -541,7 +541,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
       per_sample_weights_,
       compressed_indices_mapping,
       include_last_offset,
-      false);
+      false /* is_embedding_op */);
 }
 
 Tensor embedding_bag_4bit_rowwise_offsets(
@@ -585,7 +585,7 @@ class QEmbeddingBag final {
           per_sample_weights_,
           compressed_indices_mapping,
           include_last_offset,
-          false);
+          false /* is_embedding_op */);
     } else if (bit_rate == 4) {
       return packed_weight->embeddingbag_4bit(
           indices,
@@ -619,8 +619,8 @@ class QEmbedding final {
           pruned_weights,
           c10::nullopt,
           c10::nullopt,
-          false,
-          true);
+          false /* include_last_offset */,
+          true /* is_embedding_op */);
 
     } else {
       TORCH_INTERNAL_ASSERT(
