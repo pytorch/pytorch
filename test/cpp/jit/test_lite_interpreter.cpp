@@ -523,6 +523,29 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
     }
   }
 
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 1
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 2
+
+  // class C(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+  //     self.A0 = A()
+  //     self.B0 = B()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(self.B0.forward(x))
+
   std::unordered_set<std::string> expected_result(
       {"top(C).A0(A).forward", "top(C).A0(A).forward.B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
@@ -626,7 +649,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
 
   // There are 3 module information strings here.
   // "top(B).forward": for the add operator in top.
-  // "top(B).A0(B).forward": for the add operator in A0.
+  // "top(B).A0(A).forward": for the add operator in A0.
   // "top(B).A1(A).forward": for the add operator in A1.
 
   std::unordered_set<std::string> expected_result(
