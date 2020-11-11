@@ -4,7 +4,6 @@ import unittest
 import inspect
 import functools
 import pprint
-import pickle
 
 from torch.testing._internal.common_utils import TestCase
 from torch.overrides import (
@@ -822,14 +821,15 @@ class TestGradCheckOverride(TestCase):
             torch.add,
         })
 
-class TestPickle(TestCase):
-    "Regression test for gh-47051"
-    def test_pickle(self):
-        t = torch.tensor([1]).as_subclass(SubTensor2)
-        t.abcd = "e"
-        t2 = pickle.loads(pickle.dumps(t))
-        self.assertIs(type(t2), SubTensor2)
-        self.assertEqual(t2.abcd, "e")
+class TestNamedTuple(TestCase):
+    "Regression test for gh-47090"
+    def test_max(self):
+        x = torch.tensor([1, 2])
+        xs = x.as_subclass(SubTensor2)
+        r = torch.max(x, dim=0)
+        rs = torch.max(xs, dim=0)
+        self.assertEqual(type(r), type(rs))
+        self.assertEqual(r, rs)
 
 if __name__ == '__main__':
     unittest.main()
