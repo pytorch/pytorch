@@ -964,22 +964,78 @@ class StringTable(defaultdict):
         self[key] = torch._C._demangle(key) if len(key) > 1 else key
         return self[key]
 
+def filter_stack_entry(entry):
+    filtered_entries = [
+        ("autograd/__init__", "_make_grads"),
+        ("autograd/__init__", "backward"),
+        ("torch/tensor", "backward"),
+        ("_internal/common_utils", "prof_callable"),
+        ("_internal/common_utils", "prof_func_call"),
+        ("_internal/common_utils", "prof_meth_call"),
+    ]
+    return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
+
+def filter_name(name):
+    # ignoring the following utility ops
+    filtered_out_names = [
+        "profiler::_record_function_enter",
+        "profiler::_record_function_exit",
+        "aten::is_leaf",
+        "aten::output_nr",
+        "aten::_version",
+    ]
+    return name in filtered_out_names
+
 # Parsing of kineto profiler events
 def parse_kineto_results(result):
     # result.events() has most of the events - PyTorch op-level and device-level events
     # result.legacy_events() has events not yet ported to kineto
     # (e.g. start/stop marks, tensor memory allocator events)
 
-    # First, find __start_profile mark to get the absolute time of the start of the trace
+    # First, find __start_profile mark to get the absolute time of the start of the trace;
+    # save memory allocation records
     start_record = None
+    mem_records = []
     for record in itertools.chain(*result.legacy_events()):
         if record.kind() == 'mark' and record.name() == '__start_profile':
             assert start_record is None
             start_record = record
+        if record.kind() == 'memory_alloc':
+            mem_records.append(record)
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
 
     # Create and return FunctionEvent list
     function_events = []
+    for kineto_event in result.events():
+        fe = FunctionEvent(
+            id=record.handle(),
+            node_id=record.node_id(),
+            name=string_table[start.name()],
+            thread=start.thread_id(),
+            start_us=start_record.cpu_elapsed_us(start),
+            end_us=start_record.cpu_elapsed_us(record),
+            fwd_thread=start.fwd_thread_id(),
+            input_shapes=start.shapes(),
+            stack=[entry for entry in start.stack() if filter_stack_entry(entry)],
+            scope=start.scope(),
+            cpu_memory_usage=cpu_memory_usage,
+            cuda_memory_usage=cuda_memory_usage,
+            is_async=is_async,
+            is_remote=is_remote_event,
+            sequence_nr=start.sequence_nr(),
+        )
+        # note: async events have only cpu total time
+        if not is_async and start.has_cuda():
+            cuda_start = adjusted_time(start, cuda_records)
+            cuda_end = adjusted_time(record, cuda_records)
+            if (cuda_end - cuda_start) > 0:
+                fe.append_kernel(
+                    start.name(),
+                    start.device(),
+                    cuda_start,
+                    cuda_end)
+        function_events.append(fe)
+    function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return function_events
 
 # Parsing of legacy profiler events
@@ -997,26 +1053,6 @@ def parse_legacy_records(thread_records):
     functions = []
     record_stack = []
     string_table = StringTable()
-
-    # ignoring the following utility ops
-    filtered_out_names = [
-        "profiler::_record_function_enter",
-        "profiler::_record_function_exit",
-        "aten::is_leaf",
-        "aten::output_nr",
-        "aten::_version",
-    ]
-
-    def filter_stack_entry(entry):
-        filtered_entries = [
-            ("autograd/__init__", "_make_grads"),
-            ("autograd/__init__", "backward"),
-            ("torch/tensor", "backward"),
-            ("_internal/common_utils", "prof_callable"),
-            ("_internal/common_utils", "prof_func_call"),
-            ("_internal/common_utils", "prof_meth_call"),
-        ]
-        return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
 
     # cuda start events and the overall profiler start event don't happen
     # at exactly the same time because we need to record an event on each device
@@ -1054,7 +1090,7 @@ def parse_legacy_records(thread_records):
         prev_record = None
         for record in thread_record_list:
             record_key = get_record_key(record)
-            if (record.name() in filtered_out_names or
+            if (filter_name(record.name()) or
                     record_key in filtered_handles):
                 filtered_handles.add(record_key)
                 continue
