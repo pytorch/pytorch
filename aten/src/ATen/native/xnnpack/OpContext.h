@@ -70,7 +70,7 @@ class XNNPackLinearOpContext final : public LinearOpContext {
     output_max_ = max;
   }
 
-  Tensor run(const Tensor& input);
+  Tensor run(const Tensor& input) override;
 
   static c10::intrusive_ptr<LinearOpContext> create_context(
       Tensor&& weight,
