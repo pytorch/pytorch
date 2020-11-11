@@ -2698,9 +2698,8 @@ class TestAutograd(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         dtype = torch.complex128
         device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6)):
-            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
-            A.requires_grad_()
+        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
+            A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
 
             def func(A):
                 u, s, v = torch.svd(A)
@@ -2714,7 +2713,7 @@ class TestAutograd(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         dtype = torch.complex128
         device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6)):
+        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
             A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
 
             def func(A):
@@ -2729,7 +2728,7 @@ class TestAutograd(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         dtype = torch.complex128
         device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6)):
+        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
             A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
 
             def func(A):
@@ -2746,7 +2745,7 @@ class TestAutograd(TestCase):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         dtype = torch.complex128
         device = 'cpu'
-        for dims in ((3, 3), (6, 3), (3, 6)):
+        for dims in ((3, 3), (6, 3), (3, 6), (2, 3, 3)):
             A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
 
             def func(A):
@@ -5069,10 +5068,12 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'mean'] + separate_complex_tests
+                'exp', 'mean', 'svd'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
-skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
+skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex',
+                  'svd_batched_complex', 'svd_tall_all_batched_complex', 'svd_tall_batched_complex',
+                  'svd_wide_all_batched_complex', 'svd_wide_batched_complex']
 
 def add_test(
         name,
