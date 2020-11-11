@@ -13,6 +13,11 @@
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
 
+#ifdef USE_FBGEMM
+#include <fbgemm/Fbgemm.h>
+#include <fbgemm/FbgemmConvert.h>
+#endif
+
 namespace {
 
 using namespace at;
@@ -93,6 +98,31 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
+
+  // FBGeMM kernel support exists only for the following case,
+  // 1. Memory Format for source and destination tensors is contiguous.
+  // 2. Device for both the source and destination tensor is CPU.
+  // 3. dtype conversion between FP32->FP16 and FP16->FP32.
+  #ifdef USE_FBGEMM
+    if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
+         (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
+        (self.device().is_cpu() && src.device().is_cpu()) &&
+        !self.is_sparse() && !src.is_sparse() &&
+        ((self.is_contiguous() && src.is_contiguous()) ||
+         (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
+      if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
+        auto* output_ptr = reinterpret_cast<fbgemm::float16*>(
+            self.data_ptr<at::Half>());
+        fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+      } else {
+        auto in_data = reinterpret_cast<fbgemm::float16*>(
+            src.data_ptr<at::Half>());
+        auto* output_ptr = self.data_ptr<float>();
+        fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
+      }
+      return self;
+    }
+  #endif
 
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
