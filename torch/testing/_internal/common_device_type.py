@@ -366,7 +366,9 @@ def get_device_type_test_bases():
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
-            test_bases.append(CUDATestBase)
+            # skip if sanitizer is enabled
+            if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
+                test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
     else:
