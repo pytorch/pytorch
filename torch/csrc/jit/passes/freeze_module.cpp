@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/jit_log.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
@@ -76,7 +75,6 @@ class AttributePropagator {
   void run() {
     auto applyInline = [](std::shared_ptr<Graph>& subgraph) {
       Inline(*subgraph);
-      ClearProfilingInformation(subgraph);
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
       runOptimization(subgraph, /* unroll? */ false);

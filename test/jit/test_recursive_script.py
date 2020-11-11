@@ -495,50 +495,6 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M(), (torch.randn(5, 5),))
 
-    def test_prepare_scriptable_basic(self):
-        class SeluButReluWhenScripted(torch.nn.SELU):
-            def __prepare_scriptable__(self):
-                return nn.ReLU()
-
-        t = torch.randn(5, 5)
-        m = SeluButReluWhenScripted()
-        sm = torch.jit.script(m)
-        eager_out = m(t)
-        script_out = sm(t)
-        self.assertNotEqual(eager_out, script_out)
-
-    def test_prepare_scriptable_iterable_modules(self):
-        class SeluButReluWhenScripted(torch.nn.SELU):
-            def __prepare_scriptable__(self):
-                return nn.ReLU()
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                shared = SeluButReluWhenScripted()
-                self.sequential = nn.Sequential(
-                    SeluButReluWhenScripted(),
-                    SeluButReluWhenScripted(),
-                    nn.Sequential(SeluButReluWhenScripted(), shared, SeluButReluWhenScripted()),
-                    shared,
-                )
-                self.module_list = nn.ModuleList([SeluButReluWhenScripted(),
-                                                  shared,
-                                                  SeluButReluWhenScripted()])
-
-            def forward(self, x):
-                for mod in self.module_list:
-                    x += mod(x)
-                x += self.sequential(x)
-                return x
-
-        t = torch.randn(5, 5)
-        m = M()
-        eager_out = m(t.clone())
-        sm = torch.jit.script(m)
-        script_out = sm(t.clone())
-        self.assertNotEqual(eager_out, script_out)
-
     def test_attributes(self):
         @torch.jit.script
         class Inner2(object):
