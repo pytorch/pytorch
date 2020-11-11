@@ -12,7 +12,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-
 struct Resource final {
   class Pool;
 
@@ -334,7 +333,7 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory, Resource::Memory::Access::Flags);
+  void* map(const Memory& memory, Access::Flags);
 
   return Handle<Pointer>{
     reinterpret_cast<Pointer>(map(*this, Access::Read)),
@@ -344,7 +343,7 @@ inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory, Memory::Access::Flags);
+  void* map(const Memory& memory, Access::Flags);
 
   static_assert(
       (kAccess == Access::Read) ||

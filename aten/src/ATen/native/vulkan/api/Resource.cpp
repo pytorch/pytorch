@@ -32,7 +32,7 @@ VmaAllocator create_allocator(
     nullptr,
     1u,
     nullptr,
-    nullptr, // TODO (Ashkan): VULKAN_WRAPPER
+    nullptr,
     nullptr,
     instance,
     VK_API_VERSION_1_0,
@@ -48,8 +48,9 @@ VmaAllocator create_allocator(
 VmaAllocationCreateInfo create_allocation_create_info(
     const Resource::Memory::Descriptor& descriptor) {
   return VmaAllocationCreateInfo{
-    0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
-        /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
+    VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT |
+        /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
+        0,
     descriptor.usage,
     descriptor.required,
     descriptor.preferred,

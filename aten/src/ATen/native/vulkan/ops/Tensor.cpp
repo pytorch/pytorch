@@ -90,14 +90,14 @@ vTensor::Buffer allocate_buffer(
       return {
         VMA_MEMORY_USAGE_GPU_ONLY,
         0u,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        0u,
       };
     }
 
     return {
-      VMA_MEMORY_USAGE_UNKNOWN,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+      VMA_MEMORY_USAGE_GPU_TO_CPU,
+      0u,
+      0u,
     };
   }();
 
@@ -176,7 +176,7 @@ vTensor::Image allocate_image(
         {
           VMA_MEMORY_USAGE_GPU_ONLY,
           0u,
-          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+          0u,
         },
       },
       // View
