@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
@@ -59,6 +60,8 @@ constexpr auto kDeprecationWarning =
     "{} API is being deprecated, please ping "
     "https://github.com/pytorch/pytorch/issues/46291 "
     "if you see this warning";
+template <typename T>
+using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -1045,7 +1048,7 @@ Arguments:
       py::call_guard<py::gil_scoped_release>());
 #endif
 
-  shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+  intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",
