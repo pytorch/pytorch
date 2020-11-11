@@ -374,6 +374,28 @@ class Quantizer:
                 graph_inputs.append(node.name)
 
         get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
+        model_device = assert_and_get_unique_device(model)
+
+        def insert_observer(node, observer):
+            """Insert observer for node by modifying the observed_graph and
+               attach observer module to the model
+               Args:
+                 node: Node
+                 observer: observer/fake_quantize module instance
+            """
+            # respect device affinity when adding observers
+            if model_device:
+                observer.to(model_device)
+            # add observer module as attribute
+            prefix = node.name + '_activation_post_process_'
+            get_new_observer_name = get_new_attr_name_with_prefix(prefix)
+            observer_name = get_new_observer_name(model)
+            setattr(model, observer_name, observer)
+            # put observer instance activation_post_process map
+            self.activation_post_process_map[node.name] = observer
+            # insert observer call
+            env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
+            observed_node_names_set.add(node.name)
 
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
@@ -384,23 +406,11 @@ class Quantizer:
             if node.name in observed_node_names_set:
                 continue
 
-            prefix = node.name + '_activation_post_process_'
             root_node, matched_nodes, pattern, obj, qconfig = matches.get(node.name, (None, None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
-
-                def insert_observer(node, observer, device):
-                    get_new_observer_name = get_new_attr_name_with_prefix(prefix)
-                    observer_name = get_new_observer_name(model)
-                    setattr(model, observer_name, observer)
-                    self.activation_post_process_map[node.name] = observer
-                    env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed_node_names_set.add(node.name)
-                    if device:
-                        getattr(model, observer_name).to(device)
-
                 # index for input of custom module that needs to be observed in parent
                 standalone_module_input_idxs = None
                 if qconfig is not None:
@@ -437,8 +447,7 @@ class Quantizer:
                             assert activation_post_process_ctr is not None, \
                                 "activation_post_process constructor not provided for " + \
                                 "pattern:" + str(pattern)
-                            device = assert_and_get_unique_device(model)
-                            insert_observer(node, activation_post_process_ctr(), device)
+                            insert_observer(node, activation_post_process_ctr())
                         elif (isinstance(obj, FixedQParamsOpQuantizeHandler) and
                               not model.training) or isinstance(obj, CopyNode):
                             # inserting observers for output of observed module, or mark the output
@@ -476,17 +485,14 @@ class Quantizer:
                         elif obj.all_node_args:
                             # observer for outputs
                             new_observer = qconfig.activation()
-                            # respect device affinity when adding observers
-                            device = assert_and_get_unique_device(model)
-                            insert_observer(node, new_observer, device)
+                            insert_observer(node, new_observer)
 
                     # insert observer for input of standalone module
                     if standalone_module_input_idxs is not None:
                         for idx in standalone_module_input_idxs:
                             if node.args[idx].name not in observed_node_names_set:
                                 new_observer = qconfig.activation()
-                                device = assert_and_get_unique_device(model)
-                                insert_observer(node.args[idx], new_observer, device)
+                                insert_observer(node.args[idx], new_observer)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
@@ -497,21 +503,9 @@ class Quantizer:
                     # in parent graph
                     standalone_module_observed_input_idxs.append(graph_inputs.index(node.name))
                     continue
-                get_new_observer_name = get_new_attr_name_with_prefix(prefix)
-                observer_name = get_new_observer_name(model)
                 _, activation_post_process_ctr = quants[node.name]
                 if activation_post_process_ctr is not None:
-                    # TODO: use insert_observer
-                    new_observer = activation_post_process_ctr()
-
-                    # respect device affinity when adding observers
-                    device = assert_and_get_unique_device(model)
-                    if device:
-                        new_observer.to(device)
-                    self.activation_post_process_map[node.name] = new_observer
-                    setattr(model, observer_name, self.activation_post_process_map[node.name])
-                    env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed_node_names_set.add(node.name)
+                    insert_observer(node, activation_post_process_ctr())
 
         model = GraphModule(model, observed_graph)
         self.save_state(model)
