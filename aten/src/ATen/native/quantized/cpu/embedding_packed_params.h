@@ -7,14 +7,15 @@ struct EmbeddingPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual at::Tensor embeddingbag_byte(
     const at::Tensor& indices,
     const c10::optional<at::Tensor>& offsets,
-    bool sparse,
+    bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) = 0;
 
   virtual at::Tensor embeddingbag_4bit(
     const at::Tensor& indices,
     const c10::optional<at::Tensor>& offsets,
-    bool sparse,
+    bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) = 0;

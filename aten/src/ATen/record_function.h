@@ -1,11 +1,17 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/SmallVector.h>
+#include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
 #include <memory>
 
 #include <functional>
+
+namespace c10 {
+class CAFFE2_API OperatorHandle;
+}
 
 namespace at {
 
@@ -147,6 +153,7 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
+  void before(c10::OperatorHandle const& op, int64_t sequence_nr = -1);
 
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
@@ -176,6 +183,10 @@ struct TORCH_API RecordFunction {
 
   inline RecordFunctionHandle handle() const {
     return handle_;
+  }
+
+  inline c10::optional<OperatorName> operator_name() const {
+    return operator_name_;
   }
 
   inline void setHandle(RecordFunctionHandle handle) {
@@ -212,6 +223,8 @@ struct TORCH_API RecordFunction {
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
+
+  c10::optional<c10::OperatorName> operator_name_;
 
   // Kind of scope this RecordFunction is observing
   const RecordScope scope_;

@@ -236,12 +236,68 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
   }
 }
 
+// This pass also covers the case when the input to ListUnpack
+// is int[] comming from some other op than ListConstruct (like Slice or Shape)
+//
+// before the pass
+// graph(%x.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
+//   %1 : None = prim::Constant()
+//   %2 : int[] = aten::size(%x.1) # <string>:7:9
+//   %a.1 : int, %b.1 : int = prim::ListUnpack(%2)
+//   %5 : int[] = prim::ListConstruct(%a.1, %b.1)
+//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1) #
+//   test/onnx/test_pytorch_onnx_onnxruntime.py:1757:23 return (%6)
+//
+// after the pass:
+// graph(%x.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
+//   %1 : None = prim::Constant()
+//   %2 : int[] = aten::size(%x.1) # <string>:7:9
+//   %7 : Tensor = onnx::Constant[value={0}]()
+//   %8 : Tensor = onnx::Gather(%2, %7)
+//   %9 : Tensor = onnx::Constant[value={1}]()
+//   %10 : Tensor = onnx::Gather(%2, %9)
+//   %a.1 : int, %b.1 : int = prim::ListUnpack(%2)
+//   %5 : int[] = prim::ListConstruct(%8, %10)
+//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1) #
+//   test/onnx/test_pytorch_onnx_onnxruntime.py:1757:23 return (%6)
+static void fuseListAndListUnpack(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseListAndListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack) {
+      for (size_t i = 0; i < it->outputs().size(); i++) {
+        auto output = it->outputs().at(i);
+        if (it->inputs().size() == 1 &&
+            it->input()->node()->kind() != prim::ListConstruct &&
+            it->input()->type()->cast<ListType>() &&
+            it->input()
+                ->type()
+                ->cast<ListType>()
+                ->getElementType()
+                ->cast<IntType>()) {
+          Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
+          gather_indices->insertBefore(*it);
+          gather_indices->t_(
+              attr::value, at::scalar_to_tensor(at::Scalar(int(i))));
+          Node* gather_node = b->owningGraph()->create(onnx::Gather, 1);
+          gather_node->insertBefore(*it);
+          gather_node->addInput(it->input());
+          gather_node->addInput(gather_indices->output());
+          output->replaceAllUsesWith(gather_node->output());
+        }
+      }
+    }
+  }
+}
+
 } // namespace
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
   FuseWithListUnpack(graph->block());
   ReplaceAddWithConcat(graph->block());
   ReplaceIndexPutWithMaskedScatter(graph->block());
+  fuseListAndListUnpack(graph->block());
 }
 
 } // namespace jit
