@@ -27,32 +27,7 @@ from .utils import CodeTemplate, nested_dict, write
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
-
-# Note [Manual Backend kernels]
-# For these ops, we want to manually register to dispatch key Backend and
-# skip codegen-ed registeration to all keys before Backend.
-# For codegen this means:
-#   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
-#     where we skip codegen backend kernels
-#   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
-#   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
-# Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_BACKEND = set([
-    'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
-    '_backward', 'requires_grad_',
-])
-
-# For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD_AND_TRACER = set([
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
-])
-
-# Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
-#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
+from .gen_trace_type import MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_AUTOGRAD
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
