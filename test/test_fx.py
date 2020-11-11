@@ -700,19 +700,6 @@ class TestFX(JitTestCase):
         ref = torch.sin(mod.linear(input) + mod.bias)
         self.assertEqual(r, ref)
 
-    def test_remove_uses(self):
-        g : torch.fx.Graph = Graph()
-        x : torch.fx.Node = g.placeholder('x')
-        relu : torch.fx.Node = g.call_function(torch.relu, (x,))
-        neg : torch.fx.Node = g.call_function(torch.neg, (relu,))
-        g.output(neg)
-
-        neg.replace_all_uses_with(relu)
-        g.erase_node(neg)
-
-        self.assertTrue(neg not in relu.users)
-
-
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
