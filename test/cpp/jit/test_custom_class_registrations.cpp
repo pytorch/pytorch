@@ -196,8 +196,6 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())
-      .def(
-          torch::init([](int64_t x) { return c10::make_intrusive<Foo>(x, 3); }))
       // .def(torch::init<>())
       .def("info", &Foo::info)
       .def("increment", &Foo::increment)
