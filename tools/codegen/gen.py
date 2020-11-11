@@ -244,9 +244,11 @@ class RegisterDispatchKey:
 
             args_exprs_str = ', '.join(a.name for a in args)
 
-            return_kw = "    return "
-
+            init_cuda = ""
             cuda_guard = ""
+            # TODO: It's not entirely clear that generic dispatch keys should
+            # get device guard, as the internal kernels they call ought
+            # to also device guard
             if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
                 self_args = (a for a in f.func.arguments if a.name == "self")
 
@@ -259,38 +261,29 @@ class RegisterDispatchKey:
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
-                if local.use_c10_dispatcher() == UseC10Dispatcher.full:
-                    cuda_guard_from_tensor_options = """\
-    const DeviceGuard device_guard(device_or_default(device));
-"""
-                else:
-                    assert local.use_c10_dispatcher() in [UseC10Dispatcher.with_codegenerated_unboxing_wrapper,
-                                                          UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
-                    cuda_guard_from_tensor_options = """\
-    const DeviceGuard device_guard(options.device());
-"""
+                # Initialization happens on construction of CUDA tensors, so
+                # that all methods/functions that operates on CUDA tensors can
+                # assume initialization has already occurred
+                if is_cuda_dispatch_key(self.dispatch_key) and has_tensor_options:
+                    init_cuda = "globalContext().lazyInitCUDA();"
 
-                # TODO: There is probably a simpler version of this that
-                # works just as well.
-                if f.device_guard and is_generic_dispatch_key(self.dispatch_key) and has_tensor_options:
-                    cuda_guard = cuda_guard_from_tensor_options
-                elif f.device_guard and is_cuda_dispatch_key(self.dispatch_key) and has_tensor_options:
-                    cuda_guard = f"""\
-    globalContext().lazyInitCUDA();
-    {cuda_guard_from_tensor_options}
-"""
+                if f.device_guard and has_tensor_options:
+                    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                        cuda_guard = "const DeviceGuard device_guard(device_or_default(device));"
+                    else:
+                        assert local.use_c10_dispatcher() in [UseC10Dispatcher.with_codegenerated_unboxing_wrapper,
+                                                              UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
+                        cuda_guard = "const DeviceGuard device_guard(options.device());"
                 elif f.device_guard and device_of is not None:
-                    cuda_guard = f"""\
-    const OptionalDeviceGuard device_guard(device_of({device_of}));
-"""
+                    cuda_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
                 else:
-                    cuda_guard = """\
-    // DeviceGuard omitted
-"""
+                    cuda_guard = "// DeviceGuard omitted"
 
             return f"""\
 {returns_type} {name}({args_str}) {{
-{cuda_guard}{return_kw}{impl_name}({args_exprs_str});
+  {init_cuda}
+  {cuda_guard}
+  return {impl_name}({args_exprs_str});
 }}
 """
 
