@@ -351,9 +351,9 @@ struct CompiledExecutionStep {
       reportNet = nullptr;
     }
 
-    netShouldContinue = getContinuationTest(workspace, *step);
-    shouldContinue = [this, externalShouldContinue](int64_t iter) {
-      return externalShouldContinue(iter) && this->netShouldContinue(iter);
+    netShouldContinue_ = getContinuationTest(workspace, *step);
+    shouldContinue_ = [this, externalShouldContinue](int64_t iter) {
+      return externalShouldContinue(iter) && this->netShouldContinue_(iter);
     };
   }
 
@@ -363,6 +363,8 @@ struct CompiledExecutionStep {
       if (!first_exception_) {
         LOG(ERROR) << "Substep exception:\n" << c10::GetExceptionString(ex);
         first_exception_ = ExceptionWrapper(ex);
+      } else {
+        LOG(ERROR) << "non first:\n" << c10::GetExceptionString(ex);
       }
       gotFailure = true;
     }
@@ -378,6 +380,7 @@ struct CompiledExecutionStep {
   // or op type does IO and doesn't implement cancellation it may not be
   // possible to cancel leading to execution getting stuck on error.
   void Cancel() {
+    cancelled = true;
     for (auto& substep : reportSubsteps) {
       substep->Cancel();
     }
@@ -392,6 +395,22 @@ struct CompiledExecutionStep {
     }
   }
 
+  bool shouldContinue(int iter) {
+    /*
+    if (gotFailure) {
+      VLOG(1) << "Stopping step " << step->name() << " iteration " << iter
+              << " due to failure.";
+      return false;
+    }
+    if (cancelled) {
+      VLOG(1) << "Stopping step " << step->name() << " iteration " << iter
+              << " due to cancellation.";
+      return false;
+    }
+    */
+    return shouldContinue_(iter);
+  }
+
   const ExecutionStep* step;
   Workspace* workspace;
   vector<std::shared_ptr<ExecutionStepWrapper>> reportSubsteps;
@@ -400,11 +419,13 @@ struct CompiledExecutionStep {
   vector<NetBase*> networks;
   NetBase* reportNet;
   Blob* shouldStop{nullptr};
-  ShouldContinue netShouldContinue;
-  ShouldContinue shouldContinue;
   std::atomic<bool> gotFailure{false};
+  std::atomic<bool> cancelled{false};
 
  private:
+  ShouldContinue netShouldContinue_;
+  ShouldContinue shouldContinue_;
+
   std::unique_ptr<Workspace> localWorkspace_;
 
   std::mutex exception_mutex_; // protects first_exception_
@@ -590,10 +611,14 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         // gracefully.
         cv.wait(
             guard, [&] { return workersDone() || compiledStep->gotFailure; });
-        cv.wait_for(
-            guard,
-            std::chrono::seconds(FLAGS_caffe2_plan_executor_exception_timeout),
-            [&] { return workersDone(); });
+        for (size_t elapsed = 0; !workersDone() && elapsed <FLAGS_caffe2_plan_executor_exception_timeout; elapsed++) {
+          LOG(INFO) << "cancelling!";
+          compiledStep->Cancel();
+          cv.wait_for(
+              guard,
+              std::chrono::seconds(1),
+              [&] { return workersDone(); });
+        }
         auto first_exception = compiledStep->FirstException();
         if (!workersDone() && first_exception) {
           LOG(ERROR) << "failed to stop concurrent workers after exception: "
@@ -622,6 +647,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
       VLOG(1) << "Executing networks " << step.name() << " iteration " << iter;
       for (NetBase* network : compiledStep->networks) {
         if (!network->Run()) {
+          VLOG(1) << "Net exited with failure: " << step.name();
           return false;
         }
         CHECK_SHOULD_STOP(step, shouldStop);
