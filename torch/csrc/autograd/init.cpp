@@ -74,11 +74,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<KinetoEvent>(m, "KinetoEvent")
       // name of the event
       .def("name", &KinetoEvent::name)
-      // start callback PyTorch thread id
+      // PyTorch thread id of the start callback
       .def("start_thread_id", [](const KinetoEvent& e) {
         return e.startThreadId();
       })
-      // end callback PyTorch thread id
+      // PyTorch thread id of the end callback
       .def("end_thread_id", [](const KinetoEvent& e) {
         return e.endThreadId();
       })
@@ -96,7 +96,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("start_us", &KinetoEvent::startUs)
       // duration in us
       .def("duration_us", &KinetoEvent::durationUs)
-      // used to correlate between high-level PyTorch events
+      // used for correlation between high-level PyTorch events
       // and low-level device events
       .def("correlation_id", [](const KinetoEvent& e) {
         return e.correlationId();
@@ -117,7 +117,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           return std::vector<std::string>();
         }
       })
-      // type of the RecordFunction that generated this PyTorch CPU event
+      // type of the RecordFunction that generated a PyTorch CPU event
       // (op, torchscript function, user label, etc)
       .def("scope", [](const KinetoEvent& e) {
         return e.scope();
