@@ -82,10 +82,6 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     c10::optional<Scalar> output_min,
     c10::optional<Scalar> output_max) {
   TORCH_CHECK(weight.dim() == 4);
-  std::tuple<double, int64_t> qp =
-      at::_choose_qparams_per_tensor(std::move(weight), false);
-  weight = at::quantize_per_tensor(
-      std::move(weight), std::get<0>(qp), std::get<1>(qp), c10::kQUInt8);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(weight),
       std::move(bias),

@@ -797,6 +797,11 @@ class TestFX(JitTestCase):
         fxed_scripted = torch.jit.script(fxed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
+    def test_fn_type_annotation_empty(self):
+        def forward(a : List[torch.Tensor]):
+            return a[0]
+        torch.jit.script(symbolic_trace(forward))
+
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
             @functools.wraps(fn)
@@ -1098,6 +1103,43 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(Foo())
         assert(all('constant' not in node.target for node in traced.graph.nodes))
+
+    def test_single_default_arg(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, y=1):
+                return y
+
+        m = M()
+        self.checkGraphModule(m, ())
+        self.checkGraphModule(m, (3,))
+
+    def test_multiple_default_args(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, y=1, z=2):
+                return y + z
+
+        m = M()
+        self.checkGraphModule(m, ())
+        self.checkGraphModule(m, (3,))
+        self.checkGraphModule(m, (3, 4))
+
+    def test_regular_and_default_args(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y=1):
+                return x + y
+
+        m = M()
+        self.checkGraphModule(m, (2,))
+        self.checkGraphModule(m, (2, 3))
 
 
 if __name__ == '__main__':
