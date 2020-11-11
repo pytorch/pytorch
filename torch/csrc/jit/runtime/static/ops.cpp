@@ -112,22 +112,22 @@ getOutOfPlaceOperation(Node* n) {
     if (in1) {
       auto in1_s = in1->toScalar();
       return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto in0_t = p_node->Input(0, reg).toTensor();
-      if (p_node->Output(0, reg).isNone()) {
-        p_node->Output(0, reg) = create_empty_from(in0_t);
-      }
-      auto out_t = p_node->Output(0, reg).toTensor();
-      at::native::leaky_relu_out(out_t, in0_t, in1_s);
+        auto in0_t = p_node->Input(0, reg).toTensor();
+        if (p_node->Output(0, reg).isNone()) {
+          p_node->Output(0, reg) = create_empty_from(in0_t);
+        }
+        auto out_t = p_node->Output(0, reg).toTensor();
+        at::native::leaky_relu_out(out_t, in0_t, in1_s);
       };
     } else {
       return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto in0_t = p_node->Input(0, reg).toTensor();
-      auto in1_s = p_node->Input(1, reg).toScalar();
-      if (p_node->Output(0, reg).isNone()) {
-        p_node->Output(0, reg) = create_empty_from(in0_t);
-      }
-      auto out_t = p_node->Output(0, reg).toTensor();
-      at::native::leaky_relu_out(out_t, in0_t, in1_s);
+        auto in0_t = p_node->Input(0, reg).toTensor();
+        auto in1_s = p_node->Input(1, reg).toScalar();
+        if (p_node->Output(0, reg).isNone()) {
+          p_node->Output(0, reg) = create_empty_from(in0_t);
+        }
+        auto out_t = p_node->Output(0, reg).toTensor();
+        at::native::leaky_relu_out(out_t, in0_t, in1_s);
       };
     }
   }
