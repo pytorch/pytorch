@@ -194,7 +194,7 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #if 0
   // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
   // once LLVM 10 is available.
-  return llvm::cantFail(llvm::orc::JITTargetMachineBuilder::detectHost());
+  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
 #else
   llvm::orc::JITTargetMachineBuilder JTMB(
       (llvm::Triple(llvm::sys::getProcessTriple())));
@@ -303,11 +303,11 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::InitializeNativeTargetAsmPrinter();
 
   auto JTMB = makeTargetMachineBuilder();
-  TM_ = llvm::cantFail(JTMB.createTargetMachine());
+  TM_ = assertSuccess(JTMB.createTargetMachine());
 
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
-  module_->setDataLayout(cantFail(JTMB.getDefaultDataLayoutForTarget()));
+  module_->setDataLayout(assertSuccess(JTMB.getDefaultDataLayoutForTarget()));
   module_->setTargetTriple(JTMB.getTargetTriple().str());
 
   // Emit prototype and bind argument Vars to parameter indices.
@@ -337,9 +337,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitWrapper(params);
   emitKernel(stmt, params);
 
-  cantFail(jit_->addModule(std::move(module_), std::move(context_)));
+  assertSuccess(jit_->addModule(std::move(module_), std::move(context_)));
   auto sym = jit_->findSymbol("wrapper");
-  kernelAddress_ = cantFail(sym.getAddress());
+  kernelAddress_ = assertSuccess(sym.getAddress());
   argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
@@ -401,12 +401,12 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     if (v->op_type() == kTanh) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_tanh(v->param(0));
+        return fast_tanh(v->param(0)->accept_mutator(this));
       }
     } else if (v->op_type() == kSigmoid) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_sigmoid(v->param(0));
+        return fast_sigmoid(v->param(0)->accept_mutator(this));
       }
     }
     // TODO: fast exp
