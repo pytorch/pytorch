@@ -66,7 +66,7 @@ class BackwardHook(object):
     """
     A wrapper class to implement nn.Module backward hooks.
     It handles:
-      - Ignoring non-Tensor inputs and replacing the, by None before calling the user hook
+      - Ignoring non-Tensor inputs and replacing them by None before calling the user hook
       - Generating the proper Node to capture a set of Tensor's gradients
       - Linking the gradients captures for the outputs with the gradients captured for the input
       - Calling the user hook once both output and input gradients are available
