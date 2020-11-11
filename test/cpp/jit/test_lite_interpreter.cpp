@@ -591,7 +591,7 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // There are 3 module information strings here.
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
-  // "top(C).B0(B).A0(A).forward": for the add operator in A0.
+  // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
   std::unordered_set<std::string> expected_result(
       {"top(C).forward",
        "top(C).B0(B).forward",
