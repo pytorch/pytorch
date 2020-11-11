@@ -194,6 +194,46 @@ def is_cuda_dispatch_key(dk: str) -> bool:
 def is_structured_dispatch_key(dk: str) -> bool:
     return dk in {'CUDA', 'CPU'}
 
+# Generates `at::assert_no_internal_overlap` checks for arguments of operations
+# that need them. Arguments that may need an overlap check include:
+#   * `self` argument of an inplace operation
+#   * `out` arguments of an out-variant operation
+#
+# Overlap checks are only generated for functions with CPU and CUDA dispatch.
+# Overlap checks are not generated for any function/dispatch combination that
+# appears in functions_allow_internal_overlap.json
+class InternalOverlapCheckGenerator():
+    functions_allow_internal_overlap = json.load(open(
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            'functions_allow_internal_overlap.json'
+        ),
+        'r'))
+
+    def func_allows_overlap(self, func, dispatch_key):
+        func_name = str(func.name)
+        return (func_name in self.functions_allow_internal_overlap and 
+                dispatch_key in self.functions_allow_internal_overlap[func_name])
+
+    def func_needs_check(self, func, dispatch_key):
+        if is_structured_dispatch_key(dispatch_key) and (func.name.name.inplace or func.is_out_fn()):
+            return not self.func_allows_overlap(func, dispatch_key)
+        return False
+
+    def generate(self, dispatch_key, func):
+        internal_overlap_check = ""
+        if self.func_needs_check(func, dispatch_key):
+            if func.name.name.inplace:
+                internal_overlap_check = """\
+    at::assert_no_internal_overlap(self); 
+"""
+            if func.is_out_fn():
+                for out_argument in func.arguments.out:
+                    internal_overlap_check += f"""\
+    at::assert_no_internal_overlap({out_argument.name});
+"""
+        return internal_overlap_check
+
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
 # selective build)
@@ -550,9 +590,11 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
     // DeviceGuard omitted
 """
 
+            internal_overlap_check = InternalOverlapCheckGenerator().generate(self.dispatch_key, f.func)
+
             return f"""\
 {returns_type} {name}({args_str}) {{
-{cuda_guard}{return_kw}{impl_name}({args_exprs_str});
+{internal_overlap_check}{cuda_guard}{return_kw}{impl_name}({args_exprs_str});
 }}
 """
 

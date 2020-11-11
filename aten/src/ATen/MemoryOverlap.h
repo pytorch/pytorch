@@ -19,6 +19,7 @@ TORCH_API MemOverlap has_internal_overlap(const Tensor& t);
 TORCH_API MemOverlap has_internal_overlap(TensorImpl* t);
 
 TORCH_API void assert_no_internal_overlap(const Tensor& t);
+TORCH_API void assert_no_internal_overlap(const TensorList& t_list);
 TORCH_API void assert_no_internal_overlap(TensorImpl* t);
 
 TORCH_API MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b);

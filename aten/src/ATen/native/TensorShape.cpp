@@ -123,7 +123,6 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
         "unsupported operation: the input tensors cannot refer to any of the "
         "output memory locations. Found overlap in input tensor ", i);
   }
-  at::assert_no_internal_overlap(result);
 
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
   for (auto const &tensor : tensors) {

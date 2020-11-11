@@ -2885,14 +2885,53 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
+    # Generate inputs used for memory overlap error testing. The first tensor
+    # of the returned list is a single value expanded to a larger size, so
+    # it has a memory overlap. The remaining tensors in the list do not have
+    # overlaps
+    # args:
+    #   num_inputs      Number of input tensors to generate
+    #   dtype           Datatype of tensors to generate
+    #   device          Device of tensors to generate
+    # kwargs:
+    #   input_sizes     List of sizes of tensors to generate. If not given,
+    #                   default sizes are used
+    def generate_mem_overlap_inputs(self, num_inputs, dtype, device, input_sizes=None):
+        if input_sizes is None:
+            input = torch.randn(1, dtype=dtype, device=device).expand(3, 3)
+            inputs = [input] + [torch.randn_like(input)
+                                for i in range(num_inputs - 1)]
+        else:
+            assert isinstance(input_sizes, list)
+            assert len(input_sizes) == num_inputs
+            input = torch.randn(1, dtype=dtype, device=device).expand(*input_sizes[0])
+            inputs = [input] + [torch.randn(*input_sizes[i], dtype=dtype, device=device)
+                                for i in range(1, num_inputs)]
+        return inputs
+
+    # Checks if an inplace operation throws an error if the inplace tensor
+    # argument contains a memory overlap.
+    # args:
+    #   inplace_op      The operation to test
+    #   num_inputs      Number of inputs to the operation
+    #   dtype           Datatype of tensor inputs to check
+    #   device          Device of tensor inputs to check
+    # kwargs:
+    #   expected_failure    If False, the operation should throw an error due
+    #                       to memory overlap. If True, the operation should
+    #                       not throw an error, because it does not check for
+    #                       overlap
+    #   input_sizes         If given, the generated inputs will have the
+    #                       specified sizes. Otherwise, default sizes will
+    #                       be used
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
-                                   expected_failure=False):
+                                   expected_failure=False,
+                                   input_sizes=None):
         if isinstance(inplace_op, str):
             inplace_op = getattr(torch.Tensor, inplace_op)
-        input = torch.randn(1, dtype=dtype, device=device).expand(3, 3)
-        inputs = [input] + [torch.randn_like(input)
-                            for i in range(num_inputs - 1)]
+        inputs = self.generate_mem_overlap_inputs(
+            num_inputs, dtype, device, input_sizes)
         if not expected_failure:
             with self.assertRaisesRegex(RuntimeError, 'single memory location'):
                 inplace_op(*inputs)
@@ -5006,6 +5045,56 @@ class TestTorchDeviceType(TestCase):
                 expected_failure=not has_internal_mem_overlap_check)
             self.ternary_check_input_output_mem_overlap(out_op, dev,
                                                         expected_failure=not has_input_output_mem_overlap_check)
+
+    @dtypes(torch.double)
+    def test_blas_op_overlap(self, device, dtype):
+        S = 10
+        ops = [
+            # function name, has in/out mem overlap check, has internal mem overlap check, device, input sizes, output size
+            ("addmv", True, True, 'cpu', [(S,), (S, S), (S,)], (S,)),
+            ("addmv", True, True, 'cuda', [(S,), (S, S), (S,)], (S,)),
+            ("mv", True, True, 'cpu', [(S, S), (S,)], (S,)),
+            ("mv", True, True, 'cuda', [(S, S), (S,)], (S,)),
+            ("mm", True, True, 'cpu', [(S, S), (S, S)], (S, S)),
+            ("mm", True, True, 'cuda', [(S, S), (S, S)], (S, S)),
+            ("addr", True, True, 'cpu', [(S,), (S,), (S,)], (S,)),
+            ("addr", True, True, 'cuda', [(S,), (S,), (S,)], (S,)),
+            ("ger", True, True, 'cpu', [(S,), (S,)], (S,)),
+            ("ger", True, True, 'cuda', [(S,), (S,)], (S,)),
+            ("outer", True, True, 'cpu', [(S,), (S,)], (S,)),
+            ("outer", True, True, 'cuda', [(S,), (S,)], (S,)),
+            ("addmm", True, True, 'cpu', [(S,), (S, S), (S, S)], (S,)),
+            ("addmm", True, True, 'cuda', [(S,), (S, S), (S, S)], (S,)),
+        ]
+
+        for (fn, has_input_output_mem_overlap_check,
+             has_internal_mem_overlap_check, dev, input_sizes,
+             output_size) in ops:
+            if dev != device:
+                continue
+            out_op = getattr(torch, fn)
+
+            inplace_op_name = fn + '_'
+            if hasattr(torch.Tensor, inplace_op_name):
+                inplace_op = getattr(torch.Tensor, inplace_op_name)
+
+                self.check_internal_mem_overlap(
+                    inplace_op, 3, dtype, device,
+                    expected_failure=not has_internal_mem_overlap_check,
+                    input_sizes=input_sizes)
+
+            inputs = self.generate_mem_overlap_inputs(
+                len(input_sizes) + 1, dtype, device,
+                [output_size] + input_sizes)
+            output = inputs[0]
+            inputs = inputs[1:]
+            if has_input_output_mem_overlap_check:
+                with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                    out_op(*inputs, out=output)
+            else:
+                with self.assertRaises(AssertionError):
+                    with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                        out_op(*inputs, out=output)
 
     @dtypes(torch.double)
     @onlyOnCPUAndCUDA

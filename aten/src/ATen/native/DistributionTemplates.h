@@ -341,7 +341,6 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
   NoNamesGuard guard;
-  at::assert_no_internal_overlap(self);
   bernoulli_tensor_kernel<RNG>()(self, p_, gen);
   return self;
 }
@@ -349,7 +348,6 @@ Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator>
 template<template<typename> class bernoulli_scalar_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
-  at::assert_no_internal_overlap(self);
   bernoulli_scalar_kernel<RNG>()(self, p, gen);
   return self;
 }

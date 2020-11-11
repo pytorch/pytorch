@@ -23,6 +23,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/Functions.h>
 #include <ATen/native/Resize.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <cstddef>
 #include <functional>

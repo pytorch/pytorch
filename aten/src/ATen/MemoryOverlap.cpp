@@ -29,6 +29,12 @@ void assert_no_internal_overlap(const Tensor& t) {
   assert_no_internal_overlap(t.unsafeGetTensorImpl());
 }
 
+void assert_no_internal_overlap(const TensorList& t_list) {
+  for (auto t : t_list) {
+    assert_no_internal_overlap(t.unsafeGetTensorImpl());
+  }
+}
+
 void assert_no_internal_overlap(TensorImpl* t) {
   TORCH_CHECK(has_internal_overlap(t) != MemOverlap::YES,
     "unsupported operation: more than one element of the written-to tensor "
