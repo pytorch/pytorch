@@ -1,3 +1,4 @@
+import itertools
 import math
 import torch
 from .optimizer import Optimizer
@@ -32,8 +33,12 @@ class SparseAdam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
 
+        # if params are in the form of a generator, the next for-loop exhausts it,
+        # so the copy is passed to the loop
+        params, params_copy = itertools.tee(params)
+
         sparse_params = []
-        for index, param in enumerate(params):
+        for index, param in enumerate(params_copy):
             if isinstance(param, dict):
                 for d_index, d_param in enumerate(param.get("params", [])):
                     if d_param.is_sparse:
