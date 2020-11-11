@@ -123,10 +123,9 @@ void adaptiveaveragepool_loop(
         istrideD,
         istrideT, istrideH, istrideW,
         offsetZ);
-
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -217,10 +216,9 @@ void adaptiveaveragegradinput_loop(
         isizeT, isizeH, isizeW,
         osizeT, osizeH, osizeW,
         offsetZ);
-
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -312,10 +310,9 @@ void atomicadaptiveaveragegradinput_loop(
         isizeT, isizeH, isizeW,
         osizeT, osizeH, osizeW,
         offsetZ);
-
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     totalZ -= 65535;
     offsetZ += 65535;
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
