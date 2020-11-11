@@ -63,6 +63,21 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id) {
     .build();
 }
 
+void filterEngineConfig(
+  std::vector<cudnnBackendDescriptor_t> &from,
+  std::vector<cudnnBackendDescriptor_t> &to,
+  bool deterministic, bool allow_tf32)
+{
+  auto filter = [=](cudnnBackendDescriptor_t &engine_config) {
+    if (deterministic) {
+      if (cudnn_frontend::isNonDeterministic(engine_config)) return true;
+    }
+    // TODO: handle TF32
+    return false;
+  };
+  cudnn_frontend::filter(from, to, filter);
+}
+
 }
 
 Tensor _cudnn_convolution_v8(
@@ -70,7 +85,7 @@ Tensor _cudnn_convolution_v8(
   IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
   int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
-  TORCH_CHECK(!benchmark && !deterministic, "not supported yet");
+  TORCH_CHECK(!benchmark, "not supported yet");
 
   // std::cout << "input.sizes() " << input.sizes() << std::endl;
   // std::cout << "input.strides() " << input.strides() << std::endl;
@@ -152,31 +167,32 @@ Tensor _cudnn_convolution_v8(
   //     .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
   //     .build();
 
-  auto &engine_config = heuristics.getEngineConfig(100000);
+  auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
   // auto &fallback_list = fallback.getFallbackList();
 
-  for (auto cfg_list : {&engine_config/*, &fallback_list*/}) {
-    for (auto &cfg : *cfg_list) {
-      try {
-        auto plan = cudnn_frontend::ExecutionPlanBuilder()
-            .setHandle(handle)
-            .setEngineConfig(cfg)
-            .build();
+  std::vector<cudnnBackendDescriptor_t> filtered_configs;
+  filterEngineConfig(engine_configs, filtered_configs, deterministic, allow_tf32);
 
-        auto workspace_size = plan.getWorkspaceSize();
-        auto workspace = at::empty({workspace_size}, input_contig.options().dtype(kByte));
-        void * data_ptrs[] = {input_contig.data_ptr(), output.data_ptr(), weight_contig.data_ptr()};
-        // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
-        int64_t uids[] = {'x', 'y', 'w'};
-        auto variantPack = cudnn_frontend::VariantPackBuilder()
-            .setWorkspacePointer(workspace.data_ptr())
-            .setDataPointers(3, data_ptrs)
-            .setUids(3, uids)
-            .build();
-        AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-        return output;
-      } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
-    }
+  for (auto &cfg : filtered_configs) {
+    try {
+      auto plan = cudnn_frontend::ExecutionPlanBuilder()
+          .setHandle(handle)
+          .setEngineConfig(cfg)
+          .build();
+
+      auto workspace_size = plan.getWorkspaceSize();
+      auto workspace = at::empty({workspace_size}, input_contig.options().dtype(kByte));
+      void * data_ptrs[] = {input_contig.data_ptr(), output.data_ptr(), weight_contig.data_ptr()};
+      // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+      int64_t uids[] = {'x', 'y', 'w'};
+      auto variantPack = cudnn_frontend::VariantPackBuilder()
+          .setWorkspacePointer(workspace.data_ptr())
+          .setDataPointers(3, data_ptrs)
+          .setUids(3, uids)
+          .build();
+      AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+      return output;
+    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
   }
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
