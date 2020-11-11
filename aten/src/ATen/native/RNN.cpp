@@ -1634,6 +1634,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     params.emplace_back(static_cast<c10::intrusive_ptr<CellParamsBase>>(param));
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
@@ -1727,6 +1728,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     params.emplace_back(static_cast<c10::intrusive_ptr<CellParamsBase>>(param));
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
 
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
 
