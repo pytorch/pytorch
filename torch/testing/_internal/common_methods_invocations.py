@@ -447,7 +447,8 @@ op_db = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/47358
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_MACOS),
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
