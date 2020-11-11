@@ -6230,9 +6230,9 @@ class TestNN(NNTestCase):
         for bidir in [False, True]:
             rnn = nn.LSTM(30, 20, 2, bidirectional=bidir, proj_size=10)
             num_dirs = 2 if bidir else 1
-            input = torch.randn(10, 32, 30, device="cuda")
-            hidden_h = torch.zeros(2 * num_dirs, 32, 10, device="cuda")
-            hidden_c = torch.zeros(2 * num_dirs, 32, 20, device="cuda")
+            input = torch.randn(10, 32, 30)
+            hidden_h = torch.zeros(2 * num_dirs, 32, 10)
+            hidden_c = torch.zeros(2 * num_dirs, 32, 20)
             hidden = (hidden_h, hidden_c)
             output1, hidden1 = rnn(input, hidden)
             output2, hidden2 = rnn(input)
