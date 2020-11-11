@@ -984,12 +984,12 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
+std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     std::vector<at::Device> devices,
     int rank,
     OpType opType,
     const char* profilingTitle) {
-  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType);
+  return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType, profilingTitle);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1012,7 +1012,7 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
 }
 
 void ProcessGroupNCCL::workEnqueue(
-    c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
+    std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   if (!terminateProcessGroup_.load()) {
     std::lock_guard<std::mutex> lock(workMetaListMutex_);
     // Avoid view tensors to be processed in cleanup thread.
@@ -1027,7 +1027,7 @@ ProcessGroupNCCL::Options::Options()
       isHighPriorityStream(false) {}
 
 template <typename Fn, typename PreProcess, typename PostProcess>
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     Fn fn,
@@ -1114,7 +1114,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     std::vector<at::Tensor>& tensors,
     Fn fn,
     int peer,
@@ -1186,7 +1186,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 }
 
 template <typename Fn>
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     Fn fn,
@@ -1203,7 +1203,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 }
 
 template <typename Fn>
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     std::vector<at::Tensor>& tensor,
     Fn fn,
     int peer,
@@ -1217,7 +1217,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
       [](std::vector<at::cuda::CUDAStream>&) {});
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   check_gpu_tensors(tensors);
@@ -1242,14 +1242,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
       "nccl:all_reduce");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   throw std::runtime_error(
       "allreduce_coalesced is currently not supported with NCCL");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   check_gpu_tensors(tensors);
@@ -1274,7 +1274,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
       "nccl:broadcast");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   check_gpu_tensors(tensors);
@@ -1301,7 +1301,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
       "nccl:reduce");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
@@ -1346,7 +1346,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
       "nccl:all_gather");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
@@ -1354,7 +1354,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
       "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
@@ -1400,7 +1400,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
       "nccl:reduce_scatter");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     const BarrierOptions& opts) {
   std::vector<at::Device> devices;
   if (usedDeviceIdxs_.empty()) {
@@ -1441,7 +1441,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
 }
 
 #ifdef ENABLE_NCCL_P2P_SUPPORT
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -1512,7 +1512,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
   }
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int /* unused */) {
@@ -1531,7 +1531,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
   return ret;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int /* unused */) {
@@ -1550,7 +1550,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
   return ret;
 }
 #else
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     at::Tensor& /* unused */,
     at::Tensor& /* unused */,
     std::vector<int64_t>& /* unused */,
@@ -1560,7 +1560,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
@@ -1568,7 +1568,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
       "ProcessGroupNCCL only supports send for NCCL lib version >= 2.7.0");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
@@ -1591,34 +1591,34 @@ void ProcessGroupNCCL::groupEnd() {
   --ncclActiveGroupCounter_;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllToAllOptions& /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const GatherOptions& /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support gather");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
     std::vector<at::Tensor>& /* unused */,
     std::vector<std::vector<at::Tensor>>& /* unused */,
     const ScatterOptions& /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support scatter");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recvAnysource");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
     at::Tensor& /*unused */,
     at::Tensor& /*unused */,
     const AllgatherOptions& /*unused */) {

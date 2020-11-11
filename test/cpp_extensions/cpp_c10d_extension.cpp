@@ -23,85 +23,85 @@ ProcessGroupTest::ProcessGroupTest(int rank, int size)
 
 ProcessGroupTest::~ProcessGroupTest() {}
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::broadcast(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
-  return c10::make_intrusive<ProcessGroupTest::WorkTest>();
+  return std::make_shared<ProcessGroupTest::WorkTest>();
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::allreduce(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  return c10::make_intrusive<ProcessGroupTest::WorkTest>();
+  return std::make_shared<ProcessGroupTest::WorkTest>();
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::allreduce_coalesced(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts) {
   throw std::runtime_error("ProcessGroupTest does not support allreduce_coalesced");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::reduce(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   throw std::runtime_error("ProcessGroupTest does not support reduce");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::allgather(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   throw std::runtime_error("ProcessGroupTest does not support allgather");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::allgather_base(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const AllgatherOptions& opts) {
   throw std::runtime_error("ProcessGroupTest does not support allgather_base");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::barrier(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::barrier(
     const BarrierOptions& opts) {
-  return c10::make_intrusive<ProcessGroupTest::WorkTest>();
+  return std::make_shared<ProcessGroupTest::WorkTest>();
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::gather(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   throw std::runtime_error("ProcessGroupTest does not support gather");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::scatter(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   throw std::runtime_error("ProcessGroupTest does not support scatter");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::reduce_scatter(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   throw std::runtime_error("ProcessGroupTest does not support reduce_scatter");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::send(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
   throw std::runtime_error("ProcessGroupTest does not support send");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::recv(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
   throw std::runtime_error("ProcessGroupTest does not support recv");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::recvAnysource(
+std::shared_ptr<ProcessGroup::Work> ProcessGroupTest::recvAnysource(
     std::vector<at::Tensor>& tensor,
     int tag) {
   throw std::runtime_error("ProcessGroupTest does not support recvAnysource");

@@ -45,10 +45,8 @@ class BroadcastWork {
   // because c10d::ProcessGroup::broadcast takes a vector argument.
   std::vector<at::Tensor> flat_tensor_;
 
- private:
-
   // The broadcast work that is kicked off upon construction.
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
+  std::shared_ptr<c10d::ProcessGroup::Work> work_;
 };
 
 } // namespace
