@@ -16,7 +16,7 @@ bool canRunOutOfPlace(Node* n) {
                                                             "aten::addmm",
                                                             "aten::bmm",
                                                             "aten::sigmoid",
-                                                            "aten::leaky_relu"
+                                                            "aten::leaky_relu",
                                                             "aten::cat"};
   auto str = std::string(n->kind().toQualString());
   return out_of_place_nodes.count(str) > 0;

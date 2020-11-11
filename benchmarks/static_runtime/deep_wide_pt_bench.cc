@@ -120,11 +120,11 @@ static void BM_leaky_relu(benchmark::State& state) {
 
   const int batch_size = state.range(0);
   auto data = torch::randn({batch_size, num_features});
-  std::vector<IValue> inputs({data});
+  std::vector<at::Tensor> inputs({data});
 
-  mod.forward(inputs);
+  runtime.run(inputs);
   for (auto _ : state) {
-    mod.forward(inputs);
+    runtime.run(inputs);
   }
 }
 
