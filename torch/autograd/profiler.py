@@ -966,18 +966,21 @@ class StringTable(defaultdict):
 
 # Parsing of kineto profiler events
 def parse_kineto_results(result):
-    #
-    for evt_list in result.legacy_events():
-        for evt in evt_list:
-            print(evt, evt.kind(), flush=True)
-    print()
-    for evt in result.events():
-        print("  ", evt.name(), evt.start_thread_id(), evt.end_thread_id(), evt.device_index(), evt.device_resource_id(), evt.start_us(), evt.duration_us(), evt.correlation_id(), evt.fwd_thread_id())
-    #
-    return []
     # result.events() has most of the events - PyTorch op-level and device-level events
     # result.legacy_events() has events not yet ported to kineto
     # (e.g. start/stop marks, tensor memory allocator events)
+
+    # First, find __start_profile mark to get the absolute time of the start of the trace
+    start_record = None
+    for record in itertools.chain(*result.legacy_events()):
+        if record.kind() == 'mark' and record.name() == '__start_profile':
+            assert start_record is None
+            start_record = record
+    assert start_record is not None, "Invalid profiler output, __start_profile is missing"
+
+    # Create and return FunctionEvent list
+    function_events = []
+    return function_events
 
 # Parsing of legacy profiler events
 def parse_legacy_records(thread_records):
