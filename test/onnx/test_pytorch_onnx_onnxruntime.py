@@ -930,6 +930,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
+    @unittest.skip("If operator rank mismatch between outputs of two branches.")
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
