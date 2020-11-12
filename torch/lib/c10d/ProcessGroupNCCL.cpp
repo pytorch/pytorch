@@ -440,7 +440,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    const c10::intrusive_ptr<Options>& options)
+    c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(store),
       ncclCommCounter_(0),
