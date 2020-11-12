@@ -230,8 +230,6 @@ class TestLinalg(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh_lower_uplo(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
         def run_test(shape, batch, uplo):
             # check lower case uplo
             # use non-symmetric input to check whether uplo argument is working as intended
