@@ -1546,7 +1546,7 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+    # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
     if torch.device(device).type == 'cuda' and dtype.is_complex:
         A_cpu = A.cpu()
         result = torch.matmul(A_cpu, A_cpu.transpose(-2, -1).conj()).to(device)

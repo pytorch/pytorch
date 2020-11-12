@@ -1070,7 +1070,7 @@ class TestLinalg(TestCase):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
-            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+            # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
             if self.device_type == 'cuda' and dtype.is_complex:
                 # Ax = torch.empty_like(x_act).view(-1, *b_dims[-2:])
                 # for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, *A.shape[-2:]),
@@ -1114,7 +1114,7 @@ class TestLinalg(TestCase):
             for upper in [True, False]:
                 b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
                 x = torch.cholesky_solve(b, L, upper)
-                # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+                # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
                 if self.device_type == 'cuda' and dtype.is_complex:
                     Ax = torch.matmul(A.cpu(), x.cpu()).to(device)
                 else:
@@ -1176,7 +1176,7 @@ class TestLinalg(TestCase):
                                                          [True, False]):
             run_test(a_size, b_size, upper)
 
-    # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+    # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
     @unittest.expectedFailure
     @onlyCUDA
     @skipCUDAIfNoMagma
