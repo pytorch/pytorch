@@ -17568,10 +17568,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
 
         if not is_supported:
+            return
+            # NOTE: code below has been temporarily short circuited for unsupported types
+            # since they are supported for some code paths and don't always throw an error.
             b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
             b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
             self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.bmm(b1, b2))
-            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
@@ -17788,11 +17790,13 @@ else:
             (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
 
         if not is_supported:
+            return
+            # NOTE: code below has been temporarily short circuited for unsupported types
+            # since they are supported for some code paths and don't always throw an error.
             b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
             b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
             t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
             self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.baddbmm(t, b1, b2))
-            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
@@ -20334,11 +20338,11 @@ tensor_op_tests = [
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
+        [tf32_on_and_off(0.05), _wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
+        _cpu_types, True, [tf32_on_and_off(0.05), _wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('addcdiv', '', _small_2d,
