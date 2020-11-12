@@ -295,7 +295,6 @@ FOREACH_UNARY_OP_COMPLEX(tan, Tan);
 FOREACH_UNARY_OP_COMPLEX(sin, Sin);
 FOREACH_UNARY_OP_COMPLEX(sinh, Sinh);
 
-FOREACH_UNARY_OP_COMPLEX_BFLOAT16(abs, Abs);
 FOREACH_UNARY_OP_COMPLEX_BFLOAT16(exp, Exp);
 FOREACH_UNARY_OP_COMPLEX_BFLOAT16(sqrt, Sqrt);
 FOREACH_UNARY_OP_COMPLEX_BFLOAT16(cos, Cos);
@@ -350,6 +349,46 @@ void foreach_tensor_round_cuda_(TensorList tensors) {
     }
 
     foreach_unary_op_<Round>(tensors);
+}
+
+// Abs have to go via slow path in case of a complex type.
+// This is because foreach kernels can't return a different dtype than passed, while 
+// abs with complex input will produce float output.
+template<typename T>
+struct Abs {
+    __device__ T operator()(T t) const { return std::abs(t); }
+};
+
+std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
+    check_foreach_api_restrictions(tensors);
+    bool has_complex = false;
+    for (auto t : tensors) {
+        if (at::isComplexType(t.scalar_type())) {
+            has_complex = true;
+        }
+    }
+
+    if (!can_use_fast_route(tensors) && !has_complex) {
+        return at::native::foreach_tensor_abs_slow(tensors);
+    }
+
+    return foreach_unary_op_complex_bfloat16<Abs>(tensors);
+}
+
+void foreach_tensor_abs_cuda_(TensorList tensors) {
+    check_foreach_api_restrictions(tensors);
+    bool has_complex = false;
+    for (auto t : tensors) {
+        if (at::isComplexType(t.scalar_type())) {
+            has_complex = true;
+        }
+    }
+
+    if (!can_use_fast_route(tensors) && !has_complex) {
+        return at::native::foreach_tensor_abs_slow_(tensors);
+    }
+
+    foreach_unary_op_complex_bfloat16_<Abs>(tensors);
 }
 
 template<typename T>
