@@ -989,7 +989,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     int rank,
     OpType opType,
     const char* profilingTitle) {
-  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType);
+  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType, profilingTitle);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
