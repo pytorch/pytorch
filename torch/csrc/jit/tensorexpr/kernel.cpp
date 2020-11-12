@@ -1827,16 +1827,26 @@ void TensorExprKernel::compile() {
     }
   }
 
+  device_ = *pickDeviceType(graph_->inputs());
+
   // Move output operands from `tensors_` to `tensorOutputs_`
   for (const auto& output : graph_->outputs()) {
     if (!tensors_.count(output->unique())) {
       throw malformed_input("cannot find output Tensor");
     }
+    auto tensor_sizes = output->type()->expect<TensorType>()->sizes();
+    std::vector<int64_t> size;
+    TORCH_INTERNAL_ASSERT(tensor_sizes.sizes().has_value(), "Expected output size: ", output);
+    for (const auto& elem: *tensor_sizes.sizes()) {
+      TORCH_INTERNAL_ASSERT(elem, "expected all output values defined");
+      size.push_back(*elem);
+    }
+    tensorOutputSizes_.push_back(size);
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
+    tensorOutputTensorOptions_.push_back(c10::TensorOptions(tensorType(tensors_[output->unique()])).device(device_));
     tensors_.erase(output->unique());
   }
 
-  device_ = *pickDeviceType(graph_->inputs());
   BackendType backendType = inferBackendTypeFromDevice(device_);
   Stmt* stmt = generateStmt(backendType);
   // Set up formal params (inputs, then outputs) for kernel.
@@ -1889,47 +1899,24 @@ void TensorExprKernel::run(Stack& stack) {
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
-  std::map<const Expr*, int32_t> varToSize;
 
   std::vector<CodeGen::CallArg> runArgs;
-  for (size_t i = 0; i < inputs.size(); i++) {
+  runArgs.reserve(inputs.size() + tensorOutputs_.size());
+
+  for (size_t i = 0, e = inputs.size(); i < e; i++) {
     auto const& input = inputs[i];
     if (input.isInt()) {
       runArgs.emplace_back((int32_t)input.toInt());
     } else if (input.isDouble()) {
       runArgs.emplace_back((float)input.toDouble());
     } else if (input.isTensor()) {
-      auto const& tensor = input.toTensor();
-      runArgs.emplace_back(tensor.data_ptr());
-      for (auto const& size : kernelArgs_[i].sizes()) {
-        int32_t s = tensor.sizes()[size.idx];
-        runArgs.emplace_back(s);
-        varToSize[size.var.node()] = s;
-      }
-      for (auto const& stride : kernelArgs_[i].strides()) {
-        int32_t s = tensor.strides()[stride.idx];
-        runArgs.emplace_back(s);
-      }
+      runArgs.emplace_back(input.toTensor().data_ptr());
     }
   }
 
-  for (auto& o : tensorOutputs_) {
-    std::vector<int64_t> tensorSize;
-    for (const Expr* dim : o->dims()) {
-      auto it = varToSize.find(dim);
-      if (it != varToSize.end()) {
-        tensorSize.push_back(it->second);
-      } else {
-        const IntImm* s = dynamic_cast<const IntImm*>(dim);
-        if (!s) {
-          throw malformed_input("output expected Int", dim);
-        }
-        tensorSize.push_back(s->value());
-      }
-    }
-
+  for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
     outputs.push_back(at::empty(
-        tensorSize, c10::TensorOptions(tensorType(o)).device(device_)));
+        tensorOutputSizes_[i], tensorOutputTensorOptions_[i]));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
   return runArgs;
