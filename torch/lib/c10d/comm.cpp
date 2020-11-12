@@ -1,9 +1,9 @@
-#include <torch/csrc/distributed/c10d/comm.h>
+#include <c10d/comm.hpp>
 
 #include <deque>
 
 #include <ATen/core/functional.h>
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
@@ -45,8 +45,10 @@ class BroadcastWork {
   // because c10d::ProcessGroup::broadcast takes a vector argument.
   std::vector<at::Tensor> flat_tensor_;
 
+ private:
+
   // The broadcast work that is kicked off upon construction.
-  std::shared_ptr<c10d::ProcessGroup::Work> work_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
 };
 
 } // namespace

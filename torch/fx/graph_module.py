@@ -4,6 +4,8 @@ import linecache
 from typing import Type, Dict, List, Any, Union
 from .graph import Graph
 import copy
+import sys
+import traceback
 import math
 
 # normal exec loses the source code, however we can patch
@@ -80,7 +82,14 @@ def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target:
             setattr(to_module, item, t)
         from_module, to_module = f, t
 
-    setattr(to_module, field, getattr(from_module, field))
+    orig = getattr(from_module, field)
+    # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
+    # So, we register it as a named buffer in the target module.
+    if isinstance(orig, torch.Tensor) and not isinstance(orig, torch.nn.Parameter):
+        to_module.register_buffer(field, orig)
+    else:
+        setattr(to_module, field, orig)
+
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -170,11 +179,19 @@ class GraphModule(torch.nn.Module):
 
     @property
     def graph(self):
+        """
+        Return the `Graph` underlying this `GraphModule`
+        """
         return self._graph
 
     @graph.setter
-    def graph(self, val) -> None:
-        self._graph = val
+    def graph(self, g) -> None:
+        """
+        Set the underlying `Graph` for this `GraphModule`. This will internally
+        recompile the `GraphModule` so that the generated `forward()` function
+        corresponds to `g`
+        """
+        self._graph = g
         self.recompile()
 
     def recompile(self) -> None:
@@ -187,7 +204,28 @@ class GraphModule(torch.nn.Module):
         cls = type(self)
         cls.forward = _forward_from_src(self.code)
 
+        cls_call = cls.__call__
+
+        def print_full_traceback(exctype, value, tb):
+            traceback.print_exception(exctype, value, tb)
+
+        def wrapped_call(self, *args, **kwargs):
+            old_excepthook = sys.excepthook
+            try:
+                sys.excepthook = print_full_traceback
+                return cls_call(self, *args, **kwargs)
+            finally:
+                sys.excepthook = old_excepthook
+        cls.__call__ = wrapped_call
+
     def __reduce__(self):
+        """
+        Serialization of GraphModule. We serialize only the generated code, not
+        the underlying `Graph`. This is because `Graph` does not have on-disk
+        backward-compatibility guarantees, whereas Python source code does.
+        On the deserialization side, we symbolically trace through the generated
+        code to regenerate the underlying `Graph`
+        """
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
         return (deserialize_graphmodule, (dict_without_graph,))
