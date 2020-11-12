@@ -878,13 +878,12 @@ auto Engine::execute(const edge_list& roots,
 
   if (skip_dummy_node) {
     InputBuffer input_buffer(roots.at(0).function->num_inputs());
+    auto input = inputs.at(0);
 
-    const auto var_stream = InputMetadata(inputs.at(0)).stream();
     const auto opt_next_stream = roots.at(0).function->stream(c10::DeviceType::CUDA);
-
     input_buffer.add(roots.at(0).input_nr,
-                      std::move(inputs.at(0)),
-                      var_stream,
+                      std::move(input),
+                      InputMetadata(input).stream(),
                       opt_next_stream);
 
     execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
