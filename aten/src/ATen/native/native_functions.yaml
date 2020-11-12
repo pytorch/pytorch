@@ -2200,11 +2200,17 @@
 
 - func: nanprod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  dispatch:
+    CPU, CUDA: nanprod
 
 - func: nanprod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  dispatch:
+    CPU, CUDA: nanprod
 
 - func: nanprod.int_out(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: nanprod_out
 
 - func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
