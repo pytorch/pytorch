@@ -143,33 +143,39 @@ Using the :attr:`dim` argument to compute matrix norms::
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
 linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
 
-This function returns eigenvalues and eigenvectors
-of a complex Hermitian (conjugate symmetric) or real symmetric matrix :attr:`input`
-represented by a namedtuple (eigenvalues, eigenvectors).
+This function computes the eigenvalues and eigenvectors
+of a complex Hermitian (or real symmetric) matrix :attr:`input` or batches of such matrices
+such that :math:`\text{input} = V \text{diag}(w) V^H`, where :math:`w` is tensor of eigenvalues,
+:math:`V` is tensor of eigenvectors and :math:`^H` is the conjugate transpose operation.
 
-This function calculates all eigenvalues (and vectors) of :attr:`input`
-such that :math:`\text{input} = V \text{diag}(e) V^H`, where :math:`e` is eigenvalues tensor
-and :math:`V` is eigenvectors tensor.
-
-Since the input matrix :attr:`input` is supposed to be Hermitian,
-only the lower triangular portion is used by default
+Since :attr:`input` is assumed to be consisting of Hermitian matrices,
+only the lower triangular portion of these matrices is used by default (``UPLO = 'L'``)  in computations
 and the imaginary part of the diagonal will always be treated as zero.
+
+Supports real-valued and complex-valued input.
+For complex-valued batched input on CUDA the backpropagation is not supported yet.
+
+See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues,
+however that function is not differentiable.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
 .. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
+          This function always checks whether the call to LAPACK/MAGMA is successful
+          using ``info`` argument of ``_syevd``, ``_heevd``.
+          For CUDA this causes a cross-device memory synchronization.
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian
-                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
-    UPLO ('L', 'U', optional): controls whether to consider upper-triangular or lower-triangular part.
-        Default: ``'L'``
+    input (Tensor): the Hermitian :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    UPLO ('L', 'U', optional): controls whether to use upper-triangular or lower-triangular part
+                               of :attr:`input` in the computations. Default: ``'L'``
 
 Returns:
     (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
         - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`.
-            The eigenvalues in ascending order, each repeated according to its multiplicity.
+            The eigenvalues in ascending order.
         - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
             The orthonormal eigenvectors of the ``input``.
 
@@ -199,21 +205,30 @@ Examples::
 eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
 linalg.eigvalsh(input, UPLO='L') -> Tensor
 
-This function returns eigenvalues of a complex Hermitian (conjugate symmetric)
-or real symmetric matrix :attr:`input`. The eigenvalues are returned in ascending order,
-each repeated according to its multiplicity.
+This function computes the eigenvalues of a complex Hermitian (or real symmetric) matrix :attr:`input`
+or batches of such matrices. The eigenvalues are returned in ascending order.
+
+Since :attr:`input` is assumed to be consisting of Hermitian matrices,
+only the lower triangular portion of these matrices is used by default (``UPLO = 'L'``) in computations
+and the imaginary part of the diagonal will always be treated as zero.
+
+See :func:`torch.linalg.eigh` for a related function that computes both eigenvalues and eigenvectors.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
-.. note:: The eigenvalues are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
+          This function always checks whether the call to LAPACK/MAGMA is successful
+          using ``info`` argument of ``_syevd``, ``_heevd``.
+          For CUDA this causes a cross-device memory synchronization.
 
-.. note:: This function doesn't support backpropagation, please use :func:`torch.linalg.eigh` instead.
+.. note:: This function doesn't support backpropagation, please use :func:`torch.linalg.eigh` instead,
+          that also computes the eigenvectors.
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian
-                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
-    UPLO ('L', 'U', optional): controls whether to consider upper-triangular or lower-triangular part.
-        Default: ``'L'``
+    input (Tensor): the Hermitian :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    UPLO ('L', 'U', optional): controls whether to use upper-triangular or lower-triangular part
+                               of :attr:`input` in the computations. Default: ``'L'``
 
 Examples::
 
