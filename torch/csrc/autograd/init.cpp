@@ -127,7 +127,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // for CUDA - stream id, for CPU - start thread id
       .def("device_resource_id", &KinetoEvent::deviceResourceId)
       // device type, currently: CPU or CUDA
-      .def("device_type", &KinetoEvent::deviceType);
+      .def("device_type", [](const KinetoEvent& e) {
+        return (uint8_t)e.deviceType();
+      });
 
   py::class_<ProfilerResultWrapper>(m, "ProfilerResult")
       .def("events",  [](const ProfilerResultWrapper& r) {
