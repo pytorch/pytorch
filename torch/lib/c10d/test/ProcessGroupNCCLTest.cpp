@@ -9,6 +9,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <torch/csrc/autograd/profiler.h>
 #include <gtest/gtest.h>
 
 using namespace c10d::test;
@@ -30,7 +31,7 @@ class NCCLTestBase {
   }
 
   void initialize(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_, size);
+    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size));
@@ -79,7 +80,7 @@ class NCCLTest : public NCCLTestBase {
   }
 
   void wait(
-      std::shared_ptr<ProcessGroup::Work>& work,
+      c10::intrusive_ptr<ProcessGroup::Work>& work,
       std::chrono::milliseconds timeout = kNoTimeout) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait(timeout);
@@ -165,14 +166,21 @@ class AllreduceNCCLTest : public NCCLTest {
   AllreduceNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     launchDeviceSleep();
     valueInitialization();
 
-    return pg_->allreduce(tensors_);
+    using namespace torch::autograd::profiler;
+    // Make sure enabling profile does not make any issue. Note, in single
+    // process multi-device mode we do not expect any events be populated for
+    // collective operations, since profiling for that mode is not supported.
+    enableProfiler({ProfilerState::CPU});
+    auto results = pg_->allreduce(tensors_);
+    disableProfiler();
+    return results;
   }
 };
 
@@ -181,7 +189,7 @@ class BroadcastNCCLTest : public NCCLTest {
   BroadcastNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -200,7 +208,7 @@ class ReduceNCCLTest : public NCCLTest {
   ReduceNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -219,7 +227,7 @@ class AllgatherNCCLTest : public NCCLTest {
   AllgatherNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -234,7 +242,7 @@ struct ReduceScatterNCCLTest : NCCLTest {
   ReduceScatterNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
