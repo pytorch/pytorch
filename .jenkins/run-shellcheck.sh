@@ -5,6 +5,4 @@
 #   .jenkins/run-shellcheck.sh --color=always | less -R
 
 
-EXCLUSIONS=SC2086,SC1091,SC2155,SC1090,SC2164,SC1003
-
-find .jenkins/pytorch -name *.sh | xargs shellcheck --exclude=$EXCLUSIONS --external-sources "$@" || true
+find .jenkins/pytorch -name *.sh | xargs shellcheck --external-sources "$@"
