@@ -188,7 +188,7 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     return subscriptToType(*value_name, subscript);
 
   } else if (expr.kind() == TK_STRINGLITERAL) {
-    auto type_name = StringLiteral(expr).text();
+    const auto& type_name = StringLiteral(expr).text();
     if (resolver_) {
       if (auto typePtr = resolver_->resolveType(type_name, expr.range())) {
         return typePtr;

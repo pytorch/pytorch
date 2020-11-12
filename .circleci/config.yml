@@ -1205,6 +1205,7 @@ jobs:
 
           export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/python_doc_push_script.sh docs/'$target' master site") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
+          export CIRCLE_SHA1="$CIRCLE_SHA1"
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           mkdir -p ~/workspace/build_artifacts
@@ -1250,6 +1251,7 @@ jobs:
 
           export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.circleci/scripts/cpp_doc_push_script.sh docs/"$target" master") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
+          export CIRCLE_SHA1="$CIRCLE_SHA1"
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           mkdir -p ~/workspace/build_artifacts
@@ -1579,7 +1581,7 @@ jobs:
                 $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
             }
 
-            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests --yes
 
             # sync submodules
             cd ${PROJ_ROOT}
@@ -6947,6 +6949,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm3.8-py3.6"
           image_name: "pytorch-linux-bionic-rocm3.8-py3.6"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm3.9-py3.6"
+          image_name: "pytorch-linux-bionic-rocm3.9-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
