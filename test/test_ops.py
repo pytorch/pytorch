@@ -154,9 +154,8 @@ class TestCommon(JitCommonTestCase):
             self.assertEqual(variant_grad, expected_grad)
 
     # Tests that the forward and backward passes of operations produce the
-    #   same values for the cross-product of op variants (function, method, inplace)
+    #   same values for the cross-product of op variants (method, inplace)
     #   for eager 
-    # TODO WARNING: inplace x {traced, scripted} not currently tested
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
