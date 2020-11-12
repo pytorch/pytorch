@@ -17,7 +17,7 @@ class DeepAndWide(Module):
   def forward(self: __torch__.DeepAndWide,
     ad_emb_packed: Tensor,
     user_emb: Tensor,
-    wide: Tensor) -> Tensor:
+    wide: Tensor) -> Tuple[Tensor]:
     _0 = self._fc_b
     _1 = self._fc_w
     _2 = self._sigma
@@ -29,7 +29,7 @@ class DeepAndWide(Module):
     dp = torch.flatten(dp_unflatten, 1, -1)
     input = torch.cat([dp, wide_preproc], 1)
     fc1 = torch.addmm(_0, input, torch.t(_1), beta=1, alpha=1)
-    return torch.sigmoid(fc1)
+    return (torch.sigmoid(fc1),)
 )JIT";
 
 const std::string trivial_model_1 = R"JIT(

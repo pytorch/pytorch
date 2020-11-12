@@ -11,7 +11,6 @@ from ..autograd.utils import YamlLoader, CodeTemplate, write
 from ..autograd.gen_python_functions import (
     get_py_torch_functions,
     get_py_variable_methods,
-    namedtuple_fieldnames,
 )
 from ..autograd.gen_autograd import load_aten_declarations
 
@@ -232,6 +231,31 @@ def sig_for_ops(opname):
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:
         raise Exception("unknown op", opname)
+
+
+# Copied from 'gen_python_functions.py'
+# TODO: consolidate after migrating to the new codegen model in 'tools/codegen'.
+def namedtuple_fieldnames(declaration):
+    returns = declaration['returns']
+    if len(returns) <= 1 or all(['field_name' not in x for x in returns]):
+        return []
+    else:
+        def get_field_name(x):
+            # See Note [field_name versus name]
+            if 'field_name' not in x:
+                # When building on Windows, `PyStructSequence_UnnamedField` could not be
+                # resolved by the linker for some reason, which cause error in building:
+                #
+                # python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol
+                # PyStructSequence_UnnamedField
+                #
+                # Thus, at this point in time, we do not support unnamed
+                # fields in namedtuple; you must either name all fields,
+                # or none of them.
+                raise ValueError("Unnamed field is not supported by codegen")
+            else:
+                return x['field_name']
+        return [get_field_name(x) for x in returns]
 
 
 def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
@@ -577,6 +601,7 @@ def gen_pyi(declarations_path, out):
         'is_quantized': ['is_quantized: _bool'],
         'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
+        'is_vulkan': ['is_vulkan: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '

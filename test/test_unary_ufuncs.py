@@ -9,13 +9,13 @@ import torch
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings,
-     TEST_NUMPY, make_tensor)
+     TEST_NUMPY, IS_MACOS, make_tensor)
 from torch.testing._internal.common_methods_invocations import \
     (unary_ufuncs)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes)
 from torch.testing import \
-    (floating_types_and)
+    (floating_types_and, integral_types, all_types_and_complex_and)
 
 if TEST_NUMPY:
     import numpy as np
@@ -205,10 +205,19 @@ class TestUnaryUfuncs(TestCase):
         t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         expected = op(t)
 
-        for alt in (op.get_method(), op.get_inplace(), torch.jit.script(_fn)):
+        for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
+                             (torch.jit.script(_fn), False)):
             if alt is None:
                 with self.assertRaises(RuntimeError):
                     alt(t.clone())
+
+            if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
+                # Assert that RuntimeError is raised
+                # for inplace variant of Operators that
+                # promote integer input to floating dtype.
+                with self.assertRaises(RuntimeError):
+                    alt(t.clone())
+                continue
 
             actual = alt(t.clone())
             self.assertEqual(actual, expected, rtol=0, atol=0)
@@ -220,7 +229,7 @@ class TestUnaryUfuncs(TestCase):
 
         # Some NumPy functions return scalars, not arrays
         if isinstance(expected, Number):
-            self.assertEqual(actual.item(), expected)
+            self.assertEqual(actual.item(), expected, **kwargs)
         elif isinstance(expected, np.ndarray):
             # Handles exact dtype comparisons between arrays and tensors
             if exact_dtype:
@@ -271,7 +280,18 @@ class TestUnaryUfuncs(TestCase):
             else:
                 msg = None
 
-            self.assertEqualHelper(actual, expected, msg, dtype=dtype)
+            exact_dtype = True
+            if op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
+                exact_dtype = False
+
+                if dtype in [torch.uint8, torch.int8, torch.bool]:
+                    # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
+                    # while NumPy computes in float16
+                    self.assertEqualHelper(actual, expected, msg, dtype=dtype,
+                                           exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
+                    continue
+
+            self.assertEqualHelper(actual, expected, msg, dtype=dtype, exact_dtype=exact_dtype)
 
     # Tests for testing (dis)contiguity consistency
 
@@ -378,6 +398,51 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
+    def _test_out_arg(self, op, input, output):
+        dtype = input.dtype
+        out_dtype = output.dtype
+        if dtype is out_dtype:
+            expected = op(input)
+            op(input, out=output)
+            self.assertEqual(output, expected)
+        else:
+            with self.assertRaises(RuntimeError):
+                op(input, out=output)
+
+    def _test_out_promote_int_to_float_op(self, op, input, output):
+        def compare_out(op, input, out):
+            out_dtype = out.dtype
+            expected = op(input)
+            op(input, out=out)
+            self.assertEqual(out, expected.to(out_dtype))
+
+        dtype = input.dtype
+        out_dtype = output.dtype
+        if out_dtype.is_floating_point and not dtype.is_complex:
+            compare_out(op, input, output)
+        elif out_dtype.is_floating_point and dtype.is_complex:
+            # Can't cast complex to float
+            with self.assertRaises(RuntimeError):
+                op(input, out=output)
+        elif out_dtype.is_complex:
+            compare_out(op, input, output)
+        else:
+            # Can't cast to Integral types
+            with self.assertRaises(RuntimeError):
+                op(input, out=output)
+
+    @ops(unary_ufuncs)
+    def test_out_arg_all_dtypes(self, device, dtype, op):
+        input = make_tensor((64, 64), dtype=dtype, device=device,
+                            low=op.domain[0], high=op.domain[1])
+
+        for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
+            out = torch.empty_like(input, dtype=out_dtype)
+            if op.promotes_integers_to_float:
+                self._test_out_promote_int_to_float_op(op, input, out)
+            else:
+                self._test_out_arg(op, input, out)
+
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nan_to_num(self, device, dtype):
@@ -414,6 +479,16 @@ class TestUnaryUfuncs(TestCase):
             result = torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
+
+    @unittest.skipIf(IS_MACOS, "Skip Reference: https://github.com/pytorch/pytorch/issues/47500")
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_sqrt_complex_edge_values(self, device, dtype):
+        # Test Reference: https://github.com/pytorch/pytorch/pull/47424
+        x = torch.tensor(0. - 1.0000e+20j, dtype=dtype, device=device)
+        self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+
+        x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
+        self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 

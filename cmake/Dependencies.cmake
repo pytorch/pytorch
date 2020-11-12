@@ -226,7 +226,7 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
       set(DISABLE_NNPACK_AND_FAMILY ON)
     endif()
   else()
-    if(NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+    if(NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin|Windows)$"))
       message(WARNING
         "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in {Q/X}NNPACK. "
         "Supported platforms are Android, iOS, Linux, and macOS. "
@@ -248,6 +248,13 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
     caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     caffe2_update_option(USE_XNNPACK OFF)
   else()
+    # Disable unsupported NNPack combinations with MSVC
+    if(MSVC)
+      caffe2_update_option(USE_NNPACK OFF)
+      caffe2_update_option(USE_QNNPACK OFF)
+      caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
+    endif()
+
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
 
     if(NOT DEFINED CPUINFO_SOURCE_DIR)
@@ -507,6 +514,13 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
     set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Workaround for https://github.com/pytorch/pytorch/issues/47292
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
+      # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
+      # Fails with internal compiler error
+      # Workaround by forcing -O1 for XNNPACK (i.e. build it with RelWithDebInfo)
+      set_property(TARGET XNNPACK APPEND_STRING PROPERTY COMPILE_FLAGS "-O1")
+    endif()
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
@@ -1632,6 +1646,7 @@ if(NOT INTERN_BUILD_MOBILE)
   find_package(LAPACK)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
+    list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
   endif()
 
   if(NOT USE_CUDA)
