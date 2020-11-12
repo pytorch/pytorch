@@ -307,8 +307,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.checkQuantDequant(model.sub)
                     self.checkQuantizedLinear(model.sub.module.fc1)
                     self.checkQuantizedLinear(model.sub.module.fc2)
-                    self.assertEqual(type(model.sub.module.relu1), nnq.ReLU)
-                    self.assertEqual(type(model.sub.module.relu2), nnq.ReLU)
+                    self.assertEqual(type(model.sub.module.relu1), nn.ReLU)
+                    self.assertEqual(type(model.sub.module.relu2), nn.ReLU)
                     self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
@@ -1248,6 +1248,9 @@ class TestEagerModeOps(QuantizationTestCase):
     def test_leaky_relu(self):
         self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
 
+    def test_relu(self):
+        self._test_activation_op_impl(nn.ReLU, nn.ReLU, {'inplace': False})
+
 
 class TestEagerModeQATOps(QuantizationTestCase):
     def _test_activation_convert_numerics_impl(self, Act, data):
@@ -1324,6 +1327,25 @@ class TestEagerModeQATOps(QuantizationTestCase):
     def test_leaky_relu(self):
         data = torch.randn(1, 3, 2, 4)
         self._test_activation_convert_numerics_impl(nn.LeakyReLU, data)
+
+    def test_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(x)
+                return x
+
+        m = M().train()
+        m.qconfig = default_qconfig
+        m = prepare_qat(m)
+        # make sure no activation_post_process is inserted for relu
+        self.assertFalse(hasattr(m, "activation_post_process"))
+        m = convert(m)
+        # make sure ReLU module is not changed
+        self.assertTrue(type(m.relu), nn.ReLU)
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
