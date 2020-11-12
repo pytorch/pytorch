@@ -877,18 +877,19 @@ auto Engine::execute(const edge_list& roots,
   }
 
   if (skip_dummy_node) {
-    auto inputs_ = variable_list();
-    inputs_.reserve(graph_root->num_inputs());
-    for (size_t i = 0; i < graph_root->num_inputs(); ++i) {
-      if (i == roots.at(0).input_nr) {
-        inputs_.emplace_back(inputs.at(0));
-      } else {
-        inputs_.emplace_back();
-      }
-    }
-    execute_with_graph_task(graph_task, graph_root, std::move(inputs_));
+    InputBuffer input_buffer(roots.at(0).function->num_inputs());
+
+    const auto var_stream = InputMetadata(inputs.at(0)).stream();
+    const auto opt_next_stream = roots.at(0).function->stream(c10::DeviceType::CUDA);
+
+    input_buffer.add(roots.at(0).input_nr,
+                      std::move(inputs.at(0)),
+                      var_stream,
+                      opt_next_stream);
+
+    execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
   } else {
-    execute_with_graph_task(graph_task, graph_root);
+    execute_with_graph_task(graph_task, graph_root, InputBuffer(variable_list()));
   }
   // Avoid a refcount bump for the Future, since we check for refcount in
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
@@ -909,12 +910,11 @@ void Engine::initialize_device_threads_pool() {
 std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root,
-    variable_list&& inputs) {
+    InputBuffer&& input_buffer) {
   initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
-  InputBuffer input_buffer(std::move(inputs));
   auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
   queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
 
