@@ -658,7 +658,8 @@ class TestAssert(TestCase):
         # data can be passed without errors
         x = torch.randn(4, 4).fill_(1.0)
         ms(x)
-        # TODO(future PR) - make the assert raise properly on scripted model
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
+            ms(torch.tensor([False], dtype=torch.bool))
 
 
 if __name__ == '__main__':

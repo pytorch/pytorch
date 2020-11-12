@@ -328,10 +328,6 @@
   dispatch:
     DefaultBackend: _conj
 
-- func: _assert(bool condition, str message) -> ()
-
-- func: _assert.Tensor(Tensor condition, str message) -> ()
-
 - func: acos(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

@@ -737,6 +737,9 @@ class TestFX(JitTestCase):
             traced(torch.rand(4, 3))
         # verify the symbolically traced module is scriptable
         ms = torch.jit.script(m)
+        with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
+            ms(torch.rand(4, 3))
+
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())
