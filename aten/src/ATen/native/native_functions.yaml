@@ -6209,21 +6209,23 @@
     CUDA: _svd_helper_cuda
 
 # swapaxes, alias for transpose
-- func: swapaxes(Tensor(a) self, int axis1, int axis2) -> Tensor(a)
+- func: swapaxes(Tensor(a) self, int axis0, int axis1) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
+  device_guard: False
 
-- func: swapaxes_(Tensor(a!) self, int axis1, int axis2) -> Tensor(a!)
+- func: swapaxes_(Tensor(a!) self, int axis0, int axis1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   device_guard: False
 
 # swapdims, alias for transpose
-- func: swapdims(Tensor(a) self, int dim1, int dim2) -> Tensor(a)
+- func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
+  device_guard: False
 
-- func: swapdims_(Tensor(a!) self, int dim1, int dim2) -> Tensor(a!)
+- func: swapdims_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   device_guard: False

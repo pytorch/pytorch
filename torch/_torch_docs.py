@@ -5615,17 +5615,17 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.swapdims, r"""
-swapdims(input, dim1, dim2) -> Tensor
+swapdims(input, dim0, dim1) -> Tensor
 
 Alias for :func:`torch.transpose`.
 
-Swaps the dimension of :attr:`input` at the position in :attr:`dim1`
-to the position in :attr:`dim2`.
+Swaps the dimension of :attr:`input` at the position in :attr:`dim0`
+to the position in :attr:`dim1`.
 
 Args:
     {input}
-    dim1 (int): Original position of the dim to move
-    dim2 (int): Destination position
+    dim0 (int): Original position of the dim to move
+    dim1 (int): Destination position
 
 Examples::
 
@@ -5651,17 +5651,17 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.swapaxes, r"""
-swapaxes(input, axis1, axis2) -> Tensor
+swapaxes(input, axis0, axis1) -> Tensor
 
 Alias for :func:`torch.transpose`.
 
-Swaps the dimension of :attr:`input` at the position in :attr:`axis1`
-to the position in :attr:`axis2`.
+Swaps the dimension of :attr:`input` at the position in :attr:`axis0`
+to the position in :attr:`axis1`.
 
 Args:
     {input}
-    axis1 (int): Original position of the dim to move
-    axis2 (int): Destination position
+    axis0 (int): Original position of the dim to move
+    axis1 (int): Destination position
 
 Examples::
 

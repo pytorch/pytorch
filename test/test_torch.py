@@ -19403,8 +19403,8 @@ else:
                             dst_dim = dst_dim - nd
 
                         partial_map = {
-                            torch.swapdims: partial(torch.swapdims, dim1=src_dim, dim2=dst_dim),
-                            torch.swapaxes: partial(torch.swapaxes, axis1=src_dim, axis2=dst_dim),
+                            torch.swapdims: partial(torch.swapdims, dim0=src_dim, dim1=dst_dim),
+                            torch.swapaxes: partial(torch.swapaxes, axis0=src_dim, axis1=dst_dim),
                             torch.transpose: partial(torch.transpose, dim0=src_dim, dim1=dst_dim),
                         }
 
@@ -19415,8 +19415,8 @@ else:
             # Move dim to same position
             x = torch.randn(2, 3, 5, 7, 11)
             partial_map = {
-                torch.swapdims: partial(torch.swapdims, dim1=0, dim2=0),
-                torch.swapaxes: partial(torch.swapaxes, axis1=0, axis2=0),
+                torch.swapdims: partial(torch.swapdims, dim0=0, dim1=0),
+                torch.swapaxes: partial(torch.swapaxes, axis0=0, axis1=0),
                 torch.transpose: partial(torch.transpose, dim0=0, dim1=0),
             }
             torch_fn = partial_map[fn]
@@ -20489,26 +20489,26 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
-    def _test_movedim_view(self, device, op):
-        t = torch.zeros(3, 3, device=device)
-        out = op(t)
-
-        self.assertTrue(self.is_view_of(t, out))
-
-        # Randomly change values in output
-        # and verify that original is changed
-        # as well.
-        for _ in range(3):
-            idx_1, idx_2 = random.randint(0, 2), random.randint(0, 2)
-            out[idx_1, idx_2] = random.random()
-            self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
-
     def test_movedim_view(self, device):
+        def run_test(device, op):
+            t = torch.zeros(3, 3, device=device)
+            out = op(t)
+
+            self.assertTrue(self.is_view_of(t, out))
+
+            # Randomly change values in output
+            # and verify that original is changed
+            # as well.
+            for _ in range(3):
+                idx_1, idx_2 = random.randint(0, 2), random.randint(0, 2)
+                out[idx_1, idx_2] = random.random()
+                self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
+
         op = partial(torch.movedim, source=(0, 1), destination=(1, 0))
-        self._test_movedim_view(device, op)
+        run_test(device, op)
 
         op = partial(torch.movedim, source=0, destination=1)
-        self._test_movedim_view(device, op)
+        run_test(device, op)
 
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
