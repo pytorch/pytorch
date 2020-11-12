@@ -232,14 +232,14 @@ class TestForeach(TestCase):
             else:
                 if self.device_type == 'cpu':
                     if dtype == torch.complex64:
-                        expected = [torch.abs(tensors1[i].to(dtype=control_dtype)) for i in range(N)]
+                        expected = [torch.abs(tensors1[i]) for i in range(N)]
                         self.assertEqual(res, expected)
 
                         with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
                             torch._foreach_abs_(tensors1)
                         break
                     elif dtype == torch.complex128:
-                        expected = [torch.abs(tensors1[i].to(dtype=control_dtype)) for i in range(N)]
+                        expected = [torch.abs(tensors1[i]) for i in range(N)]
                         self.assertEqual(res, expected)
 
                         with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
@@ -249,14 +249,14 @@ class TestForeach(TestCase):
                         self.assertEqual(res, expected)
                 else:
                     if dtype == torch.complex64:
-                        expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(torch.complex64) for i in range(N)]
+                        expected = [torch.abs(tensors1[i]).to(torch.complex64) for i in range(N)]
                         self.assertEqual(res, expected)
 
                         torch._foreach_abs_(tensors1)
                         self.assertEqual(res, tensors1)
                         break
                     elif dtype == torch.complex128:
-                        expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(torch.complex128) for i in range(N)]
+                        expected = [torch.abs(tensors1[i]).to(torch.complex128) for i in range(N)]
                         self.assertEqual(res, expected)
 
                         torch._foreach_abs_(tensors1)
