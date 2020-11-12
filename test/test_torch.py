@@ -39,7 +39,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
-from typing import Dict, List
+from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off
@@ -15981,6 +15981,81 @@ class TestTorchDeviceType(TestCase):
                inf: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]})
 
         test_helper(torch.finfo(dtype).tiny, torch.finfo(dtype).max)
+
+    @onlyCPU
+    @slowTest
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @dtypes(torch.double)
+    def test_einsum(self, device: torch.device, dtype: torch.dtype) -> None:
+        # test cases taken from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
+        x = torch.randn(5, dtype=dtype, device=device)
+        y = torch.randn(7, dtype=dtype, device=device)
+        A = torch.randn(3, 5, dtype=dtype, device=device)
+        B = torch.randn(2, 5, dtype=dtype, device=device)
+        C = torch.randn(2, 3, 5, dtype=dtype, device=device)
+        D = torch.randn(2, 5, 7, dtype=dtype, device=device)
+        E = torch.randn(7, 9, dtype=dtype, device=device)
+        F = torch.randn(2, 3, 5, 7, dtype=dtype, device=device)
+        G = torch.randn(7, 11, 13, dtype=dtype, device=device)
+        H = torch.randn(4, 4, dtype=dtype, device=device)
+        I = torch.randn(3, 4, 4, dtype=dtype, device=device)
+        l = torch.randn(5, 10, dtype=dtype, device=device)
+        r = torch.randn(5, 20, dtype=dtype, device=device)
+        w = torch.randn(30, 10, 20, dtype=dtype, device=device)
+        test_list: List[Union[Tuple[str, torch.Tensor],
+                        Tuple[str, torch.Tensor, torch.Tensor],
+                        Tuple[str, torch.Tensor, torch.Tensor, torch.Tensor]]] = [
+            # -- Vector
+            ("i->", x),                 # sum
+            ("i,i->", x, x),            # dot
+            ("i,i->i", x, x),           # vector element-wise mul
+            ("i,j->ij", x, y),          # outer
+            # -- Matrix
+            ("ij->ji", A),              # transpose
+            ("ij->j", A),               # row sum
+            ("ij->i", A),               # col sum
+            ("ij,ij->ij", A, A),        # matrix element-wise mul
+            ("ij,j->i", A, x),          # matrix vector multiplication
+            ("ij,kj->ik", A, B),        # matmul
+            ("ij,ab->ijab", A, E),      # matrix outer product
+            # -- Tensor
+            ("aij,ajk->aik", C, D),     # batch matmul
+            ("ijk,jk->i", C, A),        # tensor matrix contraction
+            ("aij,jk->aik", D, E),      # tensor matrix contraction
+            ("abcd,dfg->abcfg", F, G),  # tensor tensor contraction
+            ("ijk,jk->ik", C, A),       # tensor matrix contraction with double indices
+            ("ijk,jk->ij", C, A),       # tensor matrix contraction with double indices
+            ("ijk,ik->j", C, B),        # non contiguous
+            ("ijk,ik->jk", C, B),       # non contiguous with double indices
+            # -- Diagonal
+            ("ii", H),                 # trace
+            ("ii->i", H),              # diagonal
+            # -- Ellipsis
+            ("i...->...", H),
+            ("ki,...k->i...", A.t(), B),
+            ("k...,jk", A.t(), B),
+            ("...ii->...i", I),       # batch diagonal
+            # -- Other
+            ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
+            ("... ii->...i  ", I),       # batch diagonal with spaces
+        ]
+        for test in test_list:
+            actual = torch.einsum(test[0], test[1:])
+            expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
+            self.assertEqual(expected.shape, actual.shape, msg=test[0])
+            self.assertEqual(expected, actual, msg=test[0])
+            # test vararg
+            actual2 = torch.einsum(test[0], *test[1:])
+            self.assertEqual(expected.shape, actual2.shape, msg=test[0])
+            self.assertEqual(expected, actual2, msg=test[0])
+
+            def do_einsum(*args):
+                return torch.einsum(test[0], args)
+            # FIXME: following test cases fail gradcheck
+            if test[0] not in {"i,i->", "i,i->i", "ij,ij->ij"}:
+                gradcheck_inps = tuple(t.detach().requires_grad_() for t in test[1:])
+                self.assertTrue(torch.autograd.gradcheck(do_einsum, gradcheck_inps))
+            self.assertTrue(A._version == 0)  # check that we do not use inplace ops
 
     @onlyCPU
     @dtypes(torch.bool, torch.double)
