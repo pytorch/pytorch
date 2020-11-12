@@ -1040,7 +1040,8 @@ def _convert(ret, cls):
     if isinstance(ret, Tensor):
         ret = ret.as_subclass(cls)
 
-    if isinstance(ret, tuple):
-        ret = tuple(_convert(r, cls) for r in ret)
+    if isinstance(ret, (tuple, list)):
+        # Also handles things like namedtuples
+        ret = type(ret)(_convert(r, cls) for r in ret)
 
     return ret
