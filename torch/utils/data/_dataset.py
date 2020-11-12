@@ -1,11 +1,12 @@
 # Note: The entire file is in testing phase. Please do not import!
+import warnings
 
 from .dataset import Dataset as MapDataset
 from .dataset import IterableDataset as IterDataset
 
 from .common import get_file_pathnames_from_root, get_file_binaries_from_pathnames, extract_files_from_pathname_binaries
 
-from typing import Union, List, Iterable
+from typing import Union, List, Iterable, Tuple
 
 
 class ListDirFilesMapDataset(MapDataset):
@@ -21,7 +22,6 @@ class LoadFilesFromDiskMapDataset(MapDataset):
         self.dataset = dataset
 
 
-
 class ListDirFilesIterDataset(IterDataset):
     def __init__(self, root: str = '.', mask: str = '*.tar', recursive: bool = False, abspath: bool = False):
         super().__init__()
@@ -29,26 +29,23 @@ class ListDirFilesIterDataset(IterDataset):
         self.mask : str = mask
         self.recursive : bool = recursive
         self.abspath : bool = abspath
-        self.files : Union[None, List] = None
+        self.initialized : bool = False
+        self.files : List[str] = []
 
     def _lazy_init(self):
         self.files = get_file_pathnames_from_root(self.root, self.mask, self.recursive, self.abspath)
-
+        self.initialized = True
 
     def __iter__(self):
-        if not self.is_loaded:
+        if not self.initialized:
             self._lazy_init()
         for file_name in self.files:
             yield file_name
 
     def __len__(self):
-        if not self.is_loaded:
+        if not self.initialized:
             self._lazy_init()
         return len(self.files)
-
-    @property
-    def is_loaded(self):
-        return self.files is not None
 
 
 class LoadFilesFromDiskIterDataset(IterDataset):
@@ -59,25 +56,23 @@ class LoadFilesFromDiskIterDataset(IterDataset):
         super().__init__()
         self.input : Iterable = input
         self.auto_extract = auto_extract
-        self.files : Union[None, List] = None
+        self.initialized : bool = False
+        self.files : List[Tuple[str, bytes]] = []
 
     def _lazy_init(self):
         self.files = get_file_binaries_from_pathnames(self.input, self.auto_extract)
+        self.initialized = True
 
     def __iter__(self):
-        if not self.is_loaded:
+        if not self.initialized:
             self._lazy_init()
-        for file_name_binary_tuple in self.files:
-            yield file_name_binary_tuple
+        for pathname_binary_tuple in self.files:
+            yield pathname_binary_tuple
 
     def __len__(self):
-        if not self.is_loaded:
+        if not self.initialized:
             self._lazy_init()
         return len(self.files)
-
-    @property
-    def is_loaded(self):
-        return self.files is not None
 
 
 class ExtractFilesIterDataset(IterDataset):
@@ -88,22 +83,20 @@ class ExtractFilesIterDataset(IterDataset):
         super().__init__()
         self.input : Iterable = input
         self.recursive : bool = recursive
-        self.files : Union[None, List] = None
+        self.initialized : bool = False
+        self.files : List[Tuple[str, bytes]] = []
 
     def _lazy_init(self):
         self.files = extract_files_from_pathname_binaries(self.input, self.recursive)
+        self.initialized = True
 
     def __iter__(self):
-        if not self.is_loaded:
+        if not self.initialized:
             self._lazy_init()
         for file_name_binary_tuple in self.files:
             yield file_name_binary_tuple
 
     def __len__(self):
-        if not self.is_loaded:
+        if not self.initialized:
             self._lazy_init()
         return len(self.files)
-
-    @property
-    def is_loaded(self):
-        return self.files is not None
