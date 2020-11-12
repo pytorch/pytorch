@@ -181,7 +181,7 @@ static void LstmCell_RunFusion(
   executor.compileFusion(&fusion);
 
   cudaDeviceSynchronize();
-  
+
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
     cudaDeviceSynchronize();
@@ -193,6 +193,46 @@ BENCHMARK_CAPTURE(LstmCell_RunFusion, Small, 512, 64)
 
 BENCHMARK_CAPTURE(LstmCell_RunFusion, Medium, 1024, 128)
     ->Unit(benchmark::kMicrosecond);
+
+//------------------------------------------------------------------------------
+
+static void LstmCell_RunFusion_GpuOnly(
+    benchmark::State& benchmark_state,
+    int hidden_features,
+    int batch_size) {
+  Fusion fusion;
+
+  // setup fusion
+  setupFusion(&fusion);
+
+  // inputs
+  std::vector<c10::IValue> inputs = setupInputs(hidden_features, batch_size);
+
+  // outputs
+  std::vector<at::Tensor> outputs;
+
+  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+
+  FusionExecutor executor;
+  executor.setMeasureKernelTimeFlag(true);
+  executor.compileFusion(&fusion);
+
+  cudaDeviceSynchronize();
+
+  for (auto _ : benchmark_state) {
+    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+    benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
+    cudaDeviceSynchronize();
+  }
+}
+
+BENCHMARK_CAPTURE(LstmCell_RunFusion_GpuOnly, Small, 512, 64)
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK_CAPTURE(LstmCell_RunFusion_GpuOnly, Medium, 1024, 128)
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
 
 //------------------------------------------------------------------------------
 

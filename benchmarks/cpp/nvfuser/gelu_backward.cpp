@@ -182,6 +182,39 @@ BENCHMARK(GeluBackward_RunFusion)->Unit(benchmark::kMicrosecond);
 
 //------------------------------------------------------------------------------
 
+static void GeluBackward_RunFusion_GpuOnly(benchmark::State& benchmark_state) {
+  Fusion fusion;
+
+  // setup fusion
+  setupFusion(&fusion);
+
+  // inputs
+  std::vector<c10::IValue> inputs = setupInputs();
+
+  // outputs
+  std::vector<at::Tensor> outputs;
+
+  scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+
+  FusionExecutor executor;
+  executor.setMeasureKernelTimeFlag(true);
+  executor.compileFusion(&fusion);
+
+  cudaDeviceSynchronize();
+  
+  for (auto _ : benchmark_state) {
+    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+    benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
+    cudaDeviceSynchronize();
+  }
+}
+
+BENCHMARK(GeluBackward_RunFusion_GpuOnly)
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+
 static void GeluBackward_RunFusion_CpuOnly(benchmark::State& benchmark_state) {
   Fusion fusion;
 

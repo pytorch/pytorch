@@ -84,6 +84,20 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
     execute_kernel_ = execute_kernel;
   }
 
+  //! Internal knob used for debugging/profiling only
+  void setMeasureKernelTimeFlag(bool measure_kernel_time) {
+    measure_kernel_time_ = measure_kernel_time;
+  }
+
+  //! Returns the last kernel execution time, in milliseconds
+  //!
+  //! \note The kernel time is only tracked if enabled by calling
+  //!    setMeasureKernelTimeFlag(true)
+  //!
+  float kernelTimeMs() const {
+    return measure_kernel_time_ ? kernel_time_ms_ : 0;
+  }
+
  private:
   struct GlobalBuffers {
     std::vector<at::Tensor> empty_buffers;
@@ -148,6 +162,12 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   // Profiling support: knob to control wheter we actually execute the
   // kernel on the GPU or not
   bool execute_kernel_ = true;
+
+  // Profiling support: knob to enable measuring kernel execution time
+  bool measure_kernel_time_ = false;
+
+  // The last kernel execution time, if measure_kernel_time_ is true
+  float kernel_time_ms_ = 0;
 };
 
 } // namespace cuda

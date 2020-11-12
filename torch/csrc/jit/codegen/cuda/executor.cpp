@@ -511,6 +511,15 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     kernel_arguments.appendPhiloxRNGSeed(rand_offset);
   }
 
+  cudaEvent_t start_event = {};
+  cudaEvent_t finish_event = {};
+
+  if (measure_kernel_time_) {
+    cudaEventCreate(&start_event);
+    cudaEventCreate(&finish_event);
+    cudaEventRecord(start_event);
+  }
+
   if (execute_kernel_) {
     FUSER_PERF_SCOPE("cuLaunchKernel");
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
@@ -525,6 +534,13 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         stream,
         kernel_arguments.getBuffer(),
         nullptr));
+  }
+
+  if (measure_kernel_time_) {
+    cudaEventRecord(finish_event);
+    cudaEventSynchronize(start_event);
+    cudaEventSynchronize(finish_event);
+    cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
   }
 
   return allocated_outputs;
