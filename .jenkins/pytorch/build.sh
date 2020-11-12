@@ -151,8 +151,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$IN_CI" ]]; then
-      # Set ROCM_ARCH to gtx900 and gtx906 in CircleCI
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
 
