@@ -20,104 +20,104 @@ import torch.distributed as dist
 from typing import Dict, Optional
 
 TESTS = [
-    'test_autograd',
-    'benchmark_utils/test_benchmark_utils',
-    'test_bundled_inputs',
-    'test_complex',
-    'test_cpp_api_parity',
-    'test_cpp_extensions_aot_no_ninja',
-    'test_cpp_extensions_aot_ninja',
-    'test_cpp_extensions_jit',
-    'distributed/test_c10d',
-    'distributed/test_c10d_spawn',
-    'test_cuda',
-    'test_jit_cuda_fuser',
-    'test_cuda_primary_ctx',
-    'test_dataloader',
-    'distributed/test_data_parallel',
-    'distributed/test_distributed_fork',
-    'distributed/test_distributed_spawn',
-    'distributions/test_constraints',
-    'distributions/test_distributions',
-    'test_expecttest',
-    'test_foreach',
-    'test_indexing',
-    'test_jit',
-    'test_linalg',
-    'test_logging',
-    'test_mkldnn',
-    'test_multiprocessing',
-    'test_multiprocessing_spawn',
-    'distributed/test_nccl',
-    'test_native_functions',
-    'test_numba_integration',
-    'test_nn',
-    'test_ops',
-    'test_optim',
-    'test_pytree',
-    'test_mobile_optimizer',
-    'test_xnnpack_integration',
-    'test_vulkan',
-    'test_sparse',
-    'test_quantization',
-    'test_spectral_ops',
-    'test_serialization',
-    'test_show_pickle',
-    'test_tensor_creation_ops',
-    'test_torch',
-    'test_type_info',
-    'test_type_hints',
-    'test_unary_ufuncs',
-    'test_utils',
-    'test_vmap',
-    'test_namedtuple_return_api',
-    'test_jit_profiling',
-    'test_jit_legacy',
-    'test_jit_fuser_legacy',
-    'test_tensorboard',
-    'test_namedtensor',
-    'test_type_promotion',
-    'test_jit_disabled',
-    'test_function_schema',
-    'test_op_aliases.py',
-    'test_overrides',
-    'test_jit_fuser_te',
-    'test_tensorexpr',
-    'test_openmp',
-    'test_profiler',
-    'distributed/nn/jit/test_instantiator',
-    'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/test_tensorpipe_agent',
-    'test_jit_py3',
-    'test_determination',
-    'test_futures',
-    'test_fx',
-    'test_fx_experimental',
-    'test_functional_autograd_benchmark',
-    'test_package',
-    'distributed/_pipeline/sync/skip/test_api',
-    'distributed/_pipeline/sync/skip/test_gpipe',
-    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
-    'distributed/_pipeline/sync/skip/test_leak',
-    'distributed/_pipeline/sync/skip/test_portal',
-    'distributed/_pipeline/sync/skip/test_stash_pop',
-    'distributed/_pipeline/sync/skip/test_tracker',
-    'distributed/_pipeline/sync/skip/test_verify_skippables',
-    'distributed/_pipeline/sync/test_balance',
-    'distributed/_pipeline/sync/test_bugs',
-    'distributed/_pipeline/sync/test_checkpoint',
-    'distributed/_pipeline/sync/test_copy',
-    'distributed/_pipeline/sync/test_deferred_batch_norm',
-    'distributed/_pipeline/sync/test_dependency',
-    'distributed/_pipeline/sync/test_inplace',
-    'distributed/_pipeline/sync/test_microbatch',
-    'distributed/_pipeline/sync/test_phony',
-    'distributed/_pipeline/sync/test_pipe',
-    'distributed/_pipeline/sync/test_pipeline',
-    'distributed/_pipeline/sync/test_stream',
-    'distributed/_pipeline/sync/test_transparency',
-    'distributed/_pipeline/sync/test_worker',
+    "test_autograd",
+    "benchmark_utils/test_benchmark_utils",
+    "test_bundled_inputs",
+    "test_complex",
+    "test_cpp_api_parity",
+    "test_cpp_extensions_aot_no_ninja",
+    "test_cpp_extensions_aot_ninja",
+    "test_cpp_extensions_jit",
+    "distributed/test_c10d",
+    "distributed/test_c10d_spawn",
+    "test_cuda",
+    "test_jit_cuda_fuser",
+    "test_cuda_primary_ctx",
+    "test_dataloader",
+    "distributed/test_data_parallel",
+    "distributed/test_distributed_fork",
+    "distributed/test_distributed_spawn",
+    "distributions/test_constraints",
+    "distributions/test_distributions",
+    "test_expecttest",
+    "test_foreach",
+    "test_indexing",
+    "test_jit",
+    "test_linalg",
+    "test_logging",
+    "test_mkldnn",
+    "test_multiprocessing",
+    "test_multiprocessing_spawn",
+    "distributed/test_nccl",
+    "test_native_functions",
+    "test_numba_integration",
+    "test_nn",
+    "test_ops",
+    "test_optim",
+    "test_pytree",
+    "test_mobile_optimizer",
+    "test_xnnpack_integration",
+    "test_vulkan",
+    "test_sparse",
+    "test_quantization",
+    "test_spectral_ops",
+    "test_serialization",
+    "test_show_pickle",
+    "test_tensor_creation_ops",
+    "test_torch",
+    "test_type_info",
+    "test_type_hints",
+    "test_unary_ufuncs",
+    "test_utils",
+    "test_vmap",
+    "test_namedtuple_return_api",
+    "test_jit_profiling",
+    "test_jit_legacy",
+    "test_jit_fuser_legacy",
+    "test_tensorboard",
+    "test_namedtensor",
+    "test_type_promotion",
+    "test_jit_disabled",
+    "test_function_schema",
+    "test_op_aliases.py",
+    "test_overrides",
+    "test_jit_fuser_te",
+    "test_tensorexpr",
+    "test_openmp",
+    "test_profiler",
+    "distributed/nn/jit/test_instantiator",
+    "distributed/rpc/test_faulty_agent",
+    "distributed/rpc/test_process_group_agent",
+    "distributed/rpc/test_tensorpipe_agent",
+    "test_jit_py3",
+    "test_determination",
+    "test_futures",
+    "test_fx",
+    "test_fx_experimental",
+    "test_functional_autograd_benchmark",
+    "test_package",
+    "distributed/_pipeline/sync/skip/test_api",
+    "distributed/_pipeline/sync/skip/test_gpipe",
+    "distributed/_pipeline/sync/skip/test_inspect_skip_layout",
+    "distributed/_pipeline/sync/skip/test_leak",
+    "distributed/_pipeline/sync/skip/test_portal",
+    "distributed/_pipeline/sync/skip/test_stash_pop",
+    "distributed/_pipeline/sync/skip/test_tracker",
+    "distributed/_pipeline/sync/skip/test_verify_skippables",
+    "distributed/_pipeline/sync/test_balance",
+    "distributed/_pipeline/sync/test_bugs",
+    "distributed/_pipeline/sync/test_checkpoint",
+    "distributed/_pipeline/sync/test_copy",
+    "distributed/_pipeline/sync/test_deferred_batch_norm",
+    "distributed/_pipeline/sync/test_dependency",
+    "distributed/_pipeline/sync/test_inplace",
+    "distributed/_pipeline/sync/test_microbatch",
+    "distributed/_pipeline/sync/test_phony",
+    "distributed/_pipeline/sync/test_pipe",
+    "distributed/_pipeline/sync/test_pipeline",
+    "distributed/_pipeline/sync/test_stream",
+    "distributed/_pipeline/sync/test_transparency",
+    "distributed/_pipeline/sync/test_worker",
 ]
 
 # Tests need to be run with pytest.
@@ -185,7 +185,7 @@ RUN_PARALLEL_BLOCKLIST = [
 # fixtures that cannot be run by unittest
 PYTEST_TESTS = ["distributions/test_constraints"]
 
-# These tests are slow enough that it's worth calculating whether the patch
+# These tests are slow enough that it"s worth calculating whether the patch
 # touched any related files first.
 SLOW_TESTS = [
     "distributions/test_distributions",
@@ -310,10 +310,10 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
 
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
-        unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
+        unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
-    # Can't call `python -m unittest test_*` here because it doesn't run code
-    # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
+    # Can"t call `python -m unittest test_*` here because it doesn"t run code
+    # in `if __name__ == "__main__": `. So call `python test_*.py` instead.
     argv = [test_module + ".py"] + unittest_args
 
     # Extra arguments are not supported with pytest
@@ -417,7 +417,7 @@ def test_distributed(test_module, test_directory, options):
                         noprefix_opt = (
                             "--noprefix"
                             if subprocess.call(
-                                'mpiexec -n 1 --noprefix bash -c ""',
+                                "mpiexec -n 1 --noprefix bash -c " "",
                                 shell=True,
                                 stdout=devnull,
                                 stderr=subprocess.STDOUT,
@@ -551,12 +551,12 @@ def find_test_index(test, selected_tests, find_last_index=False):
     as part of the same test module, e.g.:
 
     ```
-    selected_tests = ['autograd', 'cuda', **'torch.TestTorch.test_acos',
-                     'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
+    selected_tests = ["autograd", "cuda", **"torch.TestTorch.test_acos",
+                     "torch.TestTorch.test_tan", "torch.TestTorch.test_add"**, "utils"]
     ```
 
-    If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
-    If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
+    If :attr:`test`="torch" and :attr:`find_last_index`=False, result should be **2**.
+    If :attr:`test`="torch" and :attr:`find_last_index`=True, result should be **4**.
 
     Arguments:
         test (str): Name of test to lookup
@@ -703,7 +703,7 @@ def get_dep_modules(test):
             "json",
             "collections",
             # Modules below are excluded because they are hitting https://bugs.python.org/issue40350
-            # Trigger AttributeError: 'NoneType' object has no attribute 'is_package'
+            # Trigger AttributeError: "NoneType" object has no attribute "is_package"
             "mpl_toolkits",
             "google",
             "onnx",
@@ -711,7 +711,7 @@ def get_dep_modules(test):
             "mypy",
         ],
     )
-    # HACK: some platforms default to ascii, so we can't just run_script :(
+    # HACK: some platforms default to ascii, so we can"t just run_script :(
     with open(test_location, "r", encoding="utf-8") as fp:
         finder.load_module("__main__", fp, test_location, ("", "r", 1))
 
@@ -758,7 +758,7 @@ def determine_target(test, touched_files, options):
                 log_test_reason(file_type, touched_file, test, options)
                 return True
 
-    # If nothing has determined the test has run, don't run the test.
+    # If nothing has determined the test has run, don"t run the test.
     if options.verbose:
         print_to_stderr(f"Determination is skipping {test}")
 
@@ -778,7 +778,7 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
     message = f"{test} failed!"
     if return_code < 0:
-        # subprocess.Popen returns the child process' exit signal as
+        # subprocess.Popen returns the child process" exit signal as
         # return code -N, where N is the signal number.
         signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
         message += f" Received signal: {signal_name}"
@@ -802,7 +802,7 @@ def main():
     if options.determine_from is not None and os.path.exists(options.determine_from):
         with open(options.determine_from, "r") as fh:
             touched_files = [os.path.normpath(name.strip()) for name in fh.read().split("\n") if len(name.strip()) > 0]
-        # HACK: Ensure the 'test' paths can be traversed by Modulefinder
+        # HACK: Ensure the "test" paths can be traversed by Modulefinder
         sys.path.append("test")
         selected_tests = [test for test in selected_tests if determine_target(test, touched_files, options)]
         sys.path.remove("test")
