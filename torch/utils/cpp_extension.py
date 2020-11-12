@@ -23,6 +23,13 @@ from setuptools.command.build_ext import build_ext
 
 
 IS_WINDOWS = sys.platform == 'win32'
+LIB_EXT = 'pyd' if IS_WINDOWS else 'so'
+EXEC_EXT = 'exe' if IS_WINDOWS else 'o'
+
+_HERE = os.path.abspath(__file__)
+_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
+
 
 def _find_cuda_home() -> Optional[str]:
     r'''Finds the CUDA install path.'''
@@ -400,7 +407,7 @@ class BuildExtension(build_ext, object):
             # overriding the option if the user explicitly passed it.
             _ccbin = os.getenv("CC")
             if (
-                _ccbin is not None 
+                _ccbin is not None
                 and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
             ):
                 cflags.extend(['-ccbin', _ccbin])
@@ -848,9 +855,7 @@ def include_paths(cuda: bool = False) -> List[str]:
     Returns:
         A list of include path strings.
     '''
-    here = os.path.abspath(__file__)
-    torch_path = os.path.dirname(os.path.dirname(here))
-    lib_include = os.path.join(torch_path, 'include')
+    lib_include = os.path.join(_TORCH_PATH, 'include')
     paths = [
         lib_include,
         # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
@@ -886,13 +891,8 @@ def library_paths(cuda: bool = False) -> List[str]:
     Returns:
         A list of library path strings.
     '''
-    paths = []
-
     # We need to link against libtorch.so
-    here = os.path.abspath(__file__)
-    torch_path = os.path.dirname(os.path.dirname(here))
-    lib_path = os.path.join(torch_path, 'lib')
-    paths.append(lib_path)
+    paths = [TORCH_LIB_PATH]
 
     if cuda and IS_HIP_EXTENSION:
         lib_dir = 'lib'
@@ -925,6 +925,7 @@ def load(name,
          verbose=False,
          with_cuda: Optional[bool] = None,
          is_python_module=True,
+         is_standalone=False,
          keep_intermediates=True):
     r'''
     Loads a PyTorch C++ extension just-in-time (JIT).
@@ -979,14 +980,23 @@ def load(name,
             ``.cuh`` in ``sources``. Set it to `True`` to force CUDA headers
             and libraries to be included.
         is_python_module: If ``True`` (default), imports the produced shared
-            library as a Python module. If ``False``, loads it into the process
-            as a plain dynamic library.
+            library as a Python module. If ``False``, behavior depends on
+            ``is_standalone``.
+        is_standalone: If ``False`` (default) loads the constructed extension
+            into the process as a plain dynamic library. If ``True``, build a
+            standalone executable.
 
     Returns:
-        If ``is_python_module`` is ``True``, returns the loaded PyTorch
-        extension as a Python module. If ``is_python_module`` is ``False``
-        returns nothing (the shared library is loaded into the process as a side
-        effect).
+        If ``is_python_module`` is ``True``:
+            Returns the loaded PyTorch extension as a Python module.
+
+        If ``is_python_module`` is ``False`` and ``is_standalone`` is ``False``:
+            Returns nothing. (The shared library is loaded into the process as
+            a side effect.)
+
+        If ``is_standalone`` is ``True``.
+            Return the path to the executable. (On Windows, TORCH_LIB_PATH is
+            added to the PATH environment variable as a side effect.)
 
     Example:
         >>> from torch.utils.cpp_extension import load
@@ -1007,6 +1017,7 @@ def load(name,
         verbose,
         with_cuda,
         is_python_module,
+        is_standalone,
         keep_intermediates=keep_intermediates)
 
 
@@ -1155,6 +1166,7 @@ def load_inline(name,
         verbose,
         with_cuda,
         is_python_module,
+        is_standalone=False,
         keep_intermediates=keep_intermediates)
 
 
@@ -1168,7 +1180,11 @@ def _jit_compile(name,
                  verbose: bool,
                  with_cuda: Optional[bool],
                  is_python_module,
+                 is_standalone,
                  keep_intermediates=True) -> None:
+    if is_python_module and is_standalone:
+        raise ValueError("`is_python_module` and `is_standalone` are mutually exclusive.")
+
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
@@ -1178,7 +1194,9 @@ def _jit_compile(name,
         sources,
         build_arguments=[extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths],
         build_directory=build_directory,
-        with_cuda=with_cuda
+        with_cuda=with_cuda,
+        is_python_module=is_python_module,
+        is_standalone=is_standalone,
     )
     if version > 0:
         if version != old_version and verbose:
@@ -1210,7 +1228,8 @@ def _jit_compile(name,
                         extra_include_paths=extra_include_paths or [],
                         build_directory=build_directory,
                         verbose=verbose,
-                        with_cuda=with_cuda)
+                        with_cuda=with_cuda,
+                        is_standalone=is_standalone)
             finally:
                 baton.release()
         else:
@@ -1221,7 +1240,8 @@ def _jit_compile(name,
 
     if verbose:
         print(f'Loading extension module {name}...')
-    return _import_module_from_library(name, build_directory, is_python_module)
+    return _import_module_from_library(
+        name, build_directory, is_python_module, is_standalone)
 
 
 def _write_ninja_file_and_compile_objects(
@@ -1275,7 +1295,8 @@ def _write_ninja_file_and_build_library(
         extra_include_paths,
         build_directory: str,
         verbose: bool,
-        with_cuda: Optional[bool]) -> None:
+        with_cuda: Optional[bool],
+        is_standalone: bool = False) -> None:
     verify_ninja_availability()
     if IS_WINDOWS:
         compiler = os.environ.get('CXX', 'cl')
@@ -1287,7 +1308,8 @@ def _write_ninja_file_and_build_library(
     extra_ldflags = _prepare_ldflags(
         extra_ldflags or [],
         with_cuda,
-        verbose)
+        verbose,
+        is_standalone)
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         print(f'Emitting ninja build file {build_file_path}...')
@@ -1301,7 +1323,8 @@ def _write_ninja_file_and_build_library(
         extra_cuda_cflags=extra_cuda_cflags or [],
         extra_ldflags=extra_ldflags or [],
         extra_include_paths=extra_include_paths or [],
-        with_cuda=with_cuda)
+        with_cuda=with_cuda,
+        is_standalone=is_standalone)
 
     if verbose:
         print(f'Building extension module {name}...')
@@ -1334,11 +1357,7 @@ def verify_ninja_availability():
         raise RuntimeError("Ninja is required to load C++ extensions")
 
 
-def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
-    here = os.path.abspath(__file__)
-    torch_path = os.path.dirname(os.path.dirname(here))
-    lib_path = os.path.join(torch_path, 'lib')
-
+def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
         python_lib_path = os.path.join(python_path, 'libs')
@@ -1353,11 +1372,13 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
             extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
         extra_ldflags.append('torch.lib')
-        extra_ldflags.append('torch_python.lib')
-        extra_ldflags.append(f'/LIBPATH:{python_lib_path}')
-        extra_ldflags.append(f'/LIBPATH:{lib_path}')
+        extra_ldflags.append(f'/LIBPATH:{TORCH_LIB_PATH}')
+        if not is_standalone:
+            extra_ldflags.append('torch_python.lib')
+            extra_ldflags.append(f'/LIBPATH:{python_lib_path}')
+
     else:
-        extra_ldflags.append(f'-L{lib_path}')
+        extra_ldflags.append(f'-L{TORCH_LIB_PATH}')
         extra_ldflags.append('-lc10')
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
@@ -1365,7 +1386,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         if with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
         extra_ldflags.append('-ltorch')
-        extra_ldflags.append('-ltorch_python')
+        if not is_standalone:
+            extra_ldflags.append('-ltorch_python')
+
+        if is_standalone:
+            extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")
 
     if with_cuda:
         if verbose:
@@ -1572,7 +1597,12 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         raise RuntimeError(message) from e
 
 
-def _import_module_from_library(module_name, path, is_python_module):
+def _import_module_from_library(module_name, path, is_python_module, is_standalone):
+    if is_standalone:
+        if IS_WINDOWS and TORCH_LIB_PATH not in os.getenv('PATH', ''):
+            os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
+        return os.path.join(path, f'{module_name}.{EXEC_EXT}')
+
     # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
     file, path, description = imp.find_module(module_name, [path])
     # Close the .so file after load.
@@ -1590,7 +1620,8 @@ def _write_ninja_file_to_build_library(path,
                                        extra_cuda_cflags,
                                        extra_ldflags,
                                        extra_include_paths,
-                                       with_cuda) -> None:
+                                       with_cuda,
+                                       is_standalone) -> None:
     extra_cflags = [flag.strip() for flag in extra_cflags]
     extra_cuda_cflags = [flag.strip() for flag in extra_cuda_cflags]
     extra_ldflags = [flag.strip() for flag in extra_ldflags]
@@ -1610,8 +1641,10 @@ def _write_ninja_file_to_build_library(path,
         user_includes += system_includes
         system_includes.clear()
 
-    common_cflags = [f'-DTORCH_EXTENSION_NAME={name}']
-    common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
+    common_cflags = []
+    if not is_standalone:
+        common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
+        common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
 
     # Note [Pybind11 ABI constants]
     #
@@ -1682,7 +1715,9 @@ def _write_ninja_file_to_build_library(path,
 
     objects = [object_file_path(src) for src in sources]
 
-    if IS_WINDOWS:
+    if is_standalone:
+        ldflags = extra_ldflags
+    elif IS_WINDOWS:
         ldflags = ['/DLL'] + extra_ldflags
     else:
         ldflags = ['-shared'] + extra_ldflags
@@ -1692,7 +1727,7 @@ def _write_ninja_file_to_build_library(path,
     elif IS_WINDOWS:
         ldflags = _nt_quote_args(ldflags)
 
-    ext = 'pyd' if IS_WINDOWS else 'so'
+    ext = EXEC_EXT if is_standalone else LIB_EXT
     library_target = f'{name}.{ext}'
 
     _write_ninja_file(
