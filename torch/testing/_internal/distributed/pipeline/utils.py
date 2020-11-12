@@ -4,7 +4,26 @@
 # LICENSE file in the root directory of this source tree.
 
 from torch import nn
+from torch.distributed import rpc
 from typing import List
+
+import pytest
+import tempfile
+
+@pytest.fixture
+def setup_rpc(scope="session"):
+    file = tempfile.NamedTemporaryFile()
+    rpc.init_rpc(
+        name="worker0",
+        rank=0,
+        world_size=1,
+        rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+            init_method="file://{}".format(file.name),
+        )
+    )
+    yield
+    rpc.shutdown()
+
 
 def convert_to_balance(pipe: nn.Sequential, balance: List[int]):
     device_idx = 0

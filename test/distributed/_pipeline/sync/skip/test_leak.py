@@ -11,6 +11,7 @@ from torch import nn
 from torch.distributed._pipeline.sync import Pipe, is_checkpointing, is_recomputing
 from torch.distributed._pipeline.sync.skip import pop, skippable, stash
 from torch.distributed._pipeline.sync.skip.tracker import current_skip_tracker
+from torch.testing._internal.distributed.pipeline.utils import setup_rpc
 
 
 @skippable(stash=["skip"])
@@ -29,7 +30,7 @@ class Pop(nn.Module):
 
 @pytest.mark.parametrize("train", [True, False], ids=["train", "eval"])
 @pytest.mark.parametrize("checkpoint", ["always", "except_last", "never"])
-def test_delete_portal_tensor(train, checkpoint):
+def test_delete_portal_tensor(train, checkpoint, setup_rpc):
     # Without checkpointing:
     # +- Stash --+  +--- Pop ----+ - - - layers
     # | 2,blue,1 |--| 1,orange,0 | - - - tensor_life and portal function
@@ -97,7 +98,7 @@ def test_delete_portal_tensor(train, checkpoint):
 
     if train:
         model.train()
-        output = model(input)
+        output = model(input).local_value()
         output.norm().backward()
     else:
         model.eval()
@@ -106,7 +107,7 @@ def test_delete_portal_tensor(train, checkpoint):
 
 
 @pytest.mark.parametrize("train", [True, False], ids=["train", "eval"])
-def test_no_portal_without_pipe(train, monkeypatch):
+def test_no_portal_without_pipe(train, monkeypatch, setup_rpc):
     def deny(*args, **kwargs):
         raise AssertionError("tried to create Portal without Pipe")
 
