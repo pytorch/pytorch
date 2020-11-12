@@ -2777,25 +2777,6 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 5)]):
             _test_with_size(upper, dims)
 
-    @skipIfNoLapack
-    def test_triangular_solve(self):
-        def run_test(A_dims, B_dims, dtype):
-            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
-            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
-
-            for upper, transpose, unitriangular in product((True, False), repeat=3):
-                def func(A, b):
-                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
-
-                gradcheck(func, [A, b])
-                gradgradcheck(func, [A, b])
-
-        for dtype in (torch.double, torch.cdouble):
-            run_test((3, 3), (3, 4), dtype)
-            run_test((3, 3), (3, 2), dtype)
-            run_test((2, 3, 3), (2, 3, 4), dtype)
-            run_test((2, 3, 3), (2, 3, 2), dtype)
-
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
         def _test_complex(sizes, signal_ndim):
@@ -3271,7 +3252,7 @@ class TestAutograd(TestCase):
         print(prof.key_averages(group_by_input_shape=True).table(
             sort_by="self_cpu_time_total", row_limit=10))
         print(prof.table(
-            sort_by="self_cpu_time_total", row_limit=10, header="TEST", top_level_events_only=True))
+            sort_by="self_cpu_time_total", row_limit=10, max_src_column_width=300, header="TEST", top_level_events_only=True))
         print(prof.key_averages(group_by_input_shape=True).table(
             sort_by="self_cpu_time_total", row_limit=10, top_level_events_only=True))
 
@@ -5006,10 +4987,12 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'mean'] + separate_complex_tests
+                'exp', 'mean', 'inverse', 'triangular_solve', 'solve'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
-skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
+skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex', 'inverse_batched_complex',
+                  'solve_batched_broadcast_A_complex', 'solve_batched_broadcast_b_complex',
+                  'solve_batched_complex', 'solve_batched_dims_complex']
 
 def add_test(
         name,

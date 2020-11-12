@@ -223,17 +223,21 @@ class TestModuleInterface(JitTestCase):
         def as_any_to_any(x: AnyToAny) -> AnyToAny:
             return x
 
-        class TensorToAnyImpl(nn.Module):
+        class TensorToAnyImplA(nn.Module):
             def forward(self, input: Any) -> Any:
                 return input
+
+        class TensorToAnyImplB(nn.Module):
+            def forward(self, input: Any) -> torch.Tensor:
+                return torch.tensor([1])
 
         class AnyToAnyImpl(nn.Module):
             def forward(self, input: Any) -> torch.Tensor:
                 return torch.tensor([1])
 
-        as_tensor_to_any(torch.jit.script(TensorToAnyImpl()))
+        as_tensor_to_any(torch.jit.script(TensorToAnyImplA()))
+        as_tensor_to_any(torch.jit.script(TensorToAnyImplB()))
         as_any_to_any(torch.jit.script(AnyToAnyImpl()))
-
 
 
     def test_module_interface_inheritance(self):
