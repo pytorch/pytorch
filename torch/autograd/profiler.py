@@ -82,10 +82,10 @@ class EventList(list):
                     evt.id in cuda_corr_map):
                 for k_evt in cuda_corr_map[evt.id]:
                     evt.append_kernel(
-                        k_evt.name(),
-                        k_evt.device_index(),
-                        k_evt.start_us(),
-                        k_evt.start_us() + k_evt.duration_us())
+                        k_evt.name,
+                        k_evt.device_index,
+                        k_evt.time_range.start,
+                        k_evt.time_range.end)
 
     def _populate_cpu_children(self):
         """Populates child events into each underlying FunctionEvent object.
@@ -803,7 +803,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __init__(
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=False, sequence_nr=-1, node_id=-1, device_type=0):
+            is_remote=False, sequence_nr=-1, node_id=-1, device_type=0, device_index=0):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -823,6 +823,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_remote: bool = is_remote
         self.sequence_nr: int = sequence_nr
         self.device_type: int = device_type
+        self.device_index: int = device_index
 
     def append_kernel(self, name, device, start, end):
         assert self.device_type == 0  # CPU
@@ -1091,6 +1092,7 @@ def parse_kineto_results(result):
             is_async=is_async,
             sequence_nr=kineto_event.sequence_nr(),
             device_type=kineto_event.device_type(),
+            device_index=kineto_event.device_index(),
         )
         function_events.append(fe)
 
