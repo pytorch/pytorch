@@ -780,8 +780,8 @@ inline IValue toIValue(
       std::stringstream why_not;
       if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
-            "Object ",
-            py::str(obj),
+            "Object of type ",
+            classType->repr_str(),
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",
