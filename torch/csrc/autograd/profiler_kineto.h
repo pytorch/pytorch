@@ -97,7 +97,7 @@ struct TORCH_API KinetoEvent {
   }
 
   KinetoEvent& sequenceNr(int64_t sequence_nr) {
-    sequence_nr_ = sequence_nr_;
+    sequence_nr_ = sequence_nr;
     return *this;
   }
 
@@ -149,7 +149,7 @@ struct TORCH_API KinetoEvent {
   uint64_t start_thread_id_ = 0;
   uint64_t end_thread_id_ = 0;
   uint64_t fwd_thread_id_ = 0;
-  int64_t sequence_nr_ = 0;
+  int64_t sequence_nr_ = -1;
   uint8_t scope_ = 0;
 
   uint8_t activity_type_;

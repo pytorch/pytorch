@@ -3039,6 +3039,8 @@ class TestAutograd(TestCase):
             z = x + y
             s = z.sum()
             s.backward()
+        print(p.key_averages().table(
+            sort_by="self_cpu_time_total", row_limit=-1))
         # expecting aten::add, aten::sum to have the sequence numbers,
         # expecting the corresponding backward nodes to have the same numbers
         # as the forward ops

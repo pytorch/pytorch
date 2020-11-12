@@ -37,14 +37,57 @@ class EventList(list):
         use_cuda = kwargs.pop('use_cuda', True)
         profile_memory = kwargs.pop('profile_memory', False)
         super(EventList, self).__init__(*args, **kwargs)
-        self._cpu_children_populated = False
         self._use_cuda = use_cuda
         self._profile_memory = profile_memory
+        self._tree_built = False
+
+    def build_tree(self):
+        self._populate_cpu_children()
+        self._remove_dup_nodes()
+        self._set_kernels()
+        self._set_backward_stacktraces()
+        self._tree_built = True
 
     def __str__(self):
         return self.table()
 
-    def populate_cpu_children(self):
+    def _remove_dup_nodes(self):
+        while True:
+            to_delete = []
+            for idx in range(len(self)):
+                if (self[idx].cpu_parent is not None and
+                        self[idx].cpu_parent.name == self[idx].name and
+                        len(self[idx].cpu_parent.cpu_children) == 1):
+                    self[idx].cpu_parent.cpu_children += self[idx].cpu_children
+                    for ch in self[idx].cpu_children:
+                        ch.cpu_parent = self[idx].cpu_parent
+                    to_delete.append(idx)
+            if len(to_delete) == 0:
+                break
+            new_evts = [ev for ind, ev in enumerate(self) if ind not in to_delete]
+            self.clear()
+            self.extend(new_evts)
+
+    def _set_kernels(self):
+        # associate CUDA kernels with CPU events
+        cuda_corr_map = {}
+        for evt in self:
+            if evt.device_type == 1:  # CUDA
+                if evt.id not in cuda_corr_map:
+                    cuda_corr_map[evt.id] = []
+                cuda_corr_map[evt.id].append(evt)
+
+        for evt in self:
+            if (evt.device_type == 0 and not evt.is_async and
+                    evt.id in cuda_corr_map):
+                for k_evt in cuda_corr_map[evt.id]:
+                    evt.append_kernel(
+                        k_evt.name(),
+                        k_evt.device_index(),
+                        k_evt.start_us(),
+                        k_evt.start_us() + k_evt.duration_us())
+
+    def _populate_cpu_children(self):
         """Populates child events into each underlying FunctionEvent object.
         One event is a child of another if [s1, e1) is inside [s2, e2). Where
         s1 and e1 would be start and end of the child event's interval. And
@@ -56,8 +99,6 @@ class EventList(list):
         If for any reason two intervals intersect only partially, this function
         will not record a parent child relationship between then.
         """
-        if self.cpu_children_populated:
-            return
 
         # Some events can be async (i.e. start and end on different threads),
         # since it's generally undefined how to attribute children ranges to
@@ -112,11 +153,7 @@ class EventList(list):
 
                 current_events.append(event)
 
-        self._cpu_children_populated = True
-
-    def set_backward_stacktraces(self):
-        self.populate_cpu_children()
-
+    def _set_backward_stacktraces(self):
         def bw_parent(evt):
             if evt is None:
                 return None
@@ -127,7 +164,7 @@ class EventList(list):
 
         fwd_stacks = {}
         for evt in self:
-            if bw_parent(evt) is None:
+            if bw_parent(evt) is None and evt.stack is not None:
                 t = (evt.sequence_nr, evt.thread)
                 if t not in fwd_stacks:
                     fwd_stacks[t] = evt.stack
@@ -142,14 +179,9 @@ class EventList(list):
                 else:
                     evt.stack = []
 
-
     @property
     def self_cpu_time_total(self):
         return sum([event.self_cpu_time_total for event in self])
-
-    @property
-    def cpu_children_populated(self):
-        return self._cpu_children_populated
 
     def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
         """Prints an EventList as a nicely formatted table.
@@ -262,7 +294,7 @@ class EventList(list):
         Returns:
             An EventList containing FunctionEventAvg objects.
         """
-        self.populate_cpu_children()
+        assert self._tree_built
         stats = defaultdict(FunctionEventAvg)
 
         def get_key(event, group_by_input_shapes, group_by_stack_n):
@@ -442,8 +474,7 @@ class profile(object):
             parsed_results,
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory)
-        if self.with_stack:
-            self.function_events.set_backward_stacktraces()
+        self.function_events.build_tree()
         return False
 
     def __repr__(self):
@@ -454,13 +485,11 @@ class profile(object):
     def __str__(self):
         if self.function_events is None:
             return '<unfinished torch.autograd.profile>'
-        self.function_events.populate_cpu_children()
         return str(self.function_events)
 
     def _check_finish(self):
         if self.function_events is None:
             raise RuntimeError("can't export a trace that didn't finish running")
-        self.function_events.populate_cpu_children()
 
     def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
         self._check_finish()
@@ -774,7 +803,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __init__(
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=False, sequence_nr=-1, node_id=0, device_type=0):
+            is_remote=False, sequence_nr=-1, node_id=-1, device_type=0):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -1027,17 +1056,12 @@ def parse_kineto_results(result):
             mem_records.append(record)
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
 
-    cuda_corr_map = {}
-    for kineto_event in result.events():
-        if kineto_event.device_type() == 1: # CUDA
-            if kineto_event.correlation_id() not in cuda_corr_map:
-                cuda_corr_map[kineto_event.correlation_id()] = []
-            cuda_corr_map[kineto_event.correlation_id()].append(kineto_event)
-
     # Create and return FunctionEvent list
     string_table = StringTable()
     function_events = []
     for kineto_event in result.events():
+        if filter_name(kineto_event.name()):
+            continue
         rel_start_us = kineto_event.start_us() - start_record.start_us()
         rel_end_us = rel_start_us + kineto_event.duration_us()
         abs_end_us = kineto_event.start_us() + kineto_event.duration_us()
@@ -1068,16 +1092,8 @@ def parse_kineto_results(result):
             sequence_nr=kineto_event.sequence_nr(),
             device_type=kineto_event.device_type(),
         )
-        # associate CUDA kernels with a CPU event
-        if (kineto_event.device_type() == 0 and not is_async and
-                kineto_event.correlation_id() in cuda_corr_map):
-            for evt in cuda_corr_map[kineto_event.correlation_id()]:
-                fe.append_kernel(
-                    evt.name(),
-                    evt.device_index(),
-                    evt.start_us(),
-                    evt.start_us() + evt.duration_us())
         function_events.append(fe)
+
     function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return function_events
 
