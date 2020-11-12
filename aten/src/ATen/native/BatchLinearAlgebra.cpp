@@ -895,6 +895,12 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+// This function computes eigenvalues 'w' and eigenvectors 'v' of the input that is stored initially in 'v'
+// The computation is done in-place: 'v' stores the input and will be overriden, 'w' should be an allocated empty array
+// compute_v controls whether eigenvectors should be computed
+// uplo_str controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+// infos is used to store information for possible checks for error
+// This function doesn't do any error checks and it's assumed that every argument is valid
 template <typename scalar_t>
 static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, const std::string& uplo_str, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
@@ -960,6 +966,10 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, const std::string&
 #endif
 }
 
+// This function computes eigenvalues 'w' and eigenvectors 'v' of the tensor 'self'
+// compute_eigenvectors controls whether eigenvectors should be computed
+// uplo controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+// This function prepares correct input for 'apply_syevd' and checks for possible errors using 'infos'
 std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_eigenvectors, std::string uplo) {
   std::vector<int64_t> infos(batchCount(self), 0);
 
@@ -991,6 +1001,8 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
   return at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
 }
 
+// TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
   TORCH_CHECK(eigvecs.scalar_type() == self.scalar_type(),
     "eigvecs dtype ", eigvecs.scalar_type(), " does not match self dtype ", self.scalar_type());
@@ -1017,6 +1029,8 @@ Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
   return eigvals;
 }
 
+// TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
   ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
   TORCH_CHECK(result.scalar_type() == real_dtype,

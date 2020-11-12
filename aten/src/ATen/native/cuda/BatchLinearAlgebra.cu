@@ -1692,6 +1692,11 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+// This function computes eigenvalues 'w' and eigenvectors 'v' of the tensor 'self'
+// compute_eigenvectors controls whether eigenvectors should be computed
+// uplo controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+// '_symeig_helper_cuda' prepares correct input for 'apply_symeig' and checks for possible errors using 'infos'
+// See also CPU implementation in aten/src/ATen/native/BatchLinearAlgebra.cpp
 std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_eigenvectors, std::string uplo_str) {
   // NumPy allows lowercase input for UPLO argument
   // It is assumed that uplo_str is either "U" or "L"
