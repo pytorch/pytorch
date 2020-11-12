@@ -1307,7 +1307,7 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
 
 def control_op_remap(op, prefix, blob_remap):
     net_arg_names = []
-    if op.type == "If":
+    if op.type == "If" or op.type == "AsyncIf":
         net_arg_names = ['then_net', 'else_net']
     else:
         net_arg_names = ['loop_net', 'cond_net']
@@ -1327,6 +1327,7 @@ DEFAULT_REMAP_FUNCS = {
     'RecurrentNetworkGradient': recurrent_network_op_remap,
     'If': control_op_remap,
     'While': control_op_remap,
+    'AsyncIf': control_op_remap,
 }
 
 
@@ -1475,13 +1476,12 @@ class Net(object):
             self._external_input_map.update(list(self._net.external_input))
 
             # Set the next name index properly.
-            existing_names = set(
-                sum(
-                    [list(op.input) for op in self._net.op], []
-                ) + sum(
-                    existing_outputs, []
-                )
-            )
+            existing_names = set()
+            for op in self._net.op:
+                existing_names.update(list(op.input))
+            for output in existing_outputs:
+                existing_names.update(output)
+
             for outs in existing_outputs:
                 self._op_outputs.update(outs)
 
@@ -1524,7 +1524,8 @@ class Net(object):
         ops = net.Proto().op
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
-            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+            for op in ops:
+                op.device_option.CopyFrom(device_option)
             for op in ops:
                 if op.type == "RecurrentNetwork":
                     for arg in op.arg:
@@ -2024,10 +2025,14 @@ class Net(object):
     def AddExternalInput(self, *inputs):
         assert len(inputs) > 0
         refs = []
+        input_name_set = set()
         for input in inputs:
             input_name = str(input)
-            assert str(input) not in self._external_input_map, (
-                'Net already contains an input named %s' % input_name)
+            assert (
+                input_name not in self._external_input_map
+                and input_name not in input_name_set
+            ), ("Net already contains an input named %s" % input_name)
+            input_name_set.add(input_name)
         for input in inputs:
             input_name = str(input)
             self._net.external_input.extend([input_name])
@@ -2087,7 +2092,7 @@ class Net(object):
             self._input_record = input_record
 
         for blob in self._input_record.field_blobs():
-            if blob not in self.external_inputs:
+            if not self.is_external_input(blob):
                 self.AddExternalInput(blob)
         return self._input_record
 

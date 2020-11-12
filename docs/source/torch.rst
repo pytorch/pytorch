@@ -85,6 +85,7 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    column_stack
     dstack
     gather
     hstack
@@ -94,6 +95,7 @@ Indexing, Slicing, Joining, Mutating Ops
     narrow
     nonzero
     reshape
+    row_stack
     split
     squeeze
     stack
@@ -277,6 +279,7 @@ Pointwise Ops
     clamp
     clip
     conj
+    copysign
     cos
     cosh
     deg2rad
@@ -310,6 +313,7 @@ Pointwise Ops
     logit
     hypot
     i0
+    igamma
     mul
     multiply
     mvlgamma
@@ -456,6 +460,7 @@ Other Operations
     flip
     fliplr
     flipud
+    kron
     rot90
     gcd
     histc

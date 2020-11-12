@@ -1,10 +1,11 @@
 #include <torch/csrc/python_headers.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
-#include <c10d/TCPStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
+#include <c10d/TCPStore.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
 
@@ -24,9 +25,10 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 
+#include <c10d/comm.hpp>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -58,6 +60,8 @@ constexpr auto kDeprecationWarning =
     "{} API is being deprecated, please ping "
     "https://github.com/pytorch/pytorch/issues/46291 "
     "if you see this warning";
+template <typename T>
+using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -123,19 +127,25 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
-// This method is called from DDP's Python API. Its inputs are
-// a c10d reducer object, state, and callable comm_hook. State and
-// comm_hook inputs are Python objects and this function creates a
-// c10d PythonCommHook object using these inputs. It later calls
-// register_comm_hook function of the reducer input to register that
-// PythonCommHook object.
+// Called from DDP's Python API to create a c10d Python comm hook object.
+// The input state and callable comm_hook are Python objects. It later calls
+// register_comm_hook function of the reducer input to register the hook.
 void _register_comm_hook(
     ::c10d::Reducer& reducer,
     py::object state,
     py::object comm_hook) {
   reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
       std::move(state), std::move(comm_hook)));
-};
+}
+
+// Called from DDP's Python API to create a c10d C++ comm hook.
+// The input is an enum hook type. It later calls register_builtin_comm_hook
+// function of the reducer input to set the hook type.
+void _register_builtin_comm_hook(
+    ::c10d::Reducer& reducer,
+    ::c10d::BuiltinCommHookType comm_hook_type) {
+  reducer.register_builtin_comm_hook(comm_hook_type);
+}
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
@@ -144,17 +154,41 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
     throw python_error();
   }
 
-  auto module = py::handle(c10d_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
 
-  module.def(
-      "_register_comm_hook",
-      &_register_comm_hook,
-      py::arg("reducer"),
-      py::arg("state"),
-      py::arg("comm_hook"));
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+
+  auto module = py::handle(m).cast<py::module>();
+
+  module
+      .def(
+          "_register_comm_hook",
+          &_register_comm_hook,
+          py::arg("reducer"),
+          py::arg("state"),
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_register_builtin_comm_hook",
+          &_register_builtin_comm_hook,
+          py::arg("reducer"),
+          py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
-      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          py::init<
+              const std::vector<Tensor>&,
+              const std::vector<size_t>&,
+              const std::vector<size_t>&,
+              const std::vector<c10::IntArrayRef>&>(),
+          py::arg("tensors"),
+          py::arg("offsets"),
+          py::arg("lengths"),
+          py::arg("sizes_list"))
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
@@ -165,14 +199,31 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
             replicas only in the case of single process multiple device mode. In
             the single process single device mode, this list would consist of only
             a single tensor.
-           )");
+           )")
+      .def(
+          "get_offsets",
+          &::c10d::GradBucket::getOffsets,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_lengths",
+          &::c10d::GradBucket::getLengths,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_sizes_list",
+          &::c10d::GradBucket::getSizesVec,
+          py::call_guard<py::gil_scoped_release>());
+
+  py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
+An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
+      .value("ALLREDUCE", ::c10d::BuiltinCommHookType::ALLREDUCE)
+      .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS);
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
           py::init<
               std::vector<std::vector<torch::autograd::Variable>>,
               std::vector<std::vector<size_t>>,
-              std::shared_ptr<::c10d::ProcessGroup>,
+              c10::intrusive_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
               bool,
@@ -291,8 +342,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
 
   auto store =
-      py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
-          module, "Store",
+      py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
+          module,
+          "Store",
           R"(
 Base class for all store implementations, such as the 3 provided by PyTorch
 distributed: (:class:`~torch.distributed.TCPStore`, :class:`~torch.distributed.FileStore`,
@@ -494,7 +546,10 @@ Example::
     >>> store.wait(["bad_key"], timedelta(seconds=10))
 )");
 
-  shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store,
+  intrusive_ptr_class_<::c10d::FileStore>(
+      module,
+      "FileStore",
+      store,
       R"(
 A store implementation that uses a file to store the underlying key-value pairs.
 
@@ -514,7 +569,10 @@ Example::
       .def(py::init<const std::string&, int>());
 
 #ifndef _WIN32
-  shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store,
+  intrusive_ptr_class_<::c10d::HashStore>(
+      module,
+      "HashStore",
+      store,
       R"(
 A thread-safe store implementation based on an underlying hashmap. This store can be used
 within the same process (for example, by other threads), but cannot be used across processes.
@@ -528,7 +586,10 @@ Example::
       )")
       .def(py::init<>());
 
-  shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store,
+  intrusive_ptr_class_<::c10d::TCPStore>(
+      module,
+      "TCPStore",
+      store,
       R"(
 A TCP-based distributed key-value store implementation. The server store holds
 the data, while the client stores can connect to the server store over TCP and
@@ -565,7 +626,10 @@ Example::
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 #endif
 
-  shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store,
+  intrusive_ptr_class_<::c10d::PrefixStore>(
+      module,
+      "PrefixStore",
+      store,
       R"(
 A wrapper around any of the 3 key-value stores (:class:`~torch.distributed.TCPStore`,
 :class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`)
@@ -575,10 +639,10 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
+      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
-      shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+      intrusive_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
 
@@ -843,13 +907,13 @@ Arguments:
 #ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
-      [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
-          -> std::shared_ptr<::c10d::ProcessGroup> {
+      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
+          -> c10::intrusive_ptr<::c10d::ProcessGroup> {
         if (processGroups.size() == 0) {
           throw std::invalid_argument("Specify at least 1 process group");
         }
         const auto& first = processGroups.front();
-        return std::make_shared<::c10d::ProcessGroupRoundRobin>(
+        return c10::make_intrusive<::c10d::ProcessGroupRoundRobin>(
             first->getRank(), first->getSize(), std::move(processGroups));
       },
       py::arg("process_groups"),
@@ -857,7 +921,7 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
+  auto processGroupGloo = intrusive_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
@@ -886,14 +950,15 @@ Arguments:
       py::arg("interface") = "");
 
   processGroupGloo
-      .def(py::init<
-           const std::shared_ptr<::c10d::Store>&,
-           int,
-           int,
-           ::c10d::ProcessGroupGloo::Options>(),
-           py::call_guard<py::gil_scoped_release>())
       .def(
-          py::init([](const std::shared_ptr<::c10d::Store>& store,
+          py::init<
+              const c10::intrusive_ptr<::c10d::Store>&,
+              int,
+              int,
+              ::c10d::ProcessGroupGloo::Options>(),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
                       std::chrono::milliseconds timeout) {
@@ -916,7 +981,7 @@ Arguments:
 
             options.timeout = timeout;
             options.threads = options.devices.size() * 2;
-            return std::make_shared<::c10d::ProcessGroupGloo>(
+            return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
           }),
           py::arg("store"),
@@ -927,60 +992,64 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_NCCL
-  auto processGroupNCCL = shared_ptr_class_<::c10d::ProcessGroupNCCL>(
-      module, "ProcessGroupNCCL", processGroup)
-      .def(py::init<
-           const std::shared_ptr<::c10d::Store>&,
-           int,
-           int,
-           ::c10d::ProcessGroupNCCL::Options>(),
-           py::call_guard<py::gil_scoped_release>())
-      .def(
-          py::init([](const std::shared_ptr<::c10d::Store>& store,
-                      int rank,
-                      int size,
-                      const std::chrono::milliseconds& timeout){
-            ::c10d::ProcessGroupNCCL::Options options;
-            options.isHighPriorityStream = false;
-            options.opTimeout = timeout;
-            return std::make_shared<::c10d::ProcessGroupNCCL>(
-                store, rank, size, options);
-          }),
-          py::arg("store"),
-          py::arg("rank"),
-          py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(
-              ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
-          py::call_guard<py::gil_scoped_release>());
+  auto processGroupNCCL =
+      intrusive_ptr_class_<::c10d::ProcessGroupNCCL>(
+          module, "ProcessGroupNCCL", processGroup)
+          .def(
+              py::init<
+                  const c10::intrusive_ptr<::c10d::Store>&,
+                  int,
+                  int,
+                  c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          const std::chrono::milliseconds& timeout) {
+                auto options = ::c10d::ProcessGroupNCCL::Options::create();
+                options->isHighPriorityStream = false;
+                options->opTimeout = timeout;
+                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
+                    store, rank, size, options);
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("timeout") = std::chrono::milliseconds(
+                  ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
+              py::call_guard<py::gil_scoped_release>());
 
-  py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
+  intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
+      processGroupNCCL, "Options")
       .def(py::init<>())
-      .def_readwrite("is_high_priority", &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
-      .def_readwrite("op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
-  processGroupNCCL.def_static("_group_start", []() {
-    ::c10d::ProcessGroupNCCL::groupStart();
-  });
-  processGroupNCCL.def_static("_group_end", []() {
-    ::c10d::ProcessGroupNCCL::groupEnd();
-  });
+      .def_readwrite(
+          "is_high_priority",
+          &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
+      .def_readwrite(
+          "op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
+  processGroupNCCL.def_static(
+      "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
+  processGroupNCCL.def_static(
+      "_group_end", []() { ::c10d::ProcessGroupNCCL::groupEnd(); });
 #endif
 
 #ifdef USE_C10D_MPI
-  auto processGroupMPI = shared_ptr_class_<::c10d::ProcessGroupMPI>(
+  auto processGroupMPI = intrusive_ptr_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup);
 
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
   // part of a sub group that is to be created.
   processGroupMPI.def_static(
-    "create",
-    [](std::vector<int> ranks) {
-      return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-    },
-    py::call_guard<py::gil_scoped_release>());
+      "create",
+      [](std::vector<int> ranks) {
+        return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+      },
+      py::call_guard<py::gil_scoped_release>());
 #endif
 
-  shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+  intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",
@@ -1021,8 +1090,7 @@ Arguments:
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_future",
+      .def("get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
@@ -1043,12 +1111,12 @@ Arguments:
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
-                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend and single-process single-device mode.
                 The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                ``DistributedDataParallel.register_comm_hook``, but it is subject to some subtle
                 differences compared to ``torch.futures.Future`` due to compromises made for performance
                 reasons.
 
@@ -1080,7 +1148,7 @@ Arguments:
       // Define a lambda such that the pybind11 prototype can take a std::vector
       // for the tensor list argument, but still pass it to the underlying
       // function as a c10::ArrayRef.
-      [](std::shared_ptr<::c10d::ProcessGroup> process_group,
+      [](c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
          std::vector<at::Tensor> tensors, // NOLINT
          size_t buffer_size,
          int rank) {
@@ -1101,7 +1169,7 @@ Arguments:
       // Python side of the world. Calling Python functions on a Python object
       // completely bypasses pybind11. We need to test that the overloaded
       // functions call into Python and behave like we expect.
-      [](std::shared_ptr<::c10d::Store> store) {
+      [](c10::intrusive_ptr<::c10d::Store> store) {
         auto add = [&store](const std::string& key, int64_t value) {
           store->add(key, value);
         };
@@ -1157,7 +1225,7 @@ Arguments:
 
 // c10d methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-    {"_c10d_init", (PyCFunction)c10d_init, METH_NOARGS, nullptr},
+    {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {
