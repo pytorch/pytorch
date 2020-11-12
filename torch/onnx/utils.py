@@ -956,10 +956,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
-            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
+            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack" or op_name == "Uninitialized":
                 # None is not an ONNX operator; keep it as None
                 # Let the exporter handle and finally eliminate these ops
                 # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
+                # Uninitialized will be erased during shape/type inference
                 return None
             elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
                 return None
