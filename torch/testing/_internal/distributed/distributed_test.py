@@ -1378,6 +1378,7 @@ class DistributedTest:
             "Only Gloo and NCCL backends will have CUDA allReduce tested",
         )
         @skip_if_no_gpu
+        @skip_if_rocm
         def test_all_reduce_sum_cuda_async(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -3736,7 +3737,8 @@ class DistributedTest:
                         net.module.weight.grad.item(), expected_grad
                     )
 
-            self.assertFalse(net.ddp_join_enabled)
+            join_config = net.ddp_uneven_inputs_config
+            self.assertFalse(join_config.ddp_join_enabled)
             self.validate_net_equivalence(net)
 
         @require_backend({"gloo", "nccl"})
