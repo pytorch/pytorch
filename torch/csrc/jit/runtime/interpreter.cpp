@@ -1412,10 +1412,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               auto t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
-              if (t.defined() &&
-                  (!frames.back().symbols2dims.bindSymbolicShapes(
-                       t.sizes(), expected_type->symbolic_sizes()) ||
-                   !expected_type->matchTensor(t))) {
+              if (t.defined() && !expected_type->matchTensor(t)) {
                 push(stack, false);
                 break;
               }
