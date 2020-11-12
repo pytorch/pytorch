@@ -8,17 +8,25 @@
 namespace at { namespace native {
 
 void and_kernel_cuda(TensorIterator& iter) {
-  gpu_reduce_kernel<uint8_t, uint8_t>(
-    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
-      return a && b;
-    }), true);
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "and_kernel", [&]() {
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter,
+        func_wrapper<scalar_t>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(static_cast<bool>(a) && static_cast<bool>(b));
+        }),
+        static_cast<scalar_t>(true));
+  });
 }
 
 void or_kernel_cuda(TensorIterator& iter) {
-  gpu_reduce_kernel<uint8_t, uint8_t>(
-    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
-      return a || b;
-    }), false);
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "or_kernel", [&]() {
+    gpu_reduce_kernel<scalar_t, scalar_t>(
+        iter,
+        func_wrapper<scalar_t>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(static_cast<bool>(a) || static_cast<bool>(b));
+        }),
+        static_cast<scalar_t>(false));
+  });
 }
 
 REGISTER_DISPATCH(and_stub, &and_kernel_cuda);

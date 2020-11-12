@@ -957,6 +957,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 # None is not an ONNX operator; keep it as None
                 # Let the exporter handle and finally eliminate these ops
                 # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
+                # Uninitialized will be erased during shape/type inference
                 return None
             elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
                 return None
