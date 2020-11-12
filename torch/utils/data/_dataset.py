@@ -1,12 +1,10 @@
 # Note: The entire file is in testing phase. Please do not import!
-import warnings
-
 from .dataset import Dataset as MapDataset
 from .dataset import IterableDataset as IterDataset
 
 from .common import get_file_pathnames_from_root, get_file_binaries_from_pathnames, extract_files_from_pathname_binaries
 
-from typing import Union, List, Iterable, Tuple
+from typing import List, Iterable, Tuple
 
 
 class ListDirFilesMapDataset(MapDataset):
