@@ -1258,7 +1258,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
     @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
     def test_tensorinv(self, device, dtype):
 
@@ -1286,23 +1285,9 @@ class TestLinalg(TestCase):
         run_test((1, 2, 3, 2, 3), ind=3)
         run_test((3, 2, 1, 2, 12), ind=4)
 
-    # TODO: once "solve_inverse" supports complex dtypes, they shall be added to above test
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    def test_tensorinv_xfailed(self, device, dtype):
-        a_shape = (2, 3, 6)
-        a = torch.randn(a_shape, dtype=dtype, device=device)
-        a_numpy = a.cpu().numpy()
-        result = torch.linalg.tensorinv(a, ind=ind)
-        expected = torch.linalg.tensorinv(a_numpy, ind=ind)
-        self.assertEqual(result, expected)
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
     @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
     def test_tensorinv_non_contiguous(self, device, dtype):
 
@@ -1350,7 +1335,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_tensorinv_empty(self, device, dtype):
         for ind in range(1, 4):
             # Check for empty inputs. NumPy does not work for these cases.
@@ -1361,7 +1345,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_tensorinv_errors_and_warnings(self, device, dtype):
 
         def check_shape(a_shape, ind):
@@ -1407,7 +1390,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_tensorinv_singular_input(self, device, dtype):
 
         def check_singular_input(a_shape, ind):

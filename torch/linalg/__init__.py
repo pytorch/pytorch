@@ -147,7 +147,7 @@ Computes a tensor ``input_inv`` such that ``tensordot(input_inv, input, ind) == 
 where ``I_n`` is the n-dimensional identity tensor and ``n`` is equal to ``input.ndim``.
 The resulting tensor ``input_inv`` has shape equal to ``input.shape[ind:] + input.shape[:ind]``.
 
-Supports real-valued and, only on the CPU, complex-valued inputs.
+Supports real-valued and complex-valued inputs.
 
 .. note:: If :attr:`input` is not invertible or does not satisfy the requirement
           ``prod(input.shape[ind:]) == prod(input.shape[:ind])``,
