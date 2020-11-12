@@ -16,7 +16,7 @@ def _is_magic(x: str) -> bool:
 def snake_case(s: str) -> str:
     return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
 
-def _qualified_name(func: Callable[..., Any]) -> str:
+def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
     if getattr(builtins, func.__name__, None) is func:
         return func.__name__
@@ -330,14 +330,22 @@ class Graph:
 
         def type_repr(o : Any):
             typename = _type_repr(o)
-            register_modules_used(typename)
+            if all(x.isidentifier() for x in typename.split('.')):
+                register_modules_used(typename)
+            else:
+                # this is a constructor type, e.g. typing.List[torch.Tensor]
+                modules_used.add(o.__module__)
+                for sub_type in o.__args__:
+                    # make sure we have torch.Tensor
+                    type_repr(sub_type)
             return typename
 
         for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
-                free_vars.append(f'{node.target}{maybe_type_annotation}')
+                maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
+                free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
                     body.append(f'{node.name} = {raw_name}\n')
@@ -355,7 +363,7 @@ class Graph:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
                     continue
-                qualified_name = _qualified_name(node.target)
+                qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
                 if qualified_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
