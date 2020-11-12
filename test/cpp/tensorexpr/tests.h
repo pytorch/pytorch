@@ -312,6 +312,10 @@ namespace jit {
   _(BoundsInferenceMultipleTopLoopStore)            \
   _(BoundsInferenceCacheReads)                      \
   _(BoundsInferenceFlattened)                       \
+  _(GetPotentialHazards)                            \
+  _(GetPotentialHazardsLoopNoHazard)                \
+  _(GetPotentialHazardsLoopCall)                    \
+  _(GetPotentialHazardsLoopSplit)                   \
   _(BoundOverlap)                                   \
   _(BoundOverlapSymbolic)                           \
   _(BoundOverlapMultiDim)                           \
