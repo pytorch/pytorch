@@ -1025,7 +1025,10 @@ def __isnot_(g, self, other):
         return g.op("Constant", value_t=torch.BoolTensor([0]))
     return ne(g, self, other)
 
-
+# exists to refine the type of the Value
+# if x is an optional Tensor, unchecked_cast will cast
+# x to Tensor, so the rest of the graph knows that x is a Tensor
+# this doesn't do anything in runtime and is a noop in ONNX
 def prim_unchecked_cast(g, self):
     return self
 
