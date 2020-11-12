@@ -966,6 +966,18 @@ class TestTensorExprFuser(BaseTestClass):
         assert np.isnan(warmup_and_run_forward(tmax, y, x).item())
         self.assertLastGraphAllFused()
 
+    def test_double_intrinsics(self):
+        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
+        def do_pow(x):
+            return torch.pow(x, 7)
+
+        for device in devices:
+            x = torch.rand(10, dtype=torch.double, device=device)
+            traced = torch.jit.trace(do_pow, (x))
+            x = warmup_and_run_forward(traced, x)
+            self.assertLastGraphAllFused()
+
     def test_remainder(self):
         def run_remainder(x, y):
             c = torch.remainder(torch.add(x, y), x)
