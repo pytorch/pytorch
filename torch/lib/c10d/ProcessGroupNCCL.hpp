@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -14,6 +15,10 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
+
+#include <torch/custom_class.h>
 
 namespace c10d {
 
@@ -63,10 +68,10 @@ constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 class ProcessGroupNCCL : public ProcessGroup {
  public:
   class WorkNCCL : public ProcessGroup::Work,
-                   public std::enable_shared_from_this<WorkNCCL> {
+    public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -161,7 +166,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Reference to the store so that we can write aborted communicators
     // to the store.
-    std::shared_ptr<Store> store_;
+    c10::intrusive_ptr<Store> store_;
 
     // Store a reference to NCCL collective's outputs to be used by getFuture.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
@@ -173,8 +178,15 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options {
+  struct Options : torch::CustomClassHolder {
     explicit Options();
+
+    // return intrusive_ptr of the object
+    static c10::intrusive_ptr<Options> create(
+        std::chrono::milliseconds timeout = kNoTimeout,
+        bool isHighStream = false) {
+      return c10::make_intrusive<Options>();
+    }
 
     std::chrono::milliseconds opTimeout;
     bool isHighPriorityStream;
@@ -302,8 +314,29 @@ class ProcessGroupNCCL : public ProcessGroup {
 
       // Do not free the underlying data storage of value_ before its
       // usage on futureNCCLCallbackStream_ finish.
-      TORCH_INTERNAL_ASSERT(record_stream_cb_);
-      record_stream_cb_(value_, futureNCCLCallbackStream_->unwrap());
+      if (record_stream_cb_ != nullptr) {
+        // If a Python communication hook is used, record_stream_cb_ will be
+        // set in torch/csrc/jit/python/pybind_utils.h, which allows Python
+        // dependency to be imported.
+        record_stream_cb_(value_, futureNCCLCallbackStream_->unwrap());
+      } else {
+        // If a C++ communication hook is used, create and set a record stream
+        // callback.
+        TORCH_INTERNAL_ASSERT(
+            value_.isTensorList() || value_.isTensor(),
+            "the future value must be either a tensor list or a tensor.");
+        at::Tensor tensor;
+        if (value_.isTensorList()) {
+          const auto tensors = value_.toTensorVector();
+          TORCH_INTERNAL_ASSERT(
+              tensors.size() == 1, "expected exactly 1 tensor");
+          tensor = tensors[0];
+        } else {
+          tensor = value_.toTensor();
+        }
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensor.storage().data_ptr(), *futureNCCLCallbackStream_);
+      }
 
       // Use the dedicated callback stream to run callback.
       // Cannot move capture std::function in lambda, because it cannot deduce
@@ -370,82 +403,82 @@ class ProcessGroupNCCL : public ProcessGroup {
   // communicator. These NCCL communicators are cached and reused if possible.
   //
   ProcessGroupNCCL(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      Options options = Options());
+      const c10::intrusive_ptr<Options>& options = Options::create());
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
   C10_DEPRECATED ProcessGroupNCCL(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
       const std::string& groupName,
-      Options options = Options())
+      const c10::intrusive_ptr<Options>& options = Options::create())
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
 
-  std::shared_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier(
+  c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> alltoall(
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
@@ -455,17 +488,17 @@ class ProcessGroupNCCL : public ProcessGroup {
   static void groupEnd();
 
   // Unsupported Ops
-  std::shared_ptr<ProcessGroup::Work> gather(
+  c10::intrusive_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
@@ -492,10 +525,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   virtual std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
-  virtual std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
+  virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
       int rank,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle=nullptr);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -505,31 +539,33 @@ class ProcessGroupNCCL : public ProcessGroup {
   //                    ncclComm_t, at::cuda::CUDAStream&);
   //    void {pre,post}(std::vector<at::cuda::CUDAStream&>);
   template <typename Fn>
-  std::shared_ptr<ProcessGroup::Work> collective(
+  c10::intrusive_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
   template <typename Fn, typename PreProcess, typename PostProcess>
-  std::shared_ptr<ProcessGroup::Work> collective(
+  c10::intrusive_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
       PreProcess pre,
       PostProcess post,
-      OpType opType);
+      OpType opType,
+      const char* profilingTitle = nullptr);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
   // communicaiton primitives.
   template <typename Fn>
-  std::shared_ptr<ProcessGroup::Work> pointToPoint(
+  c10::intrusive_ptr<ProcessGroup::Work> pointToPoint(
       std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
       OpType opType);
   template <typename Fn, typename PreProcess, typename PostProcess>
-  std::shared_ptr<ProcessGroup::Work> pointToPoint(
+  c10::intrusive_ptr<ProcessGroup::Work> pointToPoint(
       std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
@@ -558,7 +594,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // This function iterates through the list of WorkNCCL objects in the
   // workList_ corresponding to incomplete collectives and then aborts NCCL
   // communicators associated with timed out collectives.
-  void abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds);
+  void abortTimedOutCollectives(
+      std::unordered_set<std::string>& abortedCommIds);
 
   void workCleanupLoop();
 
@@ -567,7 +604,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   static const int64_t kWorkCleanupThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
-  std::shared_ptr<Store> store_;
+  c10::intrusive_ptr<Store> store_;
 
   // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is
@@ -637,7 +674,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
 
   // Add Work Pointer to workVector
-  void workEnqueue(std::shared_ptr<ProcessGroupNCCL::WorkNCCL>);
+  void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
 
   // The CUDA steams used by NCCL kernels
   std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
