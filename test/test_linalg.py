@@ -1052,6 +1052,7 @@ class TestLinalg(TestCase):
         """
         t = torch.randn((10, 11), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
+
         def is_empty(x):
             return x.numel() == 0 and x.dtype == t.dtype and x.device == t.device
 
