@@ -49,11 +49,11 @@ const std::string leaky_relu_model_const = R"JIT(
 
 const std::string leaky_relu_model = R"JIT(
   def forward(self, input, neg_slope):
-      x = torch.leaky_relu(input, neg_slope[0])
-      x = torch.leaky_relu(x, neg_slope[0])
-      x = torch.leaky_relu(x, neg_slope[0])
-      x = torch.leaky_relu(x, neg_slope[0])
-      return torch.leaky_relu(x, neg_slope[0])
+      x = torch.leaky_relu(input, neg_slope)
+      x = torch.leaky_relu(x, neg_slope)
+      x = torch.leaky_relu(x, neg_slope)
+      x = torch.leaky_relu(x, neg_slope)
+      return torch.leaky_relu(x, neg_slope)
 )JIT";
 
 

@@ -134,9 +134,9 @@ static void BM_leaky_relu(benchmark::State& state) {
   torch::jit::StaticRuntime runtime(g);
 
   const int batch_size = state.range(0);
-  auto neg_slope = torch::randn({1});
+  auto neg_slope = torch::randn(1);
   auto data = torch::randn({batch_size, num_features});
-  std::vector<at::Tensor> inputs({data, neg_slope});
+  std::vector<at::Tensor> inputs({data, neg_slope[0]});
 
   runtime.run(inputs);
   for (auto _ : state) {
