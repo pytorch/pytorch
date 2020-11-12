@@ -124,6 +124,9 @@ namespace jit {
   _(ReductionReorderCacheConsumerAccess)            \
   _(ReductionRfactorCacheTempOuter)                 \
   _(ReductionRfactorCacheTempInner)                 \
+  _(ReductionVectorize)                             \
+  _(ReductionVectorizeInner)                        \
+  _(ReductionVectorizeRfactor)                      \
   _(TypeTest01)                                     \
   _(TypePropagation)                                \
   _(Cond01)                                         \
@@ -542,9 +545,9 @@ namespace jit {
   _(LLVMCondNestedTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
-  _(LLVMRFactorReduction)
-
-// _(LLVMRFactorVectorizedReduction)
+  _(LLVMRFactorReduction)                  \
+  _(LLVMRFactorVectorizedReduction)        \
+  _(LLVMVectorizedGEMM)
 
 #define TH_FORALL_TENSOREXPR_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)                   \

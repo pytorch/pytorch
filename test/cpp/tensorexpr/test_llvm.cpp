@@ -1390,8 +1390,7 @@ void testLLVMRFactorReduction() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-// TODO: disabled since this doesn't work.
-void DISABLED_testLLVMRFactorVectorizedReduction() {
+void testLLVMRFactorVectorizedReduction() {
   KernelScope kernel_scope;
 
   int M = 128;
@@ -1400,34 +1399,31 @@ void DISABLED_testLLVMRFactorVectorizedReduction() {
 
   Placeholder a("a", kFloat, {1, M, N});
 
-  // TODO: why doesn't implicit vector<DimArg> work?
-  std::vector<DimArg> axis = {DimArg(1)};
-  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor* b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
   LoopNest loopnest({b});
   std::vector<For*> loops = loopnest.getLoopStmtsFor(b);
   For* loop_k = loops.at(0);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  loopnest.reorderAxis(loop_n, loop_m);
-  loops = loopnest.getLoopStmtsFor(b);
-  loop_k = loops.at(0);
-  loop_n = loops.at(1);
-  loop_m = loops.at(2);
-  // Case-III reductions
   loopnest.rfactor(b->body(), loop_n->var());
+
+  loops = NodeFinder<For>::find(loopnest.root_stmt());
+  loop_k = loops.at(0);
+  // loop 1 is the initializer of tmp_buf
+  loop_m = loops.at(2);
+  loop_n = loops.at(3);
+  loopnest.reorderAxis(loop_n, loop_m);
+
+  // Case-III reductions
+  loops = NodeFinder<For>::find(loopnest.root_stmt());
+  // Vectorize initializer of tmp_buf
+  loopnest.vectorize(loops[1]);
+  // Vectorize producer of tmp_buf
+  loopnest.vectorize(loops[2]);
+
   loopnest.prepareForCodegen();
-  Stmt* s = loopnest.root_stmt();
-  s = IRSimplifier::simplify(s);
 
-  Block* root_block = dynamic_cast<Block*>(s);
-  auto I = root_block->begin();
-  ++I;
-
-  For* outer_loop = dynamic_cast<For*>(*I);
-  loopnest.vectorize(outer_loop);
-
-  s = IRSimplifier::simplify(s);
+  Stmt* s = IRSimplifier::simplify(loopnest.root_stmt());
   LLVMCodeGen cg(s, {a, b});
 
   PaddedBuffer<float> a_v(1, M, N, "a_v");
@@ -1446,6 +1442,94 @@ void DISABLED_testLLVMRFactorVectorizedReduction() {
   cg.call({a_v, b_v});
 
   ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
+void testLLVMVectorizedGEMM() {
+  KernelScope ks;
+
+  int M = 32;
+  int N = 32;
+  int K = 48;
+
+  Placeholder AP(BufHandle("A", {M, K}, kFloat));
+  Placeholder BP(BufHandle("B", {K, N}, kFloat));
+  Tensor* CT = Reduce(
+      "gemm",
+      {{M, "M"}, {N, "N"}},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {{K, "K"}});
+  LoopNest loop({CT});
+
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* m = loops[0];
+    For* mo;
+    For* mi;
+    loop.splitWithMask(m, 16, &mo, &mi);
+  }
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* n = loops[2];
+    For* no;
+    For* ni;
+    loop.splitWithMask(n, 16, &no, &ni);
+  }
+  // mo, mi, no, ni, k ->
+  // mo, no, mi, ni, k
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* mi = loops[1];
+    For* no = loops[2];
+    loop.reorderAxis(mi, no);
+  }
+  // mo, no, mi, ni, k ->
+  // mo, no, mi, k, ni
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* ni = loops[3];
+    For* k = loops[4];
+    loop.reorderAxis(ni, k);
+  }
+  // mo, no, mi, k, ni ->
+  // mo, no, k, mi, ni
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* mi = loops[2];
+    For* k = loops[3];
+    loop.reorderAxis(mi, k);
+  }
+  {
+    auto loops = NodeFinder<For>::find(loop.root_stmt());
+    loop.vectorize(loops[3]);
+    loop.vectorize(loops.back());
+  }
+
+  loop.prepareForCodegen();
+
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+  LLVMCodeGen cg(s, {AP, BP, CT});
+
+  PaddedBuffer<float> a_v(M, K, "a_v");
+  PaddedBuffer<float> b_v(K, N, "b_v");
+  PaddedBuffer<float> c_v(M, N, "c_v");
+  PaddedBuffer<float> c_ref(M, N, "c_ref");
+
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      c_ref(m, n) = 0.f;
+      for (int k = 0; k < K; k++) {
+        c_ref(m, n) += a_v(m, k) * b_v(k, n);
+      }
+    }
+  }
+
+  cg.call({a_v, b_v, c_v});
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
 } // namespace jit
