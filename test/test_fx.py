@@ -631,6 +631,18 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
+    def test_script_tensor_constant(self):
+        # TorchScript seems to ignore attributes that start with `__`.
+        # We used to call anonymous Tensor values `__tensor_constant*`, but
+        # they were getting ignored by script. Now they're called
+        # `_tensor_constant*`
+        class IHaveATensorConstant(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand(3, 4)
+
+        traced = torch.fx.symbolic_trace(IHaveATensorConstant())
+        torch.jit.script(traced)
+
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
             def forward(self, a):
