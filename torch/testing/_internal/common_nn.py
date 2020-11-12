@@ -25,11 +25,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-# tarfile module tries to obtain a file object name in python 3.3
-if sys.version_info[:2] == (3, 3):
-    TemporaryFile = tempfile.NamedTemporaryFile
-else:
-    TemporaryFile = tempfile.TemporaryFile
+TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
 
 

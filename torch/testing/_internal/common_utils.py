@@ -1346,16 +1346,6 @@ class TestCase(expecttest.TestCase):
             env=env)
         return pipes.communicate()[1].decode('ascii')
 
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
-
 
 def download_file(url, binary=True):
     from urllib.parse import urlsplit
