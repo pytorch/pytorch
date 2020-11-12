@@ -68,7 +68,7 @@ def _assert(condition : bool, message : str):
 )SCRIPT";
 
 // an additional overload for Tensor variant of _assert
-auto aten_ops_additional =
+const auto aten_ops_additional =
     R"SCRIPT(
 def _assert(condition : Tensor, message : str):
   assert bool(condition), message
