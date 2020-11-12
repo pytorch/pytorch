@@ -232,41 +232,55 @@ static void norm_kernel_tensor_iterator_impl(
 }
 
 static void and_kernel_impl(TensorIterator& iter) {
-  binary_kernel_reduce_vec(
-    iter,
-    [=](uint8_t a, uint8_t b) -> uint8_t { return a && b; },
-    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-      // Adding the implementation here instead of in vec256_base to avoid
-      // return value inconsistency. Other comparison operators in vec256_base
-      // return -1/0 (all bit 1 / all bit 0) as true/false to follow the AVX2
-      // convention. This would be convenient when combined with other
-      // vectorized operations. For example, one can use the logical operation
-      // results as a mask for a bit operation to retrieve/reset multiple
-      // elements in a vector.
-      //
-      // In this method, users would expect, e.g., all(), to return 1/0 as
-      // true/false.
-      Vec256<uint8_t> c = Vec256<uint8_t>();
-      for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
-        c[i] = a[i] && b[i];
-      }
-      return c;
-    },
-    /*ident=*/true);
+  if (c10::isIntegralType(iter.dtype(), /*includeBool=*/true)) {
+    binary_kernel_reduce_vec(
+        iter,
+        [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
+        [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
+          // Adding the implementation here instead of in vec256_base to avoid
+          // return value inconsistency. Other comparison operators in
+          // vec256_base return -1/0 (all bit 1 / all bit 0) as true/false to
+          // follow the AVX2 convention. This would be convenient when combined
+          // with other vectorized operations. For example, one can use the
+          // logical operation results as a mask for a bit operation to
+          // retrieve/reset multiple elements in a vector.
+          //
+          // In this method, users would expect, e.g., all(), to return 1/0 as
+          // true/false.
+          Vec256<uint8_t> c = Vec256<uint8_t>();
+          for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
+            c[i] = (a[i] && b[i]) ? 1 : 0;
+          }
+          return c;
+        },
+        /*ident=*/true);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "and_kernel", [&]() {
+      binary_kernel_reduce(
+          iter, AndOps<scalar_t>(), static_cast<scalar_t>(true));
+    });
+  }
 }
 
 static void or_kernel_impl(TensorIterator& iter) {
-  binary_kernel_reduce_vec(
-    iter,
-    [=](uint8_t a, uint8_t b) -> uint8_t { return a || b; },
-    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
-      Vec256<uint8_t> c = Vec256<uint8_t>();
-      for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
-        c[i] = a[i] || b[i];
-      }
-      return c;
-    },
-    /*ident=*/false);
+  if (c10::isIntegralType(iter.dtype(), /*includeBool=*/true)) {
+    binary_kernel_reduce_vec(
+        iter,
+        [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
+        [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
+          Vec256<uint8_t> c = Vec256<uint8_t>();
+          for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
+            c[i] = (a[i] || b[i]) ? 1 : 0;
+          }
+          return c;
+        },
+        /*ident=*/false);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "or_kernel", [&]() {
+      binary_kernel_reduce(
+          iter, OrOps<scalar_t>(), static_cast<scalar_t>(false));
+    });
+  }
 }
 
 template<typename scalar_t>

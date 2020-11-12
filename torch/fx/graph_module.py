@@ -172,11 +172,19 @@ class GraphModule(torch.nn.Module):
 
     @property
     def graph(self):
+        """
+        Return the `Graph` underlying this `GraphModule`
+        """
         return self._graph
 
     @graph.setter
-    def graph(self, val) -> None:
-        self._graph = val
+    def graph(self, g) -> None:
+        """
+        Set the underlying `Graph` for this `GraphModule`. This will internally
+        recompile the `GraphModule` so that the generated `forward()` function
+        corresponds to `g`
+        """
+        self._graph = g
         self.recompile()
 
     def recompile(self) -> None:
@@ -204,6 +212,13 @@ class GraphModule(torch.nn.Module):
         cls.__call__ = wrapped_call
 
     def __reduce__(self):
+        """
+        Serialization of GraphModule. We serialize only the generated code, not
+        the underlying `Graph`. This is because `Graph` does not have on-disk
+        backward-compatibility guarantees, whereas Python source code does.
+        On the deserialization side, we symbolically trace through the generated
+        code to regenerate the underlying `Graph`
+        """
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
         return (deserialize_graphmodule, (dict_without_graph,))
