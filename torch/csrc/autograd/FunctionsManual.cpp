@@ -422,15 +422,15 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
 }
 
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return std::get<0>(at::solve(grad, A.transpose(-2, -1)));
+  return std::get<0>(at::solve(grad, A.conj().transpose(-2, -1)));
 }
 
 Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
   Tensor grad_self = solve_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
-    return -at::mm(grad_self, solution.transpose(-2, -1));
+    return -at::mm(grad_self, solution.conj().transpose(-2, -1));
   }
-  return -at::matmul(grad_self, solution.transpose(-2, -1));
+  return -at::matmul(grad_self, solution.conj().transpose(-2, -1));
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {

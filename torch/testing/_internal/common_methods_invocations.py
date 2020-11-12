@@ -1360,15 +1360,23 @@ def method_tests():
         ('lu', (3, S, S), (True, True), 'square_batch_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('lu', (3, 3, S, S), (True, False), 'square_many_batches_no_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('lu', (3, 3, S, S), (True, True), 'square_many_batches_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (S, S), (random_fullrank_matrix_distinct_singular_value(
-            S, silent=True),), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
+        ('solve', (S, S), (lambda dtype, device: random_fullrank_matrix_distinct_singular_value(
+            S, silent=True, dtype=dtype, device=device),), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('solve', (S, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, S, silent=True, dtype=dtype, device=device),),
          'batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3, silent=True),),
+        ('solve', (2, 3, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, 2, 3, silent=True, dtype=dtype, device=device),),
          'batched_dims', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1, silent=True),),
+        ('solve', (2, 2, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, 1, silent=True, dtype=dtype, device=device),),
          'batched_broadcast_A', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2, silent=True),),
+        ('solve', (1, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, 2, 2, silent=True, dtype=dtype, device=device),),
          'batched_broadcast_b', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
