@@ -16,7 +16,7 @@ else()
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_ROOT_DIR}/include)
+  include_directories(${TBB_ROOT_DIR}/include)
 endif()
 
 if(USE_GLOO)
@@ -106,8 +106,6 @@ target_include_directories(c10d PUBLIC
 
 # For <c10d/...>
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-# For torch/csrc/utils/hash.h
-target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 
 if(USE_C10D_NCCL)
   target_compile_definitions(c10d INTERFACE USE_C10D_NCCL)

@@ -87,7 +87,7 @@ llvm::ElementCount ElementCount(int lanes) {
 #if LLVM_VERSION_MAJOR <= 11
   return llvm::ElementCount(static_cast<unsigned>(lanes), false);
 #elif LLVM_VERSION_MAJOR == 12
-  return llvm::ElementCount(llvm::PolySize<unsigned>::getFixed(lanes));
+  return llvm::ElementCount::getFixed(lanes);
 #else
 #error Only LLVM versions 8 through 12 are supported.
 #endif
@@ -193,7 +193,7 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #if 0
   // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
   // once LLVM 10 is available.
-  return llvm::cantFail(llvm::orc::JITTargetMachineBuilder::detectHost());
+  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
 #else
   llvm::orc::JITTargetMachineBuilder JTMB(
       (llvm::Triple(llvm::sys::getProcessTriple())));
@@ -226,8 +226,9 @@ LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
     at::Device device,
+    const std::string& kernel_func_name,
     Dtype dtype)
-    : CodeGen(stmt, args, device),
+    : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
 static void* argToPtr(
@@ -301,11 +302,11 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::InitializeNativeTargetAsmPrinter();
 
   auto JTMB = makeTargetMachineBuilder();
-  TM_ = llvm::cantFail(JTMB.createTargetMachine());
+  TM_ = assertSuccess(JTMB.createTargetMachine());
 
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
-  module_->setDataLayout(cantFail(JTMB.getDefaultDataLayoutForTarget()));
+  module_->setDataLayout(assertSuccess(JTMB.getDefaultDataLayoutForTarget()));
   module_->setTargetTriple(JTMB.getTargetTriple().str());
 
   // Emit prototype and bind argument Vars to parameter indices.
@@ -335,9 +336,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitWrapper(params);
   emitKernel(stmt, params);
 
-  cantFail(jit_->addModule(std::move(module_), std::move(context_)));
+  assertSuccess(jit_->addModule(std::move(module_), std::move(context_)));
   auto sym = jit_->findSymbol("wrapper");
-  kernelAddress_ = cantFail(sym.getAddress());
+  kernelAddress_ = assertSuccess(sym.getAddress());
   argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
@@ -1689,7 +1690,45 @@ void LLVMCodeGenImpl::visit(const Let* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Cond* v) {
-  throw unimplemented_lowering(v);
+  // Even if true_stmt and false_stmt are nullptr,
+  // in case condition is a function call with side effect,
+  // we still evaluate it.
+  v->condition()->accept(this);
+
+  if (!v->true_stmt() && !v->false_stmt()) {
+    return;
+  }
+  assert(v->true_stmt());
+
+  llvm::Value* condition = value_;
+  llvm::Value* c = irb_.CreateICmpNE(
+      condition, llvm::ConstantInt::get(condition->getType(), 0));
+  llvm::BasicBlock* then_block =
+      llvm::BasicBlock::Create(getContext(), "then", fn_);
+  llvm::BasicBlock* else_block = nullptr;
+  if (v->false_stmt()) {
+    else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);
+  }
+  llvm::BasicBlock* end_block =
+      llvm::BasicBlock::Create(getContext(), "end", fn_);
+
+  if (else_block) {
+    irb_.CreateCondBr(c, then_block, else_block);
+  } else {
+    irb_.CreateCondBr(c, then_block, end_block);
+  }
+
+  irb_.SetInsertPoint(then_block);
+  v->true_stmt()->accept(this);
+  irb_.CreateBr(end_block);
+
+  if (else_block) {
+    irb_.SetInsertPoint(else_block);
+    v->false_stmt()->accept(this);
+    irb_.CreateBr(end_block);
+  }
+
+  irb_.SetInsertPoint(end_block);
 }
 
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {

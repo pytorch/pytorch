@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from .constants import default_pg_timeout
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
-from . import (
+from torch._C._distributed_c10d import (
     AllreduceOptions,
     AllreduceCoalescedOptions,
     AllToAllOptions,
@@ -19,9 +19,9 @@ from . import (
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    ReduceOp,
+    PrefixStore,
 )
-from . import ReduceOp
-from . import PrefixStore
 
 
 _MPI_AVAILABLE = True
@@ -30,17 +30,17 @@ _GLOO_AVAILABLE = True
 
 
 try:
-    from. import ProcessGroupMPI
+    from torch._C._distributed_c10d import ProcessGroupMPI
 except ImportError:
     _MPI_AVAILABLE = False
 
 try:
-    from. import ProcessGroupNCCL
+    from torch._C._distributed_c10d import ProcessGroupNCCL
 except ImportError:
     _NCCL_AVAILABLE = False
 
 try:
-    from. import ProcessGroupGloo
+    from torch._C._distributed_c10d import ProcessGroupGloo
 except ImportError:
     _GLOO_AVAILABLE = False
 
@@ -401,11 +401,11 @@ def init_process_group(backend,
             asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
             will provide errors to the user which can be caught and handled,
             but due to its blocking nature, it has a performance overhead. On
-            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has little
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
             performance overhead, but crashes the process on errors. This is
             done since CUDA execution is async and it is no longer safe to
             continue executing user code since failed async NCCL operations
-            might result in subsequent CUDA operations to run on corrupted
+            might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
         group_name (str, optional, deprecated): Group name.
 
@@ -864,6 +864,10 @@ def batch_isend_irecv(p2p_op_list):
         >>> recv_tensor
         tensor([2, 3])     # Rank 0
         tensor([0, 1])     # Rank 1
+
+    .. note:: Note that when this API is used with the NCCL PG backend, users must set
+        the current GPU device with `torch.cuda.set_device`, otherwise it will
+        lead to unexpected hang issues.
     """
     _check_p2p_op_list(p2p_op_list)
     backend = get_backend(p2p_op_list[0].group)
