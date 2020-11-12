@@ -175,7 +175,7 @@ void IRPrinter::visit(const CompareSelect* v) {
 }
 
 static void formatFPSuffix(std::ostream& os, double v) {
-  // No suffix for doubles.
+  os << (v == std::ceil(v) ? ".0" : "");
 }
 
 template <typename T>
