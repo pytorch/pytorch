@@ -4,7 +4,7 @@ from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.experimental import GraphManipulation
-from torch.fx.experimental.Partitioner import Partitioner, Device, PartitionerConfig
+from torch.fx.experimental.Partitioner import Partitioner
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -12,6 +12,8 @@ from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
     get_latency_of_partitioned_graph,
+    Device,
+    PartitionerConfig
 )
 from typing import Union, Callable
 
@@ -305,6 +307,63 @@ class TestFXExperimental(JitTestCase):
             partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
         assert critical_path_latency_sec == 208.0
+
+    def test_cost_aware_partition(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a):
+                add_1 = a + torch.rand(4)
+                add_2 = add_1 + torch.rand(4)
+                linear_1 = self.linear(add_1)
+                add_3 = add_2 + torch.rand(4)
+                add_4 = add_2 + linear_1
+                add_5 = add_3 + add_4
+                return add_5
+
+        def get_node_to_latency_mapping(fx_module: GraphModule):
+            node_to_latency_mapping: Dict[Node, Nodelatency] = {}
+            for node in fx_module.graph.nodes:
+                if node.op not in {'output', 'placeholder', 'get_attr'}:
+                    if node.size_bytes.total_size == node.size_bytes.output_size:
+                        node_to_latency_mapping[node] = NodeLatency(node.size_bytes.total_size, 1)
+                    else:
+                        node_to_latency_mapping[node] = NodeLatency(node.size_bytes.total_size, node.size_bytes.output_size)
+            return node_to_latency_mapping
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+        a = torch.rand(4)
+        GraphManipulation.get_size_of_all_nodes(traced, [a])
+        devices = [
+            Device('dev_0', 125, 0),
+            Device('dev_1', 125, 1),
+            Device('dev_2', 125, 2),
+            Device('dev_3', 125, 3)
+        ]
+        node_to_latency_mapping = get_node_to_latency_mapping(traced)
+        partitioner_config = PartitionerConfig(
+            devices,
+            is_sparse_nn=False,
+            is_cost_aware=True,
+            transfer_rate_bytes_per_sec=0.5,
+            node_to_latency_mapping=node_to_latency_mapping
+        )
+        partitioner = Partitioner()
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        module_with_submodules = ret.module_with_submodules
+        dag = ret.dag
+        self.assertEqual(traced(a), module_with_submodules(a))
+        partitions = partitioner.partitions
+        partition_to_latency_mapping = get_partition_to_latency_mapping(partitions, node_to_latency_mapping)
+        critical_path_latency_sec = get_latency_of_partitioned_graph(
+            partitions,
+            partition_to_latency_mapping,
+            partitioner_config.transfer_rate_bytes_per_sec
+        )
+        assert critical_path_latency_sec == 160.
 
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
