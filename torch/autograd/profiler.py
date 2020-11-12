@@ -883,7 +883,9 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async:
             return 0
         if self.device_type == 0:  # CPU
-            return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
+            # account for the kernels in the children ops
+            return (sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) +
+                        sum(ch.cuda_time_total for ch in self.cpu_children))
         else:
             assert self.device_type == 1  # CUDA
             return self.time_range.elapsed_us()
