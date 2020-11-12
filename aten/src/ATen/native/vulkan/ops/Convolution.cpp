@@ -1,82 +1,13 @@
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
-#include <torch/custom_class.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
 namespace {
-
-class Context final : public torch::jit::CustomClassHolder {
- public:
-  static Context create(
-      api::Resource::Pool& pool,
-      const Tensor& weight,
-      const c10::optional<Tensor>& bias,
-      IntArrayRef stride,
-      IntArrayRef padding,
-      IntArrayRef dilation,
-      bool transposed,
-      IntArrayRef output_padding,
-      int64_t groups,
-      c10::optional<Scalar> output_min = c10::nullopt,
-      c10::optional<Scalar> output_max = c10::nullopt);
-
-  using State = std::tuple<
-      Tensor,
-      c10::optional<Tensor>,
-      std::vector<int64_t>,
-      std::vector<int64_t>,
-      std::vector<int64_t>,
-      int64_t,
-      c10::optional<Scalar>,
-      c10::optional<Scalar>>;
-
-  Tensor run(const Tensor& input) const;
-  State unpack() const;
-
- private:
-  Context(
-      api::Resource::Pool& pool,
-      const Tensor& weight,
-      const c10::optional<Tensor>& bias,
-      IntArrayRef stride,
-      IntArrayRef padding,
-      IntArrayRef dilation,
-      bool transposed,
-      IntArrayRef output_padding,
-      int64_t groups,
-      c10::optional<Scalar> output_min = c10::nullopt,
-      c10::optional<Scalar> output_max = c10::nullopt);
-
- private:
-  struct {
-    vTensor v_weight;
-    vTensor v_bias;
-    std::array<int64_t, 4> filter;
-    std::array<int64_t, 2> stride;
-    std::array<int64_t, 2> padding;
-    std::array<int64_t, 2> dilation;
-    int32_t groups;
-    float output_min;
-    float output_max;
-  } packed_;
-
-  struct {
-    Tensor weight;
-    c10::optional<Tensor> bias;
-    std::vector<int64_t> filter;
-    std::vector<int64_t> stride;
-    std::vector<int64_t> padding;
-    std::vector<int64_t> dilation;
-    int64_t groups;
-    c10::optional<Scalar> output_min;
-    c10::optional<Scalar> output_max;
-  } unpacked_;
-};
 
 inline bool is_depthwise(
     const IntArrayRef filter,
@@ -263,42 +194,6 @@ std::array<int64_t, 2> pack_params(const std::vector<int64_t>& vector) {
   };
 }
 
-Context::Context(
-    api::Resource::Pool& pool,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const bool /* transposed */,
-    const IntArrayRef /* output_padding */,
-    const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max)
-  : packed_{
-      pack_weights(pool, weight, groups),
-      pack_biases(pool, bias, weight),
-      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
-      pack_params(expand_param_if_needed(stride, "stride", 2)),
-      pack_params(expand_param_if_needed(padding, "padding", 2)),
-      pack_params(expand_param_if_needed(dilation, "dilation", 2)),
-      groups,
-      output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity(),
-      output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity(),
-    },
-    unpacked_{
-      weight,
-      bias,
-      weight.sizes().vec(),
-      stride.vec(),
-      padding.vec(),
-      dilation.vec(),
-      groups,
-      output_min,
-      output_max,
-    } {
-}
-
 bool available(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
@@ -347,56 +242,6 @@ bool available(
          (!output_min || output_min->isFloatingPoint()) &&
          (!output_max || output_max->isFloatingPoint()) &&
          true;
-}
-
-Context Context::create(
-    api::Resource::Pool& pool,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride_arg,
-    const IntArrayRef padding_arg,
-    const IntArrayRef dilation_arg,
-    const bool transposed,
-    const IntArrayRef output_padding_arg,
-    const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
-  const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
-  const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
-  const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
-  const auto output_padding = output_padding_arg; // TODO: Deconvolutions
-
-  TORCH_CHECK(
-      available(
-          weight,
-          bias,
-          stride,
-          padding,
-          dilation,
-          transposed,
-          output_padding,
-          groups,
-          output_min,
-          output_max),
-      "Vulkan::convolution not available! "
-      "Reason: The provided (weight, bias, stride, padding, dilation, groups, "
-      "transposed, output_padding, output_min, output_max) parameters are either "
-      "invalid individually or their combination is not supported by Vulkan impl.");
-
-  // Pass in the originals
-  return Context{
-    pool,
-    weight,
-    bias,
-    stride_arg,
-    padding_arg,
-    dilation_arg,
-    transposed,
-    output_padding_arg,
-    groups,
-    output_min,
-    output_max,
-  };
 }
 
 bool usable(const Tensor& input) {
@@ -632,7 +477,126 @@ void conv2d(
   }
 }
 
-Tensor Context::run(const Tensor& input_arg) const {
+Tensor convolution(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const bool transposed,
+    const IntArrayRef output_padding,
+    const int64_t groups) {
+  return Conv2dOpContext::create(
+      api::context()->resource().pool,
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      transposed,
+      output_padding,
+      groups
+  ).run(input);
+}
+
+#ifdef USE_VULKAN_API
+
+TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
+  m.impl_UNBOXED("convolution_overrideable", convolution);
+}
+
+#endif /* USE_VULKAN_API */
+
+} // namespace
+
+Conv2dOpContext::Conv2dOpContext(
+    api::Resource::Pool& pool,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const bool /* transposed */,
+    const IntArrayRef /* output_padding */,
+    const int64_t groups,
+    const c10::optional<Scalar> output_min,
+    const c10::optional<Scalar> output_max)
+  : packed_{
+      pack_weights(pool, weight, groups),
+      pack_biases(pool, bias, weight),
+      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
+      pack_params(expand_param_if_needed(stride, "stride", 2)),
+      pack_params(expand_param_if_needed(padding, "padding", 2)),
+      pack_params(expand_param_if_needed(dilation, "dilation", 2)),
+      groups,
+      output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity(),
+      output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity(),
+    },
+    unpacked_{
+      weight,
+      bias,
+      weight.sizes().vec(),
+      stride.vec(),
+      padding.vec(),
+      dilation.vec(),
+      groups,
+      output_min,
+      output_max,
+    } {
+}
+
+Conv2dOpContext Conv2dOpContext::create(
+    api::Resource::Pool& pool,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride_arg,
+    const IntArrayRef padding_arg,
+    const IntArrayRef dilation_arg,
+    const bool transposed,
+    const IntArrayRef output_padding_arg,
+    const int64_t groups,
+    const c10::optional<Scalar> output_min,
+    const c10::optional<Scalar> output_max) {
+  const auto stride = expand_param_if_needed(stride_arg, "stride", 2);
+  const auto padding = expand_param_if_needed(padding_arg, "padding", 2);
+  const auto dilation = expand_param_if_needed(dilation_arg, "dilation", 2);
+  const auto output_padding = output_padding_arg; // TODO: Deconvolutions
+
+  TORCH_CHECK(
+      available(
+          weight,
+          bias,
+          stride,
+          padding,
+          dilation,
+          transposed,
+          output_padding,
+          groups,
+          output_min,
+          output_max),
+      "Vulkan::convolution not available! "
+      "Reason: The provided (weight, bias, stride, padding, dilation, groups, "
+      "transposed, output_padding, output_min, output_max) parameters are either "
+      "invalid individually or their combination is not supported by Vulkan impl.");
+
+  // Pass in the originals
+  return Conv2dOpContext{
+    pool,
+    weight,
+    bias,
+    stride_arg,
+    padding_arg,
+    dilation_arg,
+    transposed,
+    output_padding_arg,
+    groups,
+    output_min,
+    output_max,
+  };
+}
+
+Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
@@ -708,8 +672,8 @@ Tensor Context::run(const Tensor& input_arg) const {
   return convert(v_output);
 }
 
-Context::State Context::unpack() const {
-  return Context::State{
+Conv2dOpContext::State Conv2dOpContext::unpack() const {
+  return Conv2dOpContext::State{
     unpacked_.weight,
     unpacked_.bias,
     unpacked_.stride,
@@ -721,7 +685,7 @@ Context::State Context::unpack() const {
   };
 }
 
-c10::intrusive_ptr<Context> conv2_clamp_prepack(
+c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
@@ -730,8 +694,8 @@ c10::intrusive_ptr<Context> conv2_clamp_prepack(
     const int64_t groups,
     const c10::optional<Scalar> output_min,
     const c10::optional<Scalar> output_max) {
-  return c10::make_intrusive<Context>(
-      Context::create(
+  return c10::make_intrusive<Conv2dOpContext>(
+      Conv2dOpContext::create(
           persistent()->pool,
           std::move(weight),
           std::move(bias),
@@ -747,78 +711,10 @@ c10::intrusive_ptr<Context> conv2_clamp_prepack(
 
 Tensor conv2d_clamp_run(
     const Tensor& input,
-    const c10::intrusive_ptr<Context>& context) {
+    const c10::intrusive_ptr<Conv2dOpContext>& context) {
   return context->run(input);
 }
 
-Tensor convolution(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const bool transposed,
-    const IntArrayRef output_padding,
-    const int64_t groups) {
-  return Context::create(
-      api::context()->resource().pool,
-      weight,
-      bias,
-      stride,
-      padding,
-      dilation,
-      transposed,
-      output_padding,
-      groups
-  ).run(input);
-}
-
-TORCH_LIBRARY(vulkan, m) {
-  m.class_<Context>("Conv2dOpContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<Context>& context) {
-            return context->unpack();
-          },
-          // __setstate__
-          [](Context::State state) {
-            return conv2_clamp_prepack(
-                std::move(std::get<0>(state)),
-                std::move(std::get<1>(state)),
-                std::move(std::get<2>(state)),
-                std::move(std::get<3>(state)),
-                std::move(std::get<4>(state)),
-                std::move(std::get<5>(state)),
-                std::move(std::get<6>(state)),
-                std::move(std::get<7>(state)));
-          });
-}
-
-TORCH_LIBRARY(vulkan_prepack, m) {
-  m.def(
-      "conv2d_clamp_prepack(Tensor W, Tensor? B, int[2] stride, "
-      "int[2] padding, int[2] dilation, int groups, "
-      "Scalar? output_min=None, Scalar? output_max=None) "
-      "-> __torch__.torch.classes.vulkan.Conv2dOpContext");
-  m.def(
-      "conv2d_clamp_run(Tensor X, "
-      "__torch__.torch.classes.vulkan.Conv2dOpContext W_prepack) -> Tensor Y");
-}
-
-TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
-  m.impl("conv2d_clamp_prepack", TORCH_FN(conv2_clamp_prepack));
-}
-
-TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
-  m.impl("conv2d_clamp_run", conv2d_clamp_run);
-}
-
-TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl_UNBOXED("convolution_overrideable", convolution);
-}
-
-} // namespace
 } // namespace ops
 } // namespace vulkan
 } // namespace native
