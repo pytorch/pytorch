@@ -306,7 +306,7 @@ class RegisterDispatchKey:
                     device_guard = ''
                     if f.device_guard and device_of is not None:
                         # TODO: Use OptionalCUDAGuard when possible
-                        device_guard = "const OptionalDeviceGuard device_guard(device_of({device_of}));"
+                        device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
                     # TODO: figure out what to do about structured kernels and
                     # factory functions
 
