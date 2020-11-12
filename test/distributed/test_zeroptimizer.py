@@ -15,6 +15,9 @@ import io
 from torch.distributed.optim import ZeROptimizer
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
+from math import inf
+import copy
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO  # type: ignore
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -199,7 +202,7 @@ class TestZeROptimizerSingleRank(TestZeROptimizer):
         self.dist_init(self.rank)
 
         class SGDWithStepKWArg(torch.optim.SGD):
-            def step(self, closure=None, kwarg=[]):
+            def step(self, closure=None, kwarg=None):
                 super().step()
                 kwarg.append(5)
 
@@ -438,6 +441,70 @@ class TestZeROptimizerSixRanks(TestZeROptimizer):
                 model.parameters(), optim=SGD, lr=0.1, momentum=0.99, group=process_group, bucket_cap_kb=0
             )
             check(optimizer)
+
+    @skip_if_no_gpu
+    def test_gradient_clipping(self):
+        device = torch.device(self.rank)
+        torch.manual_seed(self.rank)  # make sure that the different rank get different data
+
+        # Run a dummy step so that the optimizer state dict exists
+        batch, input_width, hidden, target_width = 3, 20, 10, 5
+        target = torch.rand((batch, target_width), device=device)
+        inputs = torch.rand((batch, input_width), device=device)
+        NORMS = [1.0, 2.0, 1, 2, inf]
+        CLIP_NORM = 0.3
+
+        def check(norm):
+            model_base = torch.nn.Sequential(
+                torch.nn.Linear(input_width, hidden),
+                torch.nn.Linear(hidden, hidden),
+                torch.nn.Linear(hidden, target_width),
+            ).to(device)
+            model = copy.deepcopy(model_base)
+
+            # For this test the gradients are (all) reduced in the same way in between the torch reference and fairscale.
+            # Normally OSS would use ShardedDDP and only reduce to the proper rank, but this does not change the
+            # gradient norm computation from OSS and adds a dependency.
+            # to keep the comparison apples-to-apples DDP is used in both cases
+            model_oss = DDP(
+                module=model_base,
+                device_ids=[self.rank],
+            )
+            sharded_optimizer = ZeROptimizer(model_oss.parameters(), lr=0.1, momentum=0.99)
+
+            model_ddp = DDP(
+                model,
+                device_ids=[self.rank],
+            )
+
+            loss_fn = torch.nn.L1Loss()
+            loss_fn.to(device)
+
+            model_ddp.zero_grad()
+            model_oss.zero_grad()
+
+            outputs = model(inputs)
+            outputs_oss = model_oss(inputs)
+
+            loss = loss_fn(outputs, target)
+            loss.backward()
+
+            loss_oss = loss_fn(outputs_oss, target)
+            loss_oss.backward()
+
+            # Check the equivalence with the non-sharded optim
+            oss_total_norm = sharded_optimizer.clip_grad_norm(CLIP_NORM, norm_type=norm)
+            total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), CLIP_NORM, norm_type=norm)
+            assert torch.allclose(oss_total_norm, total_norm), "torch and fairscale should return the same grad norm"
+
+            # Check that the params have indeed been clipped
+            for params in sharded_optimizer.per_device_params.values():
+                for param in filter(lambda x: x.grad is not None, params[self.rank]):
+                    assert torch.norm(param.grad, p=norm) < CLIP_NORM, f"param grad norm above clip : {param.grad}"
+
+        for norm in NORMS:
+            print(f"Checking norm {norm}")
+            check(norm)
 
 
 if __name__ == "__main__":

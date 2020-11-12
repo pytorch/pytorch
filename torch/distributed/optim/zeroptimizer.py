@@ -8,7 +8,7 @@ import copy
 from itertools import chain
 import io
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import torch
 import torch.distributed as dist
@@ -155,6 +155,61 @@ class ZeROptimizer(Optimizer):
                 torch.zeros(bucket_cap_kb * (2 ** 10), dtype=per_device[0][0].dtype, device=device)
                 for _ in range(len(per_device))
             ]
+
+    def clip_grad_norm(self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0) -> torch.Tensor:
+        """
+        Clip all gradients at this point in time. The norm is computed over all gradients together, as if they were
+        concatenated into a single vector. Gradients are modified in-place.
+        Arguments:
+            max_norm (float or int): max norm of the gradients
+            norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for infinity norm.
+        Returns:
+            Total norm of the parameters (viewed as a single vector).
+        .. note: This is analogous to `torch.nn.utils.clip_grad_norm_` but handles the partitioning and multiple devices per rank
+            under the hood. The default torch util is not applicable here, because each rank only has a partial view of all the grads
+            in the model, so calling it in the OSS context would lead to different scaling being applied per subset of model parameters
+        .. warning: This needs to be called on all ranks, since synchronization primitives will be used
+        .. warning: Model paralelism -groups other than world- are not yet supported
+        """
+
+        if self.group != dist.group.WORLD:
+            raise NotImplementedError("Clip norm not yet supported for model parallelism (coming soon!)")
+
+        # Compute the max norm for this shards's worth of gradients
+        max_norm = float(max_norm)
+        norm_type = float(norm_type)
+
+        # Filter out the grad-less params, concatenate params from all devices
+        local_params = itertools.chain(
+            *[
+                list(filter(lambda x: x.grad is not None, device_params[self.rank]))
+                for device_params in self.per_device_params.values()
+            ]
+        )
+
+        # Compute the norm on this grad set,
+        # then sync all the norms from all ranks
+        if norm_type == inf:
+            total_norm = max(p.grad.detach().abs().max().to(self._device) for p in local_params)  # type: ignore
+            dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.group)
+        else:
+            local_norm = torch.norm(
+                input=torch.stack([torch.norm(input=p.grad.detach(), p=norm_type).to(self._device) for p in local_params]),  # type: ignore
+                p=norm_type,
+            )
+
+            total_norm = local_norm ** norm_type
+            dist.all_reduce(total_norm, group=self.group)
+            total_norm = total_norm ** (1.0 / norm_type)
+
+        clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)
+
+        if clip_coef < 1:
+            for device, device_params in self.per_device_params.items():
+                for p in filter(lambda x: x.grad is not None, device_params[self.rank]):
+                    p.grad.detach().mul_(clip_coef.to(device))  # type: ignore
+
+        return total_norm
 
     # Partition helpers
     def partition_parameters(self) -> List[List[Dict]]:
