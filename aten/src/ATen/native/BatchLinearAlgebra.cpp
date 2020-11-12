@@ -896,7 +896,7 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, std::string uplo_str, std::vector<int64_t>& infos) {
+static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, const std::string& uplo_str, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("syevd: LAPACK library not found in compilation");
 #else
@@ -910,7 +910,9 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, std::string uplo_s
   auto n = v.size(-1);
   auto lda = std::max(int64_t{1}, n);
 
-  char uplo = uplo_str == "U" ? 'U' : 'L';
+  // NumPy allows lowercase input for UPLO argument
+  // It is assumed that uplo_str is either "U" or "L"
+  char uplo = std::toupper(uplo_str[0]);
   char jobz = compute_v ? 'V' : 'N';
 
   // Using 'int' instead of int32_t or int64_t is consistent with the current LAPACK interface

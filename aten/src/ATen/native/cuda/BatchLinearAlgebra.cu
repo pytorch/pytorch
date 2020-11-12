@@ -1692,8 +1692,11 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_eigenvectors, std::string uplo) {
-  bool upper = uplo == "U" ? true : false;
+std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_eigenvectors, std::string uplo_str) {
+  // NumPy allows lowercase input for UPLO argument
+  // It is assumed that uplo_str is either "U" or "L"
+  char uplo = std::toupper(uplo_str[0]);
+  bool upper = uplo == 'U' ? true : false;
   return _symeig_helper_cuda(self, compute_eigenvectors, upper);
 }
 

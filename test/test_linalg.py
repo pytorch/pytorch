@@ -228,6 +228,26 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    def test_eigh_lower_uplo(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def run_test(shape, batch, uplo):
+            # check lower case uplo
+            # use non-symmetric input to check whether uplo argument is working as intended
+            matrix = torch.randn(shape, shape, *batch, dtype=dtype, device=device)
+            expected_w, expected_v = np.linalg.eigh(matrix.cpu().numpy(), UPLO=uplo)
+            actual_w, actual_v = torch.linalg.eigh(matrix, UPLO=uplo)
+            self.assertEqual(actual_w, expected_w)
+            self.assertEqual(abs(actual_v), abs(expected_v))
+
+        uplos = ["u", "l"]
+        for uplo in uplos:
+            run_test(3, (2, 2), uplo)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_eigh_errors_and_warnings(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
