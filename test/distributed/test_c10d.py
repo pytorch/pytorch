@@ -566,13 +566,8 @@ class RendezvousTCPTest(TestCase):
         store0, rank0, size0 = next(gen0)
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
-        if sys.platform == 'win32':
-            err_msg_reg = ".connected party did not properly respond after a period of time*"
-        else:
-            err_msg_reg = "Timeout"
-
         start = time.time()
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
             store0.get("nonexistant key")
 
         end = time.time()

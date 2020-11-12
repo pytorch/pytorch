@@ -90,11 +90,10 @@ void TCPStoreDaemon::run() {
     }
 
 #ifdef _WIN32
-    int res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count());
-    if (res == SOCKET_ERROR) {
-      throw std::system_error(GetLastError(), std::system_category());
-    }
-    else if (res == 0) {
+    int res;
+    SYSCHECK_ERR_RETURN_NEG1(
+      res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
+    if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
           finished = true;

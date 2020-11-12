@@ -102,7 +102,7 @@ std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-  hints.ai_family = AF_UNSPEC;//AF_INET; // either IPv4 or IPv6
+  hints.ai_family = AF_INET;//AF_UNSPEC;//AF_INET; // either IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -229,7 +229,7 @@ int connect(
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-  hints.ai_family = AF_UNSPEC;//AF_INET; // either IPv4 or IPv6
+  hints.ai_family = AF_INET;//AF_UNSPEC;//AF_INET; // either IPv4 or IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -277,7 +277,7 @@ int connect(
               if (err == WSAEISCONN) {
                   break;
               }
-              else if (err == WSAEALREADY || err == WSAEWOULDBLOCK || err == WSAEINVAL) {
+              else if (err == WSAEALREADY || err == WSAEWOULDBLOCK) {
                 if (timeout != kNoTimeout) {
                   const auto elapsed = std::chrono::high_resolution_clock::now() - start;
                   if (elapsed > timeout) {
