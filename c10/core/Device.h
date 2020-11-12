@@ -34,7 +34,7 @@ struct C10_API Device final {
   /// index.
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
-    validate();
+    validate_debug();
   }
 
   /// Constructs a `Device` from a string description, for convenience.
@@ -96,6 +96,12 @@ struct C10_API Device final {
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
     TORCH_CHECK(!is_cpu() || index_ <= 0,
+        "CPU device index must be -1 or zero, got ", index_);
+  }
+  void validate_debug() {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(index_ == -1 || index_ >= 0,
+        "Device index must be -1 or non-negative, got ", index_);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_cpu() || index_ <= 0,
         "CPU device index must be -1 or zero, got ", index_);
   }
 };
