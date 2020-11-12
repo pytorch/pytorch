@@ -440,14 +440,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    Options options)
+    const c10::intrusive_ptr<Options>& options)
     : ProcessGroup(rank, size),
       store_(store),
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
-      opTimeout_(options.opTimeout),
+      opTimeout_(options->opTimeout),
       futureNCCLCallbackStreams_(c10::cuda::device_count()),
-      isHighPriorityStream_(options.isHighPriorityStream) {
+      isHighPriorityStream_(options->isHighPriorityStream) {
   TORCH_CHECK(at::cuda::getNumGPUs() != 0,
     "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
