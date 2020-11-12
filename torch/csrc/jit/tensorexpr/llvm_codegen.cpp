@@ -401,12 +401,12 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     if (v->op_type() == kTanh) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_tanh(v->param(0));
+        return fast_tanh(v->param(0)->accept_mutator(this));
       }
     } else if (v->op_type() == kSigmoid) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_sigmoid(v->param(0));
+        return fast_sigmoid(v->param(0)->accept_mutator(this));
       }
     }
     // TODO: fast exp
