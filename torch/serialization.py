@@ -491,7 +491,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         zip_file.write_record(name, storage.data_ptr(), num_bytes)
 
 
-def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
+def load(f, map_location='cpu', pickle_module=pickle, **pickle_load_args):
     """Loads an object saved with :func:`torch.save` from a file.
 
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
