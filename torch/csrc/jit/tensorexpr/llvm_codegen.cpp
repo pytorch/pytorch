@@ -719,8 +719,7 @@ void LLVMCodeGenImpl::visit(const Min* v) {
   auto lhs = this->value_;
   v->rhs()->accept(this);
   auto rhs = this->value_;
-
-  if (v->dtype() == kInt) {
+  if (v->dtype().is_integral()) {
     auto icmp = irb_.CreateICmpSLT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
