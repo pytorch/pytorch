@@ -392,11 +392,20 @@ class BuildExtension(build_ext, object):
                 cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
+            cflags = (COMMON_NVCC_FLAGS +
+                      ['--compiler-options', "'-fPIC'"] +
+                      cflags + _get_cuda_arch_flags(cflags))
+
+            # NVCC does not allow multiple -ccbin/--compiler-bindir to be passed, so we avoid
+            # overriding the option if the user explicitly passed it.
             _ccbin = os.getenv("CC")
-            return (COMMON_NVCC_FLAGS +
-                    ['--compiler-options', "'-fPIC'"] +
-                    cflags + _get_cuda_arch_flags(cflags) +
-                    (['-ccbin', _ccbin] if _ccbin is not None else []))
+            if (
+                _ccbin is not None 
+                and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
+            ):
+                cflags.extend(['-ccbin', _ccbin])
+
+            return cflags
 
         def convert_to_absolute_paths_inplace(paths):
             # Helper function. See Note [Absolute include_dirs]
@@ -553,7 +562,7 @@ class BuildExtension(build_ext, object):
                         else:
                             cflags = []
 
-                        cflags = win_cuda_flags(cflags)
+                        cflags = win_cuda_flags(cflags) + ['--use-local-env']
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
@@ -623,7 +632,7 @@ class BuildExtension(build_ext, object):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = []
+                cuda_cflags = ['--use-local-env']
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
@@ -1420,9 +1429,17 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
-    # If not given, determine what's needed for the GPU that can be found
+    # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
         capability = torch.cuda.get_device_capability()
+        supported_sm = [int(arch.split('_')[1])
+                        for arch in torch.cuda.get_arch_list() if 'sm_' in arch]
+        max_supported_sm = max((sm // 10, sm % 10) for sm in supported_sm)
+        # Capability of the device may be higher than what's supported by the user's
+        # NVCC, causing compilation error. User's NVCC is expected to match the one
+        # used to build pytorch, so we use the maximum supported capability of pytorch
+        # to clamp the capability.
+        capability = min(max_supported_sm, capability)
         arch_list = [f'{capability[0]}.{capability[1]}']
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)

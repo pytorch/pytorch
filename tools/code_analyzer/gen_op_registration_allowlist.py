@@ -38,7 +38,7 @@ def load_root_ops(fname):
     return result
 
 
-def gen_transitive_closure(dep_graph, root_ops, train = False):
+def gen_transitive_closure(dep_graph, root_ops, train=False):
     result = set(root_ops)
     queue = root_ops[:]
 
