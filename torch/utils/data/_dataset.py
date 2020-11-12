@@ -5,7 +5,6 @@ from .dataset import IterableDataset as IterDataset
 
 from .common import get_file_pathnames_from_root, get_file_binaries_from_pathnames, extract_files_from_pathname_binaries
 
-import os
 from typing import Union, List, Iterable
 
 
@@ -53,9 +52,10 @@ class ListDirFilesIterDataset(IterDataset):
 
 
 class LoadFilesFromDiskIterDataset(IterDataset):
-    def __init__(self,
-        input : Iterable,
-        auto_extract : bool = False):
+    def __init__(
+            self,
+            input : Iterable,
+            auto_extract : bool = False):
         super().__init__()
         self.input : Iterable = input
         self.auto_extract = auto_extract
@@ -81,9 +81,10 @@ class LoadFilesFromDiskIterDataset(IterDataset):
 
 
 class ExtractFilesIterDataset(IterDataset):
-    def __init__(self,
-        input : Iterable,
-        recursive : bool = True):
+    def __init__(
+            self,
+            input : Iterable,
+            recursive : bool = True):
         super().__init__()
         self.input : Iterable = input
         self.recursive : bool = recursive
@@ -106,4 +107,3 @@ class ExtractFilesIterDataset(IterDataset):
     @property
     def is_loaded(self):
         return self.files is not None
-

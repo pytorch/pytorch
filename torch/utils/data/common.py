@@ -9,13 +9,13 @@ from typing import List, Tuple, Iterable
 
 
 def get_file_pathnames_from_root(
-    root: str,
-    mask: str,
-    recursive: bool = False,
-    abspath: bool = False) -> List:
+        root: str,
+        mask: str,
+        recursive: bool = False,
+        abspath: bool = False) -> List:
 
     def onerror(err : OSError):
-        warnings.warn(err.strerror + " : " +  err.filename)
+        warnings.warn(err.strerror + " : " + err.filename)
 
     pathnames = []
     for path, dirs, files in os.walk(root, onerror=onerror):
@@ -30,9 +30,10 @@ def get_file_pathnames_from_root(
 
 
 def extract_files_from_single_pathname_binary(
-    pathname : str,
-    binary : bytes,
-    recursive : bool = True) -> List[Tuple[str, bytes]]:
+        pathname : str,
+        binary : bytes,
+        recursive : bool = True) -> List[Tuple[str, bytes]]:
+
     ret : List[Tuple[str, bytes]] = []
 
     # verify whether file obj is tar
@@ -61,18 +62,18 @@ def extract_files_from_single_pathname_binary(
                 if not tarinfo.isfile():
                     continue
 
-                extract_binary = tar.extractfile(tarinfo).read()
-                if extract_binary is None:
+                extract_fobj = tar.extractfile(tarinfo)
+                if extract_fobj is None:
                     warnings.warn("failed to extract tar file {}".format(tarinfo.name))
                     continue
 
                 inner_pathname = os.path.normpath(os.path.join(pathname, tarinfo.name))
                 if recursive:
                     inner_ret = extract_files_from_single_pathname_binary(
-                        inner_pathname, extract_binary, recursive)
+                        inner_pathname, extract_fobj.read(), recursive)
                     ret.extend(inner_ret)
                 else:
-                    ret.append((inner_pathname, extract_binary))
+                    ret.append((inner_pathname, extract_fobj.read()))
         return ret
 
     # extract zip file
@@ -96,8 +97,8 @@ def extract_files_from_single_pathname_binary(
     return [(pathname, binary)]
 
 def get_file_binaries_from_pathnames(
-    pathnames : Iterable,
-    auto_extract : bool = False) -> List:
+        pathnames : Iterable,
+        auto_extract : bool = False) -> List:
 
     if not isinstance(pathnames, Iterable):
         warnings.warn("get_file_binaries_from_pathnames needs the input be an Iterable")
@@ -121,8 +122,8 @@ def get_file_binaries_from_pathnames(
     return pathname_binaries
 
 def extract_files_from_pathname_binaries(
-    pathname_binaries : Iterable,
-    recursive : bool = True) -> List:
+        pathname_binaries : Iterable,
+        recursive : bool = True) -> List:
 
     if not isinstance(pathname_binaries, Iterable):
         warnings.warn("extract_files_from_pathname_binaries needs the input be an Iterable")
