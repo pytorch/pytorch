@@ -913,11 +913,10 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, std::string uplo_s
   char uplo = uplo_str == "U" ? 'U' : 'L';
   char jobz = compute_v ? 'V' : 'N';
 
+  // Using 'int' instead of int32_t or int64_t is consistent with the current LAPACK interface
+  // It really should be changed in the future to something like lapack_int that depends on the specific LAPACK library that is linked
+  // or switch to supporting only 64-bit indexing by default.
   int info;
-  // Run once, first to get the optimum work size.
-  // Since we deal with batches of matrices with the same dimensions, doing this outside
-  // the loop saves (batch_size - 1) workspace queries which would provide the same result
-  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   int lrwork = -1;
   int liwork = -1;
@@ -925,25 +924,33 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, std::string uplo_s
   value_t rwork_query;
   int iwork_query;
 
+  // Run lapackSyevd once, first to get the optimum work size.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the main loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_data, lda, w_data, &work_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, &info);
-  lwork = std::max(1, static_cast<int>(real_impl<scalar_t, value_t>(work_query)));
+
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_query));
   Tensor work = at::empty({lwork}, v.options());
-  liwork = std::max(1, static_cast<int>(iwork_query));
+  liwork = std::max<int>(1, iwork_query);
   Tensor iwork = at::empty({liwork}, at::kInt);
 
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (isComplexType(at::typeMetaToScalarType(v.dtype()))) {
-    lrwork = std::max(1, static_cast<int>(rwork_query));
+    lrwork = std::max<int>(1, rwork_query);
     rwork = at::empty({lrwork}, w.options());
     rwork_data = rwork.data_ptr<value_t>();
   }
 
-  for (int64_t i = 0; i < batch_size; i++) {
+  // Now call lapackSyevd for each matrix in the batched input
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     scalar_t* v_working_ptr = &v_data[i * v_matrix_stride];
     value_t* w_working_ptr = &w_data[i * w_stride];
     lapackSyevd<scalar_t, value_t>(jobz, uplo, n, v_working_ptr, lda, w_working_ptr, work.data_ptr<scalar_t>(), lwork, rwork_data, lrwork, iwork.data_ptr<int>(), liwork, &info);
     infos[i] = info;
+    // The current behaviour for Linear Algebra functions to raise an error if something goes wrong or input doesn't satisfy some requirement
+    // therefore return early since further computations will be wasted anyway
     if (info != 0) {
       return;
     }
