@@ -1,4 +1,3 @@
-import sys
 
 
 def import_module(name, path):
