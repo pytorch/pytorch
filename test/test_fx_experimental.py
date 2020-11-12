@@ -1,4 +1,5 @@
 import torch
+import unittest
 from typing import Dict
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
@@ -8,6 +9,7 @@ from torch.fx.experimental.Partitioner import Partitioner
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.fx.experimental.subgraph_creation_example import split_module
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -16,6 +18,13 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig
 )
 from typing import Union, Callable
+
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
@@ -484,6 +493,53 @@ terrible spacing
 
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
+
+    def test_subgraph_creation(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x, y):
+                z = self.linear(x + self.param).clamp(min=0.0, max=1.0)
+                w = self.linear(y).clamp(min=0.0, max=1.0)
+                return z + w
+
+        # symbolically trace model
+        my_module = MyModule()
+        my_module_traced = symbolic_trace(my_module)
+
+        # random mod partitioning
+        partition_counter = 0
+        NPARTITIONS = 3
+
+        def mod_partition(node: Node):
+            nonlocal partition_counter
+            partition = partition_counter % NPARTITIONS
+            partition_counter = (partition_counter + 1) % NPARTITIONS
+            return partition
+
+        # split module in module with submodules
+        module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+
+        orig_out = my_module_traced(x, y)
+        submodules_out = module_with_submodules(x, y)
+
+        self.assertEqual(orig_out, submodules_out)
+
+    @skipIfNoTorchVision
+    def test_subgraph_trivial_resnet(self):
+        # Smoke test trivially splitting resnet into 1 partition works
+        # There was an issue before causing submodule names to be aliased
+        m = resnet18()
+        traced = symbolic_trace(m)
+        a = torch.rand(64, 3, 7, 7)
+        module_with_submodules = split_module(traced,m,lambda node: 0)
+        module_with_submodules(a)
 
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):
