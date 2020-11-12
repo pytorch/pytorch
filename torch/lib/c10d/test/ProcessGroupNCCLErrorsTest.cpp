@@ -40,7 +40,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      c10d::ProcessGroupNCCL::Options opts)
+      const c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options>& opts)
       : ProcessGroupNCCL(store, rank, size, opts), simulate_error_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
@@ -109,7 +109,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      c10d::ProcessGroupNCCL::Options opts)
+      const c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options>& opts)
       : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
         set_timedout_error_(false) {}
 
@@ -177,8 +177,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  c10d::ProcessGroupNCCL::Options options;
-  options.opTimeout = std::chrono::milliseconds(1000);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  options->opTimeout = std::chrono::milliseconds(1000);
   ProcessGroupNCCLSimulateErrors pg(
       store_, 0, 1, options);
 
@@ -206,8 +206,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  c10d::ProcessGroupNCCL::Options options;
-  options.opTimeout = std::chrono::milliseconds(3000);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  options->opTimeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLTimedOutErrors pg(
       store_, 0, 1, options);
 
@@ -229,8 +229,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
     return;
   }
 
-  c10d::ProcessGroupNCCL::Options options;
-  options.opTimeout = std::chrono::milliseconds(3000);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  options->opTimeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(
       store_, 0, 1, options);
 
