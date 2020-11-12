@@ -1836,14 +1836,17 @@ void TensorExprKernel::compile() {
     }
     auto tensor_sizes = output->type()->expect<TensorType>()->sizes();
     std::vector<int64_t> size;
-    TORCH_INTERNAL_ASSERT(tensor_sizes.sizes().has_value(), "Expected output size: ", output);
-    for (const auto& elem: *tensor_sizes.sizes()) {
+    TORCH_INTERNAL_ASSERT(
+        tensor_sizes.sizes().has_value(), "Expected output size: ", output);
+    for (const auto& elem : *tensor_sizes.sizes()) {
       TORCH_INTERNAL_ASSERT(elem, "expected all output values defined");
       size.push_back(*elem);
     }
     tensorOutputSizes_.push_back(size);
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
-    tensorOutputTensorOptions_.push_back(c10::TensorOptions(tensorType(tensors_[output->unique()])).device(device_));
+    tensorOutputTensorOptions_.push_back(
+        c10::TensorOptions(tensorType(tensors_[output->unique()]))
+            .device(device_));
     tensors_.erase(output->unique());
   }
 
@@ -1863,7 +1866,6 @@ void TensorExprKernel::compile() {
 
 TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
     : graph_(subgraph), code_(subgraph, "") {
-
   allow_fallback_ = fallbackAllowed();
   if (!allow_fallback_) {
     compile();
@@ -1899,7 +1901,6 @@ void TensorExprKernel::run(Stack& stack) {
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
-
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + tensorOutputs_.size());
 
@@ -1915,8 +1916,8 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   }
 
   for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
-    outputs.push_back(at::empty(
-        tensorOutputSizes_[i], tensorOutputTensorOptions_[i]));
+    outputs.push_back(
+        at::empty(tensorOutputSizes_[i], tensorOutputTensorOptions_[i]));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
   return runArgs;
