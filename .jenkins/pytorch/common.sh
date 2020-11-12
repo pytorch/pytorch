@@ -18,7 +18,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
   # non-interactive bashs do not expand aliases by default
   shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
-  alias python="$PYTHON"
+  alias python='$PYTHON'
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
 fi
@@ -45,7 +45,7 @@ fatal() { error "$@"; exit 1; }
 # - remaining args:  names of traps to modify
 #
 trap_add() {
-    trap_add_cmd=$1; shift || fatal "${FUNCNAME} usage error"
+    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
     for trap_add_name in "$@"; do
         trap -- "$(
             # helper fn to get existing trap command from output
@@ -116,6 +116,7 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
+  # shellcheck disable=SC2034
   BUILD_TEST_LIBTORCH=0
 fi
 
@@ -138,5 +139,5 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
 fi
 
 retry () {
-  $*  || (sleep 1 && $*) || (sleep 2 && $*)
+  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
 }
