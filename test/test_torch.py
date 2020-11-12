@@ -19396,7 +19396,7 @@ else:
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                           include_bool=True, include_complex=False)))
+                                           include_bool=True, include_complex=True)))
     def test_all_any_vs_numpy(self, device, dtype):
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
@@ -19405,11 +19405,11 @@ else:
         def _test_all_any_with_dim(x, dim):
             torch_fn = partial(torch.all, dim=dim)
             np_fn = partial(np.all, axis=dim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
 
             torch_fn = partial(torch.any, dim=dim)
             np_fn = partial(np.any, axis=dim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
 
         for ndim in range(5):
             shape = self._rand_shape(ndim, 1, 5)
