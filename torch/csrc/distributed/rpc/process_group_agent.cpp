@@ -90,7 +90,7 @@ void ProcessGroupAgent::collectNames() {
 
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
-    std::shared_ptr<c10d::ProcessGroup> pg,
+    c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
     std::unique_ptr<RequestCallback> cb)
@@ -398,7 +398,7 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
 
   // ProcessGroup is not thread-safe when sending with the same tag,
   // hence the lock
-  std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
+  std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> pendingSends;
   const auto dst = work.to_.id_;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
