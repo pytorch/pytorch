@@ -8172,6 +8172,8 @@ with the default keyword arguments.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
+Supports real-valued and complex-valued inputs.
+
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
                 :math:`*` is zero of more batch dimensions (:math:`b`)
