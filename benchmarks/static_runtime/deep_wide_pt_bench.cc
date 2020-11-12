@@ -113,8 +113,8 @@ static void BM_deep_wide_static_threaded(benchmark::State& state) {
   }
 }
 
-static void BM_leaky_relu(benchmark::State& state) {
-  auto mod = getLeakyReLUScriptModel();
+static void BM_leaky_relu_const(benchmark::State& state) {
+  auto mod = getLeakyReLUConstScriptModel();
   auto g = torch::jit::PrepareForStaticRuntime(mod);
   torch::jit::StaticRuntime runtime(g);
 
@@ -128,7 +128,24 @@ static void BM_leaky_relu(benchmark::State& state) {
   }
 }
 
+static void BM_leaky_relu(benchmark::State& state) {
+  auto mod = getLeakyReLUScriptModel();
+  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(g);
+
+  const int batch_size = state.range(0);
+  auto neg_slope = torch::randn({1});
+  auto data = torch::randn({batch_size, num_features});
+  std::vector<at::Tensor> inputs({data, neg_slope});
+
+  runtime.run(inputs);
+  for (auto _ : state) {
+    runtime.run(inputs);
+  }
+}
+
 BENCHMARK(BM_leaky_relu)->RangeMultiplier(8)->Ranges({{1, 20}});
+BENCHMARK(BM_leaky_relu_const)->RangeMultiplier(8)->Ranges({{1, 20}});
 BENCHMARK(BM_deep_wide_base)->RangeMultiplier(8)->Ranges({{1, 20}});
 BENCHMARK(BM_deep_wide_fast)->RangeMultiplier(8)->Ranges({{1, 20}});
 

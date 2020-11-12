@@ -132,3 +132,5 @@ torch::jit::Module getDeepAndWideSciptModel(int num_features = 50);
 torch::jit::Module getTrivialScriptModel();
 
 torch::jit::Module getLeakyReLUScriptModel();
+
+torch::jit::Module getLeakyReLUConstScriptModel();

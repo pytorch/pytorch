@@ -38,13 +38,22 @@ const std::string trivial_model_1 = R"JIT(
       return a + b * c + s
 )JIT";
 
-const std::string leaky_relu_model = R"JIT(
+const std::string leaky_relu_model_const = R"JIT(
   def forward(self, input):
       x = torch.leaky_relu(input, 0.1)
       x = torch.leaky_relu(x, 0.1)
       x = torch.leaky_relu(x, 0.1)
       x = torch.leaky_relu(x, 0.1)
       return torch.leaky_relu(x, 0.1)
+)JIT";
+
+const std::string leaky_relu_model = R"JIT(
+  def forward(self, input, neg_slope):
+      x = torch.leaky_relu(input, neg_slope[0])
+      x = torch.leaky_relu(x, neg_slope[0])
+      x = torch.leaky_relu(x, neg_slope[0])
+      x = torch.leaky_relu(x, neg_slope[0])
+      return torch.leaky_relu(x, neg_slope[0])
 )JIT";
 
 
@@ -95,5 +104,11 @@ torch::jit::Module getTrivialScriptModel() {
 torch::jit::Module getLeakyReLUScriptModel() {
   torch::jit::Module module("leaky_relu");
   module.define(leaky_relu_model);
+  return module;
+}
+
+torch::jit::Module getLeakyReLUConstScriptModel() {
+  torch::jit::Module module("leaky_relu_const");
+  module.define(leaky_relu_model_const);
   return module;
 }
