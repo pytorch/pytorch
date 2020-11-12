@@ -1734,49 +1734,6 @@ class TestLinalg(TestCase):
         check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
                                r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
 
-<<<<<<< HEAD
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
-    def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        def run_test(shape, batch, contiguous):
-            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
-            if A.numel() > 0 and not contiguous:
-                A = A.transpose(-2, -1)
-                self.assertFalse(A.is_contiguous())
-            expected_L = np.linalg.cholesky(A.cpu().numpy())
-            actual_L = torch.linalg.cholesky(A)
-
-            # For fp32 individual entries in matrices can differ between PyTorch and NumPy
-            # Let's compare the norms of matrices instead
-            if A.numel() > 0 and dtype in [torch.float32, torch.complex64]:
-                # axis is specified to calculate matrix norm for batched input
-                expected_norm = np.linalg.norm(expected_L, ord=1, axis=(-2, -1))
-                actual_norm = torch.linalg.norm(actual_L, ord=1, axis=(-2, -1))
-                # Compare the norms with standard tolerances
-                self.assertEqual(actual_norm, expected_norm)
-                # and individual values with a higher tolerance
-                self.assertEqual(actual_L, expected_L, atol=1e-2, rtol=1e-5)
-            else:
-                self.assertEqual(actual_L, expected_L)
-
-        shapes = (0, 3, 5)
-        batches = ((), (3, ), (2, 2))
-        larger_input_case = [(100, (5, ), True)]
-        for shape, batch, contiguous in list(itertools.product(shapes, batches, (True, False))) + larger_input_case:
-            run_test(shape, batch, contiguous)
-
-        # check the out= variant
-        A = random_hermitian_pd_matrix(3, 3, dtype=dtype, device=device)
-        out = torch.empty_like(A)
-        ans = torch.linalg.cholesky(A, out=out)
-        self.assertEqual(ans, out)
-        expected = torch.linalg.cholesky(A)
-        self.assertEqual(expected, out)
-=======
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):
         triangle_function = torch.triu if upper else torch.tril
@@ -1795,214 +1752,10 @@ class TestLinalg(TestCase):
         if unitriangular:
             A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
         return b, A_triangular
->>>>>>> upstream/master
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-<<<<<<< HEAD
-    def test_cholesky_errors_and_warnings(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        # cholesky requires the input to be a square matrix or batch of square matrices
-        A = torch.randn(2, 3, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
-            torch.linalg.cholesky(A)
-        A = torch.randn(2, 2, 3, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
-            torch.linalg.cholesky(A)
-        with self.assertRaisesRegex(np.linalg.LinAlgError, r'Last 2 dimensions of the array must be square'):
-            np.linalg.cholesky(A.cpu().numpy())
-
-        # cholesky requires the input to be at least 2 dimensional tensor
-        A = torch.randn(2, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
-            torch.linalg.cholesky(A)
-        with self.assertRaisesRegex(np.linalg.LinAlgError,
-                                    r'1-dimensional array given\. Array must be at least two-dimensional'):
-            np.linalg.cholesky(A.cpu().numpy())
-
-        # if the input matrix is singular, an error should be raised
-        A = torch.eye(3, 3, dtype=dtype, device=device)
-        A[-1, -1] = 0  # Now A is singular
-        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
-            torch.linalg.cholesky(A)
-        with self.assertRaisesRegex(np.linalg.LinAlgError, r'Matrix is not positive definite'):
-            np.linalg.cholesky(A.cpu().numpy())
-
-        # if at least one matrix in the batch is singular, an error should be raised
-        A = torch.eye(3, 3, dtype=dtype, device=device)
-        A = A.reshape((1, 3, 3))
-        A = A.repeat(5, 1, 1)
-        A[4, -1, -1] = 0  # Now A[4] is singular
-        with self.assertRaisesRegex(RuntimeError, r'For batch 4: U\(3,3\) is zero, singular U\.'):
-            torch.linalg.cholesky(A)
-
-        # if out tensor with wrong shape is passed a warning is given
-        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
-        out = torch.empty(2, 3, dtype=dtype, device=device)
-        with warnings.catch_warnings(record=True) as w:
-            # Trigger warning
-            torch.linalg.cholesky(A, out=out)
-            # Check warning occurs
-            self.assertEqual(len(w), 1)
-            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
-
-        # dtypes should match
-        out = torch.empty_like(A).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
-            torch.linalg.cholesky(A, out=out)
-
-    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
-    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    def test_cholesky_xfailed(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-        A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
-        expected_L = np.linalg.cholesky(A.cpu().numpy())
-        actual_L = torch.linalg.cholesky(A)
-        self.assertEqual(actual_L, expected_L)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float64, torch.complex128)
-    @dtypes(torch.float64)
-    def test_cholesky_autograd(self, device, dtype):
-        def func(root):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.linalg.cholesky(x)
-
-        def run_test(shape):
-            root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
-            root = root + torch.eye(shape[-1], dtype=dtype, device=device)
-
-            gradcheck(func, root)
-            gradgradcheck(func, root)
-
-            root = torch.rand(*shape, dtype=dtype, device=device)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
-            root.requires_grad_()
-            chol = torch.linalg.cholesky(root).sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
-
-        shapes = ((3, 3), (4, 3, 2, 2))
-        for shape in shapes:
-            run_test(shape)
-
-    # TODO: enable CUDA tests once (merge with above test)
-    # RuntimeError: "triangular_solve_cuda" not implemented for 'ComplexDouble' is fixed
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex128)
-    def test_cholesky_autograd_xfailed(self, device, dtype):
-        def func(root):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.linalg.cholesky(x)
-
-        shape = (3, 3)
-        root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
-        root = root + torch.eye(shape[-1], dtype=dtype, device=device)
-        gradcheck(func, root)
-
-    # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
-    @slowTest
-    @skipCUDAIf(True, "See issue #26789.")
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_old_cholesky_batched_many_batches(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
-
-        def cholesky_test_helper(n, batchsize, device, upper):
-            A = random_symmetric_pd_matrix(n, batchsize, dtype=dtype, device=device)
-            chol_fact = torch.cholesky(A, upper=upper)
-            if upper:
-                # Correctness check
-                self.assertEqual(A, chol_fact.transpose(-2, -1).matmul(chol_fact))
-                # Upper triangular check
-                self.assertEqual(chol_fact, chol_fact.triu())
-            else:
-                # Correctness check
-                self.assertEqual(A, chol_fact.matmul(chol_fact.transpose(-2, -1)))
-                # Lower triangular check
-                self.assertEqual(chol_fact, chol_fact.tril())
-
-        for upper, batchsize in itertools.product([True, False], [262144, 524288]):
-            cholesky_test_helper(2, batchsize, device, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_old_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import \
-            (random_symmetric_pd_matrix,
-             random_fullrank_matrix_distinct_singular_value)
-
-        def cholesky_test_helper(n, batch_dims, upper):
-            # This is a workaround while there is no support for batched complex random_symmetric_pd_matrix
-            if dtype.is_complex:
-                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims,
-                                                                        dtype=real_dtype, device=device)
-                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims,
-                                                                        dtype=real_dtype, device=device)
-                A = A_real + 1j * A_imag
-                # There is no support for complex batched matmul yet
-                matmul_list = []
-                for mat in A.contiguous().view(-1, n, n):
-                    matmul_list.append(mat @ mat.t().conj())
-                A = torch.stack(matmul_list).view(*batch_dims, n, n)
-            else:
-                A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
-            cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
-            cholesky_exp = cholesky_exp.reshape_as(A)
-            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
-
-        for upper, batchsize in itertools.product([True, False], [(3,), (3, 4), (2, 3, 4)]):
-            cholesky_test_helper(3, batchsize, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @tf32_on_and_off(0.01)
-    def test_old_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        A = random_hermitian_pd_matrix(10, dtype=dtype, device=device)
-
-        # default Case
-        C = torch.cholesky(A)
-        B = torch.mm(C, C.t().conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0)
-
-        # test Upper Triangular
-        U = torch.cholesky(A, True)
-        B = torch.mm(U.t().conj(), U)
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
-
-        # test Lower Triangular
-        L = torch.cholesky(A, False)
-        B = torch.mm(L, L.t().conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_old_cholesky_empty(self, device, dtype):
-        def run_test(upper):
-            A = torch.empty(0, 0, dtype=dtype, device=device)
-            chol = torch.cholesky(A, upper)
-            chol_A = torch.matmul(chol, chol.t().conj())
-            self.assertEqual(A, chol_A)
-        for upper in [True, False]:
-            run_test(upper)
-=======
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_triangular_solve(self, device, dtype):
@@ -2128,33 +1881,10 @@ class TestLinalg(TestCase):
             run_test((2, 1, 3, 4, 4), (4, 6), device, upper, transpose, unitriangular)  # broadcasting b
             run_test((4, 4), (2, 1, 3, 4, 2), device, upper, transpose, unitriangular)  # broadcasting A
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), device, upper, transpose, unitriangular)  # broadcasting A & b
->>>>>>> upstream/master
 
     @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-<<<<<<< HEAD
-    def test_old_cholesky_autograd(self, device, dtype):
-        def func(root, upper):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.cholesky(x, upper)
-
-        def run_test(upper, dims):
-            root = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
-            root = root + torch.eye(dims[-1])
-
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
-
-            root = torch.rand(*dims, dtype=dtype, device=device)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
-            root.requires_grad_()
-            chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
-
-        for upper, dims in itertools.product([True, False], [(3, 3), (4, 3, 2, 2)]):
-            run_test(upper, dims)
-=======
     def test_triangular_solve_singular(self, device, dtype):
         b = torch.rand(3, 1, dtype=dtype, device=device)
         A = torch.eye(3, 3, dtype=dtype, device=device)
@@ -2182,7 +1912,6 @@ class TestLinalg(TestCase):
         run_test((3, 3), (3, 2))
         run_test((2, 3, 3), (2, 3, 4))
         run_test((2, 3, 3), (2, 3, 2))
->>>>>>> upstream/master
 
 instantiate_device_type_tests(TestLinalg, globals())
 
