@@ -24,6 +24,10 @@ from ..quantize import (
     is_activation_post_process
 )
 
+from ..utils import (
+    get_combined_dict
+)
+
 from .pattern_utils import (
     is_match,
     get_default_quant_patterns,
@@ -233,9 +237,7 @@ class Quantizer:
 
 
     def _qat_swap_modules(self, root, additional_qat_module_mapping):
-        all_mappings = get_default_qat_module_mappings().copy()
-        for k, v in additional_qat_module_mapping.items():
-            all_mappings[k] = v
+        all_mappings = get_combined_dict(get_default_qat_module_mappings(), additional_qat_module_mapping)
         convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self,
@@ -327,10 +329,9 @@ class Quantizer:
         """
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
+
         additional_quant_patterns = prepare_custom_config_dict.get("additional_quant_pattern", {})
-        self.patterns = get_default_quant_patterns().copy()
-        for k, v in additional_quant_patterns.items():
-            self.patterns[k] = v
+        self.patterns = get_combined_dict(get_default_quant_patterns(), additional_quant_patterns)
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
