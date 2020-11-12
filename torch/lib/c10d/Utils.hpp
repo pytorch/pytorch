@@ -1,8 +1,5 @@
 #pragma once
 
-#ifndef _WIN32
-#include <sys/socket.h>
-#endif
 #include <sys/types.h>
 
 #include <chrono>
@@ -23,6 +20,9 @@
 #include <winsock2.h>
 typedef SSIZE_T ssize_t;
 #pragma comment(lib, "Ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <unistd.h>
 #endif
 
 namespace c10d {

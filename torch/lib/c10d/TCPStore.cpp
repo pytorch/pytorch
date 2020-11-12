@@ -22,6 +22,14 @@ enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
 enum class WaitResponseType : uint8_t { STOP_WAITING };
 
+void addPollfd(std::vector<struct pollfd>& fds, int socket, short events) {
+#ifdef _WIN32
+  fds.push_back({(SOCKET)socket, events});
+#else
+  fds.push_back({.fd = socket, .events = events});
+#endif
+}
+
 } // anonymous namespace
 
 // TCPStoreDaemon class methods
@@ -328,14 +336,6 @@ bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
   return std::all_of(keys.begin(), keys.end(), [this](const std::string& s) {
     return tcpStore_.count(s) > 0;
   });
-}
-
-void TCPStoreDaemon:: addPollfd(std::vector<struct pollfd>& fds, int socket, short events) {
-#ifdef _WIN32
-  fds.push_back({(SOCKET)socket, events});
-#else
-  fds.push_back({.fd = socket, .events = events});
-#endif
 }
 
 // TCPStore class methods

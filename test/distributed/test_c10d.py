@@ -18,6 +18,7 @@ from sys import platform
 import torch
 import torch.distributed as c10d
 import torch.distributed as dist
+from torch._C._distributed_c10d import TCPStore
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
@@ -267,7 +268,7 @@ def create_tcp_store(addr):
         try:
             port = common.find_free_port()
             ports.append(port)
-            return c10d.TCPStore(addr, port, 1, True)
+            return TCPStore(addr, port, 1, True)
         except RuntimeError as error:
             if str(error) == "Address already in use":
                 continue
@@ -293,8 +294,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
-            store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
+            store1 = TCPStore(addr, port, 1, True)  # noqa: F841
+            store2 = TCPStore(addr, port, 1, True)  # noqa: F841
 
     def _test_numkeys_delkeys(self, fs):
         # We start off with one init key in the store to coordinate workers

@@ -35,7 +35,6 @@ class TCPStoreDaemon {
   void getNumKeysHandler(int socket) const;
   void deleteHandler(int socket);
   void waitHandler(int socket);
-  void addPollfd(std::vector<struct pollfd>& fds, int socket, short events);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   void wakeupWaitingClients(const std::string& key);
