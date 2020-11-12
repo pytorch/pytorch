@@ -538,7 +538,7 @@ terrible spacing
         m = resnet18()
         traced = symbolic_trace(m)
         a = torch.rand(64, 3, 7, 7)
-        module_with_submodules = split_module(traced,m,lambda node: 0)
+        module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
 
     def test_traceable_function_with_nonstandard_name(self):
