@@ -692,6 +692,30 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
+        def is_output_quantized(node):
+            """ Check if output node is quantized or not """
+            if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
+                quantized = self.modules[node.target]._output_is_observed
+            else:
+                quantized = True
+
+            # Need to get correct quantized/non-quantized state for the output of CopyNode
+            if type(obj) in [
+                    CopyNode,
+                    FixedQParamsOpQuantizeHandler
+            ]:
+                assert node.op in [
+                    'call_module',
+                    'call_function',
+                    'call_method'], \
+                    'CopyNode of type ' + node.op + ' is not handled'
+                quantized = is_quantized(node.args[0])
+
+            if not activation_is_statically_quantized(qconfig):
+                quantized = False
+
+            return quantized
+
         for node in model.graph.nodes:
             if node.op == 'output':
                 if is_standalone_module:
@@ -708,25 +732,7 @@ class Quantizer:
                     quantized = False
                 else:
                     result = obj.convert(self, node, load_arg, debug=debug, convert_custom_config_dict=convert_custom_config_dict)
-                    if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
-                        quantized = self.modules[node.target]._output_is_observed
-                    else:
-                        quantized = True
-
-                    # Need to get correct quantized/non-quantized state for the output of CopyNode
-                    if type(obj) in [
-                            CopyNode,
-                            FixedQParamsOpQuantizeHandler
-                    ]:
-                        assert node.op in [
-                            'call_module',
-                            'call_function',
-                            'call_method'], \
-                            'CopyNode of type ' + node.op + ' is not handled'
-                        quantized = is_quantized(node.args[0])
-
-                    if not activation_is_statically_quantized(qconfig):
-                        quantized = False
+                    quantized = is_output_quantized(node)
 
                 if quantized:
                     quant_env[node.name] = result
