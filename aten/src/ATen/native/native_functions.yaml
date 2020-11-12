@@ -2206,6 +2206,7 @@
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
+    Math: math_native_layer_norm
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
