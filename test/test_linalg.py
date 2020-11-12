@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoMagmaAndNoCusolver, onlyOnCPUAndCUDA)
+     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck, gradgradcheck
 
@@ -886,6 +886,7 @@ class TestLinalg(TestCase):
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
+    @skipCUDAIfRocm
     def test_norm_fro_2_equivalence_old(self, device, dtype):
         input_sizes = [
             (0,),
