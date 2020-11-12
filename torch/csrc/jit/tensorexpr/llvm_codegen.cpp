@@ -1,6 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
 #include <memory>
@@ -23,6 +24,7 @@
 #endif
 
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/half_support.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -310,6 +312,11 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   module_->setDataLayout(assertSuccess(JTMB.getDefaultDataLayoutForTarget()));
   module_->setTargetTriple(JTMB.getTargetTriple().str());
 
+  // We support float16 ops by casting expr inputs to float32
+  // and then casting the result back to float16
+  HalfRewriter hsFix;
+  stmt = stmt->accept_mutator(&hsFix);
+
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
@@ -424,25 +431,25 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     int lanes = dtype.lanes();
     // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
     // times. Clamp the input expression to [-9, 9]
-    ExprHandle plus_9 = to_vec(9.0f, lanes);
-    ExprHandle minus_9 = to_vec(-9.0f, lanes);
+    ExprHandle plus_9 = float_to_vec(9.0f, lanes);
+    ExprHandle minus_9 = float_to_vec(-9.0f, lanes);
     ExprHandle v1 = Min::make(v, plus_9, false);
     v1 = Max::make(v1, minus_9, false);
 
     // The coefficients for the numerator
-    ExprHandle alpha_1 = to_vec(4.89352455891786e-03f, lanes);
-    ExprHandle alpha_3 = to_vec(6.37261928875436e-04f, lanes);
-    ExprHandle alpha_5 = to_vec(1.48572235717979e-05f, lanes);
-    ExprHandle alpha_7 = to_vec(5.12229709037114e-08f, lanes);
-    ExprHandle alpha_9 = to_vec(-8.60467152213735e-11f, lanes);
-    ExprHandle alpha_11 = to_vec(2.00018790482477e-13f, lanes);
-    ExprHandle alpha_13 = to_vec(-2.76076847742355e-16f, lanes);
+    ExprHandle alpha_1 = float_to_vec(4.89352455891786e-03f, lanes);
+    ExprHandle alpha_3 = float_to_vec(6.37261928875436e-04f, lanes);
+    ExprHandle alpha_5 = float_to_vec(1.48572235717979e-05f, lanes);
+    ExprHandle alpha_7 = float_to_vec(5.12229709037114e-08f, lanes);
+    ExprHandle alpha_9 = float_to_vec(-8.60467152213735e-11f, lanes);
+    ExprHandle alpha_11 = float_to_vec(2.00018790482477e-13f, lanes);
+    ExprHandle alpha_13 = float_to_vec(-2.76076847742355e-16f, lanes);
 
     // The coeffecients for the denominator
-    ExprHandle beta_0 = to_vec(4.89352518554385e-03f, lanes);
-    ExprHandle beta_2 = to_vec(2.26843463243900e-03f, lanes);
-    ExprHandle beta_4 = to_vec(1.18534705686654e-04f, lanes);
-    ExprHandle beta_6 = to_vec(1.19825839466702e-06f, lanes);
+    ExprHandle beta_0 = float_to_vec(4.89352518554385e-03f, lanes);
+    ExprHandle beta_2 = float_to_vec(2.26843463243900e-03f, lanes);
+    ExprHandle beta_4 = float_to_vec(1.18534705686654e-04f, lanes);
+    ExprHandle beta_6 = float_to_vec(1.19825839466702e-06f, lanes);
 
     // numerator
     ExprHandle v2 = v1 * v1;
@@ -467,20 +474,16 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     // sigmoid(x) = (tanh(x / 2) + 1) / 2
     ExprHandle x{v_ptr};
     int lanes = x.dtype().lanes();
-    ExprHandle one_v = to_vec(1.f, lanes);
-    ExprHandle half_v = to_vec(0.5f, lanes);
+    ExprHandle one_v = float_to_vec(1.f, lanes);
+    ExprHandle half_v = float_to_vec(0.5f, lanes);
     ExprHandle x2 = x * half_v;
     ExprHandle y{fast_tanh(x2.node())};
     ExprHandle z = (y + one_v) * half_v;
     return z.node();
   }
 
-  ExprHandle to_vec(float v, int lanes) {
-    if (lanes == 1) {
-      return v;
-    } else {
-      return Broadcast::make(v, lanes);
-    }
+  ExprHandle float_to_vec(float v, int lanes) {
+    return expr_to_vec(FloatImm::make(v), lanes);
   }
 };
 
@@ -1627,6 +1630,26 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         throw unimplemented_lowering(v);
       } break;
     }
+  } else if (v->dtype().is_integral() && v->op_type() == kFabs) {
+    // abs is only intrinsic defined for integer inputs in pytorch eager
+    v->params().front()->accept(this);
+    if (is_unsigned_integral(v->dtype().scalar_type())) {
+      return;
+    }
+    // TODO: use llvm.abs intrinsic for LLVM 12
+    auto zero = llvm::ConstantInt::get(value_->getType(), 0);
+    auto neg_value = irb_.CreateSub(zero, value_);
+    auto icmp = irb_.CreateICmpSGT(value_, zero);
+    value_ = irb_.CreateSelect(icmp, value_, neg_value);
+    return;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        v,
+        "Unimplemented lowering:",
+        v->op_type(),
+        " for input of dtype",
+        v->dtype().scalar_dtype());
   }
 
   std::vector<llvm::Value*> params;

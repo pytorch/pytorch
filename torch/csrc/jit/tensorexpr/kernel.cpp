@@ -420,7 +420,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
 
 ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
   auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (!c10::isIntegralType(scalarType)) {
+  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
     return e;
   }
   auto defaultType = static_cast<tensorexpr::ScalarType>(
