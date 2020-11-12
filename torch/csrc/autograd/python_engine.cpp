@@ -49,6 +49,10 @@ Engine& PythonEngine::get_python_engine() {
   return engine;
 }
 
+void at_exit() {
+  PythonEngine::get_python_engine().stop_device_threads();
+}
+
 void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
   // Increment thread usage count before acquiring the GIL
   if (should_increment) {
@@ -349,5 +353,6 @@ bool THPEngine_initModule(PyObject *module)
   Py_INCREF(&THPEngineType);
   PyModule_AddObject(module, "_ImperativeEngine", (PyObject *)&THPEngineType);
   set_default_engine_stub(python::PythonEngine::get_python_engine);
+  Py_AtExit(python::at_exit);
   return true;
 }

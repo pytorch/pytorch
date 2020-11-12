@@ -9,6 +9,8 @@ bool THPEngine_initModule(PyObject *module);
 
 namespace torch { namespace autograd { namespace python {
 
+void at_exit();
+
 struct PythonEngine : public Engine {
   static Engine& get_python_engine();
   void thread_init(int device,

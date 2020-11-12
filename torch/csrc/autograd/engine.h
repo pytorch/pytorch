@@ -24,6 +24,9 @@
 
 namespace torch { namespace autograd {
 struct ReadyQueue;
+namespace python {
+void at_exit();
+} // namespace torch::autograd::python
 }} // namespace torch::autograd
 
 namespace torch { namespace autograd {
@@ -318,6 +321,7 @@ struct TORCH_API Engine {
       bool should_increment = true);
 
  protected:
+  friend void torch::autograd::python::at_exit();
   Engine();
   void compute_dependencies(Node* root, GraphTask& task);
 
@@ -335,6 +339,7 @@ struct TORCH_API Engine {
   // start device threads (CUDA, XLA, etc.) in Engine,
   // note that it does NOT start CPU thread.
   void start_device_threads();
+  void stop_device_threads();
   void increment_non_reentrant_thread_count();
   void decrement_non_reentrant_thread_count();
   virtual void thread_main(const std::shared_ptr<GraphTask>& task);
