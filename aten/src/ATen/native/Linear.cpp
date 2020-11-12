@@ -255,10 +255,12 @@ Tensor einsum(std::string equation, TensorList operands) {
 
   // Start index of ellipsis dimensions in the permuted shape
   int64_t ell_index = 0;
+  found_ell = false;
 
   if (arrow_pos == std::string::npos) {
     // Implicit output is ellipsis (...) + labels seen only once
     perm_index = ell_num_dim;
+    found_ell = true;
     for (int label = 0; label < total_labels; ++label) {
       if (label_count[label] == 1) {
         label_perm_index[label] = perm_index++;
@@ -267,7 +269,6 @@ Tensor einsum(std::string equation, TensorList operands) {
   } else {
     // Parse explicit output
     std::string rhs = equation.substr(arrow_pos + 2);
-    found_ell = false;
     for (std::size_t i = 0; i < rhs.length(); ++i) {
       switch (rhs[i]) {
         case ' ':
@@ -309,15 +310,16 @@ Tensor einsum(std::string equation, TensorList operands) {
           label_count[rhs[i] - 'a'] = -1;
       }
     }
-
-    TORCH_CHECK(
-        // Dimensions under ellipsis are not contracted, so ensure it appears in output
-        ell_num_dim <= 0 || found_ell,
-        "einsum() ellipsis (...) covering one or more dimensions was given in the input but not in the output");
   }
 
   // Save output size before adding sum dims
   int out_size = perm_index;
+
+  // If ellipsis is not part of the output, add to contraction dimensions
+  if (ell_num_dim > 0 && !found_ell) {
+    ell_index = perm_index;
+    perm_index += ell_num_dim;
+  }
 
   // Add contraction labels (labels not present in output)
   for (int label = 0; label < total_labels; ++label) {
