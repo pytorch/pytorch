@@ -1,11 +1,33 @@
 import sys
-from typing import TYPE_CHECKING
+from typing import Any, Callable, Dict, TYPE_CHECKING
 
 
 if TYPE_CHECKING or sys.version_info >= (3, 8):
-    from typing import Protocol
+    from typing import runtime_checkable, Protocol
 else:
-    from typing_extensions import Protocol
+    from typing_extensions import runtime_checkable, Protocol
+
+
+class TimerClass(Protocol):
+    """This is the portion of the `timeit.Timer` API used by benchmark utils."""
+    def __init__(
+        self,
+        stmt: str,
+        setup: str,
+        timer: Callable[[], float],
+        globals: Dict[str, Any]
+    ) -> None:
+        ...
+
+    def timeit(self, number: int) -> float:
+        ...
+
+
+@runtime_checkable
+class TimeitModuleType(Protocol):
+    """Modules generated from `timeit_template.cpp`."""
+    def timeit(self, number: int) -> float:
+        ...
 
 
 class CallgrindModuleType(Protocol):

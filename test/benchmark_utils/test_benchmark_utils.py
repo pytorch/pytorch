@@ -162,6 +162,16 @@ class TestBenchmarkUtils(TestCase):
         ).timeit(5).median
         self.assertIsInstance(sample, float)
 
+    @slowTest
+    def test_cpp_timer(self):
+        timer = benchmark_utils.Timer(
+            "torch::Tensor y = x + 1;",
+            setup="torch::Tensor x = torch::empty({1});",
+            language=benchmark_utils.Language.CPP,
+        )
+        t = timer.timeit(10)
+        self.assertIsInstance(t.median, float)
+
     class _MockTimer:
         _seed = 0
 
