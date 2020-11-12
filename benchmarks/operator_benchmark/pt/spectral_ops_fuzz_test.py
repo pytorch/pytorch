@@ -16,7 +16,7 @@ MAX_DIM_SIZE = 16 * 1024
 def power_range(upper_bound, base):
     return (base ** i for i in range(int(math.log(upper_bound, base)) + 1))
 
-# List of regular numbers from _MIN_DIM_SIZE to _MAX_DIM_SIZE
+# List of regular numbers from MIN_DIM_SIZE to MAX_DIM_SIZE
 # These numbers factorize into multiples of prime factors 2, 3, and 5 only
 # and are usually the fastest in FFT implementations.
 REGULAR_SIZES = []
