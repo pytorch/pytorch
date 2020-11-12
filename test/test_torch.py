@@ -4141,6 +4141,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # We can't usefully test the output; just make sure this doesn't crash
             torch.__config__.show()
 
+        def test_cxx_flags(self):
+            torch.__config__._cxx_flags()
+
         def test_parallel_info(self):
             torch.__config__.parallel_info()
 
