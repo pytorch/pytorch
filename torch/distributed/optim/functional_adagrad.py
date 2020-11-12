@@ -13,8 +13,7 @@ from torch import Tensor
 # without data traces on accumulating to the same .grad.
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
-@torch.jit.script
-class _FunctionalAdagrad(object):
+class __FunctionalAdagrad(object):
     def __init__(
         self,
         params: List[Tensor],
@@ -88,3 +87,9 @@ class _FunctionalAdagrad(object):
                       self.defaults['weight_decay'],
                       self.defaults['lr_decay'],
                       self.defaults['eps'])
+
+def script_FunctionalAdagrad():
+    torch.jit.script(__FunctionalAdagrad)
+    return __FunctionalAdagrad
+
+_FunctionalAdagrad = script_FunctionalAdagrad()

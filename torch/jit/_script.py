@@ -287,7 +287,7 @@ if _enabled:
 
         def __getattr__(self, attr):
             if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
-                return super(RecursiveScriptClass, self).__getattr__(attr)
+                return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore
 
             if attr in self._props:
                 return self._props[attr].fget()
@@ -317,9 +317,6 @@ if _enabled:
 
         def __iter__(self):
             return self.forward_magic_method("__iter__")
-
-        def __getitem__(self, idx):
-            return self.forward_magic_method("__getitem__", idx)
 
         def __len__(self):
             return self.forward_magic_method("__len__")
@@ -879,12 +876,12 @@ if _enabled:
 
 else:
 
-    class ScriptClass(object):
+    class ScriptClass(object):  # type: ignore
         def __init__(self):
             super().__init__()
 
     # TODO MAKE SURE THAT DISABLING WORKS
-    class RecursiveScriptClass(object):
+    class RecursiveScriptClass(object):  # type: ignore
         def __init__(self):
             super().__init__()
 
