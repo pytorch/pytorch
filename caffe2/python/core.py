@@ -1506,6 +1506,10 @@ class Net(object):
         # make sure that this net name hasn't been used before
         self._net.name = Net._get_next_net_name(name)
 
+        # a map between prefix and ID for fast generation of blob names
+        self._next_blob_name_ids = {}
+
+
     def AppendNet(self, net, device_option=None):
         assert isinstance(net, Net)
         for i in net.Proto().external_input:
@@ -1937,12 +1941,14 @@ class Net(object):
             output_name = output_name_base
             if output_id is not None:
                 output_name += ':' + str(output_id)
-            index = 2
+            key = output_name
+            index = self._next_blob_name_ids.get(key, 2)
             while self.BlobIsDefined(str(ScopedBlobReference(output_name))):
                 output_name = output_name_base + '_' + str(index)
                 if output_id is not None:
                     output_name += ':' + str(output_id)
                 index += 1
+                self._next_blob_name_ids[key] = index
         else:
             output_name = self._net.name + '_blob_' + str(self._next_name_index)
             self._next_name_index += 1
