@@ -1027,6 +1027,13 @@ def parse_kineto_results(result):
             mem_records.append(record)
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
 
+    cuda_corr_map = {}
+    for kineto_event in result.events():
+        if kineto_event.device_type() == 1: # CUDA
+            if kineto_event.correlation_id() not in cuda_corr_map:
+                cuda_corr_map[kineto_event.correlation_id()] = []
+            cuda_corr_map[kineto_event.correlation_id()].append(kineto_event)
+
     # Create and return FunctionEvent list
     string_table = StringTable()
     function_events = []
@@ -1062,15 +1069,14 @@ def parse_kineto_results(result):
             device_type=kineto_event.device_type(),
         )
         # associate CUDA kernels with a CPU event
-        if kineto_event.device_type() == 0 and not is_async:
-            for evt in result.events():
-                if evt.device_type == 1: # CUDA
-                    if evt.correlation_id == kineto_event.correlation_id:
-                        fe.append_kernel(
-                            evt.name(),
-                            evt.device_index(),
-                            evt.start_us(),
-                            evt.start_us() + evt.duration_us())
+        if (kineto_event.device_type() == 0 and not is_async and
+                kineto_event.correlation_id() in cuda_corr_map):
+            for evt in cuda_corr_map[kineto_event.correlation_id()]:
+                fe.append_kernel(
+                    evt.name(),
+                    evt.device_index(),
+                    evt.start_us(),
+                    evt.start_us() + evt.duration_us())
         function_events.append(fe)
     function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return function_events
