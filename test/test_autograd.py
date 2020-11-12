@@ -4987,10 +4987,13 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'mean', 'inverse', 'triangular_solve', 'addcmul', 'addcdiv'] + separate_complex_tests
+                'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
+                'addcdiv'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
-skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex', 'inverse_batched_complex']
+skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex', 'inverse_batched_complex',
+                  'solve_batched_broadcast_A_complex', 'solve_batched_broadcast_b_complex',
+                  'solve_batched_complex', 'solve_batched_dims_complex']
 
 def add_test(
         name,
