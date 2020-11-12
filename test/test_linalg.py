@@ -1019,20 +1019,22 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
-    # Tests torch.linalg.svd, vs. NumPy
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_svd(self, device, dtype):
+    def test_svd_compute_uv(self, device, dtype):
+        """
+        Test the default case, compute_uv=True. Here we have the very same behavior as
+        numpy
+        """
         t = torch.randn((10, 11), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
-
         for full_matrices in (True, False):
-            # check linalg.svd agains numpy
+            # check linalg.svd vs numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
             actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
             self.assertEqual(actual, expected)
-            # check linalg.svd agains linalg.svd(out=...)
+            # check linalg.svd vs linalg.svd(out=...)
             out = (torch.empty_like(actual[0]),
                    torch.empty_like(actual[1]),
                    torch.empty_like(actual[2]))
@@ -1040,21 +1042,33 @@ class TestLinalg(TestCase):
             self.assertEqual(actual, out)
             self.assertEqual(actual, out2)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_svd_no_compute_uv(self, device, dtype):
+        """
+        Test the compute_uv=False case. Here we have a different return type than
+        numpy: numpy returns S, we return (empty, S, empty)
+        """
+        t = torch.randn((10, 11), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+        def is_empty(x):
+            return x.numel() == 0 and x.dtype == t.dtype and x.device == t.device
+
         for full_matrices in (True, False):
-            # check linalg.svd agains numpy
+            # check linalg.svd vs numpy
             np_s = np.linalg.svd(np_t, full_matrices, compute_uv=False)
             USV = torch.linalg.svd(t, full_matrices, compute_uv=False)
-            assert USV.U is None
+            assert is_empty(USV.U)
             self.assertEqual(USV.S, np_s)
-            assert USV.V is None
-            # check linalg.svd agains linalg.svd(out=...)
-            out_S = torch.empty_like(USV.S)
-            out = (torch.Tensor(), out_S, torch.Tensor())
+            assert is_empty(USV.V)
+            # check linalg.svd vs linalg.svd(out=...)
+            out = (torch.Tensor(), torch.empty_like(USV.S), torch.Tensor())
             USV = torch.linalg.svd(t, full_matrices, compute_uv=False, out=out)
-            assert USV.U is None
-            assert USV.S is out_S
+            assert USV.U is out[0]
+            assert USV.S is out[1]
+            assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
-            assert USV.V is None
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack

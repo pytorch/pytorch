@@ -140,10 +140,7 @@ Using the :attr:`dim` argument to compute matrix norms::
     (tensor(3.7417), tensor(11.2250))
 """)
 
-_add_docstr(_linalg.linalg_svd, "See ``linalg.svd``")
-
-def svd(a, full_matrices=True, compute_uv=True, out=None):
-    r"""
+svd = _add_docstr(_linalg.linalg_svd, r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, Vh)`` which is the singular value
@@ -162,12 +159,13 @@ decomposition of a input real matrix or batches of real matrices :attr:`input` s
                need to manually transpose and conjugate ``V`` in order to
                reconstruct the original matrix.
 
-             * If :attr:`compute_uv=False`, it returns ``None`` for ``U`` and
-               ``V``, whereas :meth:`~torch.svd` returns zero-filled tensors.
+             * If :attr:`compute_uv=False`, it returns empty tensors (i.e.,
+               with 0 elements) for ``U`` and ``V``, whereas
+               :meth:`~torch.svd` returns zero-filled tensors.
 
              **Differences with** ``numpy.linalg.svd``:
 
-             * if :attr:`compute_uv=False` it returns ``(None, S, None)``,
+             * if :attr:`compute_uv=False` it returns ``(empty_tensor, S, empty_tensor)``,
                whereas numpy returns ``S``.
 
 
@@ -210,8 +208,8 @@ Args:
                     batch dimensions consisting of :math:`m \times n` matrices.
     full_matrices (bool, optional): controls the shape of returned `U` and `V`
     compute_uv (bool, optional): option whether to compute `U` and `V` or not
-    out (tuple, optional): the output tuple of tensors. If compute_uv==False, only the 2nd item is used.
-                           The 1st and 3rd argument must be tensors, but they are ignored. E.g. you can
+    out (tuple, optional): the output tuple of tensors. If compute_uv=False, tThe 1st and 3rd
+                           argument must be tensors, but they are ignored. E.g. you can
                            pass `(torch.Tensor(), out_S, torch.Tensor())`
 
 Example::
@@ -245,19 +243,7 @@ Example::
     >>> u, s, vh = torch.linalg.svd(a_big, full_matrices=False)
     >>> torch.dist(a_big, u @ torch.diag_embed(s) @ vh)
     tensor(3.0957e-06)
-    """
-    if compute_uv:
-        # easy case, same semantics as the C++ version of linalg_svd
-        return _linalg.linalg_svd(a, full_matrices, compute_uv, out=out)
-
-    # harder case: C++ returns (0-tensor, S, 0-tensor) but we want to return
-    # (None, S, None) instead. Moreover, we want to return a value of type
-    # torch.return_types.linalg_svd (which is a PyStructSequence). However,
-    # this type is not directly exposed by pytorch, so we get a reference to
-    # it by calling type() on USV.
-    USV = _linalg.linalg_svd(a, full_matrices, compute_uv, out=out)
-    USV_type = type(USV)
-    return USV_type((None, USV.S, None))
+""")
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
