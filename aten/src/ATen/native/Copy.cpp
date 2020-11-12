@@ -120,7 +120,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
             at::internal::GRAIN_SIZE,
             [&](int64_t begin, int64_t end) {
               fbgemm::FloatToFloat16_simd(
-                  self.data_ptr<float>() + begin,
+                  src.data_ptr<float>() + begin,
                   output_ptr + begin,
                   end - begin);
             });

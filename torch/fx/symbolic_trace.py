@@ -75,6 +75,10 @@ class Tracer(TracerBase):
                 if a is p:
                     return self.create_node('get_attr', n, (), {})
             raise NameError('parameter is not a member of this module')
+        elif isinstance(a, torch.Tensor):
+            for n, p in self.root.named_buffers():
+                if a is p:
+                    return self.create_node('get_attr', n, (), {})
         # Tensors do not have a reliable string repr() from which they can be
         # constructed (and we probably don't want to rely on that, either), so
         # for any constant Tensor values we encounter, first search for if they
