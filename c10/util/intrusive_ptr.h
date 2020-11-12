@@ -218,7 +218,8 @@ class intrusive_ptr final {
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
-      if (--target_->weakcount_ == 0) {
+      if (target_->weakcount_.load(std::memory_order_acquire) == 1 ||
+          --target_->weakcount_ == 0) {
         delete target_;
       }
     }
@@ -247,6 +248,8 @@ class intrusive_ptr final {
       // and because we allow raising these values from 0, which retain_()
       // has an assertion against.
       ++target_->refcount_;
+      // NOTE: can't we leak memory by using this constructor on an
+      // object that was created with make_intrusive?
       ++target_->weakcount_;
     }
   }
