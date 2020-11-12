@@ -28,7 +28,7 @@ class TestE2EBase : public ::testing::Test {
     autogradContainer = getDistAutogradContainer();
 
     // Setup server store.
-    store = c10::make_intrusive<c10d::TCPStore>(
+    store = std::make_shared<c10d::TCPStore>(
         serverAddress, 0, numWorkers, true, std::chrono::seconds(10));
 
     buildRpcAgent();
@@ -147,7 +147,7 @@ class TestE2EBase : public ::testing::Test {
   std::shared_ptr<RpcAgent> rpcAgent;
   static const size_t numIters;
   static const size_t numWorkers;
-  c10::intrusive_ptr<c10d::Store> store;
+  std::shared_ptr<c10d::Store> store;
   static const char* serverAddress;
 };
 
