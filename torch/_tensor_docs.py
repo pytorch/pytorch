@@ -1983,20 +1983,6 @@ kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 See :func:`torch.kthvalue`
 """)
 
-add_docstr_all('linalg_eigh',
-               r"""
-linalg_eigh(UPLO='L') -> tuple(Tensor, Tensor)
-
-See :func:`torch.linalg.eigh`
-""")
-
-add_docstr_all('linalg_eigvalsh',
-               r"""
-linalg_eigvalsh(UPLO='L') -> Tensor
-
-See :func:`torch.linalg.eigvalsh`
-""")
-
 add_docstr_all('lcm',
                r"""
 lcm(other) -> Tensor
