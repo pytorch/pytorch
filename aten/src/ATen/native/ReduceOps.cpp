@@ -731,14 +731,14 @@ Tensor all(const Tensor& self) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
 
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   auto iter = make_reduction(
-    "all", result, self, {}, false, self.scalar_type());
+    "all", result, self, {}, false, /*out_dtype=*/kBool);
   return _all(result, iter);
 }
 
 Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::native::all_out(result, self, dim, keepdim);
 }
 
@@ -753,7 +753,7 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
     return result;
   } else {
     auto iter = make_reduction(
-      "all", result, self, dim, keepdim, self.scalar_type());
+      "all", result, self, dim, keepdim, /*out_dtype=*/kBool);
     return _all(result, iter);
   }
 }
@@ -774,14 +774,14 @@ Tensor any(const Tensor& self) {
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
 
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   auto iter = make_reduction(
-    "any", result, self, {}, false, self.scalar_type());
+    "any", result, self, {}, false, /*out_dtype=*/kBool);
   return _any(result, iter);
 }
 
 Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::native::any_out(result, self, dim, keepdim);
 }
 
@@ -796,7 +796,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
     return result;
   } else {
     auto iter = make_reduction(
-      "any", result, self, dim, keepdim, self.scalar_type());
+      "any", result, self, dim, keepdim, /*out_dtype=*/kBool);
     return _any(result, iter);
   }
 }
