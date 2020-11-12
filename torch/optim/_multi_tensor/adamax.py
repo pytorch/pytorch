@@ -98,7 +98,7 @@ class Adamax(Optimizer):
                     exp_inf.unsqueeze(0),
                     grad.abs().add_(eps).unsqueeze_(0)
                 ], 0)
-                torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
+                torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
 
             bias_corrections = [1 - beta1 ** state['step'] for state in states]
             clr = [-1 * (group['lr'] / bias_correction) for bias_correction in bias_corrections]
