@@ -6,8 +6,8 @@
 #include <stdexcept>
 
 namespace pybind11 {
-  template <typename, typename...>
-  class class_;
+template <typename, typename...>
+class class_;
 }
 
 namespace c10 {
@@ -28,7 +28,8 @@ namespace raw {
  * performance because it does the refcounting intrusively
  * (i.e. in a member of the object itself).
  * Your class T needs to inherit from intrusive_ptr_target to allow it to be
- * used in an intrusive_ptr<T>.
+ * used in an intrusive_ptr<T>. Your class's constructor should not allow
+ *`this` to escape to other threads or create an intrusive_ptr from `this`.
  */
 
 // Note [Stack allocated intrusive_ptr_target safety]
@@ -190,12 +191,12 @@ class intrusive_ptr final {
   friend class intrusive_ptr;
   friend class weak_intrusive_ptr<TTarget, NullType>;
 
-  // Make pybind11::class_ be a friend class of intrusive_ptr, so that custom smart
-  // holder in pybind11 could access the private constructor of intrusive_ptr(T*)
-  // which took the ownership of the object.
-  // This is required by customer holder macro PYBIND11_DECLARE_HOLDER_TYPE, where
-  // it uses intrusive_ptr(TTarget*) to initialize and take ownership of the object.
-  // For details, see
+  // Make pybind11::class_ be a friend class of intrusive_ptr, so that custom
+  // smart holder in pybind11 could access the private constructor of
+  // intrusive_ptr(T*) which took the ownership of the object. This is required
+  // by customer holder macro PYBIND11_DECLARE_HOLDER_TYPE, where it uses
+  // intrusive_ptr(TTarget*) to initialize and take ownership of the object. For
+  // details, see
   // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
   template <typename, typename...>
   friend class pybind11::class_;
@@ -225,10 +226,9 @@ class intrusive_ptr final {
     target_ = NullType::singleton();
   }
 
-
-  // raw pointer constructors are not public because we shouldn't make intrusive_ptr
-  // out of raw pointers except from inside the make_intrusive(), reclaim() and
-  // weak_intrusive_ptr::lock() implementations.
+  // raw pointer constructors are not public because we shouldn't make
+  // intrusive_ptr out of raw pointers except from inside the make_intrusive(),
+  // reclaim() and weak_intrusive_ptr::lock() implementations.
 
   // This constructor will not increase the ref counter for you.
   // We use the tagged dispatch mechanism to explicitly mark this constructor
@@ -237,9 +237,10 @@ class intrusive_ptr final {
       : target_(target) {}
 
   // This constructor will increase the ref counter for you.
-  // This constructor will be used by the make_intrusive(), and also pybind11, which
-  // wrap the intrusive_ptr holder around the raw pointer and incref correspondingly
-  // (pybind11 requires raw pointer constructor to incref by default).
+  // This constructor will be used by the make_intrusive(), and also pybind11,
+  // which wrap the intrusive_ptr holder around the raw pointer and incref
+  // correspondingly (pybind11 requires raw pointer constructor to incref by
+  // default).
   explicit intrusive_ptr(TTarget* target)
       : intrusive_ptr(target, raw::DontIncreaseRefcount{}) {
     if (target_ != NullType::singleton()) {
@@ -396,7 +397,22 @@ class intrusive_ptr final {
    */
   template <class... Args>
   static intrusive_ptr make(Args&&... args) {
-    return intrusive_ptr(new TTarget(std::forward<Args>(args)...));
+    auto result = intrusive_ptr(new TTarget(std::forward<Args>(args)...), raw::DontIncreaseRefcount{});
+
+    // We just created result.target_, so we know no other thread has
+    // access to it, so we know we needn't care about memory ordering.
+    // (On x86_64, a store with memory_order_relaxed generates a plain old
+    // `mov`, whereas an atomic increment does a lock-prefixed `add`, which is
+    // much more expensive: https://godbolt.org/z/eKPzj8.)
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        result.target_->refcount_ == 0 && result.target_->weakcount_ == 0,
+        "intrusive_ptr: Newly-created target had non-zero refcounts. Does its "
+        "constructor do something strange like incref or create an intrusive_ptr"
+        "from `this`?");
+    result.target_->refcount_.store(1, std::memory_order_relaxed);
+    result.target_->weakcount_.store(1, std::memory_order_relaxed);
+
+    return result;
   }
 
   /**
