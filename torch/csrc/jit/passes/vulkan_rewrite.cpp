@@ -33,9 +33,9 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_pattern_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
         %weight_t = aten::t(%weight)
-        %packed_weight_bias = vulkan_prepack_lin::linear_prepack(
+        %packed_weight_bias = vulkan_prepack::linear_prepack(
             %weight_t, %bias)
-        %res = vulkan_prepack_lin::linear_run(%input, %packed_weight_bias)
+        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
         return (%res))";
   std::string linear_pattern = R"(
     graph(%input, %weight, %bias):
@@ -44,20 +44,17 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_pattern = R"(
     graph(%input, %weight, %bias):
         %weight_t = aten::t(%weight)
-        %packed_weight_bias = vulkan_prepack_lin::linear_prepack(
+        %packed_weight_bias = vulkan_prepack::linear_prepack(
             %weight_t, %bias)
-        %res = vulkan_prepack_lin::linear_run(%input, %packed_weight_bias)
+        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
         return (%res))";
 
-  auto filter = [](const Match& match,
+  const auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
-    auto linear_value = match_vmap.at(vmap.at("linear"));
-    auto func_name = graph_rewrite_helper::getFuncName(linear_value);
-    if (func_name == "linear") {
-      return true;
-    }
-    return false;
+    const auto linear_value = match_vmap.at(vmap.at("linear"));
+    const auto func_name = graph_rewrite_helper::getFuncName(linear_value);
+    return (func_name == "linear");
   };
 
   SubgraphRewriter linear_call_fn_rewriter;
@@ -205,7 +202,7 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack")) ||
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack_lin::linear_prepack")));
+         Symbol::fromQualString("vulkan_prepack::linear_prepack")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }

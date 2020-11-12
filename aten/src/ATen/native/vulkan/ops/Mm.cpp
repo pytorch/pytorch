@@ -1,6 +1,5 @@
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
-#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -8,40 +7,7 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-class LinearOpContext final : public torch::jit::CustomClassHolder {
- public:
-  static LinearOpContext create(
-      api::Resource::Pool& pool,
-      const Tensor& weight,
-      const c10::optional<Tensor>& bias);
-
-  using State = std::tuple<Tensor, c10::optional<Tensor>>;
-
-  Tensor run(const Tensor& input, float beta, float alpha) const;
-  State unpack() const;
-
- private:
-  LinearOpContext(
-      api::Resource::Pool& pool,
-      const Tensor& weight,
-      const c10::optional<Tensor>& bias);
-
- private:
-  struct {
-    vTensor v_weight;
-    vTensor v_bias;
-  } packed_;
-
-  struct {
-    Tensor weight;
-    c10::optional<Tensor> bias;
-  } unpacked_;
-};
-
 vTensor pack_weights(api::Resource::Pool& pool, const Tensor& weight_arg) {
-  if (weight_arg.is_vulkan()) {
-    return convert(weight_arg);
-  }
   return convert(weight_arg.vulkan());
 }
 
@@ -49,9 +15,6 @@ vTensor pack_biases(
     api::Resource::Pool& pool,
     const c10::optional<Tensor>& bias_arg,
     const Tensor& weight_arg) {
-  if (bias_arg && bias_arg->is_vulkan()) {
-    return convert(*bias_arg);
-  }
   if (bias_arg) {
     return convert(bias_arg->vulkan());
   } else {
@@ -88,41 +51,12 @@ bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
   return api::available() && valid;
 }
 
-LinearOpContext::LinearOpContext(
-    api::Resource::Pool& pool,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias)
-  : packed_{
-      pack_weights(pool, weight),
-      pack_biases(pool, bias, weight),
-    },
-    unpacked_{
-      weight,
-      bias,
-    } {
-}
-
-LinearOpContext LinearOpContext::create(
-    api::Resource::Pool& pool,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias) {
-  TORCH_CHECK(available(weight, bias))
-  // Pass in the originals
-  return LinearOpContext{
-      pool,
-      weight,
-      bias,
-  };
-}
-
 bool usable(
     const Tensor& input,
     const Tensor& weight,
     const c10::optional<Tensor>& bias) {
-  bool valid =
-      (input.sizes()[Layout::Parameter::width] ==
+  return (input.sizes()[Layout::Parameter::width] ==
        weight.sizes()[Layout::Parameter::height]);
-  return valid;
 }
 
 void addmm_impl(
@@ -170,71 +104,6 @@ void addmm_impl(
   } else {
     TORCH_CHECK(false, "Not implemented!");
   }
-}
-
-Tensor LinearOpContext::run(const Tensor& input_arg, float beta, float alpha)
-    const {
-  api::Context* const context = api::context();
-
-  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
-  const vTensor& v_input = convert(input);
-
-  TORCH_CHECK(
-      usable(input, unpacked_.weight, unpacked_.bias),
-      "Vulkan Linear not usable! "
-      "Reason: The provided input tensor is either invalid or unsupported by Vulkan impl.");
-
-  vTensor v_output{
-      context,
-      {
-          input_arg.sizes()[Layout::Parameter::height],
-          packed_.v_weight.sizes()[Layout::Parameter::width],
-      },
-      input.options(),
-  };
-
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
-  {
-    if (input_arg.ndimension() == 2) {
-      addmm_impl(
-          context,
-          command_buffer,
-          v_output,
-          packed_.v_bias,
-          v_input,
-          packed_.v_weight,
-          beta,
-          alpha);
-    } else {
-      TORCH_CHECK(
-          false, "linear_run does not yet support inputs with ndim > 2!")
-    }
-  }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
-
-  return convert(v_output);
-}
-
-LinearOpContext::State LinearOpContext::unpack() const {
-  return LinearOpContext::State{
-      unpacked_.weight,
-      unpacked_.bias,
-  };
-}
-
-c10::intrusive_ptr<LinearOpContext> linear_prepack(
-    Tensor&& weight,
-    c10::optional<Tensor>&& bias) {
-  return c10::make_intrusive<LinearOpContext>(LinearOpContext::create(
-      persistent()->pool, std::move(weight), std::move(bias)));
-}
-
-Tensor linear_run(
-    const Tensor& input,
-    const c10::intrusive_ptr<LinearOpContext>& context) {
-  return context->run(input, 1.0, 1.0);
 }
 
 Tensor addmm(
@@ -307,37 +176,6 @@ Tensor mm(const Tensor& self_arg, const Tensor& mat2_arg) {
 
 #ifdef USE_VULKAN_API
 
-TORCH_LIBRARY(vulkan_lin, m) {
-  m.class_<LinearOpContext>("LinearOpContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<LinearOpContext>& context) {
-            return context->unpack();
-          },
-          // __setstate__
-          [](LinearOpContext::State state) {
-            return linear_prepack(
-                std::move(std::get<0>(state)), std::move(std::get<1>(state)));
-          });
-}
-
-TORCH_LIBRARY(vulkan_prepack_lin, m) {
-  m.def(
-      "linear_prepack(Tensor W, Tensor? B) "
-      "-> __torch__.torch.classes.vulkan_lin.LinearOpContext");
-  m.def(
-      "linear_run(Tensor X, "
-      "__torch__.torch.classes.vulkan_lin.LinearOpContext BW_prepack) -> Tensor Y");
-}
-
-TORCH_LIBRARY_IMPL(vulkan_prepack_lin, CPU, m) {
-  m.impl("linear_prepack", TORCH_FN(linear_prepack));
-}
-
-TORCH_LIBRARY_IMPL(vulkan_prepack_lin, Vulkan, m) {
-  m.impl("linear_run", linear_run);
-}
-
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("addmm", TORCH_FN(addmm));
   m.impl("mm", TORCH_FN(mm));
@@ -346,6 +184,100 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 #endif /* USE_VULKAN_API */
 
 } // namespace
+
+LinearOpContext::LinearOpContext(
+    api::Resource::Pool& pool,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias)
+  : packed_{
+      pack_weights(pool, weight),
+      pack_biases(pool, bias, weight),
+    },
+    unpacked_{
+      weight,
+      bias,
+    } {
+}
+
+LinearOpContext LinearOpContext::create(
+    api::Resource::Pool& pool,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias) {
+  TORCH_CHECK(available(weight, bias))
+  // Pass in the originals
+  return LinearOpContext{
+      pool,
+      weight,
+      bias,
+  };
+}
+
+Tensor LinearOpContext::run(const Tensor& input_arg, float beta, float alpha)
+    const {
+  api::Context* const context = api::context();
+
+  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
+  const vTensor& v_input = convert(input);
+
+  TORCH_CHECK(
+      usable(input, unpacked_.weight, unpacked_.bias),
+      "Vulkan Linear not usable! "
+      "Reason: The provided input tensor is either invalid or unsupported by Vulkan impl.");
+
+  vTensor v_output{
+      context,
+      {
+          input_arg.sizes()[Layout::Parameter::height],
+          packed_.v_weight.sizes()[Layout::Parameter::width],
+      },
+      input.options(),
+  };
+
+  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  command_buffer.begin();
+  {
+    if (input_arg.ndimension() == 2) {
+      addmm_impl(
+          context,
+          command_buffer,
+          v_output,
+          packed_.v_bias,
+          v_input,
+          packed_.v_weight,
+          beta,
+          alpha);
+    } else {
+      TORCH_CHECK(
+          false, "linear_run does not yet support inputs with ndim > 2!")
+    }
+  }
+  command_buffer.end();
+  command_buffer.submit(context->gpu().queue);
+
+  return convert(v_output);
+}
+
+LinearOpContext::State LinearOpContext::unpack() const {
+  return LinearOpContext::State{
+      unpacked_.weight,
+      unpacked_.bias,
+  };
+}
+
+
+c10::intrusive_ptr<LinearOpContext> linear_prepack(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias) {
+  return c10::make_intrusive<LinearOpContext>(LinearOpContext::create(
+      persistent()->pool, std::move(weight), std::move(bias)));
+}
+
+Tensor linear_run(
+    const Tensor& input,
+    const c10::intrusive_ptr<LinearOpContext>& context) {
+  return context->run(input, 1.0, 1.0);
+}
+
 } // namespace ops
 } // namespace vulkan
 } // namespace native
