@@ -9,13 +9,14 @@ from itertools import chain
 import io
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from math import inf
+import itertools
 
 import torch
 import torch.distributed as dist
 from torch.nn import Parameter
 from torch._six import container_abcs
 from torch.optim import Optimizer
-
 
 if TYPE_CHECKING:  # pragma: no cover
     from torch.optim.optimizer import _params_t
@@ -165,9 +166,10 @@ class ZeROptimizer(Optimizer):
             norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for infinity norm.
         Returns:
             Total norm of the parameters (viewed as a single vector).
-        .. note: This is analogous to `torch.nn.utils.clip_grad_norm_` but handles the partitioning and multiple devices per rank
-            under the hood. The default torch util is not applicable here, because each rank only has a partial view of all the grads
-            in the model, so calling it in the OSS context would lead to different scaling being applied per subset of model parameters
+        .. note: This is analogous to `torch.nn.utils.clip_grad_norm_` but handles the partitioning and multiple
+            devices per rank under the hood. The default torch util is not applicable here, because each rank only
+            has a partial view of all the grads in the model, so calling it in the OSS context would lead to
+            different scaling being applied per subset of model parameters
         .. warning: This needs to be called on all ranks, since synchronization primitives will be used
         .. warning: Model paralelism -groups other than world- are not yet supported
         """
@@ -190,11 +192,13 @@ class ZeROptimizer(Optimizer):
         # Compute the norm on this grad set,
         # then sync all the norms from all ranks
         if norm_type == inf:
-            total_norm = max(p.grad.detach().abs().max().to(self._device) for p in local_params)  # type: ignore
+            total_norm = max(p.grad.detach().abs().max().to(self._device) for p in local_params)
             dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.group)
         else:
             local_norm = torch.norm(
-                input=torch.stack([torch.norm(input=p.grad.detach(), p=norm_type).to(self._device) for p in local_params]),  # type: ignore
+                input=torch.stack(
+                    [torch.norm(input=p.grad.detach(), p=norm_type).to(self._device) for p in local_params]
+                ),  # type: ignore
                 p=norm_type,
             )
 
@@ -207,7 +211,7 @@ class ZeROptimizer(Optimizer):
         if clip_coef < 1:
             for device, device_params in self.per_device_params.items():
                 for p in filter(lambda x: x.grad is not None, device_params[self.rank]):
-                    p.grad.detach().mul_(clip_coef.to(device))  # type: ignore
+                    p.grad.detach().mul_(clip_coef.to(device))
 
         return total_norm
 
