@@ -196,7 +196,7 @@ class TestLinalg(TestCase):
             run_test(shape)
 
     # TODO: enable CUDA tests once (merge with above test)
-    # RuntimeError: "triangular_solve_cuda" not implemented for 'ComplexDouble' is fixed
+    # batched matmul for complex dtypes on CUDA is implemented
     @unittest.expectedFailure
     @onlyCUDA
     @skipCUDAIfNoMagma
@@ -206,7 +206,7 @@ class TestLinalg(TestCase):
             x = 0.5 * (root + root.transpose(-1, -2).conj())
             return torch.linalg.cholesky(x)
 
-        shape = (3, 3)
+        shape = (3, 2, 2)
         root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
         root = root + torch.eye(shape[-1], dtype=dtype, device=device)
         gradcheck(func, root)

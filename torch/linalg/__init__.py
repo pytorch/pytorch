@@ -25,7 +25,7 @@ In code it translates to ``input = L @ L.t()` if :attr:`input` is real-valued an
 ``input = L @ L.conj().t()`` if :attr:`input` is complex-valued.
 The batch of :math:`L` matrices is returned.
 
-Supports real and complex inputs. Backpropagation for complex inputs is only supported on the CPU.
+Supports real and complex inputs. Backpropagation for batched complex inputs is only supported on the CPU.
 
 .. note:: If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
           and one or more of them is not a Hermitian positive-definite matrix, then a RuntimeError will be thrown.
