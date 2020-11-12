@@ -631,6 +631,18 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
+    def test_script_tensor_constant(self):
+        # TorchScript seems to ignore attributes that start with `__`.
+        # We used to call anonymous Tensor values `__tensor_constant*`, but
+        # they were getting ignored by script. Now they're called
+        # `_tensor_constant*`
+        class IHaveATensorConstant(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand(3, 4)
+
+        traced = torch.fx.symbolic_trace(IHaveATensorConstant())
+        torch.jit.script(traced)
+
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -699,6 +711,19 @@ class TestFX(JitTestCase):
         r = gm(input)
         ref = torch.sin(mod.linear(input) + mod.bias)
         self.assertEqual(r, ref)
+
+    def test_remove_uses(self):
+        g : torch.fx.Graph = Graph()
+        x : torch.fx.Node = g.placeholder('x')
+        relu : torch.fx.Node = g.call_function(torch.relu, (x,))
+        neg : torch.fx.Node = g.call_function(torch.neg, (relu,))
+        g.output(neg)
+
+        neg.replace_all_uses_with(relu)
+        g.erase_node(neg)
+
+        self.assertTrue(neg not in relu.users)
+
 
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -796,6 +821,11 @@ class TestFX(JitTestCase):
         fxed = symbolic_trace(Foo())
         fxed_scripted = torch.jit.script(fxed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
+
+    def test_fn_type_annotation_empty(self):
+        def forward(a : List[torch.Tensor]):
+            return a[0]
+        torch.jit.script(symbolic_trace(forward))
 
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
@@ -1098,6 +1128,54 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(Foo())
         assert(all('constant' not in node.target for node in traced.graph.nodes))
+
+    def test_single_default_arg(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, y=1):
+                return y
+
+        m = M()
+        self.checkGraphModule(m, ())
+        self.checkGraphModule(m, (3,))
+
+    def test_multiple_default_args(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, y=1, z=2):
+                return y + z
+
+        m = M()
+        self.checkGraphModule(m, ())
+        self.checkGraphModule(m, (3,))
+        self.checkGraphModule(m, (3, 4))
+
+    def test_regular_and_default_args(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y=1):
+                return x + y
+
+        m = M()
+        self.checkGraphModule(m, (2,))
+        self.checkGraphModule(m, (2, 3))
+
+    def test_string_literal_return(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self):
+                return "foo"
+
+        m = M()
+        self.checkGraphModule(m, ())
 
 
 if __name__ == '__main__':
