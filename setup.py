@@ -660,13 +660,13 @@ def configure_extension_build():
             extra_link_args += ['-g']
 
 
-    def make_relative_rpath(path):
+    def make_relative_rpath_args(path):
         if IS_DARWIN:
-            return '-Wl,-rpath,@loader_path/' + path
+            return ['-Wl,-rpath,@loader_path/' + path]
         elif IS_WINDOWS:
-            return ''
+            return []
         else:
-            return '-Wl,-rpath,$ORIGIN/' + path
+            return ['-Wl,-rpath,$ORIGIN/' + path]
 
     ################################################################################
     # Declare extensions and package
@@ -681,7 +681,7 @@ def configure_extension_build():
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
-                  extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')])
+                  extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
 
     if not IS_WINDOWS:
