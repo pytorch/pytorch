@@ -248,8 +248,6 @@ class intrusive_ptr final {
       // and because we allow raising these values from 0, which retain_()
       // has an assertion against.
       ++target_->refcount_;
-      // NOTE: can't we leak memory by using this constructor on an
-      // object that was created with make_intrusive?
       ++target_->weakcount_;
     }
   }
