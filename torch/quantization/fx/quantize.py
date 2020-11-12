@@ -462,9 +462,8 @@ class Quantizer:
                     # propagate observed property from input
                     if is_observed(node.args[0]):
                         observed_node_names_set.add(node.name)
-                elif (isinstance(quantize_handler, Add) or
-                      isinstance(quantize_handler, Mul)) and \
-                      quantize_handler.num_node_args == 1:
+                elif ((isinstance(quantize_handler, Add) or isinstance(quantize_handler, Mul)) and
+                      quantize_handler.num_node_args == 1):
                     input_node = matched_nodes[-1]  # first node in the sequence
 
                     def input_is_observed(arg):
@@ -767,8 +766,9 @@ class Quantizer:
             # handle activation post process calls
             if node.op == 'call_module' and is_activation_post_process(self.modules[node.target]):
                 insert_quantize_node(node)
-            elif is_standalone_module and node.op == 'placeholder' and \
-               graph_inputs.index(node.name) in model._standalone_module_observed_input_idxs:
+            elif (is_standalone_module and node.op == 'placeholder' and
+                  graph_inputs.index(node.name) in
+                  model._standalone_module_observed_input_idxs):
                 # the node is quantized in parent module
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:
