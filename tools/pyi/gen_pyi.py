@@ -132,7 +132,7 @@ def type_to_python(typename, size=None):
         'MemoryFormat': 'memory_format',
         'IntArrayRef': '_size',
         'IntArrayRef[]': 'Union[_int, _size]',
-        'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
+        'TensorList': 'List[Tensor]',
         'TensorList[]': 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]',
         'bool': '_bool',
         'double': '_float',
@@ -509,6 +509,7 @@ def gen_pyi(declarations_path, out):
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
         'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
                     'def nonzero(input: Tensor, *, as_tuple: bool=...) -> Tensor: ...'],
+        '_foreach_add': []
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         unsorted_function_hints[binop].append(

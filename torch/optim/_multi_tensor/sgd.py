@@ -1,6 +1,7 @@
 import torch
-from ..optimizer import Optimizer, required, _params_t
+from ..optimizer import Optimizer, _params_t
 
+required = float()
 
 class SGD(Optimizer):
     r"""Implements stochastic gradient descent (optionally with momentum).

@@ -16,12 +16,3 @@ from .adadelta import Adadelta
 
 __all__ = ['ASGD', 'Adadelta', 'Adam', 'AdamW', 'Adamax',
            'RMSprop', 'Rprop', 'SGD']
-
-del adam
-del adamw
-del sgd
-del rmsprop
-del rprop
-del asgd
-del adamax
-del adadelta
