@@ -1112,7 +1112,7 @@ void testMemDependencyCheckerLoopSelfDependency() {
   // This check assumes that the Stmt has a single Store with a single Load on
   // the RHS.
   auto isSelfDependent =
-      [](const std::deque<std::shared_ptr<AccessInfo>>& history) -> bool {
+      [](const std::vector<std::shared_ptr<AccessInfo>>& history) -> bool {
     return history.front()->hasDependency(history.back());
   };
 

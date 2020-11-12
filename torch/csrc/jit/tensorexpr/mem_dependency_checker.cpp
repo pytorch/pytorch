@@ -276,7 +276,7 @@ bool MemDependencyChecker::allowLoopExecutionOrderAnalysis(bool allow) {
   return allow;
 }
 
-const std::deque<std::shared_ptr<AccessInfo>>& MemDependencyChecker::
+const std::vector<std::shared_ptr<AccessInfo>>& MemDependencyChecker::
     getHistory() const {
   return currentScope_->accesses_;
 }
@@ -450,6 +450,27 @@ std::shared_ptr<AccessInfo> MemDependencyChecker::accessFor(
   }
 
   return nullptr;
+}
+
+std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
+    accessesWithin(const Stmt* A) const {
+  auto it = scopeToAccesses_.find(A);
+  if (it != scopeToAccesses_.end()) {
+    return std::unordered_set<std::shared_ptr<AccessInfo>>(
+        it->second.begin(), it->second.end());
+  }
+
+  std::unordered_set<std::shared_ptr<AccessInfo>> ret;
+  auto bound = stmtToAccess_.equal_range(A);
+  for (auto it = bound.first; it != bound.second; ++it) {
+    ret.insert(it->second);
+  }
+  return ret;
+}
+
+std::unordered_set<std::shared_ptr<AccessInfo>> MemDependencyChecker::
+    accessesWithin(const Expr* A) const {
+  return {accessFor(A)};
 }
 
 std::shared_ptr<AccessInfo> MemDependencyChecker::input(const Buf* b) const {
@@ -924,6 +945,19 @@ void MemDependencyChecker::visit(const For* v) {
     }
   }
 
+  std::vector<std::shared_ptr<AccessInfo>> mergedAccesses;
+  mergedAccesses.reserve(
+      extentsScope->accesses_.size() + currentScope_->accesses_.size());
+  std::copy(
+      extentsScope->accesses_.begin(),
+      extentsScope->accesses_.end(),
+      std::back_inserter(mergedAccesses));
+  std::copy(
+      currentScope_->accesses_.begin(),
+      currentScope_->accesses_.end(),
+      std::back_inserter(mergedAccesses));
+  scopeToAccesses_.emplace(v, mergedAccesses);
+
   // it's a little faster to merge without closing, and since no writes can
   // occur within the start and stop exprs we'll do that.
   mergeScope(extentsScope, extentsScope->parent, false);
@@ -935,13 +969,15 @@ void MemDependencyChecker::visit(const Cond* v) {
   const Stmt* last = lastStmt_;
   lastStmt_ = v;
 
+  auto enclosingScope =
+      std::make_shared<Scope>(currentScope_->block, currentScope_);
+
   // condition is in enclosing scope.
   v->condition()->accept(this);
 
   Block* true_stmt = v->true_stmt();
   Block* false_stmt = v->false_stmt();
 
-  auto enclosingScope = currentScope_;
   // Create scopes so the Block visitor doesn't create and merge a new scope.
   auto trueScope = std::make_shared<Scope>(true_stmt, enclosingScope);
   auto falseScope = std::make_shared<Scope>(false_stmt, enclosingScope);
@@ -968,7 +1004,13 @@ void MemDependencyChecker::visit(const Cond* v) {
   mergeScope(trueScope, enclosingScope, false);
   mergeScope(falseScope, enclosingScope, false);
 
+  // Merge the enclosing scope into it's parent.
+  mergeScope(enclosingScope, enclosingScope->parent, false);
+
   currentScope_ = enclosingScope;
+  scopeToAccesses_.emplace(v, enclosingScope->accesses_);
+
+  currentScope_ = enclosingScope->parent;
   lastStmt_ = last;
 }
 
@@ -1090,6 +1132,8 @@ void MemDependencyChecker::visit(const Block* v) {
   for (auto& pair : currentScope_->shadowedVarBounds) {
     knownVarBounds_[pair.first] = pair.second;
   }
+
+  scopeToAccesses_.emplace(v, currentScope_->accesses_);
 
   if (currentScope_ != prev_scope) {
     mergeScope(currentScope_, prev_scope, true);
