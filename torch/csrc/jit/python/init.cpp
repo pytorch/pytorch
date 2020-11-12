@@ -618,6 +618,18 @@ void initJITBindings(PyObject* module) {
             return getTEGenerateBlockCode();
           })
       .def(
+          "_jit_get_te_must_use_llvm_cpu",
+          []() -> bool {
+            using namespace torch::jit::tensorexpr;
+            return getTEMustUseLLVMOnCPU();
+          })
+      .def(
+          "_jit_set_te_must_use_llvm_cpu",
+          [](bool use_llvm) {
+            using namespace torch::jit::tensorexpr;
+            getTEMustUseLLVMOnCPU() = use_llvm;
+          })
+      .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
       .def(
