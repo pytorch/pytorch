@@ -155,16 +155,21 @@ class TestCommon(JitCommonTestCase):
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (function, method, inplace)
-    #   and runtimes (eager, traced, scripted).
+    #   for eager 
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @ops(op_db)
-    def test_variant_consistency(self, device, dtype, op):
+    def test_variant_consistency_eager(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
         for sample in samples:
+            # Acquires variants to test
+            method = op.get_method()
+            inplace = op.get_inplace()
+            variants = (v for v in (method, inplace) if v is not None)
             # Computes expected forward
+
             expected_forward = op(sample.input, *sample.args, **sample.kwargs)
 
             # Computes expected backward
@@ -177,11 +182,6 @@ class TestCommon(JitCommonTestCase):
                 sample.input.grad = None
             except Exception as e:
                 exception_during_backwards = True
-
-            # Acquires variants to test
-            method = op.get_method()
-            inplace = op.get_inplace()
-            variants = (v for v in (method, inplace) if v is not None)
 
             # Test eager consistency
             for variant in variants:
@@ -203,6 +203,23 @@ class TestCommon(JitCommonTestCase):
                 if variant is not inplace and op.test_inplace_grad:
                     self.check_variant_backward(sample.input, variant_forward,
                                                 expected_grad, exception_during_backwards)
+
+    # Tests that the forward and backward passes of operations produce the
+    #   same values for the cross-product of op variants (function, method, inplace)
+    #   and runtimes (eager, traced, scripted).
+    # TODO WARNING: inplace x {traced, scripted} not currently tested
+    @ops(op_db)
+    def test_variant_consistency_jit(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        for sample in samples:
+
+            # Acquires variants to test
+            method = op.get_method()
+            inplace = op.get_inplace()
+            variants = (v for v in (method, inplace) if v is not None)
 
             # Adds function variant to variant list
             # TODO: inplace tests currently fail
