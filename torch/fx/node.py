@@ -59,10 +59,16 @@ class Node:
 
     @property
     def next(self) -> 'Node':
+        """
+        Get the next node in the linked list
+        """
         return self._next
 
     @property
     def prev(self) -> 'Node':
+        """
+        Get the previous node in the linked list
+        """
         return self._prev
 
     def prepend(self, x: 'Node'):
@@ -96,18 +102,38 @@ class Node:
 
     @property
     def args(self) -> Tuple[Argument, ...]:
+        """
+        Return the tuple of arguments to this Node. The interpretation of arguments
+        depends on the node's opcode. See the `fx.Graph` docstring for more
+        information.
+        """
         return self._args
 
     @args.setter
     def args(self, a : Tuple[Argument, ...]):
+        """
+        Set the tuple of arguments to this Node. The interpretation of arguments
+        depends on the node's opcode. See the `fx.Graph` docstring for more
+        information.
+        """
         self._update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
+        """
+        Return the dict of kwargs to this Node. The interpretation of arguments
+        depends on the node's opcode. See the `fx.Graph` docstring for more
+        information.
+        """
         return self._kwargs
 
     @kwargs.setter
     def kwargs(self, k : Dict[str, Argument]):
+        """
+        Set the dict of kwargs to this Node. The interpretation of arguments
+        depends on the node's opcode. See the `fx.Graph` docstring for more
+        information.
+        """
         self._update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
 
     def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
@@ -151,7 +177,7 @@ class Node:
 
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
-    """ apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
+    """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
     if isinstance(a, tuple):
         return tuple(map_arg(elem, fn) for elem in a)
     if isinstance(a, list):
