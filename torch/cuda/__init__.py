@@ -468,8 +468,8 @@ class _CudaBase(object):
 
     def type(self, *args, **kwargs):
         # We could use a Protocol here to tell mypy that self has `get_device` method
-        # but it is only available on Python >= 3.8 on typing or mypy_extensions on
-        # Python >= 3.6
+        # but it is only available in the typing module on Python >= 3.8
+        # or on typing_extensions module on Python >= 3.6
         with device(self.get_device()):  # type: ignore
             return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
