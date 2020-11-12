@@ -252,11 +252,9 @@ class Linear(torch.nn.Module):
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
                 cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            activation_post_process = mod.activation_post_process
             if type(mod) == nni.LinearReLU:
-                activation_post_process = mod[1].activation_post_process
                 mod = mod[0]
-            else:
-                activation_post_process = mod.activation_post_process
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
