@@ -57,7 +57,7 @@ static void registerIntrinsics(
 
         // float -> half & half -> float conversions
         entry("__gnu_f2h_ieee", &c10::detail::fp16_ieee_to_fp32_value),
-        entry("__gnu_f2h_ieee", &c10::detail::fp16_ieee_from_fp32_value),
+        entry("__gnu_h2f_ieee", &c10::detail::fp16_ieee_from_fp32_value),
 
         // FP32 Sleef functions -- SSE
         entry("Sleef_acosf4", &Sleef_acosf4_u10),

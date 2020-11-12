@@ -1206,7 +1206,7 @@ class TestTEFuser(JitTestCase):
             return torch.quantize_per_tensor(v, 0.1, 1, dtype=dtype)
         else:
             return v.to(dtype)
-    
+
     @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
     def test_unary_ops(self):
         def apply(fn):
