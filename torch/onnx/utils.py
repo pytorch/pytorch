@@ -1080,9 +1080,9 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_master_opset
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
 
-    for version in _onnx_stable_opsets + [_onnx_master_opset]:
+    for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:
             sym_registry.register_op(op_name, symbolic_fn, ns, version)
 
