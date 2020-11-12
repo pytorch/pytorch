@@ -94,14 +94,14 @@ def _retrieve_device(module: nn.Module) -> torch.device:
     the appropriate device.
 
     Arguments:
-        An nn.Module to process.
+        An ``nn.Module`` to process.
 
     Returns:
-        torch.Device for the entire module.
+        ``torch.Device`` for the entire module.
 
     Raises:
         ValueError:
-            If devices for nn.Module parameters are not all same.
+            If devices for ``nn.Module`` parameters are not all same.
     """
 
     device = None
@@ -149,15 +149,15 @@ class Pipe(Module):
     memory required to train while minimizing device under-utilization.
 
     You should place all the modules on the appropriate devices before passing
-    them to this API and wrap them into an nn.Sequential module defining the
+    them to this API and wrap them into an ``nn.Sequential`` module defining the
     desired order of execution.
 
     Args:
-        module (torch.nn.Sequential):
+        module (``torch.nn.Sequential``):
             Sequential module to be parallelized using pipelining. Each module
             in the sequence has to have all of its parameters on a single
             device. Each module in the sequence has to either be an nn.Module
-            or nn.Sequential (to combine multiple sequential modules on a single
+            or ``nn.Sequential`` (to combine multiple sequential modules on a single
             device)
 
     Keyword Args:

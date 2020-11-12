@@ -87,20 +87,22 @@ def test_tuple_wait(cuda_sleep):
 
     class Layer1(nn.Module):
         def __init__(self):
-            nn.Module.__init__(self)
-            self.foo = nn.Linear(10, 5)
+            super().__init__()
+            self.ones = nn.Parameter(torch.ones(32, 3, 32, 32, requires_grad=True))
 
         def forward(self, pair):
             a, b = pair
+            a = a * self.ones
             return a * 1, b * 2, b * 3
 
     class Layer2(nn.Module):
         def __init__(self):
-            nn.Module.__init__(self)
-            self.foo = nn.Linear(10, 5)
+            super().__init__()
+            self.ones = nn.Parameter(torch.ones(32, 3, 32, 32, requires_grad=True))
 
         def forward(self, triple):
             a, b, c = triple
+            a = a * self.ones
             b = Sleep.apply(b)
             return a + b + c
 

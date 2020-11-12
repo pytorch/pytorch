@@ -9,15 +9,21 @@ from ..fuser_method_mappings import get_fuser_method
 # Fusion Patterns
 # ---------------------
 
-@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.Conv2d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv1d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
+@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Conv1d))
+@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.Conv2d))
+@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.Conv3d))
+@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
+@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
+@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
+@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
 class ConvBNReLUFusion():
     def __init__(self, quantizer, node):
         super().__init__()
@@ -66,7 +72,8 @@ class ConvBNReLUFusion():
         fuser_method = get_fuser_method(op_type_list, additional_fuser_method_mapping)
         if fuser_method is None:
             raise NotImplementedError("Cannot fuse modules: {}".format(types))
-        setattr(quantizer.modules[conv_parent_name], conv_name, fuser_method(*op_list))
+        fused = fuser_method(*op_list)
+        setattr(quantizer.modules[conv_parent_name], conv_name, fused)
 
         # TODO: do we need to make sure bn is only used once?
         if self.bn_node is not None:
@@ -77,8 +84,6 @@ class ConvBNReLUFusion():
 
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Linear))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm1d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm1d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm2d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm2d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))

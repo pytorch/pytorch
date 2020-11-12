@@ -1,6 +1,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/metal/MetalPrepackOpContext.h>
-#include <torch/script.h>
+#include <ATen/ATen.h>
+
 
 #if defined(C10_IOS)
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>

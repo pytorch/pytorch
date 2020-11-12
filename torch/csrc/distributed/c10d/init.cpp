@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <c10/util/intrusive_ptr.h>
 #include <c10d/FileStore.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
@@ -24,9 +25,10 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 
+#include <c10d/comm.hpp>
+#include <c10d/reducer.hpp>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -58,6 +60,8 @@ constexpr auto kDeprecationWarning =
     "{} API is being deprecated, please ping "
     "https://github.com/pytorch/pytorch/issues/46291 "
     "if you see this warning";
+template <typename T>
+using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -123,19 +127,25 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
-// This method is called from DDP's Python API. Its inputs are
-// a c10d reducer object, state, and callable comm_hook. State and
-// comm_hook inputs are Python objects and this function creates a
-// c10d PythonCommHook object using these inputs. It later calls
-// register_comm_hook function of the reducer input to register that
-// PythonCommHook object.
+// Called from DDP's Python API to create a c10d Python comm hook object.
+// The input state and callable comm_hook are Python objects. It later calls
+// register_comm_hook function of the reducer input to register the hook.
 void _register_comm_hook(
     ::c10d::Reducer& reducer,
     py::object state,
     py::object comm_hook) {
   reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
       std::move(state), std::move(comm_hook)));
-};
+}
+
+// Called from DDP's Python API to create a c10d C++ comm hook.
+// The input is an enum hook type. It later calls register_builtin_comm_hook
+// function of the reducer input to set the hook type.
+void _register_builtin_comm_hook(
+    ::c10d::Reducer& reducer,
+    ::c10d::BuiltinCommHookType comm_hook_type) {
+  reducer.register_builtin_comm_hook(comm_hook_type);
+}
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
@@ -144,17 +154,41 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
     throw python_error();
   }
 
-  auto module = py::handle(c10d_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
 
-  module.def(
-      "_register_comm_hook",
-      &_register_comm_hook,
-      py::arg("reducer"),
-      py::arg("state"),
-      py::arg("comm_hook"));
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_c10d", "distributed c10d bindings");
+
+  auto module = py::handle(m).cast<py::module>();
+
+  module
+      .def(
+          "_register_comm_hook",
+          &_register_comm_hook,
+          py::arg("reducer"),
+          py::arg("state"),
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_register_builtin_comm_hook",
+          &_register_builtin_comm_hook,
+          py::arg("reducer"),
+          py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
-      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          py::init<
+              const std::vector<Tensor>&,
+              const std::vector<size_t>&,
+              const std::vector<size_t>&,
+              const std::vector<c10::IntArrayRef>&>(),
+          py::arg("tensors"),
+          py::arg("offsets"),
+          py::arg("lengths"),
+          py::arg("sizes_list"))
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
@@ -165,7 +199,24 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
             replicas only in the case of single process multiple device mode. In
             the single process single device mode, this list would consist of only
             a single tensor.
-           )");
+           )")
+      .def(
+          "get_offsets",
+          &::c10d::GradBucket::getOffsets,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_lengths",
+          &::c10d::GradBucket::getLengths,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_sizes_list",
+          &::c10d::GradBucket::getSizesVec,
+          py::call_guard<py::gil_scoped_release>());
+
+  py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
+An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
+      .value("ALLREDUCE", ::c10d::BuiltinCommHookType::ALLREDUCE)
+      .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS);
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -291,7 +342,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
 
   auto store =
-      py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
+      py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
           module,
           "Store",
           R"(
@@ -495,7 +546,7 @@ Example::
     >>> store.wait(["bad_key"], timedelta(seconds=10))
 )");
 
-  shared_ptr_class_<::c10d::FileStore>(
+  intrusive_ptr_class_<::c10d::FileStore>(
       module,
       "FileStore",
       store,
@@ -518,7 +569,7 @@ Example::
       .def(py::init<const std::string&, int>());
 
 #ifndef _WIN32
-  shared_ptr_class_<::c10d::HashStore>(
+  intrusive_ptr_class_<::c10d::HashStore>(
       module,
       "HashStore",
       store,
@@ -535,7 +586,7 @@ Example::
       )")
       .def(py::init<>());
 
-  shared_ptr_class_<::c10d::TCPStore>(
+  intrusive_ptr_class_<::c10d::TCPStore>(
       module,
       "TCPStore",
       store,
@@ -575,7 +626,7 @@ Example::
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 #endif
 
-  shared_ptr_class_<::c10d::PrefixStore>(
+  intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
       "PrefixStore",
       store,
@@ -588,7 +639,7 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
+      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
@@ -901,13 +952,13 @@ Arguments:
   processGroupGloo
       .def(
           py::init<
-              const std::shared_ptr<::c10d::Store>&,
+              const c10::intrusive_ptr<::c10d::Store>&,
               int,
               int,
               ::c10d::ProcessGroupGloo::Options>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
-          py::init([](const std::shared_ptr<::c10d::Store>& store,
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
                       std::chrono::milliseconds timeout) {
@@ -946,13 +997,13 @@ Arguments:
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
-                  const std::shared_ptr<::c10d::Store>&,
+                  const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
                   ::c10d::ProcessGroupNCCL::Options>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
-              py::init([](const std::shared_ptr<::c10d::Store>& store,
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size,
                           const std::chrono::milliseconds& timeout) {
@@ -997,7 +1048,7 @@ Arguments:
       py::call_guard<py::gil_scoped_release>());
 #endif
 
-  shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+  intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",
@@ -1038,8 +1089,7 @@ Arguments:
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_future",
+      .def("get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
@@ -1060,12 +1110,12 @@ Arguments:
                 >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
-                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
                 ``get_future`` API supports only NCCL backend and single-process single-device mode.
                 The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                ``DistributedDataParallel.register_comm_hook``, but it is subject to some subtle
                 differences compared to ``torch.futures.Future`` due to compromises made for performance
                 reasons.
 
@@ -1118,7 +1168,7 @@ Arguments:
       // Python side of the world. Calling Python functions on a Python object
       // completely bypasses pybind11. We need to test that the overloaded
       // functions call into Python and behave like we expect.
-      [](std::shared_ptr<::c10d::Store> store) {
+      [](c10::intrusive_ptr<::c10d::Store> store) {
         auto add = [&store](const std::string& key, int64_t value) {
           store->add(key, value);
         };
