@@ -90,6 +90,22 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
   return st;
 }
 
+static c10::optional<c10::ScalarType> GetScalarTypeFromListElement(
+    TypePtr elem) {
+  c10::optional<c10::ScalarType> scalar_type = c10::nullopt;
+  ;
+  if (elem->cast<IntType>()) {
+    scalar_type = at::kLong;
+  } else if (elem->cast<FloatType>()) {
+    scalar_type = at::kFloat;
+  } else if (elem->cast<BoolType>()) {
+    scalar_type = at::kBool;
+  } else if (auto t_type = elem->cast<TensorType>()) {
+    scalar_type = t_type->scalarType();
+  }
+  return scalar_type;
+}
+
 static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
@@ -177,30 +193,34 @@ static void UpdateScalarTypeForInputs(
     c10::optional<c10::ScalarType> st = c10::nullopt;
     auto input_tensor_type = input->type()->cast<TensorType>();
     auto input_list_type = input->type()->cast<ListType>();
-    
-    if ((input->node()->kind() == onnx::Constant) ||
-        (input_tensor_type && input_tensor_type->scalarType() &&
-         (*input_tensor_type->scalarType() != scalar_type))) {
-      if (input->node()->kind() == onnx::Constant) {
-        // Fix up the scalar directly instead of inserting a cast operator.
-        // NOTE: Keep only the else branch once constant_folding is enabled by
-        // default.
-        at::Tensor val = input->node()->t(attr::value);
-        at::Tensor new_val = val.to(scalar_type);
-        Node* const_node = n->owningGraph()->create(onnx::Constant);
-        const_node->t_(attr::value, new_val);
-        const_node->insertBefore(n);
-        const_node->output()->setType(TensorType::create(new_val));
-        n->replaceInputWith(input, const_node->output());
-      } else {
-        Node* cast_node = n->owningGraph()->create(onnx::Cast);
-        cast_node->addInput(input);
-        cast_node->i_(attr::to, onnx_type);
-        cast_node->insertBefore(n);
+
+    if (input->node()->kind() == onnx::Constant) {
+      // Fix up the scalar directly instead of inserting a cast operator.
+      // NOTE: Keep only the else branch once constant_folding is enabled by
+      // default.
+      at::Tensor val = input->node()->t(attr::value);
+      at::Tensor new_val = val.to(scalar_type);
+      Node* const_node = n->owningGraph()->create(onnx::Constant);
+      const_node->t_(attr::value, new_val);
+      const_node->insertBefore(n);
+      const_node->output()->setType(TensorType::create(new_val));
+      n->replaceInputWith(input, const_node->output());
+    } else if (
+        (input_tensor_type && input_tensor_type->scalarType() != scalar_type) ||
+        (input_list_type &&
+         GetScalarTypeFromListElement(input_list_type->getElementType()) !=
+             scalar_type)) {
+      Node* cast_node = n->owningGraph()->create(onnx::Cast);
+      cast_node->addInput(input);
+      cast_node->i_(attr::to, onnx_type);
+      cast_node->insertBefore(n);
+      if (input_tensor_type) {
         cast_node->output()->setType(CreateProfiledTensorTypeWithScalarType(
             input_tensor_type, scalar_type));
-        n->replaceInputWith(input, cast_node->output());
+      } else {
+        cast_node->output()->setType(input_list_type->getElementType());
       }
+      n->replaceInputWith(input, cast_node->output());
     }
   }
 }
