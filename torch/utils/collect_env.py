@@ -10,7 +10,7 @@ from collections import namedtuple
 try:
     import torch
     TORCH_AVAILABLE = True
-except (ImportError, NameError, AttributeError):
+except (ImportError, NameError, AttributeError, OSError):
     TORCH_AVAILABLE = False
 
 # System Environment Information
