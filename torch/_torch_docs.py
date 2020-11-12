@@ -2640,7 +2640,7 @@ Computes the dot product of two 1D tensors. The vdot(a, b) function handles comp
 differently than dot(a, b). If the first argument is complex, the complex conjugate of the
 first argument is used for the calculation of the dot product.
 
-.. note:: 
+.. note::
 
     Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
     of two 1D tensors with the same number of elements.
@@ -2672,7 +2672,7 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 
 .. note::
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-    for :func:`torch.symeig`
+    if eigenvalues and eigenvectors are all real valued.
 
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
@@ -3500,6 +3500,8 @@ Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batch
 of 2D square tensors, in which case this function would return a tensor composed of
 individual inverses.
 
+Supports real and complex input.
+
 .. note::
 
     Irrespective of the original strides, the returned tensors will be
@@ -3512,7 +3514,7 @@ Args:
 Keyword args:
     {out}
 
-Example::
+Examples::
 
     >>> x = torch.rand(4, 4)
     >>> y = torch.inverse(x)
@@ -3524,12 +3526,29 @@ Example::
             [ 0.0000, -0.0000, -0.0000,  1.0000]])
     >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
     tensor(1.1921e-07)
+
     >>> # Batched inverse example
     >>> x = torch.randn(2, 3, 4, 4)
     >>> y = torch.inverse(x)
     >>> z = torch.matmul(x, y)
     >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
     tensor(1.9073e-06)
+
+    >>> x = torch.rand(4, 4, dtype=torch.cdouble)
+    >>> y = torch.inverse(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
+            5.5511e-17-1.1102e-16j,  0.0000e+00-1.6653e-16j],
+            [ 5.5511e-16-1.6653e-16j,  1.0000e+00+6.9389e-17j,
+            2.2204e-16-1.1102e-16j, -2.2204e-16+1.1102e-16j],
+            [ 3.8858e-16-1.2490e-16j,  2.7756e-17+3.4694e-17j,
+            1.0000e+00+0.0000e+00j, -4.4409e-16+5.5511e-17j],
+            [ 4.4409e-16+5.5511e-16j, -3.8858e-16+1.8041e-16j,
+            2.2204e-16+0.0000e+00j,  1.0000e+00-3.4694e-16j]],
+        dtype=torch.complex128)
+    >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
+    tensor(7.5107e-16, dtype=torch.float64)
 """.format(**common_args))
 
 add_docstr(torch.isinf, r"""
@@ -7683,9 +7702,11 @@ This function returns a namedtuple ``(U, S, V)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
-If :attr:`some` is ``True`` (default), the method returns the reduced singular value decomposition
-i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the returned
-`U` and `V` matrices will contain only :math:`min(n, m)` orthonormal columns.
+If :attr:`some` is ``True`` (default), the method returns the reduced
+singular value decomposition i.e., if the last two dimensions of
+:attr:`input` are ``m`` and ``n``, then the returned `U` matrix will
+contain only :math:`min(n, m)` orthonormal columns and the size of `V`
+will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
@@ -8188,6 +8209,8 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
+
+Supports real-valued and complex-valued inputs.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
