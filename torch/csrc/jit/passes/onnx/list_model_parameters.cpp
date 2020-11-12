@@ -31,6 +31,8 @@ void findSubModuleAttr(
     if (node->kind() == prim::GetAttr) {
       names_.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
+    } else {
+      return;
     }
   }
 
@@ -87,7 +89,9 @@ std::vector<IValue> getParamAttributes(
 
         findSubModuleAttr(input, name, attrModule, graph);
 
-        TORCH_INTERNAL_ASSERT(attrModule.hasattr(name));
+        if (!attrModule.hasattr(name)) {
+          continue;
+        }
         Value* paramConst = nullptr;
 
         auto attr = attrModule.attr(name);
@@ -101,8 +105,10 @@ std::vector<IValue> getParamAttributes(
         auto type = attrModule.type();
         auto slot = *type->findAttributeSlot(name);
 
-        if (type->is_parameter(slot) || type->is_buffer(slot)) {
-          if (type->is_parameter(slot) || type->is_buffer(slot)) {
+        if (type->is_parameter(slot) || type->is_buffer(slot) ||
+            name == "training") {
+          if (type->is_parameter(slot) || type->is_buffer(slot) ||
+              name == "training") {
             if (attr.isTensor()) {
               TORCH_INTERNAL_ASSERT(attr.isTensor());
               auto tensor_ = attr.toTensor();
@@ -113,7 +119,7 @@ std::vector<IValue> getParamAttributes(
               }
               attrValues.push_back(attr.toTensor());
               paramConst = addParamAsArgument(function_, fullName, attr);
-            } else if (attr.isNone()) {
+            } else if (attr.isNone() || name == "training") {
               auto attrVal = tryInsertConstant(*graph, attr);
               paramConst = *attrVal;
             }
