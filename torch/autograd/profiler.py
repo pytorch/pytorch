@@ -6,7 +6,7 @@ from torch.futures import Future
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple, Optional
 
 try:
     # Available in Python >= 3.2
@@ -120,7 +120,7 @@ class EventList(list):
         def bw_parent(evt):
             if evt is None:
                 return None
-            elif evt.scope == 1: # BACKWARD_FUNCTION
+            elif evt.scope == 1:  # BACKWARD_FUNCTION
                 return evt
             else:
                 return bw_parent(evt.cpu_parent)
@@ -671,7 +671,7 @@ class emit_nvtx(object):
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
-        torch.autograd._enable_profiler(
+        torch.autograd._enable_profiler_legacy(
             torch.autograd.ProfilerConfig(
                 torch.autograd.ProfilerState.NVTX,
                 self.record_shapes,
@@ -684,7 +684,7 @@ class emit_nvtx(object):
         if not self.enabled:
             return
         torch.cuda.synchronize()
-        torch.autograd._disable_profiler()
+        torch.autograd._disable_profiler_legacy()
         return False
 
 
@@ -796,7 +796,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.device_type: int = device_type
 
     def append_kernel(self, name, device, start, end):
-        assert self.device_type == 0 # CPU
+        assert self.device_type == 0  # CPU
         self.kernels.append(Kernel(name, device, Interval(start, end)))
 
     def append_cpu_child(self, child):
@@ -805,7 +805,7 @@ class FunctionEvent(FormattedTimesMixin):
         One is supposed to append only direct children to the event to have
         correct self cpu time being reported.
         """
-        assert(self.device_type == 0) # CPU
+        assert(self.device_type == 0)  # CPU
         assert(isinstance(child, FunctionEvent))
         assert(child.device_type == 0)
         self.cpu_children.append(child)
@@ -817,7 +817,7 @@ class FunctionEvent(FormattedTimesMixin):
         the child's range interval is completely inside the parent's. We use
         this connection to determine the event is from top-level op or not.
         """
-        assert(self.device_type == 0) # CPU
+        assert(self.device_type == 0)  # CPU
         assert(isinstance(parent, FunctionEvent))
         assert(parent.device_type == 0)
         self.cpu_parent = parent
@@ -826,7 +826,7 @@ class FunctionEvent(FormattedTimesMixin):
     # metrics of other events, have only total cpu time
     @property
     def self_cpu_memory_usage(self):
-        if self.is_async or self.device_type != 0: # CPU
+        if self.is_async or self.device_type != 0:  # CPU
             return 0
         return self.cpu_memory_usage - sum(
             [child.cpu_memory_usage for child in self.cpu_children]
@@ -834,7 +834,7 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def self_cuda_memory_usage(self):
-        if self.is_async or self.device_type != 0: # CPU
+        if self.is_async or self.device_type != 0:  # CPU
             return 0
         return self.cuda_memory_usage - sum(
             [child.cuda_memory_usage for child in self.cpu_children]
@@ -852,26 +852,26 @@ class FunctionEvent(FormattedTimesMixin):
     def cuda_time_total(self):
         if self.is_async:
             return 0
-        if self.device_type == 0: # CPU
+        if self.device_type == 0:  # CPU
             return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
         else:
-            assert self.device_type == 1 # CUDA
+            assert self.device_type == 1  # CUDA
             return self.time_range.elapsed_us()
 
     @property
     def self_cuda_time_total(self):
         if self.is_async:
             return 0
-        if self.device_type == 0: # CPU
+        if self.device_type == 0:  # CPU
             return self.cuda_time_total - \
                 sum([child.cuda_time_total for child in self.cpu_children])
         else:
-            assert(self.device_type == 1) # CUDA
+            assert(self.device_type == 1)  # CUDA
             return self.cuda_time_total
 
     @property
     def cpu_time_total(self):
-        if self.device_type == 0: # CPU
+        if self.device_type == 0:  # CPU
             return self.time_range.elapsed_us()
         else:
             return 0
@@ -1179,7 +1179,7 @@ def parse_legacy_records(thread_records):
                     is_async=is_async,
                     is_remote=is_remote_event,
                     sequence_nr=start.sequence_nr(),
-                    device_type=0, # CPU
+                    device_type=0,  # CPU
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():

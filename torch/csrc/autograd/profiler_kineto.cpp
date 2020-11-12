@@ -193,6 +193,7 @@ void prepareProfiler(
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::CONCURRENT_KERNEL,
+    // also including CUDA_RUNTIME
     libkineto::ActivityType::CUDA_RUNTIME,
   };
 
