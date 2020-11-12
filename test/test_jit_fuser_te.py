@@ -66,6 +66,8 @@ class TestTEFuser(JitTestCase):
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
+        self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
         torch._C._jit_set_profiling_mode(self.old_profiling_mode)
@@ -411,17 +413,17 @@ class TestTEFuser(JitTestCase):
         graph = backward_graph(s, skip_check=True)
         self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_add_bool(self):
-        def f(x, y, z):
-            return x + y + z
+        sizes = [(1,), (2,), (4, 4)]
+        for device, size in product(self.devices, sizes):
+            def f(x, y, z):
+                return x + y + z
 
-        x = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
-        y = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
-        z = torch.randint(0, 2, (4, 4), dtype=torch.bool, device='cuda')
-
-        ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
-        self.assertAllFused(ge.graph_for(x, y, z))
+            x = torch.randint(0, 2, size, dtype=torch.bool, device=device)
+            y = torch.randint(0, 2, size, dtype=torch.bool, device=device)
+            z = torch.randint(0, 2, size, dtype=torch.bool, device=device)
+            ge = self.checkTrace(f, (x, y, z), inputs_require_grads=False)
+            self.assertAllFused(ge.graph_for(x, y, z))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_mul_bool(self):
