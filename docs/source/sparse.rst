@@ -418,11 +418,15 @@ matrix arguments.
     .. automethod:: sparse_resize_and_clear_
     .. automethod:: to_dense
     .. automethod:: to_sparse
+    .. automethod:: to_sparse_gcs
     .. The following methods are specific to :ref:`sparse COO tensors <sparse-coo-docs>`:
     .. automethod:: coalesce
     .. automethod:: is_coalesced
     .. automethod:: indices
     .. automethod:: values
+    .. The following methods are specific to :ref:`sparse GCS tensors <sparse-coo-docs>`:
+    .. automethod:: pointers
+    .. automethod:: reduction
 
 The following :class:`torch.Tensor` methods support :ref:`sparse COO
 tensors <sparse-coo-docs>`:
