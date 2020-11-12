@@ -155,7 +155,7 @@ This function supports real-valued, and only on CPU, complex-valued input.
           then a RuntimeError will be thrown.
 
 .. note:: For the batched input if at least one matrix in the batch is not invertible,
-          then the result for all other (possibly) invertible matrices will be erroneously infinity as well.
+          currently getting the result for all other (possibly) invertible matrices in the batch is not implemented.
 
 Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`

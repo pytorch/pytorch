@@ -1603,20 +1603,18 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 
 Tensor _linalg_cond_exception_helper(const Tensor& self) {
   // For batched input if at least one matrix in the batch is not invertible,
-  // then the result for all other (possibly) invertible matrices will be infinity as well
-  // since there is currently no way to use at::inverse with silent errors
-
+  // we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
+  // This should change when at::inverse works with silent errors
+  if (self.dim() > 2) {
+    TORCH_CHECK(false,
+      "At least one matrix in the batch is not invertible, its condition number is infinity, "
+      "linalg_cond does not support yet calculating the condition number for all other (possibly invertible) matrices in the batch.");
+  }
   auto result_shape = self.sizes().vec();
   result_shape.pop_back();
   result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
   Tensor result = at::empty(result_shape, self.options());
   at::fill_(result, INFINITY);
-  if (self.dim() > 2) {
-    // Should this be the not-implemented-error?
-    TORCH_WARN(
-      "linalg_cond for the batched input returns infinity for all (possibly invertible) matrices in the batch, "
-      "if at least one matrix in the batch is not invertible.");
-  }
   return result;
 }
 

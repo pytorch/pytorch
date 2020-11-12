@@ -500,20 +500,18 @@ class TestLinalg(TestCase):
                 torch.linalg.cond(a, ord, out=out)
 
         # for batched input if at least one matrix in the batch is not invertible,
-        # then the result for all other (possibly) invertible matrices will be infinity as well
-        # since there is currently no way to use torch.inverse with silent errors
+        # we can't get the result for all other (possibly) invertible matrices in the batch without an explicit for loop.
+        # this should change when at::inverse works with silent errors
+        # NumPy works fine in this case because it's possible to silence the error and get the inverse matrix results
+        # possibly filled with NANs
         batch_dim = 3
         a = torch.eye(3, 3, dtype=dtype, device=device)
         a = a.reshape((1, 3, 3))
         a = a.repeat(batch_dim, 1, 1)
         a[0, -1, -1] = 0  # now a[0] is singular
         for ord in [1, -1, inf, -inf, 'fro', 'nuc']:
-            with warnings.catch_warnings(record=True) as w:
-                # Trigger warning
+            with self.assertRaisesRegex(RuntimeError, "linalg_cond does not support yet"):
                 torch.linalg.cond(a, ord)
-                # Check warning occurs
-                self.assertEqual(len(w), 1)
-                self.assertTrue("for the batched input returns infinity for all" in str(w[-1].message))
 
     # TODO: once "inverse_cuda" supports complex dtypes, they shall be added to above tests
     @unittest.expectedFailure
