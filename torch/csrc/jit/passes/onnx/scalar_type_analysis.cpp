@@ -90,6 +90,43 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
   return st;
 }
 
+// Type promotion between scalars and tensors
+// per logic here
+// https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
+static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
+    const std::vector<c10::ScalarType>& typesFromTensors,
+    const std::vector<c10::ScalarType>& typesFromScalars) {
+  auto typeFromTensor = PromoteScalarTypes(typesFromTensors);
+  auto typeFromScalar = PromoteScalarTypes(typesFromScalars);
+
+  auto getTypeCategory = [](c10::ScalarType t) {
+    if (c10::kBool == t) {
+      return 1;
+    }
+    if (c10::isIntegralType(t)) {
+      return 2;
+    }
+    if (c10::isFloatingType(t)) {
+      return 3;
+    }
+    return 0;
+  };
+
+  if (c10::nullopt == typeFromScalar) {
+    return typeFromTensor;
+  } else if (c10::nullopt == typeFromTensor) {
+    return typeFromScalar;
+  }
+
+  auto typeCategoryFromTensor = getTypeCategory(typeFromTensor.value());
+  auto typeCategoryFromScalar = getTypeCategory(typeFromScalar.value());
+
+  if (typeCategoryFromScalar > typeCategoryFromTensor) {
+    return typeFromScalar;
+  }
+  return typeFromTensor;
+}
+
 static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
@@ -174,11 +211,9 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
       // PyTorch now does implicit type promotion regardless whether the inputs
       // are tensors or scalars. (Previously only scalars support implicit
       // casting).
-      typesFromScalars.insert(
-          typesFromScalars.end(),
-          typesFromTensors.begin(),
-          typesFromTensors.end());
-      st = PromoteScalarTypes(typesFromScalars);
+      // Per logic here
+      // https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
+      st = PromoteScalarTypesWithCategory(typesFromTensors, typesFromScalars);
     }
   }
 
