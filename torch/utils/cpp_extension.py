@@ -831,7 +831,6 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     include_dirs = kwargs.get('include_dirs', [])
 
-    hipified_sources = set()
     if IS_HIP_EXTENSION:
         build_dir = os.getcwd()
         if not include_dirs:
@@ -845,6 +844,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
             is_pytorch_extension=True,
         )
 
+        hipified_sources = set()
         for source in sources:
             s_abs = os.path.abspath(source)
             hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
