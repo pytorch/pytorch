@@ -145,8 +145,8 @@ linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
 
 This function computes the eigenvalues and eigenvectors
 of a complex Hermitian (or real symmetric) matrix :attr:`input` or batches of such matrices
-such that :math:`\text{input} = V \text{diag}(w) V^H`, where :math:`w` is tensor of eigenvalues,
-:math:`V` is tensor of eigenvectors and :math:`^H` is the conjugate transpose operation.
+such that :math:`\text{input} = V \text{diag}(w) V^H`, where :math:`w` is the tensor of eigenvalues,
+:math:`V` is the tensor of eigenvectors and :math:`^H` is the conjugate transpose operation.
 
 Since :attr:`input` is assumed to be consisting of Hermitian matrices,
 only the lower triangular portion of these matrices is used by default (``UPLO = 'L'``)  in computations
