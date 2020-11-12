@@ -160,6 +160,10 @@ however that function is not differentiable.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
+.. note:: The eigenvectors of matrices are not unique, any eigenvector multiplied by a constant remains
+          to be a valid eigenvector, therefore results on CPU, CUDA and from other libraries can be different.
+          Usually the difference is only in the sign of the eigenvector.
+
 .. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
           This function always checks whether the call to LAPACK/MAGMA is successful
           using ``info`` argument of ``_syevd``, ``_heevd``.
