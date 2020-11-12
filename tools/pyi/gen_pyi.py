@@ -102,14 +102,6 @@ blocklist = [
     'div_out',
     'true_divide', 'true_divide_', 'true_divide_out',
     'floor_divide', 'floor_divide_', 'floor_divide_out',
-    # '_foreach_add',
-    # '_foreach_add_',
-    # '_foreach_sub',
-    # '_foreach_sub_',
-    # '_foreach_mul',
-    # '_foreach_mul_',
-    # '_foreach_div',
-    # '_foreach_div_',
 ]
 
 
