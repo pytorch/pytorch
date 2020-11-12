@@ -1,5 +1,5 @@
 import json
-from typing import Dict, List, NamedTuple
+from typing import Dict, List, NamedTuple, Any
 
 import torch
 from torch.fx.experimental.shape_prop import ShapeProp
@@ -90,8 +90,8 @@ def serialize_shape(shape: torch.Size) -> str:
     return str(list(shape))
 
 
-def serialize_tensor_quantization(tensor: torch.Tensor) -> Dict:
-    scheme = {}
+def serialize_tensor_quantization(tensor: torch.Tensor) -> Dict[str, Any]:
+    scheme = {}  # type: Dict[str, Any]
     if tensor.is_quantized:
         scheme["q_scheme"] = str(tensor.qscheme())
         if tensor.qscheme() in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
@@ -103,14 +103,16 @@ def serialize_tensor_quantization(tensor: torch.Tensor) -> Dict:
             torch.per_channel_symmetric,
         }:
             scheme["q_per_channel_scales"] = tensor.q_per_channel_scales().tolist()
-            scheme["q_per_channel_zero_points"] = tensor.q_per_channel_zero_points().tolist()
+            scheme[
+                "q_per_channel_zero_points"
+            ] = tensor.q_per_channel_zero_points().tolist()
             scheme["q_per_channel_axis"] = tensor.q_per_channel_axis()
 
     return scheme
 
 
 def serialize_weight(tensor: torch.Tensor) -> Dict:
-    weight = {}
+    weight = {}  # type: Dict[str, Any]
     weight["dtype"] = str(tensor.dtype)
     weight["is_quantized"] = tensor.is_quantized
     if tensor.is_quantized:
@@ -156,7 +158,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         q_per_channel_axis, int
     }
     """
-    serialized_dict = {}
+    serialized_dict = {}  # type: Dict[str, Any]
     serialized_dict["modules"] = {}
     serialized_dict["weights"] = {}
     serialized_dict["nodes"] = []
@@ -168,7 +170,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
             serialized_dict["weights"][prefix + name] = weight
             weights[prefix + name] = p
     for node in fx_module.graph.nodes:
-        node_rep = {}
+        node_rep = {}  # type: Dict[str, Any]
         # Get shape/type info, currently not needed for call_module.
         if node.op != "call_module":
             shape = getattr(node, "shape", None)
@@ -189,7 +191,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         # Recurse down into any submodules we are calling.
         if node.op == "call_module":
             submodules = dict(fx_module.named_modules())
-            if isinstance(submodules[node.target], torch.fx.GraphModule):
+            if isinstance(submodules[node.target], GraphModule):
                 serialized_module = serialize_module(
                     getattr(fx_module, node.target), weights, node.target
                 )
@@ -226,6 +228,6 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
 class AcceleratedGraphModule:
     def __init__(self, fx_module: GraphModule):
         """Creates the needed data structures to pass to the glow runtime"""
-        self.weights = {}
+        self.weights = {}  # type: Dict[str, Any]
         self.serialized_graph = serialize_module(fx_module, self.weights)
         self.serialized_graph_json = json.dumps(self.serialized_graph, indent=4)
