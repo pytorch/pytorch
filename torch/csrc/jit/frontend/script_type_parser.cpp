@@ -155,14 +155,9 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     case '.': {
       auto select = Select(expr);
       const std::string& name = select.selector().name();
-
-      bool is_torch = isTorch(select.value());
       // Special case for torch.Tensor
-      if (is_torch && name == "Tensor") {
+      if (isTorch(select.value()) && name == "Tensor") {
         return "Tensor";
-        // Special case for torch.device
-      } else if (is_torch && name == "device") {
-        return "Device";
       } else {
         // Otherwise, it's a fully qualified class name
         return collectQualname(select);

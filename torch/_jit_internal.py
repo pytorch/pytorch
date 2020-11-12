@@ -226,6 +226,32 @@ def can_compile_class(cls):
     return all(has_code)
 
 
+def get_type_hint_captures(fn):
+    """
+    Get a dictionary containing type resolution mapping necessary to resolve types
+    for the annotations on 'fn'. These are not considered to be closed-over by fn
+    and must be obtained separately.
+
+    Arguments:
+        fn: A callable.
+    Returns:
+        A Dict[str, Any] containing a mapping from the literal annotations used on
+        fn to the Python objects they refer to.
+    """
+    captures = {}
+    signature = inspect.signature(fn)
+
+    for name, parameter in signature.parameters.items():
+        if parameter.annotation is not inspect.Parameter.empty:
+            # The string representation of a Parameter is "name:[annotation]".
+            # This line splits this string at ':', takes the second part
+            # containing the annotation, and strips out all whitespace.
+            ty_str = str(parameter).split(':')[1].strip()
+            captures[ty_str] = parameter.annotation
+
+    return captures
+
+
 def createResolutionCallbackForClassMethods(cls):
     """
     This looks at all the methods defined in a class and pulls their closed-over
@@ -238,6 +264,7 @@ def createResolutionCallbackForClassMethods(cls):
 
     for fn in fns:
         captures.update(get_closure(fn))
+        captures.update(get_type_hint_captures(fn))
 
     def lookup_in_class(key):
         if key in captures:
