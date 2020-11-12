@@ -796,8 +796,7 @@ inline IValue toIValue(
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
-      return IValue::make_capsule(
-          py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
+      return IValue::make_capsule(py::cast<c10::Capsule>(obj).obj_ptr);
     }
     case TypeKind::FutureType: {
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
@@ -1002,7 +1001,7 @@ inline py::object toPyObject(IValue ivalue) {
     // PyObject
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
-    return py::cast(ivalue.toCapsule());
+    return py::cast(c10::Capsule(ivalue.toCapsule()));
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
   } else if (ivalue.isEnum()) {

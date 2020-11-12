@@ -6,12 +6,13 @@ from math import inf, nan, isnan
 from random import randrange
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
+    (TestCase, run_tests, TEST_NUMPY, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCUDA,
-     onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+     onlyCUDA, onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
+     skipCUDAIfNoMagmaAndNoCusolver, onlyOnCPUAndCUDA)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
-from torch.autograd import gradcheck
+from torch.autograd import gradcheck, gradgradcheck
 
 if TEST_NUMPY:
     import numpy as np
@@ -1055,6 +1056,120 @@ class TestLinalg(TestCase):
             self.assertEqual(USV.S, np_s)
             assert USV.V is None
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3})
+    def test_inverse(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def run_test(matrix, batches, n):
+            matrix_inverse = torch.inverse(matrix)
+
+            # Compare against NumPy output
+            # NumPy uses 'gesv' LAPACK routine solving the equation A A_inv = I
+            # But in PyTorch 'gertf' + 'getri' is used causing element-wise differences
+            expected = np.linalg.inv(matrix.cpu().numpy())
+            self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=1e-4)
+
+            # Additional correctness tests, check matrix*matrix_inverse == identity
+            identity = torch.eye(n, dtype=dtype, device=device)
+            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+            if self.device_type == 'cuda' and dtype.is_complex:
+                result_identity_list1 = []
+                result_identity_list2 = []
+                p = int(np.prod(batches))  # use `p` instead of -1, so that the test works for empty input as well
+                for m, m_inv in zip(matrix.contiguous().view(p, n, n), matrix_inverse.contiguous().view(p, n, n)):
+                    result_identity_list1.append(torch.matmul(m, m_inv))
+                    result_identity_list2.append(torch.matmul(m_inv, m))
+                result_identity1 = torch.stack(result_identity_list1).view(*batches, n, n)
+                result_identity2 = torch.stack(result_identity_list2).view(*batches, n, n)
+                self.assertEqual(identity.expand_as(matrix), result_identity1)
+                self.assertEqual(identity.expand_as(matrix), result_identity2)
+            else:
+                self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
+                self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
+
+            # check the out= variant
+            matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
+            ans = torch.inverse(matrix, out=matrix_inverse_out)
+            self.assertEqual(matrix_inverse_out, ans, atol=0, rtol=0)
+            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
+
+            # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
+            if matrix.ndim > 2:
+                expected_inv_list = []
+                p = int(np.prod(batches))  # use `p` instead of -1, so that the test works for empty input as well
+                for mat in matrix.contiguous().view(p, n, n):
+                    expected_inv_list.append(torch.inverse(mat))
+                expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
+                if self.device_type == 'cuda' and dtype in [torch.float32, torch.complex64]:
+                    # single-inverse is done using cuSOLVER, while batched inverse is done using MAGMA
+                    # individual values can be significantly different for fp32, hence rather high rtol is used
+                    # the important thing is that torch.inverse passes above checks with identity
+                    self.assertEqual(matrix_inverse, expected_inv, atol=1e-1, rtol=1e-2)
+                else:
+                    self.assertEqual(matrix_inverse, expected_inv)
+
+        for batches, n in itertools.product(
+            [[], [1], [4], [2, 3]],
+            [0, 5, 64]
+        ):
+            # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
+            if batches and batches[0] == 32 and n == 256:
+                continue
+            matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
+            run_test(matrices, batches, n)
+
+            # test non-contiguous input
+            run_test(matrices.transpose(-2, -1), batches, n)
+            if n > 0:
+                run_test(
+                    random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype).to(device)
+                    .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
+                    batches, n
+                )
+
+    @slowTest
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
+                        torch.float64: 1e-5, torch.complex128: 1e-5})
+    def test_inverse_many_batches(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def test_inverse_many_batches_helper(b, n):
+            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype).to(device)
+            matrices_inverse = torch.inverse(matrices)
+
+            # Compare against NumPy output
+            expected = np.linalg.inv(matrices.cpu().numpy())
+            self.assertEqual(matrices_inverse, expected, atol=self.precision, rtol=1e-4)
+
+        test_inverse_many_batches_helper(5, 256)
+        test_inverse_many_batches_helper(3, 512)
+        test_inverse_many_batches_helper(64, 64)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_inverse_errors(self, device, dtype):
+        # inverse expects batches of square matrices as input
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.inverse(torch.randn(2, 3, 4, 3))
+
+        # if input is not invertible, RuntimeError is raised mentioning the first non-invertible batch
+        def run_test_singular_input(batch_dim, n):
+            x = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            x[n, -1, -1] = 0
+            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+                torch.inverse(x)
+
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            run_test_singular_input(*params)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -1244,6 +1359,324 @@ class TestLinalg(TestCase):
     def test_dot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.dot)
         self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
+
+    def test_einsum(self, device):
+        def check(equation, *operands):
+            ref = np.einsum(equation, *[operand.cpu().numpy() for operand in operands])
+            res = torch.einsum(equation, operands)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.array(ref)))
+
+            # Autograd check (FIXME: tests below fail check)
+            if equation not in {"i,i->", "i,i->i", "ij,ij->ij"}:
+                ops = [op.detach().requires_grad_() for op in operands]
+                self.assertTrue(torch.autograd.gradcheck(lambda *ops: torch.einsum(equation, ops), ops))
+                for op in ops:
+                    self.assertTrue(op._version == 0)
+
+        # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
+        x = torch.rand(5, device=device)
+        y = torch.rand(7, device=device)
+        A = torch.randn(3, 5, device=device)
+        B = torch.randn(2, 5, device=device)
+        C = torch.randn(2, 3, 5, device=device)
+        D = torch.randn(2, 5, 7, device=device)
+        E = torch.randn(7, 9, device=device)
+        F = torch.randn(2, 3, 3, 5, device=device)
+        G = torch.randn(5, 4, 6, device=device)
+        H = torch.randn(4, 4, device=device)
+        I = torch.rand(2, 3, 2, device=device)
+
+        # Vector operations
+        check('i->', x)                     # sum
+        check('i,i->', x, x)                # dot
+        check('i,i->i', x, x)               # vector element-wisem mul
+        check('i,j->ij', x, y)              # outer
+
+        # Matrix operations
+        check("ij->ji", A)                  # transpose
+        check("ij->j", A)                   # row sum
+        check("ij->i", A)                   # col sum
+        check("ij,ij->ij", A, A)            # matrix element-wise mul
+        check("ij,j->i", A, x)              # matrix vector multiplication
+        check("ij,kj->ik", A, B)            # matmul
+        check("ij,ab->ijab", A, E)          # matrix outer product
+
+        # Tensor operations
+        check("aij,ajk->aik", C, D)         # batch matmul
+        check("ijk,jk->i", C, A)            # tensor matrix contraction
+        check("aij,jk->aik", D, E)          # tensor matrix contraction
+        check("abcd,dfg->abcfg", F, G)      # tensor tensor contraction
+        check("ijk,jk->ik", C, A)           # tensor matrix contraction with double indices
+        check("ijk,jk->ij", C, A)           # tensor matrix contraction with double indices
+        check("ijk,ik->j", C, B)            # non contiguous
+        check("ijk,ik->jk", C, B)           # non contiguous with double indices
+
+        # Test diagonals
+        check("ii", H)                      # trace
+        check("ii->i", H)                   # diagonal
+        check('iji->j', I)                  # non-contiguous trace
+
+        # Test ellipsis
+        check("i...->...", H)
+        check("ki,...k->i...", A.t(), B)
+        check("k...,jk", A.t(), B)
+        check('...ik, ...kj -> ...ij', torch.rand(2, 3, 4), torch.rand(1, 5))
+        check('bik,k...j->i...j', torch.rand(5, 2, 3), torch.rand(3, 2))
+        check('i...j, ij... -> ...ij', torch.rand(2, 3, 4), torch.rand(2, 4, 2, 3))
+
+        # torch.bilinear with discontiguous tensors
+        l = torch.randn(10, 5, device=device).transpose(0, 1)
+        r = torch.randn(20, 5, device=device).transpose(0, 1)
+        w = torch.randn(15, 10, 20, device=device)
+        check("bn,anm,bm->ba", l, w, r)
+        # with strided tensors
+        check("bn,anm,bm->ba", l[:, ::2], w[:, ::2, ::2], r[:, ::2])
+
+    def test_einsum_corner_cases(self, device):
+        def check(equation, *operands, expected_output):
+            tensors = [torch.tensor(operand, dtype=torch.float32, device=device) if not isinstance(operand, tuple)
+                       else torch.rand(operand, dtype=torch.float32, device=device) for operand in operands]
+            output = torch.einsum(equation, tensors)
+            self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
+
+        # Test equation variantions
+        check(' ', 1, expected_output=1)
+        check(' -> ', 1, expected_output=1)
+        check(' , ', 2, 2, expected_output=4)
+        check(' , , ', 2, 2, 2, expected_output=8)
+        check(' , -> ', 2, 2, expected_output=4)
+        check(' i ', [1], expected_output=[1])
+        check(' i -> ', [1], expected_output=1)
+        check(' i -> i ', [1], expected_output=[1])
+        check(' i , i ', [2], [2], expected_output=4)
+        check(' i , i -> i ', [2], [2], expected_output=[4])
+
+        # Test tensors with 0 size dimensions
+        check('i', [], expected_output=[])
+        check(' i j -> j', [[], []], expected_output=[])
+        check('ij->i', [[], []], expected_output=[0., 0.])
+        check(' i j k  ,  k  -> i j ', (3, 0, 6), (6,), expected_output=[[], [], []])
+
+        # Test broadcasting
+        check('i,j', [2], [1, 2], expected_output=[[2, 4]])
+        check('i,ij->ij', [1, 2], [[1, 2, 3], [2, 3, 4]], expected_output=[[1, 2, 3], [4, 6, 8]])
+
+        # Test ellipsis broadcasting
+        check('...', 1, expected_output=1)
+        check('...->', 1, expected_output=1)
+        check('...->...', 1, expected_output=1)
+        check('i...->i', [1], expected_output=[1])
+        check('i...->...i', [1], expected_output=[1])
+
+    def test_einsum_error_cases(self, device):
+        def check(equation, operands, regex, exception=RuntimeError):
+            with self.assertRaisesRegex(exception, r'einsum\(\) ' + regex):
+                torch.einsum(equation, operands)
+
+        x = torch.rand(2)
+        y = torch.rand(2, 3)
+
+        check('', [], r'must provide at least one operand')
+        check('. ..', [x], r'found \'.\' for operand 0 that is not part of any ellipsis')
+        check('... ...', [x], r'found \'.\' for operand 0 for which an ellipsis was already found')
+        check('A', [x], r'operand subscript must be in range \[a, z\] but found A for operand 0')
+        check(',', [x], r'fewer operands were provided than specified in the equation')
+        check('', [x, x], r'more operands were provided than specified in the equation')
+        check('', [x], r'the number of subscripts in the equation \(0\) does not match the number '
+                       r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai', [x], r'the number of subscripts in the equation \(2\) does not match the number '
+                         r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai...', [x], r'the number of subscripts in the equation \(2\) is more than the number '
+                            r'of dimensions \(1\) for operand 0')
+        check('a->... .', [x], r'found \'.\' for output but an ellipsis \(...\) was already found')
+        check('a->..', [x], r'found \'.\' for output that is not part of any ellipsis \(...\)')
+        check('a->A', [x], r'subscripts must be in range \[a, z\] but found A for the output')
+        check('a->aa', [x], r'output subscript a appears more than once in the output')
+        check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
+        check('...->', [x], r'ellipsis \(...\) covering one or more dimensions was given in the input '
+                            r'but not in the output')
+        check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
+        check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
+                               r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+
+    def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
+                                     device, dtype):
+        triangle_function = torch.triu if upper else torch.tril
+        b = torch.randn(*b_dims, dtype=dtype, device=device)
+        A = torch.randn(*A_dims, dtype=dtype, device=device)
+        # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+        if self.device_type == 'cuda' and dtype.is_complex:
+            A_tmp = torch.empty_like(A).view(-1, *A_dims[-2:])
+            for A_i, A_tmp_i in zip(A.contiguous().view(-1, *A_dims[-2:]), A_tmp):
+                torch.matmul(A_i, A_i.t(), out=A_tmp_i)
+            A = A_tmp.view(*A_dims)
+        else:
+            # create positive definite matrix
+            A = torch.matmul(A, A.transpose(-2, -1))
+        A_triangular = triangle_function(A)
+        if unitriangular:
+            A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
+        return b, A_triangular
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_triangular_solve(self, device, dtype):
+        for (k, n), (upper, unitriangular, transpose) in itertools.product(zip([2, 3, 5], [3, 5, 7]),
+                                                                           itertools.product([True, False], repeat=3)):
+            b, A = self.triangular_solve_test_helper((n, n), (n, k), upper,
+                                                     unitriangular, device, dtype)
+            x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            if transpose:
+                self.assertEqual(b, A.t().mm(x))
+            else:
+                self.assertEqual(b, A.mm(x))
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_triangular_solve_batched(self, device, dtype):
+        def triangular_solve_batch_helper(A_dims, b_dims, upper, unitriangular, transpose):
+            b, A = self.triangular_solve_test_helper(A_dims, b_dims, upper,
+                                                     unitriangular, device, dtype)
+            x_exp_list = []
+            for i in range(b_dims[0]):
+                x_exp_list.append(torch.triangular_solve(b[i], A[i], upper=upper,
+                                                         unitriangular=unitriangular,
+                                                         transpose=transpose)[0])
+            x_exp = torch.stack(x_exp_list)  # Stacked output
+            x_act = torch.triangular_solve(b, A, upper=upper,
+                                           unitriangular=unitriangular,
+                                           transpose=transpose)[0]  # Actual output
+            self.assertEqual(x_act, x_exp)  # Equality check
+            if transpose:
+                A = A.transpose(-2, -1)
+
+            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+            if self.device_type == 'cuda' and dtype.is_complex:
+                Ax = torch.empty_like(x_act).view(-1, *b_dims[-2:])
+                for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, *A_dims[-2:]),
+                                          x_act.contiguous().view(-1, *b_dims[-2:]), Ax):
+                    torch.matmul(A_i, x_i, out=Ax_i)
+                Ax = Ax.view(*x_act.shape)
+            else:
+                Ax = torch.matmul(A, x_act)
+            self.assertEqual(b, Ax)
+
+        for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product(
+                [True, False], repeat=3), [1, 3, 4]):
+            triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
+                                          upper, unitriangular, transpose)
+
+
+    @slowTest
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_triangular_solve_batched_many_batches(self, device, dtype):
+        for upper, transpose, unitriangular in itertools.product([True, False], repeat=3):
+            # test batched A case
+            b, A = self.triangular_solve_test_helper((256, 256, 5, 5), (5, 1),
+                                                     upper, unitriangular, device, dtype)
+            x, _ = torch.triangular_solve(b, A,
+                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+
+            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+            if self.device_type == 'cuda' and dtype.is_complex:
+                Ax = torch.empty_like(x).view(-1, 5, 1)
+                for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, 5, 5), x.contiguous().view(-1, 5, 1), Ax):
+                    torch.matmul(A_i, x_i, out=Ax_i)
+                Ax = Ax.view(256, 256, 5, 1)
+            else:
+                Ax = torch.matmul(A, x)
+
+            rtol = 1e-2 if dtype in [torch.float32, torch.complex64] else self.precision
+            self.assertEqual(Ax, b.expand_as(Ax), atol=self.precision, rtol=rtol)
+
+            # test batched b case
+            b, A = self.triangular_solve_test_helper((3, 3), (512, 512, 3, 1),
+                                                     upper, unitriangular, device, dtype)
+            x, _ = torch.triangular_solve(b, A, upper=upper, transpose=transpose,
+                                          unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+
+            self.assertEqual(torch.matmul(A, x), b)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_triangular_solve_batched_broadcasting(self, device, dtype):
+        from scipy.linalg import solve_triangular as tri_solve
+
+        def scipy_tri_solve_batched(A, B, upper, trans, diag):
+            batch_dims_A, batch_dims_B = A.shape[:-2], B.shape[:-2]
+            single_dim_A, single_dim_B = A.shape[-2:], B.shape[-2:]
+            expand_dims = tuple(torch._C._infer_size(torch.Size(batch_dims_A),
+                                                     torch.Size(batch_dims_B)))
+            expand_A = np.broadcast_to(A, expand_dims + single_dim_A)
+            expand_B = np.broadcast_to(B, expand_dims + single_dim_B)
+            flat_A = expand_A.reshape((-1,) + single_dim_A)
+            flat_B = expand_B.reshape((-1,) + single_dim_B)
+            flat_X = np.vstack([tri_solve(a, b, lower=(not upper), trans=int(trans), unit_diagonal=diag)
+                                for a, b in zip(flat_A, flat_B)])
+            return flat_X.reshape(expand_B.shape)
+
+        def run_test(A_dims, b_dims, device, upper, transpose, unitriangular):
+            b, A = self.triangular_solve_test_helper(A_dims, b_dims, upper,
+                                                     unitriangular, device, dtype)
+            x_exp = torch.as_tensor(scipy_tri_solve_batched(A.cpu().numpy(), b.cpu().numpy(),
+                                                            upper, transpose, unitriangular))
+            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
+
+            self.assertEqual(x, x_exp.to(device))
+
+        for upper, transpose, unitriangular in itertools.product([True, False], repeat=3):
+            # test against scipy.linalg.solve_triangular
+            run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6), device, upper, transpose, unitriangular)  # no broadcasting
+            run_test((2, 1, 3, 4, 4), (4, 6), device, upper, transpose, unitriangular)  # broadcasting b
+            run_test((4, 4), (2, 1, 3, 4, 2), device, upper, transpose, unitriangular)  # broadcasting A
+            run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), device, upper, transpose, unitriangular)  # broadcasting A & b
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_triangular_solve_singular(self, device, dtype):
+        b = torch.rand(3, 1, dtype=dtype, device=device)
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A[-1, -1] = 0  # Now A is singular
+        err_str = r"triangular_solve_cpu: U\(3,3\) is zero, singular U\."
+        with self.assertRaisesRegex(RuntimeError, err_str):
+            torch.triangular_solve(b, A)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64, torch.complex128)
+    def test_triangular_solve_autograd(self, device, dtype):
+        def run_test(A_dims, B_dims):
+            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
+            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
+
+            for upper, transpose, unitriangular in itertools.product((True, False), repeat=3):
+                def func(A, b):
+                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
+
+                gradcheck(func, [A, b])
+                gradgradcheck(func, [A, b])
+
+        run_test((3, 3), (3, 4))
+        run_test((3, 3), (3, 2))
+        run_test((2, 3, 3), (2, 3, 4))
+        run_test((2, 3, 3), (2, 3, 2))
 
 instantiate_device_type_tests(TestLinalg, globals())
 

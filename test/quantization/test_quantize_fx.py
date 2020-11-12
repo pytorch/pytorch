@@ -500,48 +500,52 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
         qconfig_dict = {"": default_qconfig}
-        prepare_custom_config_dict = {"standalone_module_name": ["standalone"]}
-        # check prepared model
-        m = prepare_fx(
-            original_m, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
-        # calibration
-        m(data)
-        # input and output of first conv, observer for standalone module
-        # will be inserted in the standalone module itself
-        count_check = {
-            ns.call_module(torch.quantization.MinMaxObserver): 2
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-        # for output of conv in the standalone module
-        count_check = {
-            ns.call_module(torch.quantization.MinMaxObserver): 1
-        }
-        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
+        config_name = {"standalone_module_name": ["standalone"]}
+        config_class = {"standalone_module_class": [StandaloneModule]}
+        for prepare_config in [config_name, config_class]:
+            original_m_copy = copy.deepcopy(original_m)
+            original_ref_m_copy = copy.deepcopy(original_ref_m)
+            # check prepared model
+            m = prepare_fx(
+                original_m_copy, qconfig_dict, prepare_custom_config_dict=prepare_config)
+            # calibration
+            m(data)
+            # input and output of first conv, observer for standalone module
+            # will be inserted in the standalone module itself
+            count_check = {
+                ns.call_module(torch.quantization.MinMaxObserver): 2
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+            # for output of conv in the standalone module
+            count_check = {
+                ns.call_module(torch.quantization.MinMaxObserver): 1
+            }
+            self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
 
-        # check converted/quantized model
-        m = convert_fx(m)
-        count_check = {
-            ns.call_function(torch.quantize_per_tensor) : 1,
-            ns.call_module(nnq.Conv2d) : 1,
-            ns.call_method('dequantize') : 1,
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
-        count_check = {
-            # quantization of input happens in parent module
-            # quantization of output happens in the quantized conv module
-            ns.call_function(torch.quantize_per_tensor) : 0,
-            # dequantization for output happens in parent module
-            ns.call_method('dequantize') : 0,
-        }
-        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
-        res = m(data)
+            # check converted/quantized model
+            m = convert_fx(m)
+            count_check = {
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_module(nnq.Conv2d) : 1,
+                ns.call_method('dequantize') : 1,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+            count_check = {
+                # quantization of input happens in parent module
+                # quantization of output happens in the quantized conv module
+                ns.call_function(torch.quantize_per_tensor) : 0,
+                # dequantization for output happens in parent module
+                ns.call_method('dequantize') : 0,
+            }
+            self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
+            res = m(data)
 
-        # quantize the reference model
-        ref_m = prepare_fx(original_ref_m, qconfig_dict)
-        ref_m(data)
-        ref_m = convert_fx(ref_m)
-        ref_res = ref_m(data)
-        self.assertEqual(res, ref_res)
+            # quantize the reference model
+            ref_m = prepare_fx(original_ref_m_copy, qconfig_dict)
+            ref_m(data)
+            ref_m = convert_fx(ref_m)
+            ref_res = ref_m(data)
+            self.assertEqual(res, ref_res)
 
     @skipIfNoFBGEMM
     def test_qconfig_none(self):
@@ -1024,7 +1028,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M()
-        print(m.__dict__.keys())
         m.eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         prepared = prepare_fx(m, qconfig_dict)
