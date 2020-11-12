@@ -594,42 +594,42 @@ class TestTEFuser(JitTestCase):
     # Removed `_cuda` suffix from this test which disables leak-checking.
     # If this is a real problem, we'll need to revisit Torchscript Function
     # lifetimes in Python.
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lerp(self):
-        start = torch.randn(4, 1, dtype=torch.float, device='cuda')
-        end = torch.randn(1, 4, dtype=torch.float, device='cuda')
-        weight = torch.tensor(0.5, dtype=torch.float, device='cuda')
+        for device in self.devices:
+            start = torch.randn(4, 1, dtype=torch.float, device=device)
+            end = torch.randn(1, 4, dtype=torch.float, device=device)
+            weight = torch.tensor(0.5, dtype=torch.float, device=device)
 
-        # scalar weight overload
-        def foo_weight_scalar(start, end):
-            return torch.lerp(start + 1, end, 0.5)
+            # scalar weight overload
+            def foo_weight_scalar(start, end):
+                return torch.lerp(start + 1, end, 0.5)
 
-        # tensor weight overload
-        def foo_weight_tensor(start, end):
-            return torch.lerp(start + 1, end, weight)
+            # tensor weight overload
+            def foo_weight_tensor(start, end):
+                return torch.lerp(start + 1, end, weight)
 
-        ge_weight_scalar = self.checkTrace(foo_weight_scalar, (start, end))
-        graph = ge_weight_scalar.graph_for(start, end)
-        self.assertAllFused(graph)
+            ge_weight_scalar = self.checkTrace(foo_weight_scalar, (start, end))
+            graph = ge_weight_scalar.graph_for(start, end)
+            self.assertAllFused(graph)
 
-        # TODO: uncomment when TE enables support for scalar tensors
-        # ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
-        # graph = ge_weight_tensor.graph_for(start, end)
-        # self.assertAllFused(graph)
+            # TODO: uncomment when TE enables support for scalar tensors
+            # ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
+            # graph = ge_weight_tensor.graph_for(start, end)
+            # self.assertAllFused(graph)
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_cuda(self):
-        hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
-        cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
+        for device in self.devices:
+            hx = torch.randn(3, 20, dtype=torch.float, device=device)
+            cx = torch.randn(3, 20, dtype=torch.float, device=device)
 
-        def foo(hx, cx):
-            return torch.cat((hx + cx, hx * cx))
+            def foo(hx, cx):
+                return torch.cat((hx + cx, hx * cx))
 
-        ge = self.checkTrace(foo, (hx, cx))
-        graph = ge.graph_for(hx, cx)
-        self.assertAllFused(graph)
-        # XXX: TE fuser can handle concats in a fusion group.
-        # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+            ge = self.checkTrace(foo, (hx, cx))
+            graph = ge.graph_for(hx, cx)
+            self.assertAllFused(graph)
+            # XXX: TE fuser can handle concats in a fusion group.
+            # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_remove_output_used_only_in_size(self):
@@ -674,13 +674,13 @@ class TestTEFuser(JitTestCase):
     def fn_test_exp(x, y):
         return (x + .5 * y).exp()
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_exp_cuda(self):
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+    def test_exp(self):
+        for device in self.devices:
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
 
-        ge = self.checkTrace(self.fn_test_exp, (x, y))
-        self.assertAllFused(ge.graph_for(x, y))
+            ge = self.checkTrace(self.fn_test_exp, (x, y))
+            self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
@@ -738,14 +738,14 @@ class TestTEFuser(JitTestCase):
         test_norm_decompose(lm, ['aten::batch_norm_stats'],
                             ['aten::layer_norm('], ['aten::sub', 'aten::mul', 'aten::add'])
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_threshold(self):
-        def f(x):
-            return torch.threshold(x, 0, -10) + x + x + x
+        for device in self.devices:
+            def f(x):
+                return torch.threshold(x, 0, -10) + x + x + x
 
-        x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device='cuda')
-        scripted = self.checkScript(f, (x,))
-        self.assertAllFused(scripted.graph_for(x))
+            x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device=device)
+            scripted = self.checkScript(f, (x,))
+            self.assertAllFused(scripted.graph_for(x))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_scalar_arg_cuda(self):
@@ -896,25 +896,10 @@ class TestTEFuser(JitTestCase):
         ge = self.checkTrace(doit, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_lstm_cuda(self):
-        inputs = get_lstm_inputs('cuda', training=True)
-        module = self.checkScript(LSTMCellS, inputs)
-        return
-        forward_graph = module.graph_for(*inputs)
-        self.assertGraphContainsExactly(
-            forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-        self.assertTrue(len(strip_profiling_nodes(forward_graph.nodes())) == 2)
-        # Everything is differentiable but TupleConstruct return
-        FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
-            .check_next("return").run(str(forward_graph))
-
-        with enable_profiling_mode_for_profiling_tests(True):
-            hy, cy = module(*inputs)
-            warmup_backward((hy + cy).sum())
-            backward = backward_graph(module)
-        self.assertAllFused(backward, except_for=("aten::t", "aten::mm",
-                                                  "aten::_grad_sum_to_size"))
+    def test_lstm(self):
+        for device in self.devices:
+            inputs = get_lstm_inputs(device, training=True)
+            module = self.checkScript(LSTMCellS, inputs)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_concat_cuda(self):
@@ -924,27 +909,27 @@ class TestTEFuser(JitTestCase):
         # XXX: TE fuser can handle concats inside a fusion group.
         # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_lstm_gates_permutations_cuda(self):
-        # lstm has gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh.
-        # Test that any permutation of this will still result in one FusionGroup.
-        choices = ['x.mm(w_ih.t())', 'hx.mm(w_hh.t())', 'b_ih', 'b_hh']
-        template = dedent('''
-        def cell(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
-            gates = {} + {} + {} + {}
-            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
-            return ingate * forgetgate * cellgate * outgate
-        ''')
-        for permutation in permutations(choices, len(choices)):
-            code = template.format(*permutation)
-            scope = {}
-            exec(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
+    def test_lstm_gates_permutations(self):
+        for device in self.devices:
+            # lstm has gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh.
+            # Test that any permutation of this will still result in one FusionGroup.
+            choices = ['x.mm(w_ih.t())', 'hx.mm(w_hh.t())', 'b_ih', 'b_hh']
+            template = dedent('''
+            def cell(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+                gates = {} + {} + {} + {}
+                ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+                return ingate * forgetgate * cellgate * outgate
+            ''')
+            for permutation in permutations(choices, len(choices)):
+                code = template.format(*permutation)
+                scope = {}
+                exec(code, globals(), scope)
+                cu = torch.jit.CompilationUnit(code)
 
-            inputs = get_lstm_inputs('cuda', training=False)
-            self.assertEqual(cu.cell(*inputs), scope['cell'](*inputs))
-            forward_graph = cu.cell.graph_for(*inputs)
-            self.assertGraphContainsExactly(forward_graph, FUSION_GROUP, 1)
+                inputs = get_lstm_inputs(device, training=False)
+                self.assertEqual(cu.cell(*inputs), scope['cell'](*inputs))
+                forward_graph = cu.cell.graph_for(*inputs)
+                self.assertGraphContainsExactly(forward_graph, FUSION_GROUP, 1)
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
