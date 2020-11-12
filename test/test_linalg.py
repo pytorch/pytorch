@@ -1382,7 +1382,7 @@ class TestLinalg(TestCase):
         # Test ellipsis
         check("i...->...", H)
         check("ki,...k->i...", A.t(), B)
-        check("k...,jk", A.t(), B)
+        check("k...,jk->...", A.t(), B)
         check('...ik, ...kj -> ...ij', torch.rand(2, 3, 4), torch.rand(1, 5))
         check('bik,k...j->i...j', torch.rand(5, 2, 3), torch.rand(3, 2))
         check('i...j, ij... -> ...ij', torch.rand(2, 3, 4), torch.rand(2, 4, 2, 3))
@@ -1428,8 +1428,12 @@ class TestLinalg(TestCase):
         check('...', 1, expected_output=1)
         check('...->', 1, expected_output=1)
         check('...->...', 1, expected_output=1)
+        check('...', [1], expected_output=[1])
+        check('...->', [1], expected_output=1)
         check('i...->i', [1], expected_output=[1])
         check('i...->...i', [1], expected_output=[1])
+        check('...a->', [[2], [4]], expected_output=6)
+        check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
         def check(equation, operands, regex, exception=RuntimeError):
@@ -1456,8 +1460,6 @@ class TestLinalg(TestCase):
         check('a->A', [x], r'subscripts must be in range \[a, z\] but found A for the output')
         check('a->aa', [x], r'output subscript a appears more than once in the output')
         check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
-        check('...->', [x], r'ellipsis \(...\) covering one or more dimensions was given in the input '
-                            r'but not in the output')
         check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
         check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
                                r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')

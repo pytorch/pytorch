@@ -309,15 +309,16 @@ Tensor einsum(std::string equation, TensorList operands) {
           label_count[rhs[i] - 'a'] = -1;
       }
     }
-
-    TORCH_CHECK(
-        // Dimensions under ellipsis are not contracted, so ensure it appears in output
-        ell_num_dim <= 0 || found_ell,
-        "einsum() ellipsis (...) covering one or more dimensions was given in the input but not in the output");
   }
 
   // Save output size before adding sum dims
   int out_size = perm_index;
+
+  // If ellipsis is not part of the output, add to contraction dimensions
+  if (ell_num_dim > 0 && !found_ell) {
+    ell_index = perm_index;
+    perm_index += ell_num_dim;
+  }
 
   // Add contraction labels (labels not present in output)
   for (int label = 0; label < total_labels; ++label) {
