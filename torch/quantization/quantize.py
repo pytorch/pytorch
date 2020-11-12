@@ -1,4 +1,3 @@
-
 import copy
 import itertools
 import warnings
@@ -137,7 +136,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             m._forward_hooks.move_to_end(handle.id, last=False)
 
     for name, child in module.named_children():
-        if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
+        if type(child) in [nnq.FloatFunctional, nnq.QFunctional] or \
+           isinstance(child, _FusedModule):
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif _has_special_act_post_process(child):
