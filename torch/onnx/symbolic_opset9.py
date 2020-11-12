@@ -1046,16 +1046,6 @@ def prim_dtype(g, self):
     return g.op("Constant", value_t=torch.IntTensor([dtype]))
 
 
-def prim_data(g, self):
-    return self
-
-
-def is_floating_point(g, self):
-    if sym_help._is_fp(self):
-        return g.op("Constant", value_t=torch.BoolTensor([1]))
-    return g.op("Constant", value_t=torch.BoolTensor([0]))
-
-
 def __isnot_(g, self, other):
     if sym_help._is_none(other):
         if sym_help._is_none(self):
