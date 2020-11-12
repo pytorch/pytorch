@@ -3228,6 +3228,8 @@ A, in order as a namedtuple `solution, LU`.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
+Supports real-valued and complex-valued inputs.
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
