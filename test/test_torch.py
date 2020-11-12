@@ -17718,6 +17718,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
+    @precisionOverride({torch.half: 0.005, torch.bfloat16: 0.05})
     @skipCUDAIf(torch.version.cuda == "10.1", "flaky on CUDA 10.1")
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
@@ -17727,15 +17728,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         M, N, O = 23, 8, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
-        cpu_supported_dtypes = torch.testing.floating_and_complex_types()
-        cuda_supported_dtypes = torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)
-        is_supported = (self.device_type == 'cpu' and dtype in cpu_supported_dtypes) or \
-            (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
+        if self.device_type == 'cpu':
+            is_supported = True
+        elif self.device_type == 'cuda':
+            is_supported = True if dtype != torch.bfloat16 else AMPERE_OR_ROCM
 
         if not is_supported:
-            return
-            # NOTE: code below has been temporarily short circuited for unsupported types
-            # since they are supported for some code paths and don't always throw an error.
             b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
             b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
             self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.bmm(b1, b2))
@@ -17746,16 +17744,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         def generate_inputs():
             for perm1, perm2 in product(permutations((0, 1, 2)), repeat=2):
-                b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
-                b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
+                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
+                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
             for b1, b2, b3, b4, b5, b6 in product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
-                b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
-                b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
                 yield b1, b2
 
         for (b1, b2), perm3 in product(generate_inputs(), permutations((0, 1, 2))):
@@ -17941,7 +17939,7 @@ else:
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
-    @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.5})
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
@@ -17949,15 +17947,12 @@ else:
         num_batches = 10
         M, N, O = 12, 8, 5
 
-        cpu_supported_dtypes = torch.testing.floating_and_complex_types()
-        cuda_supported_dtypes = torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)
-        is_supported = (self.device_type == 'cpu' and dtype in cpu_supported_dtypes) or \
-            (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
+        if self.device_type == 'cpu':
+            is_supported = True
+        elif self.device_type == 'cuda':
+            is_supported = True if dtype != torch.bfloat16 else AMPERE_OR_ROCM
 
         if not is_supported:
-            return
-            # NOTE: code below has been temporarily short circuited for unsupported types
-            # since they are supported for some code paths and don't always throw an error.
             b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
             b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
             t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
@@ -17984,8 +17979,8 @@ else:
             for s1, s2, s3, s4, s5, s6 in product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-2, high=2).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-2, high=2).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)
