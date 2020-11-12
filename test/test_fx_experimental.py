@@ -32,10 +32,12 @@ class TestFXExperimental(JitTestCase):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
                 self.e = torch.rand(4)
+                self.conv = torch.nn.Conv2d(3, 3, 2, bias=False)
 
-            def forward(self, a, b):
+            def forward(self, a, b, c):
                 add_1 = a + b
-                linear = self.linear(add_1)
+                conv1 = self.conv(c)
+                linear = self.linear(add_1 + conv1)
                 add_2 = linear + self.e
                 return add_2
 
@@ -43,7 +45,8 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         a = torch.rand(4)
         b = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b])
+        c = torch.rand(3, 3, 2, 2)
+        GraphManipulation.get_size_of_all_nodes(traced, [a, b, c])
 
         partitioner = Partitioner()
         devices = [Device("dev_0", 5000, 0), Device("dev_1", 125, 1)]
@@ -66,13 +69,13 @@ class TestFXExperimental(JitTestCase):
 
         agm1 = GraphManipulation.AcceleratedGraphModule(traced)
         agm2 = GraphManipulation.AcceleratedGraphModule(module_with_submodules)
-        assert len(agm1.weights) == 3
-        assert len(agm2.weights) == 3
-        assert len(agm1.serialized_graph["nodes"]) == 7
-        assert len(agm1.serialized_graph["weights"]) == 3
+        assert len(agm1.weights) == 4
+        assert len(agm2.weights) == 4
+        assert len(agm1.serialized_graph["nodes"]) == 10
+        assert len(agm1.serialized_graph["weights"]) == 4
         assert len(agm1.serialized_graph["modules"]) == 0
-        assert len(agm2.serialized_graph["nodes"]) == 5
-        assert len(agm2.serialized_graph["weights"]) == 3
+        assert len(agm2.serialized_graph["nodes"]) == 6
+        assert len(agm2.serialized_graph["weights"]) == 4
         assert len(agm2.serialized_graph["modules"]) == 1
         assert agm1.serialized_graph["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert (
@@ -87,8 +90,8 @@ class TestFXExperimental(JitTestCase):
         assert agm1.serialized_graph["nodes"][0]["target"] == "a"
         assert agm1.serialized_graph["nodes"][0]["op_code"] == "placeholder"
         assert agm1.serialized_graph["nodes"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][2]["args"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][2]["args"][0]["is_node"] is True
+        assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_2"
+        assert agm1.serialized_graph["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
         x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
