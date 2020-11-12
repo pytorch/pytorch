@@ -196,6 +196,7 @@ class LSTM(nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.training = False  # We don't want to train using this module
+
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -221,6 +222,51 @@ class LSTM(nn.Module):
                                     self.bias, batch_first=False,
                                     bidirectional=self.bidirectional))
         self.layers = nn.ModuleList(layers)
+
+        self._all_weights = []
+        for layer in range(self.num_layers):
+            layer = str(layer)
+            weight_names = ['weight_ih_l' + layer, 'weight_hh_l' + layer]
+            if self.bias:
+                weight_names.extend(['bias_ih_l' + layer, 'bias_hh_l' + layer])
+            self._all_weights.append(weight_names)
+
+            if self.bidirectional:
+                weight_names = ['weight_ih_l' + layer + '_reverse',
+                                'weight_hh_l' + layer + '_reverse']
+                if self.bias:
+                    weight_names.extend(['bias_ih_l' + layer + '_reverse',
+                                         'bias_hh_l' + layer + '_reverse'])
+                self._all_weights.append(weight_names)
+
+    @property
+    def all_weights(self):
+        weights = []
+        for layer_weight_names in self._all_weights:
+            layer_weights = []
+            for weight_name in layer_weight_names:
+                wn = weight_name.split('_')
+                param_type, linear_param, layer_num = wn[:3]
+                layer_num = int(layer_num[1:])
+                reverse = (len(wn) == 4)
+
+                if reverse:
+                    layer = self.layers[layer_num].layer_bw
+                else:
+                    layer = self.layers[layer_num].layer_fw
+                cell = layer.cell
+                if linear_param == 'ih':
+                    linear = cell.igates
+                else:  # 'hh'
+                    linear = cell.hgates
+
+                if param_type == 'weight':
+                    layer_weights.append(linear.weight)
+                else:  # 'bias'
+                    layer_weights.append(linear.bias)
+            weights.append(layer_weights)
+        return weights
+
 
     def forward(self, x, hidden=None):
         if self.batch_first:
@@ -269,6 +315,7 @@ class LSTM(nn.Module):
 
     @classmethod
     def from_float(cls, other, qconfig=None):
+        import torch.quantization as tq
         assert isinstance(other, cls._FLOAT_MODULE)
         assert (hasattr(other, 'qconfig') or qconfig)
         observed = cls(other.input_size, other.hidden_size, other.num_layers,
@@ -278,5 +325,5 @@ class LSTM(nn.Module):
         for idx in range(other.num_layers):
             observed.layers[idx] = LSTMLayer.from_float(other, idx, qconfig,
                                                         batch_first=False)
-        observed.eval()
+        observed = tq.prepare(observed, inplace=True)
         return observed

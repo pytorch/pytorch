@@ -18,8 +18,7 @@ from .quantization_mappings import (
     _get_special_act_post_process,
 )
 
-# import torch.quantization as tq
-# from torch.quantization.fx.utils import get_quant_type
+from .utils import get_quant_type
 
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
@@ -160,7 +159,7 @@ def add_observer_(module,
         elif needs_observation(child) and type(child) in quant_type_custom_module_class_mapping:
             observed_child = quant_type_custom_module_class_mapping[type(child)].from_float(child)
             setattr(module, name, observed_child)
-            insert_activation_post_process(observed_child)
+            # insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list,
                           device, custom_module_class_mapping)
