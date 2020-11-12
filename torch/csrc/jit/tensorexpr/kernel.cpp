@@ -1019,54 +1019,30 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::pow: {
       return computeTwoOperand(
           "aten_pow", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            const FloatImm* floatImm = rhs.AsNode<FloatImm>();
-            if (floatImm) {
-              float imm = floatImm->value();
-              if (imm == 1.0f) {
-                return lhs;
-              } else if (imm == 2.0f) { // NOLINT
-                return lhs * lhs;
-              } else if (imm == 3.0f) { // NOLINT
-                return (lhs * lhs) * lhs;
-              } else if (imm == 4.0f) { // NOLINT
-                ExprHandle tmp = lhs * lhs;
-                return tmp * tmp;
-              } else if (imm == 0.5f) { // NOLINT
-                return sqrt(lhs);
-              } else if (imm == 0.0f) {
-                return ExprHandle(1.0f);
-              } else if (imm == -0.5f) { // NOLINT
-                return rsqrt(lhs);
-              } else if (imm == -1.0f) {
-                return ExprHandle(1.0f) / lhs;
-              } else if (imm == -2.0f) { // NOLINT
-                return ExprHandle(1.0f) / (lhs * lhs);
-              }
+            double val = 0;
+            if (rhs.node()->isConstant()) {
+              val = immediateAs<double>(IRSimplifier::simplify(rhs.node()));
             }
 
-            const Cast* floatCast = rhs.AsNode<Cast>();
-            if (floatCast) {
-              const IntImm* intImm =
-                  dynamic_cast<const IntImm*>(floatCast->src_value());
-              if (intImm) {
-                float imm = static_cast<float>(intImm->value());
-                if (imm == 1) {
-                  return lhs;
-                } else if (imm == 2) {
-                  return lhs * lhs;
-                } else if (imm == 3) {
-                  return (lhs * lhs) * lhs;
-                } else if (imm == 4) {
-                  ExprHandle tmp = lhs * lhs;
-                  return tmp * tmp;
-                } else if (imm == 0) {
-                  return ExprHandle(1.0f);
-                } else if (imm == -1) {
-                  return ExprHandle(1.0f) / lhs;
-                } else if (imm == -2) {
-                  return ExprHandle(1.0f) / (lhs * lhs);
-                }
-              }
+            if (val == 1.0f) {
+              return lhs;
+            } else if (val == 2.0f) { // NOLINT
+              return lhs * lhs;
+            } else if (val == 3.0f) { // NOLINT
+              return (lhs * lhs) * lhs;
+            } else if (val == 4.0f) { // NOLINT
+              ExprHandle tmp = lhs * lhs;
+              return tmp * tmp;
+            } else if (val == 0.5f) { // NOLINT
+              return sqrt(lhs);
+            } else if (val == 0.0f) {
+              return ExprHandle(1.0f);
+            } else if (val == -0.5f) { // NOLINT
+              return rsqrt(lhs);
+            } else if (val == -1.0f) {
+              return ExprHandle(1.0f) / lhs;
+            } else if (val == -2.0f) { // NOLINT
+              return ExprHandle(1.0f) / (lhs * lhs);
             }
             return pow(lhs, rhs);
           });
