@@ -798,25 +798,24 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
   self_sizes[self.dim() - 2] = std::min(m, n);
   auto tau_working_copy = at::empty(self_sizes, self.options());
   Tensor q_working_copy;
+  Tensor R;
 
   // Setup input geometry for apply_orgqr
   std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
-  Tensor R;
   std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
 
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
-    // Fix the number of columns of q appropriately
-    q_sizes[self.dim() - 1] = n_columns_q;
-    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
-    q_working_copy = q_working_copy.expand_as(q_working_copy);
-
-    // We repurpose the same q_sizes for R
-    // Fix the number of rows and columns of q_working_copy appropriately
-    q_sizes[self.dim() - 1] = n;
-    q_sizes[self.dim() - 2] = n_columns_q;
-    R = at::empty(q_sizes, self.options());
+    R = at::empty({n_columns_q, n}, self.options());
+    if (compute_q) {
+        // Fix the number of columns of q appropriately
+        q_sizes[self.dim() - 1] = n_columns_q;
+        q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
+        q_working_copy = q_working_copy.expand_as(q_working_copy);
+    } else {
+      q_working_copy = at::empty({0}, self.options());
+    }
     return std::make_tuple(q_working_copy, R);
   }
 
@@ -836,6 +835,11 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
   }
 
   R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
+  if (!compute_q) {
+    // this is for mode='r'
+    Tensor empty_Q = at::empty({0}, self.options());
+    return std::make_tuple(empty_Q, R);
+  }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{

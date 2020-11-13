@@ -201,6 +201,9 @@ static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
   } else if (mode == "complete") {
     compute_q = true;
     reduced = false;
+  } else if (mode == "r") {
+    compute_q = false;
+    reduced = true; // this is actually irrelevant in this mode
   } else {
     TORCH_CHECK(false, "Unrecognized mode '", mode, "'");
   }

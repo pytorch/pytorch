@@ -1369,7 +1369,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_qr_complete(self, device, dtype):
-        t = torch.randn((10, 11), device=device, dtype=dtype)
+        t = torch.randn((7, 5), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
 
         exp_q, exp_r = np.linalg.qr(np_t, mode='complete')
@@ -1377,6 +1377,42 @@ class TestLinalg(TestCase):
         self.assertEqual(q, exp_q)
         self.assertEqual(r, exp_r)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_r(self, device, dtype):
+        t = torch.randn((7, 5), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+        # note: numpy returns only r, while we return a tuple q, r where q is
+        # an empty tensor
+        exp_r = np.linalg.qr(np_t, mode='r')
+        q, r = torch.linalg.qr(t, mode='r')
+        # check that q is empty
+        assert q.shape == (0,)
+        assert q.dtype == t.dtype
+        assert q.device == t.device
+        # check r
+        self.assertEqual(r, exp_r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
+    def test_qr_empty(self, device, dtype):
+        def check(shape):
+            t = torch.empty((5, 0), dtype=dtype, device=device)
+            np_t = t.cpu().numpy()
+            exp_q, exp_r = np.linalg.qr(np_t)
+            q, r = torch.linalg.qr(t, mode='reduced')
+            self.assertEqual(q, exp_q)
+            self.assertEqual(r, exp_r)
+            q, r = torch.linalg.qr(t, mode='r')
+            assert q.shape == (0,)
+            self.assertEqual(r, exp_r)
+
+        check((5, 0))
+        check((0, 5))
+
+# XXXXX: write an autograd test for 'r'
 
 instantiate_device_type_tests(TestLinalg, globals())
 
