@@ -12,6 +12,7 @@
 #include <ATen/DimVector.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -1946,15 +1947,8 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
 
 Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                           std::string mode, const Tensor& q, const Tensor& r){
-  bool some;
-  if (mode == "reduced") {
-    some = true;
-  } else if (mode == "complete") {
-    some = false;
-  } else {
-    TORCH_CHECK(false, "Unrecognized mode '", mode, "'");
-  }
-
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
   auto square_deep_case_backward = [](const Tensor& grad_Q,
                                       const Tensor& grad_R,
                                       const Tensor& A,
@@ -2027,7 +2021,7 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
   auto n = self.size(-1);
 
   TORCH_CHECK(
-      ((m <= n && (!some)) || some),
+      ((m <= n && (!reduced)) || reduced),
       "The derivative is not implemented when nrows > ncols and complete QR. ");
 
   auto grad_Q = grads[0];

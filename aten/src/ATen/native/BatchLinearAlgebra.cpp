@@ -787,15 +787,8 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 }
 
 std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
-  bool some;
-  if (mode == "reduced") {
-    some = true;
-  } else if (mode == "complete") {
-    some = false;
-  } else {
-    TORCH_CHECK(false, "Unrecognized mode '", mode, "'");
-  }
-
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
 
@@ -810,7 +803,7 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
   std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
   Tensor R;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
 
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
