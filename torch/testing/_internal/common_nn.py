@@ -1191,12 +1191,12 @@ def multimarginloss_weights_no_reduce_test():
         pickle=False)
 
 
-def fractional_max_pool2d_test(test_case):
+def fractional_max_pool2d_test(test_case, return_indices=False):
     random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
     if test_case == 'ratio':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool2d(
-                2, output_ratio=0.5, _random_samples=random_samples),
+                2, output_ratio=0.5, _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
                                     .output_ratio(0.5)
                                     ._random_samples(random_samples)''',
@@ -1204,16 +1204,19 @@ def fractional_max_pool2d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_ratio')
     elif test_case == 'size':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
-                4, 3), _random_samples=random_samples),
+                4, 3), _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
                                     .output_size(std::vector<int64_t>({4, 3}))
                                     ._random_samples(random_samples)''',
             input_size=(1, 3, 7, 6),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_size')
-
+    if return_indices:
+        del out['cpp_constructor_args']
+        out['fullname'] = '%s_return_indices' % out['fullname']
+    return out
 
 def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
     if use_random_samples:
@@ -1265,12 +1268,12 @@ def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
                 fullname='FractionalMaxPool2d_size_no_batch_dim_no_random_samples')
 
 
-def fractional_max_pool3d_test(test_case):
+def fractional_max_pool3d_test(test_case, return_indices=False):
     random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
     if test_case == 'ratio':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool3d(
-                2, output_ratio=0.5, _random_samples=random_samples),
+                2, output_ratio=0.5, _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
                                     .output_ratio(0.5)
                                     ._random_samples(random_samples)''',
@@ -1278,9 +1281,9 @@ def fractional_max_pool3d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_ratio')
     elif test_case == 'size':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
-                4, 4, 4), _random_samples=random_samples),
+                4, 4, 4), _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
                                     .output_size(std::vector<int64_t>({4, 4, 4}))
                                     ._random_samples(random_samples)''',
@@ -1288,15 +1291,19 @@ def fractional_max_pool3d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_size')
     elif test_case == 'asymsize':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool3d((4, 2, 3), output_size=(
-                10, 3, 2), _random_samples=random_samples),
+                10, 3, 2), _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({4, 2, 3})
                                     .output_size(std::vector<int64_t>({10, 3, 2}))
                                     ._random_samples(random_samples)''',
             input_size=(2, 4, 16, 7, 5),
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_asymsize')
+    if return_indices:
+        del out['cpp_constructor_args']
+        out['fullname'] = '%s_return_indices' % out['fullname']
+    return out
 
 
 def single_batch_reference_fn(input, parameters, module):
@@ -1369,13 +1376,15 @@ new_module_tests = [
     multimarginloss_weights_no_reduce_test(),
     fractional_max_pool2d_test('ratio'),
     fractional_max_pool2d_test('size'),
-    fractional_max_pool3d_test('ratio'),
-    fractional_max_pool3d_test('size'),
-    fractional_max_pool3d_test('asymsize'),
     fractional_max_pool2d_no_batch_dim_test('ratio', True),
     fractional_max_pool2d_no_batch_dim_test('ratio', False),
     fractional_max_pool2d_no_batch_dim_test('size', True),
     fractional_max_pool2d_no_batch_dim_test('size', False),
+    fractional_max_pool2d_test('ratio', return_indices=True),
+    fractional_max_pool3d_test('ratio'),
+    fractional_max_pool3d_test('size'),
+    fractional_max_pool3d_test('asymsize'),
+    fractional_max_pool3d_test('ratio', return_indices=True),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -1937,6 +1946,12 @@ new_module_tests = [
         desc='stride',
     ),
     dict(
+        module_name='MaxPool1d',
+        fullname='MaxPool1d_return_indices',
+        constructor=lambda: nn.MaxPool1d(4, return_indices=True),
+        input_size=(2, 10, 4),
+    ),
+    dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 2)),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
@@ -2150,6 +2165,13 @@ new_module_tests = [
         input_size=(1, 3, 7, 7),
         check_with_channels_last=True,
         desc='4d_input'
+    ),
+    dict(
+        module_name='MaxPool2d',
+        fullname='MaxPool2d_return_indices',
+        constructor=lambda: nn.MaxPool2d((3, 3), (2, 2), (1, 1), return_indices=True),
+        input_size=(1, 3, 7, 7),
+        check_with_channels_last=True,
     ),
     dict(
         module_name='AvgPool1d',
@@ -2646,6 +2668,12 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::MaxPool3dOptions(2).stride(2).padding({1, 1, 1})',
         input_size=(2, 3, 5, 5, 5),
         desc='stride_padding',
+    ),
+    dict(
+        module_name='MaxPool3d',
+        fullname='MaxPool3d_return_indices',
+        constructor=lambda: nn.MaxPool3d(2, 2, (1, 1, 1), return_indices=True),
+        input_size=(2, 3, 5, 5, 5),
     ),
     dict(
         module_name='AvgPool3d',
@@ -5794,6 +5822,8 @@ class ModuleTest(TestBase):
         test_case._zero_grad_input(input)
         with freeze_rng_state():
             output = test_case._forward(module, input)
+            if getattr(module, "return_indices", False):
+                output = output[0]
             grad_output = output.new(output.shape).normal_()
             output = output.clone()
             d_input = deepcopy(test_case._backward(module, input, output, grad_output))
@@ -5810,6 +5840,8 @@ class ModuleTest(TestBase):
             test_case._zero_grad_input(i)
             with freeze_rng_state():
                 out = test_case._forward(module, i)
+                if getattr(module, "return_indices", False):
+                    out = out[0]
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
