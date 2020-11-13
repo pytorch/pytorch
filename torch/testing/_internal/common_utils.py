@@ -1426,8 +1426,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         high = math.ceil(10 if high is None else min(high, 10))
         return torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
-        low = math.floor(-9 if low is None else max(low, -9))
-        high = math.ceil(10 if high is None else min(high, 10))
+        low = math.ceil(-9 if low is None else max(low, -9))
+        high = math.floor(10 if high is None else min(high, 10))
         return torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         low = -9 if low is None else max(low, -9)
