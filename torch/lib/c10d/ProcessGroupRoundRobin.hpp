@@ -21,7 +21,7 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
   explicit ProcessGroupRoundRobin(
       int rank,
       int size,
-      std::vector<std::shared_ptr<ProcessGroup>> processGroups);
+      std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups);
 
   ~ProcessGroupRoundRobin() override;
 
@@ -97,11 +97,11 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
       const BarrierOptions& opts = BarrierOptions()) override;
 
  private:
-  std::vector<std::shared_ptr<ProcessGroup>> processGroups_;
-  std::vector<std::shared_ptr<ProcessGroup>>::const_iterator iterator_;
+  std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups_;
+  std::vector<c10::intrusive_ptr<ProcessGroup>>::const_iterator iterator_;
 
   // Returns the next ProcessGroup to use.
-  const std::shared_ptr<ProcessGroup>& next();
+  const c10::intrusive_ptr<ProcessGroup>& next();
 };
 
 } // namespace c10d

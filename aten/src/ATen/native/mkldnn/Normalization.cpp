@@ -56,18 +56,24 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     // ideep::batch_normalization_forward_training::compute<AllocForMKLDNN>(
     //     x, w, b, y, saved_mean, saved_var, m, v, momentum, eps);
     // return std::make_tuple(
-    //     new_with_itensor_mkldnn(std::move(y), input.options()),
-    //     new_with_itensor_mkldnn(std::move(saved_mean), input.options()),
-    //     new_with_itensor_mkldnn(std::move(saved_var), input.options()));
+    //     new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+    //                             input.options().device_opt()),
+    //     new_with_itensor_mkldnn(std::move(saved_mean), optTypeMetaToScalarType(input.options().dtype_opt()),
+    //                             input.options().device_opt()),
+    //     new_with_itensor_mkldnn(std::move(saved_var), optTypeMetaToScalarType(input.options().dtype_opt()),
+    //                             input.options().device_opt()));
   } else {
     TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
                "mkldnn_batch_norm: currently mkldnn only support 2d and 3d batchnorm");
     ideep::batch_normalization_forward_inference::compute(
         x, m, v, w, b, y, eps);
     return std::make_tuple(
-        new_with_itensor_mkldnn(std::move(y), input.options()),
-        new_with_itensor_mkldnn(ideep::tensor{}, input.options()),
-        new_with_itensor_mkldnn(ideep::tensor{}, input.options()));
+        new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+                                input.options().device_opt()),
+        new_with_itensor_mkldnn(ideep::tensor{}, optTypeMetaToScalarType(input.options().dtype_opt()),
+                                input.options().device_opt()),
+        new_with_itensor_mkldnn(ideep::tensor{}, optTypeMetaToScalarType(input.options().dtype_opt()),
+                                input.options().device_opt()));
   }
 }
 

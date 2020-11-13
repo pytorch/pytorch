@@ -23,6 +23,11 @@ def sub(model, blob_in, blob_out, **kwargs):
     return model.net.Sub(blob_in, blob_out, **kwargs)
 
 
+def mat_mul(model, blob_in, blob_out, **kwargs):
+    """Matrix multiplication"""
+    return model.net.MatMul(blob_in, blob_out, **kwargs)
+
+
 def batch_mat_mul(model, blob_in, blob_out,
                   enable_tensor_core=False, **kwargs):
     if enable_tensor_core:
