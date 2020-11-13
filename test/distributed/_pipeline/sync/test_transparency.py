@@ -31,7 +31,7 @@ def test_simple_linears():
     zero_grad(model.parameters())
 
     # With Pipe
-    model = Pipe(model, [2, 2], devices=["cpu", "cpu"], chunks=4)
+    model = Pipe(model, chunks=4)
 
     outputs = model(inputs)
     loss = outputs.mean()

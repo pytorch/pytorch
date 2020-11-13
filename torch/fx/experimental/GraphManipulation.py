@@ -91,7 +91,7 @@ def serialize_shape(shape: torch.Size) -> str:
 
 
 def serialize_tensor_quantization(tensor: torch.Tensor) -> Dict[str, Any]:
-    scheme = {}  # type: Dict[str, Any]
+    scheme: Dict[str, Any] = {}
     if tensor.is_quantized:
         scheme["q_scheme"] = str(tensor.qscheme())
         if tensor.qscheme() in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
@@ -112,13 +112,30 @@ def serialize_tensor_quantization(tensor: torch.Tensor) -> Dict[str, Any]:
 
 
 def serialize_weight(tensor: torch.Tensor) -> Dict:
-    weight = {}  # type: Dict[str, Any]
+    weight: Dict[str, Any] = {}
     weight["dtype"] = str(tensor.dtype)
     weight["is_quantized"] = tensor.is_quantized
     if tensor.is_quantized:
         weight["quantized_type"] = serialize_tensor_quantization(tensor)
     weight["shape"] = serialize_shape(tensor.shape)
     return weight
+
+
+def serialize_leaf_module(
+    mod: torch.nn.Module, weights_metadata: Dict, weights: Dict, name_prefix: str
+) -> Dict:
+    parameters: Dict[str, Any] = {}
+    parameters["name"] = type(mod).__name__
+    for name, buffer in mod.named_buffers():
+        weights_metadata[f"{name_prefix}.{name}"] = serialize_weight(buffer)
+        weights[f"{name_prefix}.{name}"] = buffer
+    for name, parameter in mod.named_parameters():
+        weights_metadata[f"{name_prefix}.{name}"] = serialize_weight(parameter)
+        weights[f"{name_prefix}.{name}"] = parameter
+    if isinstance(mod.__constants__, List):
+        for constant in mod.__constants__:
+            parameters[constant] = str(getattr(mod, constant))
+    return parameters
 
 
 def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> Dict:
@@ -158,21 +175,24 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         q_per_channel_axis, int
     }
     """
-    serialized_dict = {}  # type: Dict[str, Any]
+    serialized_dict: Dict[str, Any] = {}
     serialized_dict["modules"] = {}
     serialized_dict["weights"] = {}
     serialized_dict["nodes"] = []
     parameters = fx_module.named_parameters()
+    prefix = f"{name_prefix}." if name_prefix else ""
+    submodules = dict(fx_module.named_modules())
     for name, p in parameters:
         if isinstance(p, torch.Tensor):
             weight = serialize_weight(p)
-            prefix = f"{name_prefix}." if name_prefix else ""
             serialized_dict["weights"][prefix + name] = weight
             weights[prefix + name] = p
     for node in fx_module.graph.nodes:
-        node_rep = {}  # type: Dict[str, Any]
+        node_rep: Dict[str, Any] = {}
         # Get shape/type info, currently not needed for call_module.
-        if node.op != "call_module":
+        if node.op != "call_module" or not isinstance(
+            submodules[node.target], GraphModule
+        ):
             shape = getattr(node, "shape", None)
             if shape:
                 node_rep["shape"] = serialize_shape(shape)
@@ -190,12 +210,18 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
 
         # Recurse down into any submodules we are calling.
         if node.op == "call_module":
-            submodules = dict(fx_module.named_modules())
             if isinstance(submodules[node.target], GraphModule):
                 serialized_module = serialize_module(
                     getattr(fx_module, node.target), weights, node.target
                 )
                 serialized_dict["modules"][node.target] = serialized_module
+            else:
+                node_rep["parameters"] = serialize_leaf_module(
+                    submodules[node.target],
+                    serialized_dict["weights"],
+                    weights,
+                    prefix + node.target,
+                )
 
         if node.op == "call_function":
             node_rep["target"] = get_qualified_name(node.target)
@@ -205,7 +231,6 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         # Make sure we capture all constants.
         if node.op == "get_attr":
             target = getattr(fx_module, node.target)
-            prefix = f"{name_prefix}." if name_prefix else ""
             qualname = prefix + node.target
             if isinstance(target, torch.Tensor) and qualname not in weights:
                 weight = serialize_weight(target)
@@ -228,6 +253,6 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
 class AcceleratedGraphModule:
     def __init__(self, fx_module: GraphModule):
         """Creates the needed data structures to pass to the glow runtime"""
-        self.weights = {}  # type: Dict[str, Any]
+        self.weights: Dict[str, Any] = {}
         self.serialized_graph = serialize_module(fx_module, self.weights)
         self.serialized_graph_json = json.dumps(self.serialized_graph, indent=4)
