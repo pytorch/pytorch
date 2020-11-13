@@ -290,6 +290,9 @@ public:
   Vec256<c10::complex<float>> hypot(const Vec256<c10::complex<float>> &b) const {
     AT_ERROR("not supported for complex numbers");
   }
+  Vec256<c10::complex<float>> igamma(const Vec256<c10::complex<float>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<float>> neg() const {
     auto zero = _mm256_setzero_ps();
     return _mm256_sub_ps(zero, values);
@@ -310,18 +313,7 @@ public:
     return _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
   Vec256<c10::complex<float>> sqrt() const {
-    //   sqrt(a + bi)
-    // = sqrt(2)/2 * [sqrt(sqrt(a**2 + b**2) + a) + sgn(b)*sqrt(sqrt(a**2 + b**2) - a)i]
-    // = sqrt(2)/2 * [sqrt(abs() + a) + sgn(b)*sqrt(abs() - a)i]
-
-    const __m256 scalar = _mm256_set1_ps(std::sqrt(2)/2);              //sqrt(2)/2      sqrt(2)/2
-    const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
-    auto sign = _mm256_and_ps(values, sign_mask);
-    auto factor = _mm256_or_ps(scalar, sign);
-
-    auto a_a = _mm256_xor_ps(_mm256_moveldup_ps(values), sign_mask);   // a             -a
-    auto res_re_im = _mm256_sqrt_ps(_mm256_add_ps(abs_(), a_a));       // sqrt(abs + a) sqrt(abs - a)
-    return _mm256_mul_ps(factor, res_re_im);
+    return map(std::sqrt);
   }
   Vec256<c10::complex<float>> reciprocal() const;
   Vec256<c10::complex<float>> rsqrt() const {
@@ -344,7 +336,7 @@ public:
     return _mm256_cmp_ps(values, other.values, _CMP_EQ_OQ);
   }
   Vec256<c10::complex<float>> operator!=(const Vec256<c10::complex<float>>& other) const {
-    return _mm256_cmp_ps(values, other.values, _CMP_NEQ_OQ);
+    return _mm256_cmp_ps(values, other.values, _CMP_NEQ_UQ);
   }
   Vec256<c10::complex<float>> operator<(const Vec256<c10::complex<float>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");

@@ -210,6 +210,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("i0", CppFunction::makeFallthrough());
   m.impl("i0.out", CppFunction::makeFallthrough());
   m.impl("i0_", CppFunction::makeFallthrough());
+  m.impl("igamma", CppFunction::makeFallthrough());
+  m.impl("igamma.out", CppFunction::makeFallthrough());
+  m.impl("igamma_", CppFunction::makeFallthrough());
   m.impl("imag", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Scalar", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Tensor", CppFunction::makeFallthrough());
@@ -496,7 +499,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   // supported because they were manually registered.  I'm not sure
   // if these registrations are right or not, but they preserve old behavior
   // (and some of them are exercised by the test suite).
-  m.impl("backward", CppFunction::makeFallthrough());
+  m.impl("_backward", CppFunction::makeFallthrough());
   m.impl("set_data", CppFunction::makeFallthrough());
   m.impl("data", CppFunction::makeFallthrough());
   m.impl("is_leaf", CppFunction::makeFallthrough());

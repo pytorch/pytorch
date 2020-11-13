@@ -250,7 +250,7 @@ void kthvalue_cuda_template(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  int64_t slicesize = self.size(dim);
+  int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
   // FIXME: This seems bogus, I only do this because it was the old behaviour.
   //        The reductions are fine, as long as the axis being reduced along
   //        isn't of 0 elements (and the output has elements).
@@ -319,7 +319,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   NoNamesGuard guard;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
-  Tensor in = self.dim() > 0 ? self : self.unsqueeze(0);
+  Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
 
   int64_t size = in.size(dim);
   TORCH_CHECK(

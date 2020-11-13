@@ -40,8 +40,7 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-// TODO: keep the else clause for trial runs
-#if defined(FBCODE_CAFFE2) || defined(C10_MOBILE)
+#if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
@@ -447,10 +446,9 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     std::string function_name)
     : GraphExecutorImplBase(graph, std::move(function_name)) {}
 
-ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
+const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
     size_t remaining_bailout_depth) {
-  std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
   // no opt mode
@@ -475,11 +473,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // object in interpreter.
   if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
     remaining_bailout_depth_ = remaining_bailout_depth;
-  }
-
-  if (optimized_plan_) {
-    GRAPH_DEBUG("plan already optimized:", (*optimized_plan_).graph);
-    return *optimized_plan_;
   }
 
   // simple executor
@@ -516,6 +509,20 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
   return *optimized_plan_;
+}
+
+const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
+    Stack& stack,
+    size_t remaining_bailout_depth) {
+  std::lock_guard<std::mutex> lock(compile_mutex);
+
+  // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
+  // add any code above this.
+  if (optimized_plan_) {
+    return *optimized_plan_;
+  }
+
+  return getOptimizedPlanFor(stack, remaining_bailout_depth);
 }
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
