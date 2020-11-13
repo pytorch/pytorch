@@ -21,9 +21,11 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         if type(mod) == nni.BNReLU2d:
+            activation_post_process = mod[1].activation_post_process
             mod = mod[0]
+        else:
+            activation_post_process = mod.activation_post_process
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)
         new_mod.weight = mod.weight
@@ -54,9 +56,11 @@ class BatchNorm3d(torch.nn.BatchNorm3d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         if type(mod) == nni.BNReLU3d:
+            activation_post_process = mod[1].activation_post_process
             mod = mod[0]
+        else:
+            activation_post_process = mod.activation_post_process
         scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)
         new_mod.weight = mod.weight
