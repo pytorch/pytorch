@@ -35,7 +35,7 @@ def gen_variable_factories(out: str, native_yaml_path: str, template_path: str) 
     native_functions = parse_native_yaml(native_yaml_path)
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template('variable_factories.h', 'variable_factories.h', lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/variable_factories.h',
+        'generated_comment': '@' + f'generated from {fm.template_dir}/variable_factories.h',
         'function_definitions': list(mapMaybe(process_function, native_functions)),
     })
 
@@ -65,6 +65,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
             # which would fail otherwise). We handle requires_grad explicitly here
             # instead of passing it through to the kernel.
             exprs.append(f'at::TensorOptions({arg.name}).requires_grad(c10::nullopt)')
+            # Manually set the requires_grad bit on the result tensor.
             requires_grad = f'{arg.name}.requires_grad()'
         else:
             exprs.append(arg.name)

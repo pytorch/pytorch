@@ -180,7 +180,7 @@ def create_python_bindings(
         py_forwards.extend(forward_decls(name, overloads, method=method))
 
     fm.write_with_template(filename, filename, lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/{filename}',
+        'generated_comment': '@' + f'generated from {fm.template_dir}/{filename}',
         'py_forwards': py_forwards,
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
