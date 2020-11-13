@@ -1219,6 +1219,30 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
+    @skipIfNoFBGEMM
+    def test_fused_modules_activations_get_observed(self):
+        # TODO(future PR): extend this check, for any model without control flow
+        # all observers must have values populated after data is fed through
+        m = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 1, 1),
+            torch.nn.BatchNorm2d(1),
+            torch.nn.ReLU(),
+        )
+        m = torch.quantization.fuse_modules(m, [['0', '1', '2']], inplace=True)
+        m.qconfig = torch.quantization.default_qconfig
+        m = torch.quantization.prepare_qat(m)
+        # feed some data through
+        input_data = torch.randn(4, 1, 4, 4)
+        m(input_data)
+        # verify all activations received values
+        for name, child in m.named_modules():
+            if isinstance(child, torch.quantization.MinMaxObserver) and \
+                    not isinstance(child, torch.quantization.PerChannelMinMaxObserver):
+                self.assertTrue(child.min_val.item() != float('inf'),
+                                "observer not receiving data")
+                self.assertTrue(child.max_val.item() != float('-inf'),
+                                "observer not receiving data")
+
 class TestEagerModeOps(QuantizationTestCase):
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
