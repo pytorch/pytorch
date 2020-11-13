@@ -397,6 +397,34 @@ class Quantizer:
             env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
             observed_node_names_set.add(node.name)
 
+        def insert_observer_for_special_module(quantize_handler):
+            """ Insert observer for custom module and standalone module
+              Returns: standalone_module_input_idxs: the indexs for inputs that needs
+              to be observed by parent module
+            """
+            standalone_module_input_idxs = None
+            if isinstance(quantize_handler, CustomModuleQuantizeHandler):
+                custom_module = self.modules[node.target]
+                custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
+                observed_custom_module_class = \
+                    get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig)
+                observed_custom_module = \
+                    observed_custom_module_class.from_float(custom_module)
+                parent_name, name = _parent_name(node.target)
+                setattr(self.modules[parent_name], name, observed_custom_module)
+            elif isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
+                # observe standalone module
+                standalone_module = self.modules[node.target]
+                prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
+                observed_standalone_module = prepare(standalone_module, {"": qconfig})
+                observed_standalone_module.qconfig = qconfig
+                standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
+                observed_standalone_module = mark_observed_standalone_module(observed_standalone_module)
+                parent_name, name = _parent_name(node.target)
+                setattr(self.modules[parent_name], name, observed_standalone_module)
+                self.modules[node.target] = observed_standalone_module
+            return standalone_module_input_idxs
+
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
@@ -412,30 +440,8 @@ class Quantizer:
             elif root_node is node:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
                 # index for input of custom module that needs to be observed in parent
-                standalone_module_input_idxs = None
                 if qconfig is not None:
-                    if isinstance(obj, CustomModuleQuantizeHandler):
-                        custom_module = self.modules[node.target]
-                        custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
-                        observed_custom_module_class = \
-                            get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig)
-                        observed_custom_module = \
-                            observed_custom_module_class.from_float(custom_module)
-                        parent_name, name = _parent_name(node.target)
-                        setattr(self.modules[parent_name], name, observed_custom_module)
-
-                    elif isinstance(obj, StandaloneModuleQuantizeHandler):
-                        # observe standalone module
-                        standalone_module = self.modules[node.target]
-                        prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
-                        observed_standalone_module = prepare(standalone_module, {'': qconfig})
-                        observed_standalone_module.qconfig = qconfig
-                        standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
-                        observed_standalone_module = mark_observed_standalone_module(observed_standalone_module)
-                        parent_name, name = _parent_name(node.target)
-                        setattr(self.modules[parent_name], name, observed_standalone_module)
-                        self.modules[node.target] = observed_standalone_module
-
+                    standalone_module_input_idxs = insert_observer_for_special_module(obj)
 
                     # don't need to insert observer for output if activation does not
                     # need to be statically quantized
