@@ -1412,6 +1412,25 @@ class TestLinalg(TestCase):
         check((5, 0))
         check((0, 5))
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_out(self, device, dtype):
+        def check(mode):
+            t = torch.randn((7, 5), device=device, dtype=dtype)
+            np_t = t.cpu().numpy()
+            q, r = torch.linalg.qr(t, mode=mode)
+            out = (torch.empty_like(t), torch.empty_like(t))
+            q2, r2 = torch.linalg.qr(t, mode=mode, out=out)
+            assert q2 is out[0]
+            assert r2 is out[1]
+            self.assertEqual(q2, q)
+            self.assertEqual(r2, r)
+
+        check('reduced')
+        check('complete')
+        check('r')
+
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':
