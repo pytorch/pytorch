@@ -4313,17 +4313,11 @@ class TestTorchDeviceType(TestCase):
 
     # This test fails with float32 weights because numpy uses sorting and partial pairwise summation
     # instead of linear summation as bincount does, the NumPy implementation is more numerically stable.
-    # Skipping int8 weights on CUDA because this results in a flaky test from the combination of type promotion
-    # performed by bincount, atomic_add usage and integer overflow when converting back.
     @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
                                                   include_bool=False, include_complex=False),
                      torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
                                                   include_bool=False, include_complex=False)))
-    @dtypesIfCUDA(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
-                                                        include_bool=False, include_complex=False),
-                           torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-                           [torch.int16, torch.int32, torch.int64]))
-    def test_histogram_vs_np_custom_bins(self, device, dtypes):
+    def test_histogram_vs_numpy_custom_bins(self, device, dtypes):
         # test against numpy.histogram()
         def test_against_np_custombins(tensor, bins, weights=None, density=False, rtol=None, atol=None):
             nparr = tensor.cpu().numpy()
@@ -4336,6 +4330,11 @@ class TestTorchDeviceType(TestCase):
             expected = np.histogram(nparr, bins=npbins, weights=npweights, density=density)
             self.assertEqual(actual[0], torch.from_numpy(expected[0]), rtol=rtol, atol=atol)
             self.assertEqual(actual[1], torch.from_numpy(expected[1]))
+
+        # This test fails for 8bit weights on XLA
+        if self.device_type == 'xla':
+            if dtypes[1] in (torch.int8, torch.uint8):
+                return
 
         if dtypes[0].is_floating_point:
             sample = torch.randn(5000, device=device, dtype=dtypes[0])
@@ -4388,7 +4387,7 @@ class TestTorchDeviceType(TestCase):
                      torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
                                                   include_bool=False, include_complex=False),
                      (torch.float32, torch.float64)))
-    def test_histogram_vs_np_uniform_bins(self, device, dtypes):
+    def test_histogram_vs_numpy_uniform_bins(self, device, dtypes):
         # test against numpy.histogram()
         def test_against_np_uniformbins(tensor, bins=None, range=None, weights=None, density=False, atol=None, rtol=None):
             nparr = tensor.cpu().numpy()
