@@ -17,18 +17,19 @@ TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 # Add 'at::' to types defined in ATen namespace, e.g. Tensor, TensorList, IntArrayRef and etc.
 # TODO: maybe update the cpp argument API to take optional namespace argument?
 def fully_qualified_type(argument_type: str) -> str:
-    def maybe_optional_type(type: str, opt: bool) -> str:
-        return f'c10::optional<{type}>' if opt else type
+    def maybe_optional_type(type: str, is_opt: bool) -> str:
+        return f'c10::optional<{type}>' if is_opt else type
 
     opt_match = OPTIONAL_TYPE_PATTERN.match(argument_type)
+    is_opt = opt_match is not None
     if opt_match:
         argument_type = argument_type[opt_match.start(1):opt_match.end(1)]
     match = TYPE_PATTERN.match(argument_type)
     if match is None:
-        return maybe_optional_type(argument_type, opt_match is not None)
+        return maybe_optional_type(argument_type, is_opt)
     index = match.start(1)
     qualified_type = f'{argument_type[:index]}at::{argument_type[index:]}'
-    return maybe_optional_type(qualified_type, opt_match is not None)
+    return maybe_optional_type(qualified_type, is_opt)
 
 def gen_variable_factories(out: str, native_yaml_path: str, template_path: str) -> None:
     native_functions = parse_native_yaml(native_yaml_path)
@@ -42,14 +43,15 @@ def gen_variable_factories(out: str, native_yaml_path: str, template_path: str) 
 def process_function(f: NativeFunction) -> Optional[str]:
     name = cpp.name(f.func)
     has_tensor_options = python.has_tensor_options(f)
+    is_factory = has_tensor_options or name.endswith("_like")
 
-    if Variant.function not in f.variants or \
-            not has_tensor_options and not name.endswith("_like"):
+    if Variant.function not in f.variants or not is_factory:
         return None
 
     sig = CppSignatureGroup.from_schema(f.func, method=False).signature
     formals: List[str] = []
     exprs: List[str] = []
+    requires_grad = 'false'
     for arg in sig.arguments():
         qualified_type = fully_qualified_type(arg.type)
         if arg.default:
@@ -63,10 +65,9 @@ def process_function(f: NativeFunction) -> Optional[str]:
             # which would fail otherwise). We handle requires_grad explicitly here
             # instead of passing it through to the kernel.
             exprs.append(f'at::TensorOptions({arg.name}).requires_grad(c10::nullopt)')
+            requires_grad = f'{arg.name}.requires_grad()'
         else:
             exprs.append(arg.name)
-
-    requires_grad = "options.requires_grad()" if has_tensor_options else "false"
 
     return f"""\
 inline at::Tensor {name}({', '.join(formals)}) {{
