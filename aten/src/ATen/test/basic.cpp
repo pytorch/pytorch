@@ -370,14 +370,8 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor0.is_pinned());
 
   // Test setting requires_grad to true.
-  tensor0 = at::empty({4}, at::TensorOptions().requires_grad(true));
-  ASSERT_EQ(tensor0.dtype(), at::kFloat);
-  ASSERT_EQ(tensor0.layout(), at::kStrided);
-  ASSERT_EQ(tensor0.device(), at::kCPU);
-  // This is a bug. Requires_grad was set to TRUE but this is being ignored.
-  // Issue https://github.com/pytorch/pytorch/issues/30405
-  ASSERT_FALSE(tensor0.requires_grad());
-  ASSERT_FALSE(tensor0.is_pinned());
+  // This is a bug. Requires_grad was set to TRUE but this is not implemented.
+  EXPECT_ANY_THROW(at::empty({4}, at::TensorOptions().requires_grad(true)));
 
   // Test setting dtype
   at::Tensor tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf));

@@ -342,14 +342,16 @@ struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
   at::Tensor embeddingbag_byte(
     const at::Tensor& indices,
     const c10::optional<at::Tensor>& offsets,
-    bool sparse,
+    bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
-    bool include_last_offset) override;
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    bool include_last_offset,
+    bool is_embedding_op) override;
 
   at::Tensor embeddingbag_4bit(
     const at::Tensor& indices,
     const c10::optional<at::Tensor>& offsets,
-    bool sparse,
+    bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) override;
