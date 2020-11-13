@@ -1,5 +1,6 @@
 #pragma once
 
+//#include <c10/cuda/CUDAFunctions.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -30,11 +31,59 @@ using DeviceIndex = int16_t;
 struct C10_API Device final {
   using Type = DeviceType;
 
-  /// Constructs a new `Device` from a `DeviceType` and an optional device
+  /// Constructs a new `Device` from a `DeviceType` and a device
   /// index.
+  /// Also performs validation
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
     validate();
+  }
+
+  /// Device specific constructors
+  /// These functions construct "default" devices for each device type.
+  /// They don't require validating the corresponding DeviceType/DeviceIndex
+  /// combination and are therefore slightly faster.
+
+  static Device cpu() {
+    Device device;
+    device.type_ = kCPU;
+    device.index_ = -1;
+    return device;
+  }
+
+  static Device metal() {
+    Device device;
+    device.type_ = kMetal;
+    device.index_ = -1;
+    return device;
+  }
+
+  static Device vulkan() {
+    Device device;
+    device.type_ = kVulkan;
+    device.index_ = -1;
+    return device;
+  }
+
+  static Device hip() {
+    Device device;
+    device.type_ = kHIP;
+    device.index_ = -1;
+    return device;
+  }
+
+  static Device cuda() {
+    Device device;
+    device.type_ = kCUDA;
+    device.index_ = -1;
+    return device;
+  }
+
+  static Device cuda_unchecked(DeviceIndex index) {
+    Device device;
+    device.type_ = kCUDA;
+    device.index_ = index;
+    return device;
   }
 
   /// Constructs a `Device` from a string description, for convenience.
@@ -92,6 +141,7 @@ struct C10_API Device final {
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
+  Device() {}
   void validate() {
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);

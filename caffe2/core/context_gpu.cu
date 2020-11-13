@@ -563,7 +563,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           cuda::CUDAStreamGuard g(
             Stream(
               Stream::DEFAULT,
-              Device(kCUDA, CaffeCudaGetDevice())
+              Device::cuda_unchecked(CaffeCudaGetDevice())
             ));
           ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
         }

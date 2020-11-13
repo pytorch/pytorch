@@ -80,7 +80,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
   at::OptionalDeviceGuard device_guard;
   auto primary_ctx_device_index = CUDAHooks::getDevceIndexWithPrimaryContext();
   if (primary_ctx_device_index.has_value()) {
-    device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    device_guard.reset_device(at::Device::cuda_unchecked(*primary_ctx_device_index));
   }
   cudaPointerAttributes attr;
   cudaError_t err = cudaPointerGetAttributes(&attr, data);

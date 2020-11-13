@@ -72,7 +72,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   Device getDevice() const override {
     int device;
     C10_HIP_CHECK(hipGetDevice(&device));
-    return Device(DeviceType::CUDA, device);
+    return Device::cuda_unchecked(device);
   }
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.type() == DeviceType::CUDA);

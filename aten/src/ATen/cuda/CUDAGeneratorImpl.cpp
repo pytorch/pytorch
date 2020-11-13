@@ -18,7 +18,7 @@ static std::deque<std::once_flag> cuda_gens_init_flag;
 // Default, global CUDA generators, one per GPU.
 static std::vector<Generator> default_gens_cuda;
 
-/* 
+/*
 * Populates the global variables related to CUDA generators
 * Warning: this function must only be called once!
 */
@@ -81,7 +81,7 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
 /**
  * Sets the seed to be used by curandStatePhilox4_32_10
  * Resets the philox_offset_per_thread_ to 0
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
@@ -99,7 +99,7 @@ uint64_t CUDAGeneratorImpl::current_seed() const {
 /**
  * Gets a nondeterministic random number from /dev/urandom or time,
  * seeds the CPUGeneratorImpl with it and then returns that number.
- * 
+ *
  * FIXME: You can move this function to Generator.cpp if the algorithm
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
@@ -111,7 +111,7 @@ uint64_t CUDAGeneratorImpl::seed() {
 
 /**
  * Sets the philox_offset_per_thread_ to be used by curandStatePhilox4_32_10
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
@@ -128,19 +128,19 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
 /**
  * Gets the seed and philox offset value to be used in
  * curandStatePhilox4_32_10
- * 
+ *
  * Each kernel using philox has to sensibly increment offset
  * for future users of philox. So it gets the "old" value for
  * itself (before add), and tells subsequent users which offset
  * they should use, since only the kernel knows how many randoms
- * it intends to generate. 
- * 
+ * it intends to generate.
+ *
  * Increment should be at least the number of curand() random numbers used in
  * each thread. It is the user's responsibility to make sure that the increment
  * for philox is never smaller than the number of curand() calls. Increment
  * value > the number of curand() calls won't harm but anything less would mean
  * that you would be reusing random values from previous calls.
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
@@ -159,7 +159,7 @@ DeviceType CUDAGeneratorImpl::device_type() {
 
 /**
  * Public clone method implementation
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
@@ -168,7 +168,7 @@ std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
 
 /**
  * Private clone method implementation
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {

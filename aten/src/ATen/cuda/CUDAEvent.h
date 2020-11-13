@@ -72,7 +72,7 @@ struct TORCH_CUDA_API CUDAEvent {
 
   optional<at::Device> device() const {
     if (is_created_) {
-      return at::Device(at::kCUDA, device_index_);
+      return at::Device::cuda_unchecked(device_index_);
     } else {
       return {};
     }

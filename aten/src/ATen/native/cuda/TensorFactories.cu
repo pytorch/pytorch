@@ -84,7 +84,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
   result.resize_({n});
 
   if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-    auto result_cpu = at::empty({n}, result.options().device(kCPU));
+    auto result_cpu = at::empty({n}, result.options().device(Device::cpu()));
     randperm_out(result_cpu, n, generator);
     return result.copy_(result_cpu);
   }

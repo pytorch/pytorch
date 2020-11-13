@@ -597,7 +597,7 @@ inline Tensor convert(const vTensor& tensor) {
   return at::detail::make_tensor<vTensorImpl>(
       DispatchKeySet(DispatchKey::Vulkan),
       tensor.options().dtype(),
-      at::Device(at::kVulkan),
+      at::Device::vulkan(),
       tensor,
       tensor.sizes(),
       tensor.strides());

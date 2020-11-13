@@ -96,7 +96,7 @@ public:
 
   /// Get the full Device that this stream is associated with.  The Device
   /// is guaranteed to be a CUDA device.
-  Device device() const { return Device(DeviceType::CUDA, device_index()); }
+  Device device() const { return Device::cuda_unchecked(device_index()); }
 
   /// Return the stream ID corresponding to this particular stream.
   StreamId id() const { return stream_.id(); }

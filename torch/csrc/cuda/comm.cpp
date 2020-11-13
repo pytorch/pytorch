@@ -100,7 +100,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
       diff_device_dst_tensors.push_back(at::empty(
           tensor.sizes(),
           tensor.options().device(
-              at::Device(DeviceType::CUDA, device)))); // preserve memory format
+              at::Device::cuda_unchecked(device)))); // preserve memory format
     }
   }
   _broadcast_out_impl(tensor, diff_device_dst_tensors);

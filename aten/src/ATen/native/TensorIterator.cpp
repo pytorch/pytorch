@@ -257,7 +257,7 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
   //   - determines if there are undefined outputs
   //   - determines if there are different dtypes and attempts
   //       to quickly acquire a common dtype
-  Device common_device = kCPU;
+  Device common_device = Device::cpu();
   common_dtype_ = ScalarType::Undefined;
   // NB: despite output_dtype's generic sounding name, it only is
   // used in a nontrivial way if check_all_same_dtype is true
@@ -291,7 +291,7 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
     // Acquires the first non-CPU device (if any) as the common device
-    if (common_device == kCPU && !op.tensor.device().is_cpu()) {
+    if (common_device.type() == kCPU && !op.tensor.device().is_cpu()) {
       common_device = op.tensor.device();
     }
 
@@ -398,7 +398,7 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
 
     // Creates temporaries for CPU operations, if needed and requested
     // TODO: reuse temporaries when possible (e.g. for inplace operations)
-    if (common_device == kCPU) {
+    if (common_device.type() == kCPU) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
       if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
         op.original_tensor = op.tensor;

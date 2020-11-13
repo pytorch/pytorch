@@ -71,7 +71,7 @@ at::Tensor MetalTensor::toTensor(
   return detail::make_tensor<MetalTensorImpl>(
       DispatchKeySet(DispatchKey::Metal),
       options.dtype(),
-      at::Device(at::kMetal),
+      at::Device::metal(),
       std::move(mt),
       std::vector<int64_t>(sizes.begin(), sizes.end()),
       std::vector<int64_t>(strides.begin(), strides.end()));
