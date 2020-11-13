@@ -6767,6 +6767,39 @@ class TestNN(NNTestCase):
         x_grad_ref = torch.where(mask, grad, z)
         self.assertEqual(x.grad, x_grad_ref)
 
+    def test_batchnorm_nhwc_cpu(self):
+        def helper(self, size):
+            channels = size[1]
+            input = torch.randint(1, 10, size, dtype=torch.float32, device='cpu', requires_grad=True)
+            input = input.contiguous(memory_format=torch.channels_last)
+            input.retain_grad()
+            grad = torch.randint(1, 10, size, dtype=torch.float32, device='cpu')
+            grad = grad.contiguous(memory_format=torch.channels_last)
+            bn = nn.BatchNorm2d(channels).cpu().float()
+            bn.weight.data.uniform_()
+            bn.bias.data.uniform_()
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_bn = nn.BatchNorm2d(channels).cpu().float()
+            ref_bn.load_state_dict(bn.state_dict())
+
+            out = bn(input)
+            out.backward(grad)
+            ref_out = ref_bn(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
+            self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        helper(self, (4, 8, 10, 10))
+        helper(self, (4, 1, 9, 9))
+        helper(self, (4, 9, 1, 1))
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
