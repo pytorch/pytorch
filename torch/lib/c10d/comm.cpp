@@ -13,7 +13,7 @@ namespace {
 class BroadcastWork {
  public:
   BroadcastWork(
-      const std::shared_ptr<c10d::ProcessGroup>& process_group,
+      const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
       std::vector<at::Tensor> bucket_tensors,
       int root_rank = 0)
       : bucket_tensors_(std::move(bucket_tensors)),
@@ -45,15 +45,17 @@ class BroadcastWork {
   // because c10d::ProcessGroup::broadcast takes a vector argument.
   std::vector<at::Tensor> flat_tensor_;
 
+ private:
+
   // The broadcast work that is kicked off upon construction.
-  std::shared_ptr<c10d::ProcessGroup::Work> work_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
 };
 
 } // namespace
 
 // Broadcast many tensors to all processes in the process group.
 void broadcast_coalesced(
-    std::shared_ptr<c10d::ProcessGroup> process_group,
+    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     at::TensorList tensors,
     size_t buffer_size,
     int rank) {
@@ -84,6 +86,5 @@ void broadcast_coalesced(
     in_flight.pop_front();
   }
 }
-
 
 } // namespace c10d

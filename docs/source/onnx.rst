@@ -249,6 +249,31 @@ E.g.: ::
     out = model(*inputs)
     torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
 
+Write PyTorch model in Torch way
+--------------------------------
+
+PyTorch models can be written using numpy manipulations, but this is not proper when we convert to the ONNX model.
+For the trace-based exporter, tracing treats the numpy values as the constant node,
+therefore it calculates the wrong result if we change the input.
+So the PyTorch model need implement using torch operators.
+For example, do not use numpy operators on numpy tensors: ::
+
+    np.concatenate((x, y, z), axis=1)
+
+do not convert to numpy types: ::
+
+    y = x.astype(np.int)
+
+Always use torch tensors and torch operators: torch.concat, etc.
+In addition, Dropout layer need defined in init function so that inferencing can handle it properly, i.e., ::
+
+    class MyModule(nn.Module):
+        def __init__(self):
+            self.dropout = nn.Dropout(0.5)
+
+        def forward(self, x):
+            x = self.dropout(x)
+
 Indexing
 --------
 
