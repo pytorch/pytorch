@@ -39,12 +39,13 @@ from torch._six import inf
 from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
+from torch.autograd.functional import jacobian
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
                                  Distribution, Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
-                                 HalfCauchy, HalfNormal,
-                                 Independent, Kumaraswamy, Laplace, LogisticNormal,
+                                 HalfCauchy, HalfNormal, Independent,
+                                 LKJCholesky, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
                                  MixtureSameFamily, Multinomial, MultivariateNormal,
                                  NegativeBinomial, Normal,
@@ -58,7 +59,8 @@ from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AffineTransform, CatTransform, ExpTransform,
                                             StackTransform, identity_transform)
-from torch.distributions.utils import probs_to_logits, lazy_property
+from torch.distributions.utils import (probs_to_logits, lazy_property, tril_matrix_to_vec,
+                                       vec_to_tril_matrix)
 from torch.nn.functional import softmax
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -244,6 +246,20 @@ EXAMPLES = [
         {
             'concentration1': torch.rand(4).uniform_(1, 2).requires_grad_(),
             'concentration0': torch.rand(4).uniform_(1, 2).requires_grad_(),
+        },
+    ]),
+    Example(LKJCholesky, [
+        {
+            'dim': 2,
+            'concentration': 0.5
+        },
+        {
+            'dim': 3,
+            'concentration': torch.tensor([0.5, 1., 2.]),
+        },
+        {
+            'dim': 100,
+            'concentration': 4.
         },
     ]),
     Example(Laplace, [
@@ -2533,6 +2549,29 @@ class TestDistributions(TestCase):
         self.assertEqual(ContinuousBernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(ContinuousBernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
+
+    def test_lkj_cholesky_log_prob(self):
+        def tril_cholesky_to_tril_corr(x):
+            x = vec_to_tril_matrix(x, -1)
+            diag = (1 - (x * x).sum(-1)).sqrt().diag_embed()
+            x = x + diag
+            return tril_matrix_to_vec(x @ x.T, -1)
+
+        for dim in range(2, 5):
+            log_probs = []
+            lkj = LKJCholesky(dim, concentration=1.)
+            for i in range(2):
+                sample = lkj.sample()
+                sample_tril = tril_matrix_to_vec(sample, diag=-1)
+                log_prob = lkj.log_prob(sample)
+                log_abs_det_jacobian = torch.slogdet(jacobian(tril_cholesky_to_tril_corr, sample_tril)).logabsdet
+                log_probs.append(log_prob - log_abs_det_jacobian)
+            # for concentration=1., the density is uniform over the space of all
+            # correlation matrices.
+            if dim == 2:
+                # for dim=2, log_prob = 0.5 (jacobian adjustment factor is 0.)
+                self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
+            self.assertEqual(log_probs[0], log_probs[1])
 
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
