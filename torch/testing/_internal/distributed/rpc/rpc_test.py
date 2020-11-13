@@ -67,7 +67,6 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::relu",
     "aten::threshold",
     "aten::sigmoid",
-    "aten::sigmoid",
 ]
 
 # Remote operations are prefixed with the following string for RPC profiling.
