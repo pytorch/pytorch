@@ -1200,16 +1200,7 @@ class TestLinalg(TestCase):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
-            # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
-            if self.device_type == 'cuda' and dtype.is_complex:
-                # Ax = torch.empty_like(x_act).view(-1, *b_dims[-2:])
-                # for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, *A.shape[-2:]),
-                #                           x_act.contiguous().view(-1, *b_dims[-2:]), Ax):
-                #     torch.matmul(A_i, x_i, out=Ax_i)
-                # Ax = Ax.view(*x_act.shape)
-                Ax = torch.matmul(A.cpu(), x_act.cpu()).to(device)
-            else:
-                Ax = torch.matmul(A, x_act)
+            Ax = torch.matmul(A, x_act)
             self.assertEqual(b, Ax)  # Correctness check
 
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
@@ -1244,11 +1235,7 @@ class TestLinalg(TestCase):
             for upper in [True, False]:
                 b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
                 x = torch.cholesky_solve(b, L, upper)
-                # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
-                if self.device_type == 'cuda' and dtype.is_complex:
-                    Ax = torch.matmul(A.cpu(), x.cpu()).to(device)
-                else:
-                    Ax = torch.matmul(A, x)
+                Ax = torch.matmul(A, x)
                 self.assertEqual(Ax, b.expand_as(Ax))
 
     @skipCUDAIfNoMagma
@@ -1285,7 +1272,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
-    @dtypesIfCUDA(torch.float64)
     def test_cholesky_solve_autograd(self, device, dtype):
         def run_test(A_dims, B_dims, upper):
             root = torch.randn(*A_dims, device=device, dtype=dtype).requires_grad_()
@@ -1305,30 +1291,6 @@ class TestLinalg(TestCase):
                                                           ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
                                                          [True, False]):
             run_test(a_size, b_size, upper)
-
-    # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex128)
-    def test_cholesky_solve_autograd_xfailed(self, device, dtype):
-        def run_test(A_dims, B_dims, upper):
-            root = torch.randn(*A_dims, device=device, dtype=dtype).requires_grad_()
-            b = torch.randn(*B_dims, device=device, dtype=dtype).requires_grad_()
-
-            def func(root, b, upper):
-                if upper:
-                    A = root.triu()
-                else:
-                    A = root.tril()
-                return torch.cholesky_solve(b, A, upper)
-
-            gradcheck(func, [root, b, upper])
-            gradgradcheck(func, [root, b, upper], atol=1e-3)
-
-        a_shape = (2, 3, 3)
-        b_shape = (2, 3, 4)
-        run_test(a_shape, b_shape)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
