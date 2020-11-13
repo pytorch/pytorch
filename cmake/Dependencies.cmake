@@ -510,6 +510,13 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
     set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Workaround for https://github.com/pytorch/pytorch/issues/47292
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
+      # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
+      # Fails with internal compiler error
+      # Workaround by forcing -O1 for XNNPACK (i.e. build it with RelWithDebInfo)
+      set_property(TARGET XNNPACK APPEND_STRING PROPERTY COMPILE_FLAGS "-O1")
+    endif()
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
@@ -1636,6 +1643,8 @@ if(NOT INTERN_BUILD_MOBILE)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
     list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+  else()
+    set(USE_LAPACK 0)
   endif()
 
   if(NOT USE_CUDA)

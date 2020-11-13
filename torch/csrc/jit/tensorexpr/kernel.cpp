@@ -20,6 +20,7 @@ static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
+static bool te_must_use_llvm_on_cpu = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -66,6 +67,10 @@ int& getTECudaPointwiseBlockSize() {
 // based on device type in tensor.
 bool& getTEGenerateBlockCode() {
   return te_generate_block_code;
+}
+
+bool& getTEMustUseLLVMOnCPU() {
+  return te_must_use_llvm_on_cpu;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -371,7 +376,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     }
 
     case aten::softmax:
-      // Output of Softmax has the same shape as input 0.
+    case aten::log_softmax:
+      // Output of softmax / log_softmax has the same shape as input 0.
       return sizesForValue(v->node()->input(0));
 
     case aten::slice:
@@ -414,7 +420,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
 
 ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
   auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (!c10::isIntegralType(scalarType)) {
+  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
     return e;
   }
   auto defaultType = static_cast<tensorexpr::ScalarType>(
@@ -1013,54 +1019,30 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::pow: {
       return computeTwoOperand(
           "aten_pow", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            const FloatImm* floatImm = rhs.AsNode<FloatImm>();
-            if (floatImm) {
-              float imm = floatImm->value();
-              if (imm == 1.0f) {
-                return lhs;
-              } else if (imm == 2.0f) { // NOLINT
-                return lhs * lhs;
-              } else if (imm == 3.0f) { // NOLINT
-                return (lhs * lhs) * lhs;
-              } else if (imm == 4.0f) { // NOLINT
-                ExprHandle tmp = lhs * lhs;
-                return tmp * tmp;
-              } else if (imm == 0.5f) { // NOLINT
-                return sqrt(lhs);
-              } else if (imm == 0.0f) {
-                return ExprHandle(1.0f);
-              } else if (imm == -0.5f) { // NOLINT
-                return rsqrt(lhs);
-              } else if (imm == -1.0f) {
-                return ExprHandle(1.0f) / lhs;
-              } else if (imm == -2.0f) { // NOLINT
-                return ExprHandle(1.0f) / (lhs * lhs);
-              }
+            double val = 0;
+            if (rhs.node()->isConstant()) {
+              val = immediateAs<double>(IRSimplifier::simplify(rhs.node()));
             }
 
-            const Cast* floatCast = rhs.AsNode<Cast>();
-            if (floatCast) {
-              const IntImm* intImm =
-                  dynamic_cast<const IntImm*>(floatCast->src_value());
-              if (intImm) {
-                float imm = static_cast<float>(intImm->value());
-                if (imm == 1) {
-                  return lhs;
-                } else if (imm == 2) {
-                  return lhs * lhs;
-                } else if (imm == 3) {
-                  return (lhs * lhs) * lhs;
-                } else if (imm == 4) {
-                  ExprHandle tmp = lhs * lhs;
-                  return tmp * tmp;
-                } else if (imm == 0) {
-                  return ExprHandle(1.0f);
-                } else if (imm == -1) {
-                  return ExprHandle(1.0f) / lhs;
-                } else if (imm == -2) {
-                  return ExprHandle(1.0f) / (lhs * lhs);
-                }
-              }
+            if (val == 1.0f) {
+              return lhs;
+            } else if (val == 2.0f) { // NOLINT
+              return lhs * lhs;
+            } else if (val == 3.0f) { // NOLINT
+              return (lhs * lhs) * lhs;
+            } else if (val == 4.0f) { // NOLINT
+              ExprHandle tmp = lhs * lhs;
+              return tmp * tmp;
+            } else if (val == 0.5f) { // NOLINT
+              return sqrt(lhs);
+            } else if (val == 0.0f) {
+              return ExprHandle(1.0f);
+            } else if (val == -0.5f) { // NOLINT
+              return rsqrt(lhs);
+            } else if (val == -1.0f) {
+              return ExprHandle(1.0f) / lhs;
+            } else if (val == -2.0f) { // NOLINT
+              return ExprHandle(1.0f) / (lhs * lhs);
             }
             return pow(lhs, rhs);
           });
@@ -1082,12 +1064,44 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
              const ExprHandle& weight) { return a + weight * (end - a); });
     } break;
     case aten::remainder: {
-      return computeTwoOperand(
-          "aten_remainder",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return fmod((rhs + fmod(lhs, rhs)), rhs);
-          });
+      auto imodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return Mod::make(lhs, rhs);
+      };
+      auto fmodImpl = [](const ExprHandle& lhs, const ExprHandle& rhs) {
+        return fmod((rhs + fmod(lhs, rhs)), rhs);
+      };
+      {
+        auto const& n = v->node();
+        auto const& shape = broadcastShapes(
+            valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
+        return Compute(
+            "aten_remainder",
+            c10::fmap<DimArg>(shape),
+            [&](const std::vector<VarHandle>& axes) {
+              auto const& n = v->node();
+              std::vector<ExprHandle> indices(axes.begin(), axes.end());
+              std::vector<ExprHandle> inputs = {
+                  tensorOrConstant(n->inputs()[0], indices),
+                  tensorOrConstant(n->inputs()[1], indices),
+              };
+
+              promoteInputs(inputs);
+              bool allInt = true;
+              for (auto& e : inputs) {
+                if (e.dtype().is_floating_point()) {
+                  allInt = false;
+                  break;
+                }
+              }
+              if (allInt) {
+                return demoteOutput(
+                    imodImpl(inputs[0], inputs[1]), n->output());
+              } else {
+                return demoteOutput(
+                    fmodImpl(inputs[0], inputs[1]), n->output());
+              }
+            });
+      }
 
     } break;
 
@@ -1132,8 +1146,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sqrt: {
-      return computeOneOperand(
-          "aten_sqrt", v, [](const ExprHandle& a) { return sqrt(a); });
+      return computeOneOperand("aten_sqrt", v, [](const ExprHandle& a) {
+        return sqrt(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::rsqrt: {
@@ -1353,7 +1368,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
 
     case aten::softmax: {
-      return computeSoftmax(v);
+      return computeSoftmax(v, false);
+    }
+
+    case aten::log_softmax: {
+      return computeSoftmax(v, true);
     }
 
     default: {
@@ -1510,6 +1529,9 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
 #else
     backendType = kSimpleIREval;
 #endif
+    if (getTEMustUseLLVMOnCPU() && backendType == kSimpleIREval) {
+      throw std::runtime_error("LLVM Backend not found");
+    }
   } else {
     throw std::runtime_error("Invalid device type");
   }
@@ -1626,7 +1648,9 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
       reduction_info.reductionDims);
 }
 
-Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
+Tensor* TensorExprKernel::computeSoftmax(
+    const torch::jit::Value* v,
+    bool log_softmax) {
   // Softmax is computed as follows:
   //    softmax(vi) = exp(vi) / sum(exp(vi))
   //
@@ -1640,6 +1664,21 @@ Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
   //     the max of the softmax dim it belongs to.
   //   - Third loop computes the sum over the softmax dim.
   //   - Final loop computes softmax for every element in v.
+
+  // LogSoftmax is computed as follows:
+  //    log_softmax(vi) = log(softmax(vi))
+  //                    = vi - log(sum(exp(vi)))
+  //
+  // Using the same max trick as above:
+  //    log_softmax(vi) = vi - max(vi) - log(sum(exp(vi - max(vi))))
+  //
+  // This is implemented as 5 loopnests:
+  //   - First loop computes the max over the softmax dim.
+  //   - Second loop computes exp for every element in v after subtracting
+  //     the max of the softmax dim it belongs to.
+  //   - Third loop computes the sum over the softmax dim.
+  //   - Fourth loop computes log for every element in the sum.
+  //   - Final loop computes the log_softmax for every element in v.
 
   TORCH_INTERNAL_ASSERT(v->node()->inputs().size() == 3);
   auto output_dims = dimsFromSizes(sizesForValue(v));
@@ -1724,10 +1763,23 @@ Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
         return e->call(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
-  auto res = Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-    return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+  if (!log_softmax) {
+    return Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
+      return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+    });
+  }
+
+  auto log_sum = Compute(
+      "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
+        return log(sum->call(indices));
+      });
+  return Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
+    auto inp = tensorOrConstant(
+        v->node()->inputs()[0], convert_indices_to_expr_handle(indices));
+    auto non_softmax_indices = remove_softmax_dim_index(indices);
+    return inp - max->call(non_softmax_indices) -
+        log_sum->call(non_softmax_indices);
   });
-  return res;
 }
 
 TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
