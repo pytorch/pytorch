@@ -147,6 +147,10 @@ class CallbackManager {
       ctx_list.resize(num_callbacks);
     };
 
+    if (!found_active_cb) {
+      // Should this be some kind of warning or check failure?
+      return;
+    }
     rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
     init_handles(rec_fn.state_->sorted_active_tls_handles_, rf_tls_.sorted_tls_callbacks_, rec_fn.state_->tls_ctx_);
     init_handles(rec_fn.state_->sorted_active_global_handles_, sorted_global_callbacks_, rec_fn.state_->global_ctx_);
