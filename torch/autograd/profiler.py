@@ -41,7 +41,7 @@ class EventList(list):
         self._profile_memory = profile_memory
         self._tree_built = False
 
-    def build_tree(self):
+    def _build_tree(self):
         self._populate_cpu_children()
         self._remove_dup_nodes()
         self._set_backward_stacktraces()
@@ -455,7 +455,7 @@ class profile(object):
             parsed_results,
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory)
-        self.function_events.build_tree()
+        self.function_events._build_tree()
         return False
 
     def __repr__(self):

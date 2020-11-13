@@ -133,16 +133,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // correlation id of a linked event
       .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId);
 
-  py::class_<ProfilerResultWrapper>(m, "ProfilerResult")
-      .def("events",  [](const ProfilerResultWrapper& r) {
-        return r.result_->events();
-      })
-      .def("legacy_events",  [](const ProfilerResultWrapper& r) {
-        return r.result_->legacy_events();
-      })
-      .def("save",  [](const ProfilerResultWrapper& r, const std::string& path) {
-        return r.result_->save(path);
-      });
+    py::class_<ProfilerResult>(m, "ProfilerResult")
+      .def("events", &ProfilerResult::events)
+      .def("legacy_events", &ProfilerResult::legacy_events)
+      .def("save", &ProfilerResult::save);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);

@@ -185,7 +185,7 @@ class ProcessGroupMPI : public ProcessGroup {
       const BarrierOptions& opts = BarrierOptions()) override;
 
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
-  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI(
+  static c10::intrusive_ptr<ProcessGroupMPI> createProcessGroupMPI(
       std::vector<int> ranks = {});
 
  protected:

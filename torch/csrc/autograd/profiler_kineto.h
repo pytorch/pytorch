@@ -177,6 +177,7 @@ struct TORCH_API ProfilerResult {
       std::vector<KinetoEvent> events,
       thread_event_lists legacy_events,
       std::unique_ptr<libkineto::ActivityTraceInterface> trace);
+  ~ProfilerResult();
 
   const std::vector<KinetoEvent>& events() const {
     return events_;
@@ -194,18 +195,11 @@ struct TORCH_API ProfilerResult {
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
 };
 
-// avoid unique_ptr copy issues when using pybind
-struct TORCH_API ProfilerResultWrapper {
-  ProfilerResultWrapper(const std::shared_ptr<ProfilerResult>& result)
-    : result_(result) {}
- std::shared_ptr<ProfilerResult> result_;
-};
-
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities);
 
-TORCH_API ProfilerResultWrapper disableProfiler();
+TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
 TORCH_API void prepareProfiler(
     const ProfilerConfig& config,

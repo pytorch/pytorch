@@ -259,7 +259,7 @@ void enableProfiler(
   state->mark("__start_profile", false);
 }
 
-ProfilerResultWrapper disableProfiler() {
+std::unique_ptr<ProfilerResult> disableProfiler() {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
 
@@ -281,10 +281,10 @@ ProfilerResultWrapper disableProfiler() {
   auto trace = std::move(libkineto::api().activityProfiler().stopTrace());
   TORCH_CHECK(trace);
   state_ptr->addTraceEvents(*trace);
-  return ProfilerResultWrapper(std::make_shared<ProfilerResult>(
+  return std::make_unique<ProfilerResult>(
       std::move(state_ptr->kineto_events_),
       std::move(state_ptr->consolidate()),
-      std::move(trace)));
+      std::move(trace));
 }
 
 KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
@@ -332,6 +332,7 @@ ProfilerResult::ProfilerResult(
   : events_(std::move(events)),
     legacy_events_(std::move(legacy_events)),
     trace_(std::move(trace)) {}
+ProfilerResult::~ProfilerResult() {}
 
 void ProfilerResult::save(const std::string& path) {
   trace_->save(path);

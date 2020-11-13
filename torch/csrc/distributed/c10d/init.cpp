@@ -223,7 +223,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init<
               std::vector<std::vector<torch::autograd::Variable>>,
               std::vector<std::vector<size_t>>,
-              std::shared_ptr<::c10d::ProcessGroup>,
+              c10::intrusive_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
               bool,
@@ -440,8 +440,8 @@ Deletes the key-value pair associated with ``key`` from the store. Returns
 `true` if the key was successfully deleted, and `false` if it was not.
 
 .. warning::
-    The ``delete_key`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
+    The ``delete_key`` API is only supported by the :class:`~torch.distributed.TCPStore` and :class:`~torch.distributed.HashStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` will result in an exception.
 
 Arguments:
     key (str): The key to be deleted from the store
@@ -451,6 +451,7 @@ Returns:
 
 Example::
     >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, HashStore can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key")
     >>> # This should return true
@@ -469,14 +470,15 @@ and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
 the workers using the store.
 
 .. warning::
-    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
+    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore` and :class:`~torch.distributed.HashStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` will result in an exception.
 
 Returns:
     The number of keys present in the store.
 
 Example::
     >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, HashStore can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # This should return 2
@@ -642,7 +644,7 @@ Arguments:
       .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
-      shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+      intrusive_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
 
@@ -907,13 +909,13 @@ Arguments:
 #ifndef _WIN32
   module.def(
       "_round_robin_process_groups",
-      [](std::vector<std::shared_ptr<::c10d::ProcessGroup>> processGroups)
-          -> std::shared_ptr<::c10d::ProcessGroup> {
+      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
+          -> c10::intrusive_ptr<::c10d::ProcessGroup> {
         if (processGroups.size() == 0) {
           throw std::invalid_argument("Specify at least 1 process group");
         }
         const auto& first = processGroups.front();
-        return std::make_shared<::c10d::ProcessGroupRoundRobin>(
+        return c10::make_intrusive<::c10d::ProcessGroupRoundRobin>(
             first->getRank(), first->getSize(), std::move(processGroups));
       },
       py::arg("process_groups"),
@@ -921,7 +923,7 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
+  auto processGroupGloo = intrusive_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
@@ -981,7 +983,7 @@ Arguments:
 
             options.timeout = timeout;
             options.threads = options.devices.size() * 2;
-            return std::make_shared<::c10d::ProcessGroupGloo>(
+            return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
           }),
           py::arg("store"),
@@ -993,15 +995,14 @@ Arguments:
 
 #ifdef USE_C10D_NCCL
   auto processGroupNCCL =
-      shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+      intrusive_ptr_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
-                  const c10::intrusive_ptr<
-                      ::c10d::ProcessGroupNCCL::Options>&>(),
+                  c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -1011,7 +1012,7 @@ Arguments:
                 auto options = ::c10d::ProcessGroupNCCL::Options::create();
                 options->isHighPriorityStream = false;
                 options->opTimeout = timeout;
-                return std::make_shared<::c10d::ProcessGroupNCCL>(
+                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
                     store, rank, size, options);
               }),
               py::arg("store"),
@@ -1036,7 +1037,7 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_MPI
-  auto processGroupMPI = shared_ptr_class_<::c10d::ProcessGroupMPI>(
+  auto processGroupMPI = intrusive_ptr_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup);
 
   // Define static create function instead of a constructor, because
@@ -1149,7 +1150,7 @@ Arguments:
       // Define a lambda such that the pybind11 prototype can take a std::vector
       // for the tensor list argument, but still pass it to the underlying
       // function as a c10::ArrayRef.
-      [](std::shared_ptr<::c10d::ProcessGroup> process_group,
+      [](c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
          std::vector<at::Tensor> tensors, // NOLINT
          size_t buffer_size,
          int rank) {

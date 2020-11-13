@@ -7,7 +7,6 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 #include <ATen/ATen.h>
-#include <ATen/TypeDefault.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
 
 #include <stdlib.h>
