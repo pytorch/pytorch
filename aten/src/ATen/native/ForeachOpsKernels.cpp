@@ -182,17 +182,30 @@ std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList
 FOREACH_MAXIMUM_MINIMUM_OP(maximum)
 FOREACH_MAXIMUM_MINIMUM_OP(minimum)
 
-std::vector<Tensor> foreach_tensor_add_scalarlist2_kernel_slow(TensorList tensors, ScalarList scalars) {
-  std::cout << "SLOW sc" << std::endl;
-  //check_foreach_api_restrictions(tensors, scalars);
-  std::vector<Tensor> result;
-  result.reserve(tensors.size());
-  for (int i = 0; i < tensors.size(); i++) {
-    result.emplace_back(tensors[i].add(scalars[i]));
-  }
 
-  return result;
+#define FOREACH_BINARY_OP_SCALARLIST2(OP)                                                                                \
+void foreach_tensor_##OP##_scalarlist2_kernel_slow_(TensorList tensors, ScalarList scalars) {                  \
+  /* check_foreach_api_restrictions(tensors, scalars); */\
+                                                                                                                        \
+  for (int i = 0; i < tensors.size(); i++) {                                                                            \
+      tensors[i].OP##_(scalars[i]);                                                                                     \
+    }                                                                                                                   \
+}                                                                                                                       \
+                                                                                                                        \
+std::vector<Tensor> foreach_tensor_##OP##_scalarlist2_kernel_slow(TensorList tensors, ScalarList scalars) {    \
+  /* check_foreach_api_restrictions(tensors, scalars); */                                                                \
+  std::vector<Tensor> result;                                                                                           \
+  result.reserve(tensors.size());                                                                                       \
+  for (int i = 0; i < tensors.size(); i++) {                                                                            \
+    result.emplace_back(tensors[i].OP(scalars[i]));                                                                     \
+  }                                                                                                                     \
+                                                                                                                        \
+  return result;                                                                                                        \
 }
 
+FOREACH_BINARY_OP_SCALARLIST2(add);
+FOREACH_BINARY_OP_SCALARLIST2(sub);
+FOREACH_BINARY_OP_SCALARLIST2(mul);
+FOREACH_BINARY_OP_SCALARLIST2(div);
 
 }} // namespace at::native

@@ -7046,6 +7046,62 @@
     CPU: foreach_tensor_add_scalarlist2_kernel_slow
     CUDA: foreach_tensor_add_scalarlist2_kernel_cuda
 
+- func: _foreach_add_sl_(Tensor(a!)[] self, Scalar[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_add_scalarlist2_kernel_slow_
+    CUDA: foreach_tensor_add_scalarlist2_kernel_cuda_
+
+- func: _foreach_sub_sl(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sub_scalarlist2_kernel_slow
+    CUDA: foreach_tensor_sub_scalarlist2_kernel_cuda
+
+- func: _foreach_sub_sl_(Tensor(a!)[] self, Scalar[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_sub_scalarlist2_kernel_slow_
+    CUDA: foreach_tensor_sub_scalarlist2_kernel_cuda_
+
+- func: _foreach_div_sl(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_div_scalarlist2_kernel_slow
+    CUDA: foreach_tensor_div_scalarlist2_kernel_cuda
+
+- func: _foreach_div_sl_(Tensor(a!)[] self, Scalar[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_div_scalarlist2_kernel_slow_
+    CUDA: foreach_tensor_div_scalarlist2_kernel_cuda_
+
+- func: _foreach_mul_sl(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_scalarlist2_kernel_slow
+    CUDA: foreach_tensor_mul_scalarlist2_kernel_cuda
+
+- func: _foreach_mul_sl_(Tensor(a!)[] self, Scalar[] scalars) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_mul_scalarlist2_kernel_slow_
+    CUDA: foreach_tensor_mul_scalarlist2_kernel_cuda_
+
 - func: _foreach_add_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
   device_guard: False

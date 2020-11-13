@@ -20,10 +20,17 @@ print(res[0].dtype)
 import torch
 import torch.utils.benchmark as benchmark_utils
 
-r = 3000
+r = 1
 scalars = [1.1 for _ in range(r)]
-tensors = [torch.rand(20, 20, dtype=torch.float64, device="cuda") for _ in range(r)]
+tensors = [torch.rand(2, 2, dtype=torch.float64, device="cuda") for _ in range(r)]
 
+exp = [t.div(s) for t, s in zip(tensors, scalars)]
+res = torch._foreach_div_sl(tensors, scalars)
+torch._foreach_div_sl_(tensors, scalars)
+
+print(res)
+print(tensors)
+'''
 def main():
     timer = benchmark_utils.Timer(
         stmt="exp = [t.add(s) for t, s in zip(tensors, scalars)]",
@@ -41,3 +48,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+'''
