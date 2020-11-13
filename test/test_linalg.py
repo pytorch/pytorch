@@ -1412,8 +1412,6 @@ class TestLinalg(TestCase):
         check((5, 0))
         check((0, 5))
 
-# XXXXX: write an autograd test for 'r'
-
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':
