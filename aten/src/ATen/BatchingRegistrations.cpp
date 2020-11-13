@@ -869,10 +869,13 @@ Tensor new_zeros_batching_rule(
 Tensor new_empty_batching_rule(
     const Tensor& self,
     IntArrayRef size,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
-  auto result = physical_view.tensor().new_empty(physical_size, options);
+  auto result = physical_view.tensor().new_empty(physical_size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
   return physical_view.newLogicalFromPhysical(result);
 }
 
