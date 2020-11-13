@@ -2552,10 +2552,10 @@ graph(%Ra, %Rb):
         for e in prof.function_events:
             if e.name == "aten::mul":
                 self.assertTrue(e.thread not in mul_events)
-                mul_events[e.thread] = e.cpu_interval.elapsed_us()
+                mul_events[e.thread] = e.time_range.elapsed_us()
             elif e.name == "other_fn":
                 self.assertTrue(e.thread not in other_fn_events)
-                other_fn_events[e.thread] = e.cpu_interval.elapsed_us()
+                other_fn_events[e.thread] = e.time_range.elapsed_us()
 
         self.assertTrue(len(mul_events) == 2)
         self.assertTrue(len(other_fn_events) == 2)
