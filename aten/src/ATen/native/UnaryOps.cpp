@@ -312,8 +312,8 @@ Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_imp
 Tensor reciprocal(const Tensor& self) { return unary_op_impl(self, at::reciprocal_out); }
 Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
 
-Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
-Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
+Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, rsqrt_stub); }
+Tensor rsqrt(const Tensor& self) { return unary_op_impl_float(self, rsqrt_stub); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
 Tensor& sign_out(Tensor& result, const Tensor& self) {
