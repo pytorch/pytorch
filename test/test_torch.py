@@ -11346,7 +11346,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_logical_any(self, device):
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                                  include_bool=True, include_complex=False):
+                                                  include_bool=True, include_complex=True):
             x = torch.zeros([2, 3, 400], dtype=dtype, device=device)
             out_dtype = torch.bool
 
