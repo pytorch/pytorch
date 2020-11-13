@@ -318,7 +318,7 @@ static inline void manual_seed(uint64_t seed) {
   if (hasCUDA() && num_gpus > 0) {
     for (int i = 0; i < num_gpus; i++) {
       auto cuda_gen = globalContext().defaultGenerator(
-        Device(at::kCUDA, static_cast<c10::DeviceIndex>(i))
+        Device(at::kCUDA, i)
       );
       {
         // See Note [Acquire lock when using random generators]

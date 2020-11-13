@@ -324,7 +324,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
  protected:
-  int gpu_id_;
+  c10::DeviceIndex gpu_id_;
   int random_seed_;
   curandGenerator_t curand_generator_{nullptr};
   static ThreadLocalCUDAObjects& getCudaObjects();

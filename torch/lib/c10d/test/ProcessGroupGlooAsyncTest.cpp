@@ -74,8 +74,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     for (auto i = 0; i < numTensors_; i++) {
       inputs_[i] = at::empty(
           {16, 16},
-          at::device(
-              {at::kCUDA, static_cast<c10::DeviceIndex>(i % numDevices_)}));
+          at::device({at::kCUDA, i % numDevices_}));
     }
 
     // Allocate a stream per device.

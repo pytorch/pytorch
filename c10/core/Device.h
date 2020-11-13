@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <functional>
 #include <iosfwd>
+#include <limits>
 #include <string>
 
 namespace c10 {
@@ -32,8 +33,10 @@ struct C10_API Device final {
 
   /// Constructs a new `Device` from a `DeviceType` and an optional device
   /// index.
-  /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
-      : type_(type), index_(index) {
+  /* implicit */ Device(DeviceType type, int64_t index = -1) : type_(type) {
+    TORCH_CHECK(std::numeric_limits<DeviceIndex>::min() <= index, "Device index too small!");
+    TORCH_CHECK(index <= std::numeric_limits<DeviceIndex>::max(), "Device index too large!");
+    index_ = static_cast<DeviceIndex>(index);
     validate();
   }
 
@@ -57,8 +60,10 @@ struct C10_API Device final {
   }
 
   /// Sets the device index.
-  void set_index(DeviceIndex index) {
-    index_ = index;
+  void set_index(int64_t index) {
+    TORCH_CHECK(std::numeric_limits<DeviceIndex>::min()<=index, "Device index too small!");
+    TORCH_CHECK(index<=std::numeric_limits<DeviceIndex>::max(), "Device index too large!");
+    index_ = static_cast<DeviceIndex>(index);
   }
 
   /// Returns the type of device this is.
