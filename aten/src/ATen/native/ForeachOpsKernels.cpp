@@ -185,15 +185,14 @@ FOREACH_MAXIMUM_MINIMUM_OP(minimum)
 
 #define FOREACH_BINARY_OP_SCALARLIST2(OP)                                                                                \
 void foreach_tensor_##OP##_scalarlist2_kernel_slow_(TensorList tensors, ScalarList scalars) {                  \
-  /* check_foreach_api_restrictions(tensors, scalars); */\
-                                                                                                                        \
+   check_foreach_api_restrictions(tensors, scalars); \
   for (int i = 0; i < tensors.size(); i++) {                                                                            \
       tensors[i].OP##_(scalars[i]);                                                                                     \
     }                                                                                                                   \
 }                                                                                                                       \
                                                                                                                         \
-std::vector<Tensor> foreach_tensor_##OP##_scalarlist2_kernel_slow(TensorList tensors, ScalarList scalars) {    \
-  /* check_foreach_api_restrictions(tensors, scalars); */                                                                \
+std::vector<Tensor> foreach_tensor_##OP##_scalarlist2_kernel_slow(TensorList tensors, ScalarList scalars) {             \
+   check_foreach_api_restrictions(tensors, scalars);                                                                \
   std::vector<Tensor> result;                                                                                           \
   result.reserve(tensors.size());                                                                                       \
   for (int i = 0; i < tensors.size(); i++) {                                                                            \

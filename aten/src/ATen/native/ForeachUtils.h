@@ -18,6 +18,11 @@ void check_foreach_api_restrictions(TensorList tensors, ArrayRef<double> scalars
   TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 }
 
+void check_foreach_api_restrictions(TensorList tensors, ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors);
+  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
+}
+
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
@@ -94,6 +99,11 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool div_op = fals
     return false;
   }
 
+  // complex scalar + float tensor will result in complex tensor
+  if (scalar.isComplex() && at::isFloatingType(tensor.scalar_type())) {
+    return false;
+  }
+
   // float scalar + integral or boolean tensor will result in float tensor
   if (scalar.isFloatingPoint() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
     return false;
@@ -110,11 +120,6 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool div_op = fals
       return false;
     }
   }
-  //std::cout << "div op: " << div_op  << std::endl;
-  //std::cout << "is int: " << scalar.isIntegral() << std::endl;
-  //std::cout << "is float: " << scalar.isFloatingPoint() << std::endl;
-  //std::cout << "t in int: " << at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true) << std::endl;
-  //std::cout << "returning true" << std::endl;
   return true;
 }
 
@@ -157,15 +162,22 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar, bool div_op = false) 
 }
 
 bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
-  std::cout << "hello yo!" << std::endl;
   for (int i = 0; i < tensors.size(); i++) {
     if (!will_promote_tensor(tensors[i], scalars[i])) {
-      std::cout << "false" << std::endl;
       return false;
     }
   }
 
-  std::cout << "true" << std::endl;
+  return true;
+}
+
+bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
+  for (int i = 0; i < tensors.size(); i++) {
+    if (!will_promote_tensor(tensors[i], scalars[i])) {
+      return false;
+    }
+  }
+
   return true;
 }
 
