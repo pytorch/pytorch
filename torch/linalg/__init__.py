@@ -187,5 +187,91 @@ Examples::
 
 
 qr = _add_docstr(_linalg.linalg_qr, r"""
-WRITE ME
+qr(input, mode='reduced', *, out=None) -> (Tensor, Tensor)
+
+Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
+and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
+with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
+:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
+
+Depending on the value of :attr:`mode` this function returns the reduced or
+complete QR factorization. See below for a list of valid modes.
+
+.. warning:: **Differences with** :meth:`~torch.qr`:
+
+             * ``torch.qr`` takes a boolean parameter ``some`` instead of ``mode``:
+
+               - ``some=True`` is equivalent of ``mode='reduced'``: both are the
+                 default
+
+               - ``some=False`` is equivalent of ``mode='complete'``.
+
+             **Differences with** ``numpy.linalg.qr``:
+
+             * ``mode='raw'`` is not implemented
+
+             * when ``mode='r'`` numpy returns a single array `R`, whereas
+               pytorch returns a tuple `(Q, R)`, where `Q` is an empty
+               tensor.
+
+
+.. warning::
+          Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
+
+          If you plan to backpropagate through QR, note that the current backward implementation
+          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
+          columns of :attr:`input` are linearly independent.
+          This behavior will propably change once QR supports pivoting.
+
+.. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
+          are large
+
+.. note:: While it should always give you a valid decomposition, it may not
+          give you the same one across platforms - it will depend on your
+          LAPACK implementation.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                batch dimensions consisting of matrices of dimension :math:`m \times n`.
+    mode (str, optional): if `k = min(m, n)` then:
+
+          * ``'reduced'`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
+
+          * ``'complete'``: returns `(Q, R)` with dimensions (m, m), (m, n)
+
+          * ``'r'``: computes only `R`; returns `(Q, R)` where `Q` is empty and `R` has dimensions (k, n)
+
+Keyword args:
+    out (tuple, optional): tuple of `Q` and `R` tensors
+                satisfying :code:`input = torch.matmul(Q, R)`.
+                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
+                respectively, where :math:`k = \min(m, n)` if :attr:`mode` is `'reduced'` and
+                :math:`k = m` if :attr:`mode` is `'complete'`.
+
+Example::
+
+    >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
+    >>> q, r = torch.linalg.qr(a)
+    >>> q
+    tensor([[-0.8571,  0.3943,  0.3314],
+            [-0.4286, -0.9029, -0.0343],
+            [ 0.2857, -0.1714,  0.9429]])
+    >>> r
+    tensor([[ -14.0000,  -21.0000,   14.0000],
+            [   0.0000, -175.0000,   70.0000],
+            [   0.0000,    0.0000,  -35.0000]])
+    >>> torch.mm(q, r).round()
+    tensor([[  12.,  -51.,    4.],
+            [   6.,  167.,  -68.],
+            [  -4.,   24.,  -41.]])
+    >>> torch.mm(q.t(), q).round()
+    tensor([[ 1.,  0.,  0.],
+            [ 0.,  1., -0.],
+            [ 0., -0.,  1.]])
+    >>> a = torch.randn(3, 4, 5)
+    >>> q, r = torch.linalg.qr(a, mode='complete')
+    >>> torch.allclose(torch.matmul(q, r), a)
+    True
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    True
 """)

@@ -15,3 +15,4 @@ Functions
 .. autofunction:: det
 .. autofunction:: norm
 .. autofunction:: tensorsolve
+.. autofunction:: qr
