@@ -726,6 +726,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
         set_qconfig=st.booleans(),
     )
+    @skipIfNoFBGEMM
     def test_embedding_api(self, num_embeddings, embedding_dim, set_qconfig):
         num_lengths = np.random.randint(1, 6)
         lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)
