@@ -1,8 +1,7 @@
 try:
     from urllib.parse import urlparse, urlunparse
 except ImportError:
-    # Disable typechecking for Python2 modules
-    from urlparse import urlparse, urlunparse  # type: ignore
+    raise ImportError("urllib cannot be found, urlparse from python2 is no longer supported.")
 
 import torch._six as six
 import numbers
