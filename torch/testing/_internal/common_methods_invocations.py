@@ -467,6 +467,15 @@ op_db = [
                                 dtypes=[torch.cdouble]),),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
+    UnaryUfuncInfo('rsqrt',
+                   ref=lambda x: np.reciprocal(np.sqrt(x)),
+                   domain=(1e-15, float('inf')),
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   decorators=(precisionOverride({torch.half: 5e-2}),),
+                   promotes_integers_to_float=True,
+                   handles_complex_extremals=False),
 ]
 
 # Common operator groupings
