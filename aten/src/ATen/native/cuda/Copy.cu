@@ -191,7 +191,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    void* ptr = (dst_device == kCPU ? dst : src);
+    void* ptr = (dst_device.type() == kCPU ? dst : src);
     AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
   } else {
 #if HIP_VERSION >= 301
