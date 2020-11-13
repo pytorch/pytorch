@@ -26,6 +26,7 @@ __all__ = [
     'Constraint',
     'boolean',
     'cat',
+    'corr_cholesky',
     'dependent',
     'dependent_property',
     'greater_than',
@@ -275,6 +276,17 @@ class _LowerCholesky(Constraint):
         return lower_triangular & positive_diagonal
 
 
+class _CorrCholesky(Constraint):
+    """
+    Constrain to lower-triangular square matrices with positive diagonals and each
+    row vector being of unit length.
+    """
+    def check(self, value):
+        row_norm = torch.norm(value, dim=-1)
+        unit_row_norm = (row_norm <= 1. & row_norm >= 1e-6).all(dim=-1)
+        return _LowerCholesky().check(value) & unit_row_norm
+
+
 class _PositiveDefinite(Constraint):
     """
     Constrain to positive-definite matrices.
@@ -360,6 +372,7 @@ half_open_interval = _HalfOpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
+corr_cholesky = _CorrCholesky()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
