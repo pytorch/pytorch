@@ -1078,7 +1078,8 @@ void verify(const TensorOptions& options) {
       "'layout' tensor option is not yet supported under Vulkan!");
 
   TORCH_CHECK(
-      !options.has_memory_format(),
+      !options.has_memory_format() ||
+          (c10::MemoryFormat::Contiguous == options.memory_format_opt()),
       "'memory_format' tensor option is not yet supported under Vulkan!");
 }
 
