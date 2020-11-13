@@ -11348,6 +11348,12 @@ class TestTorchDeviceType(TestCase):
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                                   include_bool=True, include_complex=True):
             x = torch.zeros([2, 3, 400], dtype=dtype, device=device)
+
+            if dtype.is_complex and self.device_type == 'cuda':
+                with self.assertRaises(RuntimeError):
+                    x.any()
+                return
+
             out_dtype = torch.bool
 
             self.assertEqual(
@@ -11389,6 +11395,12 @@ class TestTorchDeviceType(TestCase):
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                                   include_bool=True, include_complex=False):
             x = torch.ones([2, 3, 400], dtype=dtype, device=device)
+
+            if dtype.is_complex and self.device_type == 'cuda':
+                with self.assertRaises(RuntimeError):
+                    x.all()
+                return
+
             out_dtype = torch.bool
             self.assertEqual(
                 torch.tensor(1, dtype=out_dtype, device=device),
