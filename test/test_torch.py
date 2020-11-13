@@ -13380,21 +13380,25 @@ class TestTorchDeviceType(TestCase):
                     # ignore if there is no allreduce.
                     self.assertTrue('dim' in str(err))
 
-        # any
-        xb = x.to(torch.uint8)
-        yb = x.to(torch.uint8)
-        self.assertEqual((2, 0), xb.any(2).shape)
-        self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)
-        self.assertEqual(torch.zeros((2, 4), device=device, dtype=torch.uint8), xb.any(1))
-        self.assertEqual(torch.zeros((2, 1, 4), device=device, dtype=torch.uint8), xb.any(1, keepdim=True))
-        self.assertEqual(torch.zeros((), device=device, dtype=torch.uint8), xb.any())
+        for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                                  include_bool=True, include_complex=True):
+            out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
-        # all
-        self.assertEqual((2, 0), xb.all(2).shape)
-        self.assertEqual((2, 0, 1), xb.all(2, keepdim=True).shape)
-        self.assertEqual(torch.ones((2, 4), device=device, dtype=torch.uint8), xb.all(1))
-        self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=torch.uint8), xb.all(1, keepdim=True))
-        self.assertEqual(torch.ones((), device=device, dtype=torch.uint8), xb.all())
+            # any
+            xb = x.to(dtype)
+            yb = x.to(dtype)
+            self.assertEqual((2, 0), xb.any(2).shape)
+            self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)
+            self.assertEqual(torch.zeros((2, 4), device=device, dtype=out_dtype), xb.any(1))
+            self.assertEqual(torch.zeros((2, 1, 4), device=device, dtype=out_dtype), xb.any(1, keepdim=True))
+            self.assertEqual(torch.zeros((), device=device, dtype=out_dtype), xb.any())
+
+            # all
+            self.assertEqual((2, 0), xb.all(2).shape)
+            self.assertEqual((2, 0, 1), xb.all(2, keepdim=True).shape)
+            self.assertEqual(torch.ones((2, 4), device=device, dtype=out_dtype), xb.all(1))
+            self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
+            self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
 
     @onlyOnCPUAndCUDA
     def test_addcdiv(self, device):
