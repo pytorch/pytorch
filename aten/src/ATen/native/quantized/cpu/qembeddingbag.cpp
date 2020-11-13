@@ -305,9 +305,12 @@ at::Tensor embedding_bag_byte_impl(
         success,
         "FBGEMM GenerateEmbeddingSpMDMRowWiseSparse kernel failed for 8-bit input");
   }
+  return output;
 #endif
   // TODO add default (non-FBGEMM) implementation.
-  return output;
+  TORCH_CHECK(
+      false,
+      "embedding_bag_byte expects FBGEMM support. This PyTorch installation was not built with FBGEMM operators");
 }
 
 at::Tensor embedding_bag_byte_helper(
