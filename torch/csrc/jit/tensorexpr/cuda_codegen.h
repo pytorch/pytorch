@@ -197,7 +197,8 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
   CudaCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      at::Device device = at::Device::cuda_unchecked(at::cuda::current_device()),
+      at::Device device =
+          at::Device::cuda_unchecked(at::cuda::current_device()),
       const std::string& kernel_func_name = "func")
       : CodeGen(stmt, buffer_args, device, kernel_func_name) {
     Initialize();
