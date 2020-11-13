@@ -1,21 +1,19 @@
-
 import copy
 import itertools
 import warnings
 
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
-import torch.nn.intrinsic.qat as nniqat
+from torch.nn.intrinsic import _FusedModule
 
 from .quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
-    has_special_act_post_process,
-    get_default_special_act_post_process,
+    _has_special_act_post_process,
+    _get_special_act_post_process,
 )
 
 from .stubs import DeQuantStub, QuantWrapper
@@ -138,11 +136,12 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             m._forward_hooks.move_to_end(handle.id, last=False)
 
     for name, child in module.named_children():
-        if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
+        if type(child) in [nnq.FloatFunctional, nnq.QFunctional] or \
+           isinstance(child, _FusedModule):
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
-        elif has_special_act_post_process(type(child)):
-            special_act_post_process = get_default_special_act_post_process(type(child))
+        elif _has_special_act_post_process(child):
+            special_act_post_process = _get_special_act_post_process(child)
             insert_activation_post_process(child, special_act_post_process)
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
             insert_activation_post_process(child)
@@ -487,26 +486,10 @@ def _convert(
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}
-    # TODO(jerryzh): remove after deciding on the impl of intrinsic modules
-    # This is required because intrinsic modules right now are implemented as
-    # nn.Sequential and we don't want to swap their constituents
-    SWAPPABLE_MODULES = (nni.ConvBn2d,
-                         nni.ConvBnReLU2d,
-                         nni.LinearReLU,
-                         nni.BNReLU2d,
-                         nni.BNReLU3d,
-                         nni.ConvBn1d,
-                         nni.ConvReLU1d,
-                         nni.ConvBnReLU1d,
-                         nni.ConvReLU2d,
-                         nni.ConvReLU3d,
-                         nniqat.ConvBn2d,
-                         nniqat.ConvBnReLU2d)
-
     for name, mod in module.named_children():
-        # both swappable modules and observed custom modules are
+        # both fused modules and observed custom modules are
         # swapped as one unit
-        if type(mod) not in SWAPPABLE_MODULES and \
+        if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
                      custom_module_class_mapping)

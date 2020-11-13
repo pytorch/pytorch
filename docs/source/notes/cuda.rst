@@ -114,6 +114,13 @@ is needed, users can disable TF32 by:
   torch.backends.cuda.matmul.allow_tf32 = False
   torch.backends.cudnn.allow_tf32 = False
 
+To toggle the TF32 flags off in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowTF32CuBLAS(false);
+  at::globalContext().setAllowTF32CuDNN(false);
+
 For more information about TF32, see:
 
 - `TensorFloat-32`_

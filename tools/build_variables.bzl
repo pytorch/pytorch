@@ -225,6 +225,8 @@ core_sources_full = [
     "torch/csrc/jit/serialization/python_print.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
     "torch/csrc/jit/tensorexpr/bounds_inference.cpp",
+    "torch/csrc/jit/tensorexpr/bounds_overlap.cpp",
+    "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
@@ -240,6 +242,7 @@ core_sources_full = [
     "torch/csrc/jit/tensorexpr/block_codegen.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
     "torch/csrc/jit/tensorexpr/mem_arena.cpp",
+    "torch/csrc/jit/tensorexpr/reduction.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
     "torch/csrc/jit/tensorexpr/tensor.cpp",
     "torch/csrc/jit/tensorexpr/types.cpp",
@@ -268,6 +271,8 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.cpp",
+    "torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.cpp",
+    "torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/profiler/remote_profiler_manager.cpp",
     "torch/csrc/distributed/rpc/profiler/server_process_global_profiler.cpp",
@@ -278,8 +283,8 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/request_callback_no_python.cpp",
     "torch/csrc/distributed/rpc/rpc_agent.cpp",
     "torch/csrc/distributed/rpc/rref_context.cpp",
-    "torch/csrc/distributed/rpc/rref_proto.cpp",
     "torch/csrc/distributed/rpc/rref_impl.cpp",
+    "torch/csrc/distributed/rpc/rref_proto.cpp",
     "torch/csrc/distributed/rpc/script_call.cpp",
     "torch/csrc/distributed/rpc/script_remote_call.cpp",
     "torch/csrc/distributed/rpc/script_resp.cpp",
@@ -543,11 +548,11 @@ libtorch_python_core_sources = [
 ]
 
 libtorch_python_distributed_core_sources = [
-    "torch/csrc/distributed/c10d/comm.cpp",
-    "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
+    "torch/lib/c10d/comm.cpp",
+    "torch/lib/c10d/default_comm_hooks.cpp",
+    "torch/lib/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
-    "torch/csrc/distributed/c10d/reducer.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [

@@ -307,8 +307,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.checkQuantDequant(model.sub)
                     self.checkQuantizedLinear(model.sub.module.fc1)
                     self.checkQuantizedLinear(model.sub.module.fc2)
-                    self.assertEqual(type(model.sub.module.relu1), nnq.ReLU)
-                    self.assertEqual(type(model.sub.module.relu2), nnq.ReLU)
+                    self.assertEqual(type(model.sub.module.relu1), nn.ReLU)
+                    self.assertEqual(type(model.sub.module.relu2), nn.ReLU)
                     self.checkScriptable(model, self.calib_data)
                     self.checkNoQconfig(model)
 
@@ -536,6 +536,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.checkQuantizedLinear(model.fc)
 
 
+    @skipIfNoFBGEMM
     def test_quantized_embedding_bag(self):
         r""" Test the post-training quantization flow, serialization and scripting
         of embedding_bag modules
@@ -1248,8 +1249,33 @@ class TestEagerModeOps(QuantizationTestCase):
     def test_leaky_relu(self):
         self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
 
+    def test_relu(self):
+        self._test_activation_op_impl(nn.ReLU, nn.ReLU, {'inplace': False})
+
 
 class TestEagerModeQATOps(QuantizationTestCase):
+    def _test_activation_convert_numerics_impl(self, Act, data):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.act = Act()
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.act(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().train()
+        m.qconfig = default_qat_qconfig
+        m = prepare_qat(m)
+        before_convert = m(data)
+        m = convert(m)
+        after_convert = m(data)
+        self.assertEqual(before_convert, after_convert)
+
     def test_fixed_qparam_ops(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1273,10 +1299,54 @@ class TestEagerModeQATOps(QuantizationTestCase):
         m = prepare_qat(m)
         for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
             self.assertEqual(type(getattr(m, attr).activation_post_process), FixedQParamsFakeQuantize)
+        data = torch.randn(1, 3, 2, 4)
+        before_convert = m(data)
         m = convert(m)
+        after_convert = m(data)
+        self.assertEqual(before_convert, after_convert)
         # make sure activation post process is removed
         for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
+            # verify fake quant module is removd
             self.assertFalse(hasattr(getattr(m, attr), 'activation_post_process'))
+            # verify that hooks are removed
+            self.assertTrue(len(getattr(m, attr)._forward_hooks.items()) == 0)
+
+        # make sure no fake quantize module is inserted for eval mode
+
+        def checkNoFQModule(m):
+            for attr in ['sigmoid', 'hardsigmoid', 'tanh']:
+                self.assertFalse(hasattr(getattr(m, attr), "activation_post_process"))
+                self.assertTrue(len(getattr(m, attr)._forward_hooks.items()) == 0)
+
+        m = M().eval()
+        m.qconfig = default_qconfig
+        m = prepare(m)
+        checkNoFQModule(m)
+        m = convert(m)
+        checkNoFQModule(m)
+
+    def test_leaky_relu(self):
+        data = torch.randn(1, 3, 2, 4)
+        self._test_activation_convert_numerics_impl(nn.LeakyReLU, data)
+
+    def test_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(x)
+                return x
+
+        m = M().train()
+        m.qconfig = default_qconfig
+        m = prepare_qat(m)
+        # make sure no activation_post_process is inserted for relu
+        self.assertFalse(hasattr(m, "activation_post_process"))
+        m = convert(m)
+        # make sure ReLU module is not changed
+        self.assertTrue(type(m.relu), nn.ReLU)
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
