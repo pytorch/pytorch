@@ -750,7 +750,7 @@ class TestFX(JitTestCase):
 
         class AssertsTensorShape(torch.nn.Module):
             def forward(self, x):
-                torch._assert(x.shape[1] > 4, message)
+                torch.Assert(x.shape[1] > 4, message)
                 return x
 
         m = AssertsTensorShape()
