@@ -129,7 +129,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       // device type, currently: CPU or CUDA
       .def("device_type", [](const KinetoEvent& e) {
         return (uint8_t)e.deviceType();
-      });
+      })
+      // correlation id of a linked event
+      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId);
 
   py::class_<ProfilerResultWrapper>(m, "ProfilerResult")
       .def("events",  [](const ProfilerResultWrapper& r) {

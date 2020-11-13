@@ -20,6 +20,11 @@ uint64_t next_correlation_id() {
   return corr_id_++;
 }
 
+inline int64_t getTimeUs() {
+  using namespace std::chrono;
+  return duration_cast<microseconds>(high_resolution_clock::now().time_since_epoch()).count();
+}
+
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
@@ -44,6 +49,16 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     // if (ctx->shapes && !ctx->shapes->empty()) {
     //   op.inputDims = shapesToStr(*ctx->shapes);
     // }
+
+    // Not setting atm
+    op.inputTypes = "[]";
+    op.arguments = "[]";
+    op.outputDims = "[]";
+    op.outputTypes = "[]";
+    op.inputNames = "[]";
+    op.outputNames = "[]";
+
+    //
     op.threadId = pthread_self();
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
@@ -82,6 +97,8 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     for (auto idx = 0; idx < cpu_trace->activities.size(); ++idx) {
       if (kineto_events_[idx].hasShapes()) {
         cpu_trace->activities[idx].inputDims = shapesToStr(kineto_events_[idx].shapes());
+      } else {
+        cpu_trace->activities[idx].inputDims = "[]";
       }
     }
   }
@@ -237,9 +254,7 @@ void enableProfiler(
     pushProfilingCallbacks();
   }
 
-  if (!libkineto::api().activityProfiler().isActive()) {
-    libkineto::api().activityProfiler().startTrace();
-  }
+  libkineto::api().activityProfiler().startTrace();
 
   state->mark("__start_profile", false);
 }
@@ -284,6 +299,9 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   //if (activity.linkedActivity()) {
   //  std::cerr << "DEBUG: linkedActivity: " << activity.name() << " " << activity.linkedActivity()->deviceId() << " " << activity.linkedActivity()->resourceId() << std::endl;
   //}
+  if (activity.linkedActivity()) {
+    linked_correlation_id_ = activity.linkedActivity()->correlationId();
+  }
   return *this;
 }
 

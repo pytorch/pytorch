@@ -140,6 +140,10 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  uint64_t linkedCorrelationId() const {
+    return linked_correlation_id_;
+  }
+
   int64_t deviceResourceId() const {
     return device_resource_id_;
   }
@@ -161,6 +165,7 @@ struct TORCH_API KinetoEvent {
   uint64_t start_us_ = 0;
   uint64_t duration_us_ = 0;
   uint64_t correlation_id_ = 0;
+  uint64_t linked_correlation_id_ = 0;
   int64_t device_resource_id_ = 0;
 };
 

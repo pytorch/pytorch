@@ -100,15 +100,22 @@ class TestProfiler(TestCase):
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
+    def payload(self):
+        x = torch.randn(10, 10).cuda()
+        y = torch.randn(10, 10).cuda()
+        z = torch.mm(x, y)
+        z = z + y
+        z = z.cpu()
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_kineto(self):
-        x = torch.randn(10, 10).cuda()
-        y = torch.randn(10, 10).cuda()
+        with profile(use_cuda=True, use_kineto=True):
+            self.payload()
+
+        # rerun to avoid initial start overhead
         with profile(use_cuda=True, use_kineto=True) as p:
-            z = torch.mm(x, y)
-            z = z + y
-            z = z.cpu()
+            self.payload()
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
         found_gemm = False
@@ -120,6 +127,7 @@ class TestProfiler(TestCase):
                 found_memcpy = True
         self.assertTrue(found_gemm)
         self.assertTrue(found_memcpy)
+        # p.export_chrome_trace("/tmp/test_trace.json")
 
 if __name__ == '__main__':
     run_tests()

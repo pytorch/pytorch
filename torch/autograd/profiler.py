@@ -44,7 +44,6 @@ class EventList(list):
     def build_tree(self):
         self._populate_cpu_children()
         self._remove_dup_nodes()
-        self._set_kernels()
         self._set_backward_stacktraces()
         self._tree_built = True
 
@@ -67,25 +66,6 @@ class EventList(list):
             new_evts = [ev for ind, ev in enumerate(self) if ind not in to_delete]
             self.clear()
             self.extend(new_evts)
-
-    def _set_kernels(self):
-        # associate CUDA kernels with CPU events
-        cuda_corr_map = {}
-        for evt in self:
-            if evt.device_type == 1:  # CUDA
-                if evt.id not in cuda_corr_map:
-                    cuda_corr_map[evt.id] = []
-                cuda_corr_map[evt.id].append(evt)
-
-        for evt in self:
-            if (evt.device_type == 0 and not evt.is_async and
-                    evt.id in cuda_corr_map):
-                for k_evt in cuda_corr_map[evt.id]:
-                    evt.append_kernel(
-                        k_evt.name,
-                        k_evt.device_index,
-                        k_evt.time_range.start,
-                        k_evt.time_range.end)
 
     def _populate_cpu_children(self):
         """Populates child events into each underlying FunctionEvent object.
@@ -414,6 +394,7 @@ class profile(object):
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.use_cpu = use_cpu
+        self.kineto_results = None
         if not self.use_cpu:
             assert use_kineto, \
                 "Device-only events supported only with Kineto (use_kineto=True)"
@@ -465,8 +446,8 @@ class profile(object):
         if not self.enabled:
             return
         if self.kineto_activities:
-            results = torch.autograd._disable_profiler()
-            parsed_results = parse_kineto_results(results)
+            self.kineto_results = torch.autograd._disable_profiler()
+            parsed_results = parse_kineto_results(self.kineto_results)
         else:
             records = torch.autograd._disable_profiler_legacy()
             parsed_results = parse_legacy_records(records)
@@ -502,8 +483,11 @@ class profile(object):
 
     def export_chrome_trace(self, path):
         self._check_finish()
-        assert self.function_events is not None
-        return self.function_events.export_chrome_trace(path)
+        if self.kineto_results is not None:
+            self.kineto_results.save(path)
+        else:
+            assert self.function_events is not None
+            return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
@@ -1062,6 +1046,7 @@ def parse_kineto_results(result):
     # Create and return FunctionEvent list
     string_table = StringTable()
     function_events = []
+    cuda_corr_map = {}
     for kineto_event in result.events():
         if filter_name(kineto_event.name()):
             continue
@@ -1097,6 +1082,22 @@ def parse_kineto_results(result):
             device_index=kineto_event.device_index(),
         )
         function_events.append(fe)
+        if kineto_event.device_type() == 1:  # CUDA
+            corr_id = kineto_event.linked_correlation_id()
+            if corr_id > 0 and corr_id not in cuda_corr_map:
+                cuda_corr_map[corr_id] = []
+            cuda_corr_map[corr_id].append(kineto_event)
+
+    # associate CUDA kernels with CPU events
+    for fe in function_events:
+        if (fe.device_type == 0 and not fe.is_async and
+                fe.id in cuda_corr_map):
+            for k_evt in cuda_corr_map[fe.id]:
+                fe.append_kernel(
+                    k_evt.name(),
+                    k_evt.device_index(),
+                    k_evt.start_us(),
+                    k_evt.start_us() + k_evt.duration_us())
 
     function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return function_events
