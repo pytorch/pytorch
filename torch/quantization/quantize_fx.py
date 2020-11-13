@@ -5,6 +5,7 @@ from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
+from torch.nn.intrinsic import _FusedModule
 
 def _check_is_graph_module(model):
     if not isinstance(model, GraphModule):
@@ -47,7 +48,8 @@ class CustomTracer(Tracer):
         return (m.__module__.startswith('torch.nn') and
                 not isinstance(m, torch.nn.Sequential)) or \
             module_qualified_name in self.skipped_module_names or \
-            type(m) in self.skipped_module_classes
+            type(m) in self.skipped_module_classes or \
+            isinstance(m, _FusedModule)
 
 
 def _prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None, is_standalone_module=False):
@@ -75,6 +77,9 @@ forward graph of the parent module,
         # standalone module and custom module config are applied in top level module
         standalone_module_names = prepare_custom_config_dict.get('standalone_module_name', [])
         skipped_module_names += standalone_module_names
+
+        standalone_module_classes = prepare_custom_config_dict.get('standalone_module_class', [])
+        skipped_module_classes += standalone_module_classes
         float_custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         skipped_module_classes += float_custom_module_classes
@@ -170,6 +175,11 @@ def prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None):
         "standalone_module_name": [
            "submodule.standalone"
         ],
+
+        "standalone_module_class": [
+            StandaloneModule
+        ],
+
         # user will manually define the corresponding observed
         # module class which has a from_float class method that converts
         # float custom module to observed custom module

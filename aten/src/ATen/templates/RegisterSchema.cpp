@@ -17,14 +17,8 @@
 #include <torch/library.h>
 
 namespace at {
-namespace TypeDefault {
-
-${type_method_definitions}
-
-}  // namespace TypeDefault
-
 TORCH_LIBRARY(aten, m) {
-  ${function_registrations};
+  ${schema_registrations};
 
   // String Ops
   // Implementations located in torch/csrc/jit/runtime/register_prim_ops.cpp
@@ -62,13 +56,5 @@ TORCH_LIBRARY(aten, m) {
   // Distributed Ops
   // Implementations located in torch/csrc/jit/runtime/register_distributed_ops.cpp
   m.def("get_gradients(int context_id) -> Dict(Tensor, Tensor)");
-}
-
-TORCH_LIBRARY_IMPL(aten, Math, m) {
-  ${math_function_registrations};
-}
-
-TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
-  ${default_backend_function_registrations};
 }
 }  // namespace at
