@@ -45,10 +45,10 @@ endfunction()
 
 set(C10D_SRCS
   FileStore.cpp
-  TCPStore.cpp
+  PrefixStore.cpp
   ProcessGroup.cpp
   Store.cpp
-  PrefixStore.cpp
+  TCPStore.cpp
   Utils.cpp
   )
 
@@ -121,10 +121,10 @@ if(USE_C10D_GLOO)
 endif()
 
 copy_header(FileStore.hpp)
-copy_header(TCPStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)
 copy_header(Store.hpp)
+copy_header(TCPStore.hpp)
 copy_header(Types.hpp)
 copy_header(Utils.hpp)
 if(USE_GLOO)
