@@ -1845,6 +1845,7 @@ new_module_tests = [
         desc='dilated',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv2d',
@@ -1893,7 +1894,7 @@ new_module_tests = [
         input_size=(1, 3, 7, 6),
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -2219,6 +2220,7 @@ new_module_tests = [
         desc='1x1x1_no_bias',
         check_with_long_tensor=False,
         with_tf32=False,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -3588,6 +3590,8 @@ new_module_tests = [
                                 .dropout(0.0)''',
         input_size=(2, 3, 4),
         desc='relu_activation',
+        with_tf32=True,
+        tf32_precision=0.1,
     ),
     dict(
         module_name='TransformerEncoderLayer',
@@ -3599,6 +3603,8 @@ new_module_tests = [
         input_size=(2, 3, 4),
         check_gradgrad=False,
         desc='gelu_activation',
+        with_tf32=True,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3609,6 +3615,8 @@ new_module_tests = [
         input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
         check_gradgrad=False,
         desc='relu_activation',
+        with_tf32=True,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3620,6 +3628,8 @@ new_module_tests = [
         input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
         check_gradgrad=False,
         desc='gelu_activation',
+        with_tf32=True,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='Transformer',
@@ -3634,7 +3644,9 @@ new_module_tests = [
                                 .activation(torch::kReLU)''',
         input_fn=lambda:(torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
         check_gradgrad=False,
-        desc='multilayer_coder'
+        desc='multilayer_coder',
+        with_tf32=True,
+        tf32_precision=0.01,
     )
 ]
 
