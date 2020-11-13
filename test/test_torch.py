@@ -6926,8 +6926,7 @@ class TestTorchDeviceType(TestCase):
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
@@ -6957,18 +6956,6 @@ class TestTorchDeviceType(TestCase):
             M = fullrank(matsize, *batchdims, dtype=dtype, device=device)
             self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
                              atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
-
-    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
-    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    def test_pinverse_complex_xfailed(self, device, dtype):
-        size = (3, 5, 5)
-        M = torch.randn(*sizes, dtype=dtype, device=device)
-        MPI = torch.pinverse(M)
-        self.assertEqual(M, M.matmul(MPI).matmul(M))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -9663,8 +9650,7 @@ class TestTorchDeviceType(TestCase):
     @precisionOverride({torch.float32: 1e-5, torch.complex64: 1e-5})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_symeig(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
@@ -9712,25 +9698,6 @@ class TestTorchDeviceType(TestCase):
         batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
         for batch_dims, eigenvectors, upper in product(batch_dims_set, (True, False), (True, False)):
             run_test((5,) + batch_dims, eigenvectors, upper)
-
-    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
-    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    def test_symeig_complex_xfailed(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
-        dims = (5, 3)
-        x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
-        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-        oute = torch.empty(dims[1:] + dims[:1], dtype=real_dtype, device=device)
-        outv = torch.empty(dims[1:] + dims[:1] * 2, dtype=dtype, device=device)
-        torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
-
-        x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
-        self.assertEqual(x, x_recon, atol=1e-8, rtol=0)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -13959,10 +13926,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
-        # TODO: update this once torch.addmm is supported for complex
-        if dtype.is_complex and device != 'cpu':
-            return
-
         # torch.addmm
         input = torch.full((2, 3), value, dtype=dtype, device=device)
         mat2 = torch.ones((0, 3), dtype=dtype, device=device)
@@ -13992,9 +13955,6 @@ class TestTorchDeviceType(TestCase):
         mp = torch.randn((p, m), device=device).t()
         np_out = torch.full((n, p), float('nan'), device=device)
         self.assertEqual(torch.mm(nm, mp), torch.mm(nm, mp, out=np_out))
-
-        if dtype.is_complex and device.startswith('cuda'):
-            return
 
         # torch.bmm
         bnm = torch.randn((b, m, n), device=device).transpose(1, 2)
@@ -15421,28 +15381,12 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(pivots_info, pivots)
 
 
-                if (self.device_type == 'cpu') or (not dtype.is_complex):
-                    P, L, U = torch.lu_unpack(a_LU, pivots)
-                    P_ = P.cpu().numpy()
-                    L_ = L.cpu().numpy()
-                    U_ = U.cpu().numpy()
+                P, L, U = torch.lu_unpack(a_LU, pivots)
+                P_ = P.cpu().numpy()
+                L_ = L.cpu().numpy()
+                U_ = U.cpu().numpy()
 
-                    self.assertEqual(np.matmul(P_, np.matmul(L_, U_)), a)
-                else:
-                    # TODO(@nikitaved): remove this once bmm_out is avaiable on CUDA for complex types
-
-                    # squash batch dimensions for easier iteration
-                    a = a.view(-1, a.size(-2), a.size(-1))
-                    a_LU = a_LU.view(-1, a_LU.size(-2), a_LU.size(-1))
-                    pivots = pivots.view(-1, pivots.size(-1))
-
-                    P, L, U = torch.lu_unpack(a_LU, pivots)
-
-                    for i in range(a.size(0)):
-                        self.assertEqual(
-                            P.select(0, i).cpu().numpy() @ L.select(0, i).cpu().numpy() @ U.select(0, i).cpu().numpy(),
-                            a.select(0, i).cpu().numpy()
-                        )
+                self.assertEqual(np.matmul(P_, np.matmul(L_, U_)), a)
 
                 if self.device_type == 'cuda':
                     # lu without pivoting is implemented only for cuda device
@@ -15452,16 +15396,7 @@ class TestTorchDeviceType(TestCase):
                     L_nopiv_ = L_nopiv.cpu().numpy()
                     U_nopiv_ = U_nopiv.cpu().numpy()
 
-                    if (self.device_type == 'cpu') or (not dtype.is_complex):
-                        self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
-                    else:
-                        # TODO(@nikitaved): remove this once bmm_out is avaiable on CUDA for complex types
-                        for i in range(a.size(0)):
-                            self.assertEqual(
-                                P_nopiv.select(0, i).cpu().numpy() @ L_nopiv.select(0, i).cpu().numpy()
-                                @ U_nopiv.select(0, i).cpu().numpy(),
-                                a.select(0, i).cpu().numpy()
-                            )
+                    self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
 
                     k = min(rows, columns)
                     self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
