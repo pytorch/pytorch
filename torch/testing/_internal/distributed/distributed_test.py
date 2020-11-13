@@ -364,9 +364,8 @@ class DistributedTest:
             if BACKEND == "nccl":
                 apply_hack_for_nccl()
 
-            """ If rank is lesser than or equal to number of available GPU's
-            then each rank can be mapped to corresponding GPU.
-            """
+            # If rank is lesser than or equal to number of available GPU's
+            # then each rank can be mapped to corresponding GPU.
             nGPUs_per_process = 1
             if world_size > nGPUs:
                nGPUs_per_process = nGPUs // world_size
