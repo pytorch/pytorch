@@ -51,11 +51,12 @@ if __name__ == '__main__':
     INTERNAL_ITER = args.internal_iter
 
     for profiling_enabled in [False, True]:
-        print("Profiling {}, tensor size {}x{}, use cuda: {}, with stacks: {}, use script: {}".format(
+        print("Profiling {}, tensor size {}x{}, use cuda: {}, use kineto: {}, with stacks: {}, use script: {}".format(
             "enabled" if profiling_enabled else "disabled",
             args.profiling_tensor_size,
             args.profiling_tensor_size,
             args.with_cuda,
+            args.use_kineto,
             args.with_stack,
             args.use_script))
 

@@ -335,7 +335,10 @@ ProfilerResult::ProfilerResult(
 ProfilerResult::~ProfilerResult() {}
 
 void ProfilerResult::save(const std::string& path) {
+  // Kineto's save is destructive
+  TORCH_CHECK(!saved_, "Trace is already saved");
   trace_->save(path);
+  saved_ = true;
 }
 
 #endif

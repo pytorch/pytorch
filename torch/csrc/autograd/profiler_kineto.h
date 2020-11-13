@@ -190,6 +190,7 @@ struct TORCH_API ProfilerResult {
   void save(const std::string& path);
 
  private:
+  bool saved_ = false;
   std::vector<KinetoEvent> events_;
   thread_event_lists legacy_events_;
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
