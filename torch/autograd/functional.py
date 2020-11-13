@@ -245,7 +245,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
         (tensor([2.4225, 2.3340]),
          (tensor([2., 2.]), tensor([3., 3.])))
     """
-       
+
     with torch.enable_grad():
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "vjp")
         inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
@@ -256,19 +256,19 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
     if v is not None:
         _, v = _as_tuple(v, "v", "vjp")
-        v = _grad_preprocess(v, create_graph=create_graph, need_graph=False )
+        v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
         _validate_v(v, outputs, is_outputs_tuple)
     else:
         if len(outputs) != 1 or outputs[0].nelement() != 1:
             raise RuntimeError("The vector v can only be None if the "
                                "user-provided function returns "
                                "a single Tensor with a single element.")
-    
+
     enable_grad = True if create_graph else torch.is_grad_enabled()
     with torch.set_grad_enabled(enable_grad):
         grad_res = _autograd_grad(outputs, inputs, v, create_graph=create_graph)
         vjp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "back")
-        
+
     # Cleanup objects and return them to the user
     outputs = _grad_postprocess(outputs, create_graph)
     vjp = _grad_postprocess(vjp, create_graph)
@@ -360,7 +360,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
     with torch.set_grad_enabled(enable_grad):
         grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
         jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
-        
+
     # Cleanup objects and return them to the user
     outputs = _grad_postprocess(outputs, create_graph)
     jvp = _grad_postprocess(jvp, create_graph)
@@ -440,8 +440,8 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore
             for j in range(out.nelement()):
                 vj = _autograd_grad((out.reshape(-1)[j],), inputs,
-                                     retain_graph=True, create_graph=create_graph)
-     
+                                    retain_graph=True, create_graph=create_graph)
+
                 for el_idx, (jac_i_el, vj_el, inp_el) in enumerate(zip(jac_i, vj, inputs)):
                     if vj_el is not None:
                         if strict and create_graph and not vj_el.requires_grad:
@@ -630,7 +630,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
 
         if outputs[0].nelement() != 1:
             raise RuntimeError("The Tensor returned by the function given to vhp should contain a single element")
-    
+
         jac = _autograd_grad(outputs, inputs, create_graph=True)
         _check_requires_grad(jac, "jacobian", strict=strict)
 
@@ -638,7 +638,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
     with torch.set_grad_enabled(enable_grad):
         grad_res = _autograd_grad(jac, inputs, v, create_graph=create_graph)
         vhp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back")
-        
+
     outputs = _grad_postprocess(outputs, create_graph)
     vhp = _grad_postprocess(vhp, create_graph)
 
@@ -708,7 +708,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         much faster with the current implementation.
 
     """
-    
+
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hvp")
     inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
 
@@ -743,7 +743,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
     with torch.set_grad_enabled(enable_grad):
         grad_res = _autograd_grad(double_back, grad_jac, v, create_graph=create_graph)
         hvp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back_trick")
-    
+
     outputs = _grad_postprocess(outputs, create_graph)
     hvp = _grad_postprocess(hvp, create_graph)
 
