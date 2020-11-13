@@ -455,8 +455,6 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
 endif()
 
 # ---[ Utils
-# TODO: merge the following 3 files into cmake/public/utils.cmake.
-include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
