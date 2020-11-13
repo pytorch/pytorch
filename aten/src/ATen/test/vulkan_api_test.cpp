@@ -164,6 +164,33 @@ TEST(VulkanAPITest, addmm) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, addmm_expand) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  const auto bias_cpu = at::rand({1000}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({1, 1280}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({1280, 1000}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+
+  const auto bias_vulkan = bias_cpu.vulkan();
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto m2_vulkan = m2_cpu.vulkan();
+  const auto out_vulkan = at::addmm(bias_vulkan, m1_vulkan, m2_vulkan, beta, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << out_cpu << std::endl;
+    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
@@ -703,7 +730,7 @@ class Conv2d final : public BaseOp {
         stride_(stride),
         padding_(padding),
         w_(at::rand(wsizes, at::device(at::kCPU).dtype(at::kFloat))),
-        b_(at::zeros(wsizes[0], at::device(at::kCPU).dtype(at::kFloat))){
+        b_(at::rand(wsizes[0], at::device(at::kCPU).dtype(at::kFloat))){
   }
 
   at::Tensor run(at::Tensor& t) const override {
@@ -822,7 +849,6 @@ class MobileNetV2 final : public OpsList {
     ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));
     ops_.emplace_back(new Hardtanh_());
     ops_.emplace_back(new Conv2d({384, 1, 3, 3}, 384, 1, 1));
-    ops_.emplace_back(new Hardtanh_());
     ops_.emplace_back(new Hardtanh_());
     ops_.emplace_back(new Conv2d({64, 384, 1, 1}, 1, 1, 0));
     ops_.emplace_back(new Conv2d({384, 64, 1, 1}, 1, 1, 0));

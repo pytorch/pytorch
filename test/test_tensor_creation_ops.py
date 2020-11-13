@@ -1165,6 +1165,15 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
         self.assertEqual(torch.full(size, 1, out=o).dtype, o.dtype)
 
+    # check that warning for numpy being not writable is suppressed
+    # when a copy of it is being created.
+    # see issue #47160
+    def test_tensor_from_non_writable_numpy(self, device):
+        with warnings.catch_warnings(record=True) as w:
+            a = np.arange(5.)
+            a.flags.writeable = False
+            t = torch.tensor(a)
+            self.assertEqual(len(w), 0)
 
 
 # Class for testing random tensor creation ops, like torch.randint
