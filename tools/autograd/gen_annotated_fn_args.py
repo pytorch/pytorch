@@ -34,14 +34,14 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
     )
     annotated_args: List[str] = []
     for pred, namespace in mappings:
-        groups: Dict[str, List[NativeFunction]] = defaultdict(list)
+        groups: Dict[BaseOperatorName, List[NativeFunction]] = defaultdict(list)
         for f in native_functions:
             if not should_generate_py_binding(f) or not pred(f):
                 continue
-            groups[str(f.func.name.name)].append(f)
+            groups[f.func.name.name].append(f)
         for group in groups.values():
             for f in group:
-                annotated_args.append(f'{namespace}.{process_func(f)}')
+                annotated_args.append(f'{namespace}.{gen_annotated_args(f)}')
 
     template_path = os.path.join(autograd_dir, 'templates')
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
@@ -50,7 +50,7 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
     })
 
 @with_native_function
-def process_func(f: NativeFunction) -> str:
+def gen_annotated_args(f: NativeFunction) -> str:
     out_args: List[Dict[str, Any]] = []
     for arg in f.func.arguments:
         if arg.default is not None:
