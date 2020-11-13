@@ -235,7 +235,7 @@ On Windows
 
 Build with CPU
 
-It's faily easy to build with CPU. It is recommended to build the latest baseline with Visual Studio 2019 version 16.7.6 or higher. 
+It's fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
 
 Build with Cuda
 
