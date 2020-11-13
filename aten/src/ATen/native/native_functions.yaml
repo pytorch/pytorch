@@ -1612,13 +1612,13 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty_meta(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  #use_c10_dispatcher: full
+  use_c10_dispatcher: full
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  #use_c10_dispatcher: full
+  use_c10_dispatcher: full
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -1626,7 +1626,7 @@
     SparseCPU, SparseCUDA: empty_sparse
 
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  #use_c10_dispatcher: full
+  use_c10_dispatcher: full
   variants: method
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1679,7 +1679,7 @@
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
@@ -4595,12 +4595,12 @@
   use_c10_dispatcher: full
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_sparse
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
 
@@ -5680,13 +5680,13 @@
     DefaultBackend: tril
 
 - func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
 - func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda
@@ -7116,358 +7116,6 @@
   dispatch:
     CPU: foreach_tensor_sqrt_slow_
     CUDA: foreach_tensor_sqrt_cuda_
-
-- func: _foreach_abs(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_abs_slow
-    CUDA: foreach_tensor_abs_cuda
-
-- func: _foreach_abs_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_abs_slow_
-    CUDA: foreach_tensor_abs_cuda_
-
-- func: _foreach_acos(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_acos_slow
-    CUDA: foreach_tensor_acos_cuda
-
-- func: _foreach_acos_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_acos_slow_
-    CUDA: foreach_tensor_acos_cuda_
-
-- func: _foreach_asin(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_asin_slow
-    CUDA: foreach_tensor_asin_cuda
-
-- func: _foreach_asin_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_asin_slow_
-    CUDA: foreach_tensor_asin_cuda_
-
-- func: _foreach_atan(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_atan_slow
-    CUDA: foreach_tensor_atan_cuda
-
-- func: _foreach_atan_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_atan_slow_
-    CUDA: foreach_tensor_atan_cuda_
-
-- func: _foreach_ceil(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_ceil_slow
-    CUDA: foreach_tensor_ceil_cuda
-
-- func: _foreach_ceil_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_ceil_slow_
-    CUDA: foreach_tensor_ceil_cuda_
-
-- func: _foreach_cos(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_cos_slow
-    CUDA: foreach_tensor_cos_cuda
-
-- func: _foreach_cos_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_cos_slow_
-    CUDA: foreach_tensor_cos_cuda_
-
-- func: _foreach_cosh(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_cosh_slow
-    CUDA: foreach_tensor_cosh_cuda
-
-- func: _foreach_cosh_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_cosh_slow_
-    CUDA: foreach_tensor_cosh_cuda_
-
-- func: _foreach_erf(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_erf_slow
-    CUDA: foreach_tensor_erf_cuda
-
-- func: _foreach_erf_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_erf_slow_
-    CUDA: foreach_tensor_erf_cuda_
-
-- func: _foreach_erfc(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_erfc_slow
-    CUDA: foreach_tensor_erfc_cuda
-
-- func: _foreach_erfc_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_erfc_slow_
-    CUDA: foreach_tensor_erfc_cuda_
-
-- func: _foreach_expm1(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_expm1_slow
-    CUDA: foreach_tensor_expm1_cuda
-
-- func: _foreach_expm1_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_expm1_slow_
-    CUDA: foreach_tensor_expm1_cuda_
-
-- func: _foreach_floor(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_floor_slow
-    CUDA: foreach_tensor_floor_cuda
-
-- func: _foreach_floor_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_floor_slow_
-    CUDA: foreach_tensor_floor_cuda_
-
-- func: _foreach_log(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log_slow
-    CUDA: foreach_tensor_log_cuda
-
-- func: _foreach_log_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log_slow_
-    CUDA: foreach_tensor_log_cuda_
-
-- func: _foreach_log10(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log10_slow
-    CUDA: foreach_tensor_log10_cuda
-
-- func: _foreach_log10_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log10_slow_
-    CUDA: foreach_tensor_log10_cuda_
-
-- func: _foreach_log1p(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log1p_slow
-    CUDA: foreach_tensor_log1p_cuda
-
-- func: _foreach_log1p_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log1p_slow_
-    CUDA: foreach_tensor_log1p_cuda_
-
-- func: _foreach_log2(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log2_slow
-    CUDA: foreach_tensor_log2_cuda
-
-- func: _foreach_log2_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_log2_slow_
-    CUDA: foreach_tensor_log2_cuda_
-
-- func: _foreach_neg(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_neg_slow
-    CUDA: foreach_tensor_neg_cuda
-
-- func: _foreach_neg_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_neg_slow_
-    CUDA: foreach_tensor_neg_cuda_
-
-- func: _foreach_tan(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_tan_slow
-    CUDA: foreach_tensor_tan_cuda
-
-- func: _foreach_tan_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_tan_slow_
-    CUDA: foreach_tensor_tan_cuda_
-
-- func: _foreach_tanh(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_tanh_slow
-    CUDA: foreach_tensor_tanh_cuda
-
-- func: _foreach_tanh_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_tanh_slow_
-    CUDA: foreach_tensor_tanh_cuda_
-
-- func: _foreach_sin(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sin_slow
-    CUDA: foreach_tensor_sin_cuda
-
-- func: _foreach_sin_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sin_slow_
-    CUDA: foreach_tensor_sin_cuda_
-
-- func: _foreach_sinh(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sinh_slow
-    CUDA: foreach_tensor_sinh_cuda
-
-- func: _foreach_sinh_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_sinh_slow_
-    CUDA: foreach_tensor_sinh_cuda_
-
-- func: _foreach_round(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_round_slow
-    CUDA: foreach_tensor_round_cuda
-
-- func: _foreach_round_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_round_slow_
-    CUDA: foreach_tensor_round_cuda_
-
-- func: _foreach_lgamma(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_lgamma_slow
-    CUDA: foreach_tensor_lgamma_cuda
-
-- func: _foreach_lgamma_(Tensor(a!)[] self) -> ()
-  use_c10_dispatcher: full
-  device_guard: False
-  variants: function
-  dispatch:
-    CPU: foreach_tensor_lgamma_slow_
-    CUDA: foreach_tensor_lgamma_cuda_
 
 - func: _foreach_addcdiv_.Scalar(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
   use_c10_dispatcher: full

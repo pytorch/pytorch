@@ -15,46 +15,16 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
 
   ModuleDictImpl() = default;
 
-  /// Constructs the `ModuleDict` from an OrderedDict or `ModuleDict`.
-  explicit ModuleDictImpl(
-      const torch::OrderedDict<std::string, std::shared_ptr<Module>>& modules) {
-    update(modules);
-  }
-
   /// Constructs the `ModuleDict` from a list of string-Module paris.
   explicit ModuleDictImpl(
       const std::vector<std::pair<std::string, std::shared_ptr<Module>>>& modules) {
     update(modules);
   }
 
-  /// Special cloning function for `ModuleDict` because it does not use
-  /// `reset()`.
-  std::shared_ptr<Module> clone(
-      const optional<Device>& device = nullopt) const override {
-    auto clone = std::make_shared<ModuleDictImpl>();
-    for (const auto& module : modules_) {
-      clone->insert(module.key(), module.value()->clone(device));
-    }
-    return clone;
-  }
-
-  /// `reset()` is empty for `ModuleDict`, since it does not have parameters of
-  /// its own.
-  void reset() override {}
-
-  /// Pretty prints the `ModuleDict` into the given `stream`.
-  void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::ModuleDict(" << std::endl;
-    for (const auto& pair : modules_) {
-      stream << "  (" << pair.key() << "): ";
-      pair.value()->pretty_print(stream);
-      stream << std::endl;
-    }
-    stream << ")";
-  }
-
-  void clear() {
-    modules_.clear();
+  /// Constructs the `ModuleDict` from an OrderedDict.
+  explicit ModuleDictImpl(
+      const torch::OrderedDict<std::string, std::shared_ptr<Module>>& modules) {
+    update(modules);
   }
 
   /// Return the items in the `ModuleDict`.
@@ -65,44 +35,6 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
   /// Return the keys in the `ModuleDict`.
   std::vector<std::string> keys() const {
     return modules_.keys();
-  }
-
-  /// Removes and returns the value associated with the given `key`.
-  /// Throws an exception if no such key is stored in the `ModuleDict`. 
-  /// Check contains(key) before for a non-throwing way of access.
-  std::shared_ptr<Module> pop(const std::string& key) {
-    auto module = modules_[key];
-    modules_.erase(key);
-    return module;
-  }
-
-  /// Updated the `ModuleDict` with key-value paris from OrderedDict
-  /// or another `ModuleDict`.
-  template <typename Container>
-  void update(const Container& container) {
-    for (auto& item : container) {
-      if (contains(item.key())) {
-        modules_[item.key()] = item.value();
-        replace_module(item.key(), modules_[item.key()]);
-      }
-      else {
-        insert(item.key(), item.value());
-      }
-    }
-  }
-
-  /// Updated the `ModuleDict` with key-value paris from vector of key-module pairs
-  void update(
-      const std::vector<std::pair<std::string, std::shared_ptr<Module>>>& container) {
-    for (auto& item : container) {
-      if (contains(item.first)) {
-        modules_[item.first] = item.second;
-        replace_module(item.first, modules_[item.first]);
-      }
-      else {
-        insert(item.first, item.second);
-      }
-    }
   }
 
   /// Return the values in the `ModuleDict`.
@@ -145,6 +77,30 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     return modules_.contains(key);
   }
 
+  void clear() {
+    modules_.clear();
+  }
+
+  /// Special cloning function for `ModuleDict` because it does not use
+  /// `reset()`.
+  std::shared_ptr<Module> clone(
+      const optional<Device>& device = nullopt) const override {
+    auto clone = std::make_shared<ModuleDictImpl>();
+    for (const auto& module : modules_) {
+      clone->insert(module.key(), module.value()->clone(device));
+    }
+    return clone;
+  }
+
+  /// `reset()` is empty for `ModuleDict`, since it does not have parameters of
+  /// its own.
+  void reset() override {}
+
+  /// Pretty prints the `ModuleDict` into the given `stream`.
+  void pretty_print(std::ostream& stream) const override {
+    stream << "torch::nn::ModuleDict";
+  }
+
   /// Returns the value associated with the given `key`. Throws an exception if
   /// no such key is stored in the `ModuleDict`. Check contains(key) before
   /// for a non-throwing way of access.
@@ -159,13 +115,66 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     return modules_[key];
   }
 
+  /// Attempts to return the module at the given key as the requested type.
+  /// Throws an exception if no such key is stored in the `ModuleDict`.
+  /// Check contains(key) before for a non-throwing way of access.
+  template <typename T>
+  T& at(const std::string& key) {
+    static_assert(
+        torch::detail::is_module<T>::value,
+        "Can only call ModuleList::at with an nn::Module type");
+    return *modules_[key]->as<T>();
+  }
+
+  /// Attempts to return the module at the given key as the requested type.
+  /// Throws an exception if no such key is stored in the `ModuleDict`.
+  /// Check contains(key) before for a non-throwing way of access.
+  template <typename T>
+  const T& at(const std::string& key) const {
+    static_assert(
+        torch::detail::is_module<T>::value,
+        "Can only call ModuleList::at with an nn::Module type");
+    return *modules_[key]->as<T>();
+  }
+
+  /// Removes and returns the value associated with the given `key`.
+  /// Throws an exception if no such key is stored in the `ModuleDict`.
+  /// Check contains(key) before for a non-throwing way of access.
+  std::shared_ptr<Module> pop(const std::string& key) {
+    auto module = modules_[key];
+    modules_.erase(key);
+    return module;
+  }
+
+  /// Updated the `ModuleDict` with key-value paris from vector of key-module pairs
+  void update(
+      const std::vector<std::pair<std::string, std::shared_ptr<Module>>>& modules) {
+    for (auto& item : modules) {
+      insert(item.first, item.second);
+    }
+  }
+
+  /// Updated the `ModuleDict` with key-value paris from OrderedDict or `ModuleDict`
+  template <typename Container>
+  void update(const Container& container) {
+    for (auto& item : container) {
+      insert(item.key(), item.value());
+    }
+  }
+
 private:
   torch::OrderedDict<std::string, std::shared_ptr<Module>> modules_;
 
-  /// Insert a new key-module pair. Throws an exception if the key is already present.
+  /// Insert a key-module pair by overwriting existing keys.
   void insert(const std::string& key, std::shared_ptr<Module> module) {
-    modules_.insert(key, std::move(module));
-    register_module(key, modules_.back().value());
+    if (contains(key)) {
+      modules_[key] = std::move(module);
+      replace_module(key, modules_[key]);
+    }
+    else {
+      modules_.insert(key, std::move(module));
+      register_module(key, modules_.back().value());
+    }
   }
 
 };

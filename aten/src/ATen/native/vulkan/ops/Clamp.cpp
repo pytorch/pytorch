@@ -120,11 +120,37 @@ Tensor& clamp_(
   return self_arg;
 }
 
+Tensor hardtanh(
+    const Tensor& self,
+    const Scalar min,
+    const Scalar max) {
+  return ops::clamp(self, min, max);
+}
+
+Tensor& hardtanh_(
+    Tensor& self,
+    const Scalar min,
+    const Scalar max) {
+  return ops::clamp_(self, min, max);
+}
+
+Tensor relu(const Tensor& self) {
+  return ops::clamp(self, 0, c10::nullopt);
+}
+
+Tensor& relu_(Tensor& self) {
+  return ops::clamp_(self, 0, c10::nullopt);
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("clamp", TORCH_FN(clamp));
   m.impl("clamp_", TORCH_FN(clamp_));
+  m.impl_UNBOXED("hardtanh", hardtanh);
+  m.impl_UNBOXED("hardtanh_", hardtanh_);
+  m.impl_UNBOXED("relu", relu);
+  m.impl_UNBOXED("relu_", relu_);
 }
 
 #endif /* USE_VULKAN_API */

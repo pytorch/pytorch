@@ -8,12 +8,12 @@
 namespace torch {
 namespace nn {
 
-/// An ordered map of `Module`s that registers its elements by string names.
+/// A list of `Module`s that registers its elements by string names.
 ///
 /// \rst
 /// .. code-block:: cpp
 ///
-///   torch::nn::ModuleDict mdict(
+///   torch::nn::ModuleList mlist(
 ///     torch::nn::Linear(3, 4),
 ///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
