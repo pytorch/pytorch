@@ -4907,7 +4907,7 @@ for shape in [(1,), ()]:
     def test_linalg_qr_r(self):
         inp = torch.randn((5, 7), requires_grad=True)
         q, r = torch.linalg.qr(inp, mode='r')
-        assert q.shape == (0,) # empty tensor
+        assert q.shape == (0,)  # empty tensor
         b = torch.sum(r)
         with self.assertRaisesRegex(RuntimeError,
                                     "linalg_qr_backward: cannot compute backward"):
