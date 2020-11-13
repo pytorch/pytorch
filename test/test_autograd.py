@@ -4904,6 +4904,16 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
+    def test_linalg_qr_r(self):
+        inp = torch.randn((5, 7), requires_grad=True)
+        q, r = torch.linalg.qr(inp, mode='r')
+        assert q.shape == (0,) # empty tensor
+        b = torch.sum(r)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "linalg_qr_backward: cannot compute backward"):
+            b.backward()
+
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)

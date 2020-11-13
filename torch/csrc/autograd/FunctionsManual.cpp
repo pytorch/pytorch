@@ -1949,6 +1949,9 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
                           std::string mode, const Tensor& q, const Tensor& r){
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
+  TORCH_CHECK(compute_q, "linalg_qr_backward: cannot compute backward if mode='r'. "
+                         "Please use torch.linalg.qr(..., mode='reduced')");
+
   auto square_deep_case_backward = [](const Tensor& grad_Q,
                                       const Tensor& grad_R,
                                       const Tensor& A,
