@@ -453,6 +453,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
 
+  if (blockingWait_ && asyncErrorHandling_) {
+    LOG(INFO) << "[Rank " << rank_
+              << "] NCCL_BLOCKING_WAIT and NCCL_ASYNC_ERROR_HANDLING "
+              << "should not both be enabled. " 
+              << "Only NCCL_BLOCKING_WAIT is being used in this process.";
+    asyncErrorHandling_ = false;
+  }
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
