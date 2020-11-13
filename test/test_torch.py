@@ -19405,7 +19405,7 @@ else:
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                           include_bool=True, include_complex=False)))
+                                           include_bool=True, include_complex=True)))
     def test_all_any_vs_numpy(self, device, dtype):
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
@@ -19419,6 +19419,14 @@ else:
             torch_fn = partial(torch.any, dim=dim)
             np_fn = partial(np.any, axis=dim)
             self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
+
+        if dtype.is_complex and self.device_type == 'cuda':
+            x = torch.randn(3, 3, dtype=dtype, device=device)
+            with self.assertRaises(RuntimeError):
+                x.all()
+            with self.assertRaises(RuntimeError):
+                x.any()
+            return
 
         for ndim in range(5):
             shape = self._rand_shape(ndim, 1, 5)

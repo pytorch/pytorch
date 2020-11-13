@@ -3,26 +3,33 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/Dispatch.h>
 
 
 namespace at { namespace native {
 
 void and_kernel_cuda(TensorIterator& iter) {
-  gpu_reduce_kernel<bool, bool>(
-      iter,
-      func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
-        return (static_cast<bool>(a) && static_cast<bool>(b));
-      }),
-      true);
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kHalf, kBFloat16, kBool, iter.common_dtype(), "and_cuda", [&]() {
+        gpu_reduce_kernel<scalar_t, bool>(
+            iter,
+            func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
+              return (a && b);
+            }),
+            true);
+      });
 }
 
 void or_kernel_cuda(TensorIterator& iter) {
-  gpu_reduce_kernel<bool, bool>(
-      iter,
-      func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
-        return (static_cast<bool>(a) || static_cast<bool>(b));
-      }),
-      false);
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kHalf, kBFloat16, kBool, iter.common_dtype(), "or_cuda", [&]() {
+        gpu_reduce_kernel<scalar_t, bool>(
+            iter,
+            func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
+              return (a || b);
+            }),
+            false);
+      });
 }
 
 REGISTER_DISPATCH(and_stub, &and_kernel_cuda);

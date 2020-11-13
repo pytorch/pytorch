@@ -732,8 +732,13 @@ Tensor all(const Tensor& self) {
               "all only supports strided layout, got: ", self.layout());
 
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  auto iter = make_reduction(
-    "all", result, self, {}, false, /*out_dtype=*/kBool);
+  if (self.is_cuda()) {
+    auto iter = make_reduction(
+        "all", result, self, {}, false, self.scalar_type(), kBool);
+    return _all(result, iter);
+  }
+  auto iter =
+      make_reduction("all", result, self, {}, false, /*out_dtype=*/kBool);
   return _all(result, iter);
 }
 
@@ -752,8 +757,13 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
   } else {
-    auto iter = make_reduction(
-      "all", result, self, dim, keepdim, /*out_dtype=*/kBool);
+    if (self.is_cuda()) {
+      auto iter = make_reduction(
+          "all", result, self, dim, keepdim, self.scalar_type(), kBool);
+      return _all(result, iter);
+    }
+    auto iter =
+        make_reduction("all", result, self, dim, keepdim, /*out_dtype=*/kBool);
     return _all(result, iter);
   }
 }
@@ -775,8 +785,13 @@ Tensor any(const Tensor& self) {
               "any only supports strided AND sparse layout, got: ", self.layout());
 
   Tensor result = at::empty({0}, self.options().dtype(kBool));
-  auto iter = make_reduction(
-    "any", result, self, {}, false, /*out_dtype=*/kBool);
+  if (self.is_cuda()) {
+    auto iter = make_reduction(
+        "any", result, self, {}, false, self.scalar_type(), kBool);
+    return _any(result, iter);
+  }
+  auto iter =
+      make_reduction("any", result, self, {}, false, /*out_dtype=*/kBool);
   return _any(result, iter);
 }
 
@@ -795,8 +810,13 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
-    auto iter = make_reduction(
-      "any", result, self, dim, keepdim, /*out_dtype=*/kBool);
+    if (self.is_cuda()) {
+      auto iter = make_reduction(
+          "any", result, self, dim, keepdim, self.scalar_type(), kBool);
+      return _any(result, iter);
+    }
+    auto iter =
+        make_reduction("any", result, self, dim, keepdim, /*out_dtype=*/kBool);
     return _any(result, iter);
   }
 }
