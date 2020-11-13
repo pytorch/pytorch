@@ -257,7 +257,7 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
   //   - determines if there are undefined outputs
   //   - determines if there are different dtypes and attempts
   //       to quickly acquire a common dtype
-  Device common_device = Device::cpu();
+  Device common_device = kCPU;
   common_dtype_ = ScalarType::Undefined;
   // NB: despite output_dtype's generic sounding name, it only is
   // used in a nontrivial way if check_all_same_dtype is true

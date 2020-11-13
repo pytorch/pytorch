@@ -16,10 +16,10 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Device exchangeDevice(Device) const override {
     // no-op
-    return Device::vulkan();
+    return kVulkan;
   }
   Device getDevice() const override {
-    return Device::vulkan();
+    return kVulkan;
   }
   void setDevice(Device) const override {
     // no-op
@@ -29,12 +29,12 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Stream getStream(Device d) const noexcept override {
     // no-op
-    return Stream(Stream::DEFAULT, Device::vulkan());
+    return Stream(Stream::DEFAULT, kVulkan);
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     // no-op
-    return Stream(Stream::DEFAULT, Device::vulkan());
+    return Stream(Stream::DEFAULT, kVulkan);
   }
   DeviceIndex deviceCount() const noexcept override {
     return 1;

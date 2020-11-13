@@ -13,11 +13,11 @@ struct CPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Device exchangeDevice(Device) const override {
     // no-op
-    return Device::cpu();
+    return kCPU;
 
   }
   Device getDevice() const override {
-    return Device::cpu();
+    return kCPU;
   }
   void setDevice(Device) const override {
     // no-op
@@ -27,12 +27,12 @@ struct CPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
   Stream getStream(Device d) const noexcept override {
     // no-op
-    return Stream(Stream::DEFAULT, Device::cpu());
+    return Stream(Stream::DEFAULT, kCPU);
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     // no-op
-    return Stream(Stream::DEFAULT, Device::cpu());
+    return Stream(Stream::DEFAULT, kCPU);
   }
   DeviceIndex deviceCount() const noexcept override {
     return 1;

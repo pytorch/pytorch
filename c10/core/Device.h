@@ -9,6 +9,7 @@
 #include <functional>
 #include <iosfwd>
 #include <string>
+#include <iostream>
 
 namespace c10 {
 
@@ -34,61 +35,28 @@ struct C10_API Device final {
   /// Constructs a new `Device` from a `DeviceType` and a device
   /// index.
   /// Also performs validation
-  /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
+  /* implicit */ Device(DeviceType type, DeviceIndex index, const char* str = __builtin_FUNCTION())
       : type_(type), index_(index) {
+          std::cout << "copy ctr called by: " << std::string(str) << std::endl;
     validate();
   }
 
+  /// Note: no validation is required in this constructor, since the DeviceIndex
+  /// is set to -1.
+  /* implicit */ Device(DeviceType type) : type_(type) {}
+
   /// Device specific constructors
-  /// These functions construct "default" devices for each device type.
   /// They don't require validating the corresponding DeviceType/DeviceIndex
   /// combination and are therefore slightly faster.
 
-  static Device cpu() {
-    Device device;
-    device.type_ = kCPU;
-    device.index_ = -1;
-    return device;
-  }
-
-  static Device metal() {
-    Device device;
-    device.type_ = kMetal;
-    device.index_ = -1;
-    return device;
-  }
-
-  static Device vulkan() {
-    Device device;
-    device.type_ = kVulkan;
-    device.index_ = -1;
-    return device;
-  }
-
-  static Device hip() {
-    Device device;
-    device.type_ = kHIP;
-    device.index_ = -1;
-    return device;
-  }
-
   static Device hip_unchecked(DeviceIndex index) {
-    Device device;
-    device.type_ = kHIP;
+    Device device(kHIP);
     device.index_ = index;
     return device;
   }
 
-  static Device cuda() {
-    Device device;
-    device.type_ = kCUDA;
-    device.index_ = -1;
-    return device;
-  }
-
   static Device cuda_unchecked(DeviceIndex index) {
-    Device device;
-    device.type_ = kCUDA;
+    Device device(kCUDA);
     device.index_ = index;
     return device;
   }
@@ -148,8 +116,8 @@ struct C10_API Device final {
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
-  Device() : type_(DeviceType::CPU) {}
   void validate() {
+          std::cout << "validate called" << std::endl;
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
     TORCH_CHECK(!is_cpu() || index_ <= 0,

@@ -1056,7 +1056,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, options.device(Device::cpu()));
+  auto cpu_tensor = tensor_cpu(values, options.device(kCPU));
   return cpu_tensor.to(options.device());
 }
 
@@ -1072,7 +1072,7 @@ Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_complex_cpu(values, options.device(Device::cpu()));
+  auto cpu_tensor = tensor_complex_cpu(values, options.device(kCPU));
   return cpu_tensor.to(options.device());
 }
 

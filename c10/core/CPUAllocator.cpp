@@ -102,7 +102,7 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
     profiledCPUMemoryReporter().New(data, nbytes);
-    return {data, data, &ReportAndDelete, at::Device::cpu()};
+    return {data, data, &ReportAndDelete, at::kCPU};
   }
 
   static void ReportAndDelete(void* ptr) {
@@ -180,7 +180,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
           nullptr,
           nullptr,
           &deleter,
-          at::Device::cpu(),
+          at::kCPU,
       };
     }
 
@@ -204,7 +204,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
         reinterpret_cast<uint8_t*>(data) + PreGuardBytes,
         data,
         &deleter,
-        at::Device::cpu(),
+        at::kCPU,
     };
   }
 
@@ -275,7 +275,7 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
               << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, nbytes, c10::Device::cpu());
+    reportMemoryUsageToProfiler(ptr, nbytes, c10::kCPU);
   }
 }
 
@@ -301,7 +301,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
               << allocated << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, -nbytes, c10::Device::cpu());
+    reportMemoryUsageToProfiler(ptr, -nbytes, c10::kCPU);
   }
 }
 

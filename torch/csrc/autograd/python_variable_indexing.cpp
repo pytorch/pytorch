@@ -356,7 +356,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   Variable value;
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(self_.scalar_type())) {
-    value = valueToTensor(device(kCPU).dtype(kFloat), py_value, at::Device::cpu());
+    value = valueToTensor(device(kCPU).dtype(kFloat), py_value, at::kCPU);
   } else {
     value = valueToTensor(self_.options(), py_value, self_device);
   }

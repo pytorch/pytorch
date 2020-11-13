@@ -23,7 +23,7 @@ struct DefaultTensorOptions {
 
  private:
   caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 64-bit
-  Device device_          = at::kCPU;                        // 32-bit
+  Device device_          = at::kCPU;               // 32-bit
   Layout layout_          = at::kStrided;                    // 8-bit
   bool requires_grad_     = false;                           // 8-bit
 };

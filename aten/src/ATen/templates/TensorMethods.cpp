@@ -18,24 +18,24 @@ namespace at {
 using Stream = c10::Stream;
 
 Tensor Tensor::cpu() const {
-  return to(options().device(Device::cpu()), /*non_blocking*/ false, /*copy*/ false);
+  return to(options().device(kCPU), /*non_blocking*/ false, /*copy*/ false);
 }
 
 // TODO: The Python version also accepts arguments
 Tensor Tensor::cuda() const {
-  return to(options().device(Device::cuda()), /*non_blocking*/ false, /*copy*/ false);
+  return to(options().device(kCUDA), /*non_blocking*/ false, /*copy*/ false);
 }
 
 Tensor Tensor::hip() const {
-  return to(options().device(Device::hip()), /*non_blocking*/ false, /*copy*/ false);
+  return to(options().device(kHIP), /*non_blocking*/ false, /*copy*/ false);
 }
 
 Tensor Tensor::vulkan() const {
-  return to(options().device(Device::vulkan()), /*non_blocking*/ false, /*copy*/ false);
+  return to(options().device(kVulkan), /*non_blocking*/ false, /*copy*/ false);
 }
 
 Tensor Tensor::metal() const {
-  return to(options().device(Device::metal()), /*non_blocking*/ false, /*copy*/ false);
+  return to(options().device(kMetal), /*non_blocking*/ false, /*copy*/ false);
 }
 
 Tensor Tensor::toType(ScalarType t) const {

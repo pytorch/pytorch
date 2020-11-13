@@ -52,7 +52,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   });
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto device = r.deviceWithDefault(0, at::Device::cpu());
+  auto device = r.deviceWithDefault(0, at::kCPU);
 
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA

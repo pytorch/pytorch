@@ -31,7 +31,7 @@ Tensor new_with_vtensor_vulkan(
   return at::detail::make_tensor<VulkanTensorImpl>(
       DispatchKeySet(DispatchKey::Vulkan),
       options.dtype(),
-      at::Device::vulkan(),
+      at::kVulkan,
       std::move(vt),
       std::vector<int64_t>(sizes.begin(), sizes.end()),
       std::vector<int64_t>(strides.begin(), strides.end()));
