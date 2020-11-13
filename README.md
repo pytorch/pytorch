@@ -235,7 +235,7 @@ On Windows
 
 Build with CPU
 
-It is fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
+It's fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
 
 Build with CUDA
 
@@ -249,9 +249,10 @@ Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If
 CUDA and MSVC, MSVC and PyTorch have version dependency, please install the matched versions. 
 | CUDA version | Newest supported VS version                             | PyTorch version |
 | ------------ | ------------------------------------------------------- | --------------- |
-| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |       <= 1.6    |
-| 10.0         | Visual Studio 2017 (15.X) (`_MSC_VER` < 1920)           |       <= 1.6    |
-| 10.1 ~ 11.0  | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |       >= 1.7    |
+| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |  0.4.1 ~ 1.5.1  |
+| 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
+| 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
+| 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
 
 Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in serveral Visual Studio 2019 versions since 16.7.1 . So please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
