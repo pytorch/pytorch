@@ -3225,6 +3225,8 @@ A, in order as a namedtuple `solution, LU`.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
+Supports real-valued and complex-valued inputs.
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
@@ -4475,6 +4477,8 @@ lu_solve(input, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
+
+Supports real-valued and complex-valued inputs.
 
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
@@ -8171,6 +8175,8 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
+
+Supports real-valued and complex-valued inputs.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where

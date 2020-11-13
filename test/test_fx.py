@@ -11,7 +11,6 @@ from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
-from torch.fx.experimental.subgraph_creation_example import split_module
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
 
@@ -631,6 +630,18 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
+    def test_script_tensor_constant(self):
+        # TorchScript seems to ignore attributes that start with `__`.
+        # We used to call anonymous Tensor values `__tensor_constant*`, but
+        # they were getting ignored by script. Now they're called
+        # `_tensor_constant*`
+        class IHaveATensorConstant(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.rand(3, 4)
+
+        traced = torch.fx.symbolic_trace(IHaveATensorConstant())
+        torch.jit.script(traced)
+
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -735,11 +746,10 @@ class TestFX(JitTestCase):
         self.assertEqual(out, ref_out)
 
     def test_symbolic_trace_assert(self):
-        message = "assert_foobar"
 
         class AssertsTensorShape(torch.nn.Module):
             def forward(self, x):
-                torch.Assert(x.shape[1] > 4, message)
+                torch._assert(x.shape[1] > 4, "assert_foobar")
                 return x
 
         m = AssertsTensorShape()
@@ -747,8 +757,13 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(m)
         # verify assertion on traced model works correctly at runtime
         traced(torch.rand(4, 5))
-        with self.assertRaisesRegex(AssertionError, message):
+        with self.assertRaisesRegex(AssertionError, "assert_foobar"):
             traced(torch.rand(4, 3))
+        # verify the symbolically traced module is scriptable
+        ms = torch.jit.script(m)
+        with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
+            ms(torch.rand(4, 3))
+
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())
@@ -879,43 +894,6 @@ class TestFX(JitTestCase):
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         x = torch.rand(3, 4)
         self.assertEqual(gm(x), (x + float('inf'), x + float('nan')))
-
-    def test_subgraph_creation(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = torch.nn.Parameter(torch.rand(3, 4))
-                self.linear = torch.nn.Linear(4, 5)
-
-            def forward(self, x, y):
-                z = self.linear(x + self.param).clamp(min=0.0, max=1.0)
-                w = self.linear(y).clamp(min=0.0, max=1.0)
-                return z + w
-
-        # symbolically trace model
-        my_module = MyModule()
-        my_module_traced = symbolic_trace(my_module)
-
-        # random mod partitioning
-        partition_counter = 0
-        NPARTITIONS = 3
-
-        def mod_partition(node: Node):
-            nonlocal partition_counter
-            partition = partition_counter % NPARTITIONS
-            partition_counter = (partition_counter + 1) % NPARTITIONS
-            return partition
-
-        # split module in module with submodules
-        module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
-
-        x = torch.rand(3, 4)
-        y = torch.rand(3, 4)
-
-        orig_out = my_module_traced(x, y)
-        submodules_out = module_with_submodules(x, y)
-
-        self.assertEqual(orig_out, submodules_out)
 
     def test_deepcopy_recursion_depth(self):
         depth = sys.getrecursionlimit() + 20
