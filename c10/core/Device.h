@@ -72,6 +72,13 @@ struct C10_API Device final {
     return device;
   }
 
+  static Device hip_unchecked(DeviceIndex index) {
+    Device device;
+    device.type_ = kHIP;
+    device.index_ = index;
+    return device;
+  }
+
   static Device cuda() {
     Device device;
     device.type_ = kCUDA;
@@ -141,7 +148,7 @@ struct C10_API Device final {
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
-  Device() {}
+  Device() : type_(DeviceType::CPU) {}
   void validate() {
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
