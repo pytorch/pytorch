@@ -301,7 +301,6 @@ class TestDistBackend(MultiProcessTestCase):
                 rank=self.rank,
                 timeout=timeout,
             )
-            print(f"Initialized process group with timeout {timeout}")
         except RuntimeError as e:
             if "recompile" in e.args[0]:
                 sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
