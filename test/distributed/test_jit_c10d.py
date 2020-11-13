@@ -3,16 +3,20 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import unittest
 import traceback
+import tempfile
 from sys import platform
 import torch
 import torch.distributed as c10d
 
-from torch.testing._internal.common_distributed import MultiProcessTestCase, \
-    requires_nccl
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
+import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_rocm_single_process
+from torch.testing._internal.common_utils import TestCase, load_tests, TEST_WITH_TSAN
 
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if not c10d.is_available():
     print('c10d not available, skipping tests', file=sys.stderr)
@@ -24,47 +28,55 @@ if platform == 'darwin':
 else:
     LOOPBACK = 'lo'
 
-@requires_nccl()
-@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
-class ProcessGroupNCCLJitTest(MultiProcessTestCase):
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
+class ProcessGroupNCCLJitTest(TestCase):
+    MAIN_PROCESS_RANK = 0
+
     def setUp(self):
-        super(ProcessGroupGlooJitTest, self).setUp()
-        self._fork_processes()
+        self.rank = self.MAIN_PROCESS_RANK
+        self.world_size = 1
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+        self.num_gpus = torch.cuda.device_count()
+        if self.num_gpus < 2:
+            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
+    def _create_nccl_pg(self):
+        addr = "localhost"
+        port = common.find_free_port()
+        tcp_store = torch.classes.dist_c10d.TCPStore(addr, port, 1, True)
+        opts = torch.classes.dist_c10d.ProcessGroupNCCLOptions(0, True)
 
-    # def test_jit_process_group_nccl(self):
-    #     @torch.jit.script
-    #     def test_create_group() -> torch.classes.dist_c10d.FileStore:
-    #         store = torch.classes.dist_c10d.FileStore(filename, world_size)
-    #         return store
+        return torch.classes.dist_c10d.ProcessGroupNCCL(tcp_store, self.rank, self.world_size, opts)  
 
-    #     store = test_create_store(self.file_name, self.world_size)
+    @requires_nccl()
+    @skip_if_rocm_single_process
+    def test_init_process_group_nccl_torchbind(self):
+        self._create_nccl_pg()
 
+    @requires_nccl()
+    @skip_if_rocm_single_process
+    def test_process_group_nccl_torchbind_alltoall(self):
+        nccl_pg = self._create_nccl_pg()
 
-        # pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        input = torch.rand(16).cuda()
+        output = torch.rand(16).cuda()
 
-        # try:
-        #     test_process_group_script(pg)
-        # except Exception as e:
-        #     traceback.print_exc()
-
-
-    def test_process_group_nccl_alltoall(self):
-        opts = torch.classes.dist_c10d.ProcessGroupNCCLOptions()
-
-        nccl_pg = torch.classes.dist_c10d.ProcessGroupNCCL(my_store, 
-
-
-
-
-
-class SingleJitTest(JitTestCase):
-    def test_filestore(self):
         @torch.jit.script
-        def test_process_group_script() -> torch.classes.dist_c10d.FileStore:
-            store = torch.classes.dist_c10d.FileStore("test", 2)
-            return store
+        def run_pg_nccl_alltoall(
+            pg: torch.classes.dist_c10d.ProcessGroupNCCL,
+            output: torch.Tensor,
+            input: torch.Tensor
+        ):
+            output_split_sizes: List[int] = []
+            input_split_sizes: List[int] = []
+            work = pg.alltoall_base(output, input, output_split_sizes, input_split_sizes)
+            work.wait()
+            return work.result()
 
-        print(test_process_group_script.graph)
+        run_pg_nccl_alltoall(nccl_pg, output, input)
 
-        test_process_group_script()
+
+

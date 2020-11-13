@@ -22,8 +22,13 @@ jobs:
           pip install -r requirements.txt
           cd .circleci && ./ensure-consistency.py
       - name: Shellcheck Jenkins scripts
+        # https://github.com/koalaman/shellcheck#installing-a-pre-compiled-binary
         run: |
-          sudo apt-get install -y shellcheck
+          scversion="stable"
+          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
+          sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
+          rm -r "shellcheck-${scversion}"
+          shellcheck --version
           .jenkins/run-shellcheck.sh
       - name: Ensure no tabs
         run: |

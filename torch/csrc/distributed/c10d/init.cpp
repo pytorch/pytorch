@@ -440,8 +440,8 @@ Deletes the key-value pair associated with ``key`` from the store. Returns
 `true` if the key was successfully deleted, and `false` if it was not.
 
 .. warning::
-    The ``delete_key`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
+    The ``delete_key`` API is only supported by the :class:`~torch.distributed.TCPStore` and :class:`~torch.distributed.HashStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` will result in an exception.
 
 Arguments:
     key (str): The key to be deleted from the store
@@ -451,6 +451,7 @@ Returns:
 
 Example::
     >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, HashStore can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key")
     >>> # This should return true
@@ -469,14 +470,15 @@ and :meth:`~torch.distributed.store.add` since one key is used to coordinate all
 the workers using the store.
 
 .. warning::
-    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` or :class:`~torch.distributed.HashStore` will result in an exception.
+    The ``num_keys`` API is only supported by the :class:`~torch.distributed.TCPStore` and :class:`~torch.distributed.HashStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` will result in an exception.
 
 Returns:
     The number of keys present in the store.
 
 Example::
     >>> import torch.distributed as dist
+    >>> # Using TCPStore as an example, HashStore can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, true, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # This should return 2
@@ -1226,30 +1228,16 @@ Arguments:
 // all the TorchBind issues and merge these two together. we shouldn't
 // document this until we finish the migration.
 
-// struct Millisecond : public torch::CustomClassHolder {
-//   std::chrono::milliseconds time;
-// };
-
-// static auto MillisecondTorchBind = torch::class_<Millisecond>("c10",
-// "millisecond")
-
 static auto StoreTorchBind = torch::class_<::c10d::Store>("dist_c10d", "Store");
-// static auto TCPStoreTorchBind =
-//     torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
-// .def(torch::init([](const std::string& host_name,
-//                     int64_t port,
-//                     int64_t world_size,
-//                     bool is_master) {
-
-//                     });
-// .def(torch::init<>())
-// .def_static([]->intrusive_ptr<TPCStore>)
-
-// .def(torch:init<>())
-// .def("create" -> intrusive_ptr<TCPStore>())
-
-// dummy_tcp_store = torch.classes.dist_c10d.TCPSTore()
-// real_tcp_store =
+static auto TCPStoreTorchBind =
+    torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
+        .def(torch::init([](const std::string& host_name,
+                            int64_t port,
+                            int64_t world_size,
+                            bool is_master) {
+          return c10::make_intrusive<::c10d::TCPStore>(
+              host_name, port, world_size, is_master);
+        }));
 
 // Torchbind the ProcessGroup to make it available in TorchScript
 static auto ProcessGroupWorkTorchBind =
@@ -1270,10 +1258,16 @@ static auto ProcessGroupTorchBind =
 
 #ifdef USE_C10D_NCCL
 
+// XXX: Ideally the Options of ProcessGroupNCCL should be
+// binded using `def_readwrite` like in pybind11, but we
+// didn't do that because: 1. no milisecond support yet
+// 2. no def_readwrite or property support yet.
+// TODO: make this binding the same as pybind11
 static auto ProcessGroupNCCLOptionsTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL::Options>(
         "dist_c10d",
-        "ProcessGroupNCCLOptions");
+        "ProcessGroupNCCLOptions")
+        .def(torch::init<int64_t, bool>());
 
 static auto ProcessGroupNCCLTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
@@ -1283,13 +1277,13 @@ static auto ProcessGroupNCCLTorchBind =
              int64_t,
              const c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>&>())
         .def(
-            "alltoalll_base",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+            "alltoall_base",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
                at::Tensor output,
                at::Tensor input,
                std::vector<int64_t> outputSplitSizes,
                std::vector<int64_t> inputSplitSizes) {
-              return pg->alltoall_base(
+              return self->alltoall_base(
                   output,
                   input,
                   outputSplitSizes,
