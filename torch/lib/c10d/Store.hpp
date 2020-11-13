@@ -13,7 +13,7 @@ namespace c10d {
 class Store : public torch::CustomClassHolder {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
-      std::chrono::seconds(300);
+      std::chrono::seconds(3);
   static constexpr std::chrono::milliseconds kNoTimeout =
       std::chrono::milliseconds::zero();
 

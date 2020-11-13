@@ -16,6 +16,7 @@
 #include <torch/cuda.h>
 
 #include <c10d/FileStore.hpp>
+#include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
 
@@ -128,9 +129,11 @@ class CollectiveTest {
     }
 
     std::vector<std::thread> threads;
+    // Change back to FileStore?
+    auto store = c10::make_intrusive<::c10d::FileStore>(path, tests.size());
     for (auto i = 0; i < num; i++) {
       threads.push_back(std::thread(
-          [i, &tests, delayed] { tests[i].start(i, tests.size(), delayed); }));
+          [i, &tests, delayed, &store] { tests[i].start(i, tests.size(), delayed, store); }));
     }
     for (auto& thread : threads) {
       thread.join();
@@ -150,9 +153,7 @@ class CollectiveTest {
     return *pg_;
   }
 
-  void start(int rank, int size, bool delayed) {
-    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
-
+  void start(int rank, int size, bool delayed, c10::intrusive_ptr<c10d::FileStore> store) {
     // Set a timeout that is small enough to make this test run fast, but also
     // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
     ::c10d::ProcessGroupGloo::Options options;

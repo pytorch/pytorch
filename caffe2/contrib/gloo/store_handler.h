@@ -17,7 +17,7 @@ class CAFFE2_API StoreHandlerWrapper : public ::gloo::rendezvous::Store {
   virtual void set(const std::string& key, const std::vector<char>& data)
       override;
 
-  virtual std::vector<char> get(const std::string& key) override;
+  virtual std::vector<char> get(const std::string& key, bool ignorePrefix=false) override;
 
   virtual void wait(const std::vector<std::string>& keys) override {
     wait(keys, ::gloo::rendezvous::Store::kDefaultTimeout);

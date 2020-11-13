@@ -115,7 +115,7 @@ class GlooStore : public ::gloo::rendezvous::Store {
     store_->set(key, tmp);
   }
 
-  std::vector<char> get(const std::string& key) override {
+  std::vector<char> get(const std::string& key, bool /* unused */) override {
     auto value = store_->get(key);
     return std::vector<char>(value.begin(), value.end());
   }
@@ -574,6 +574,17 @@ ProcessGroupGloo::ProcessGroupGloo(
   if (devices.empty()) {
     throw std::runtime_error("No device(s) specified");
   }
+  // Get Hostname using syscall
+  std::array<char, HOST_NAME_MAX> hostname{};
+  auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+
+  // Add global rank <> hostname pair to the Store.
+  auto key = c10::str("rank_", rank);
+  const std::vector<char> value(hostname.begin(), hostname.end());
+  store_->set(key, value);
 
   // Create and connect a context for every device.
   //
