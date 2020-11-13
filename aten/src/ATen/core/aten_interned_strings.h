@@ -133,8 +133,6 @@ _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_forward) \
-_(aten, _th_baddbmm) \
-_(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_mode) \
@@ -669,7 +667,6 @@ _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
-_(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
 _(aten, th_pow) \
