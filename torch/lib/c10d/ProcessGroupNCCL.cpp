@@ -3,6 +3,7 @@
 #include <map>
 #include <tuple>
 #include <unordered_set>
+#include <fmt/format.h>
 
 #include <THC/THC.h>
 
@@ -398,7 +399,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         LOG(INFO) << "[Rank " << rank_
                   << "] Caught collective operation timeout for work: "
                   << (*this);
-        throw std::runtime_error("Operation timed out!");
+        auto timeoutErr = fmt::format("Operation timed out after {} milliseconds!", workTimeout.count());
+        throw std::runtime_error(timeoutErr);
       }
       // Check for errors and throw appropriate exception.
       checkAndThrowException();
