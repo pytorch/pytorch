@@ -10,6 +10,8 @@ namespace at {
 namespace native {
 namespace metal {
 
+constexpr double kMinScaleFactor = 100000000.f;
+
 c10::intrusive_ptr<Conv2dOpContext> unpack(
     Tensor&& weight,
     c10::optional<Tensor>&& bias,
@@ -19,12 +21,23 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     c10::optional<Scalar> output_min,
     c10::optional<Scalar> output_max) {
-  Tensor weightContig = weight.contiguous();
-  if (weightContig.is_quantized()) {
-    weightContig = weightContig.dequantize();
+  weight = weight.contiguous();
+  if (weight.is_quantized()) {
+    double scale = weight.q_scale();
+    int64_t zero_point = weight.q_zero_point();
+    // SCale down the min value
+    auto min = static_cast<float>(zero_point) / kMinScaleFactor;
+    auto float_weight = at::empty(weight.sizes(), at::kFloat);
+    auto quantized_data =
+         reinterpret_cast<uint8_t*>(weight.template data_ptr<c10::quint8>());
+    auto float_data = float_weight.data_ptr<float>();
+    for (size_t i = 0; i < weight.numel(); ++i) {
+      float_data[i] = (static_cast<float>(quantized_data[i]) * scale) + min;
+    }
+    weight = float_weight;
   }
-  const auto ws = weightContig.sizes();
-  auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
+  const auto ws = weight.sizes();
+  auto packed_buffer = permuteWeights(weight.data_ptr<float>(), ws.vec());
   auto packedWeight = at::empty(ws);
   int64_t size_bytes = at::prod_intlist(ws) * sizeof(float);
   memcpy(packedWeight.data_ptr(), packed_buffer.data(), size_bytes);
