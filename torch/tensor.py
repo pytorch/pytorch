@@ -968,8 +968,26 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
-    # Convert dense tensor to sparse GCS format.
-    def to_sparse_gcs(self, reduction, fill_value):
+    def to_sparse_gcs(self, reduction=None, fill_value=float('NaN')):
+        """ Convert a dense, strided tensor to GCS format. The tensor can be of 
+        any dimension.
+
+        The ``reduction`` parameter specifies the dimensions of the target
+        tensor that must be used for converting it into a 2-D CSR-like tensor.
+        When left to the default value, the dimensions will be split along
+        the middle and the first half will be reduced to the 0th dimension
+        of the flattened tensor and the other half to the 1st.
+
+        The ``fill_value`` is a value within the dense tensor that is
+        excluded from being included into the sparse tensor.
+
+        Examples::
+
+            >>> dense = torch.randn(5,5,5,5,5)
+            >>> sparse = dense.to_sparse_gcs(None, -999)
+            >>> sparse._nnz()
+            3125
+        """
         def make_strides(shape, dims=None):
             if dims is None:
                 dims = tuple(range(len(shape)))
