@@ -10,19 +10,11 @@ from itertools import combinations_with_replacement
 N_values = [20] if not TEST_WITH_SLOW else [30, 300]
 
 class TestForeach(TestCase):
-
     bin_ops = [
         (torch._foreach_add, torch._foreach_add_, torch.add),
         (torch._foreach_sub, torch._foreach_sub_, torch.sub),
         (torch._foreach_mul, torch._foreach_mul_, torch.mul),
         (torch._foreach_div, torch._foreach_div_, torch.div),
-    ]
-
-    bin_ops_sl = [
-        (torch._foreach_add_sl, torch._foreach_add_sl_, torch.add),
-        (torch._foreach_sub_sl, torch._foreach_sub_sl_, torch.sub),
-        (torch._foreach_mul_sl, torch._foreach_mul_sl_, torch.mul),
-        (torch._foreach_div_sl, torch._foreach_div_sl_, torch.div),
     ]
 
     unary_ops = [
@@ -231,7 +223,7 @@ class TestForeach(TestCase):
                         self.assertEqual(res, tensors1)
                         break
                     elif dtype == torch.complex128:
-                        expected = [torch.abs(tensors1[i].to(dtype=control_dtype)   ).to(torch.complex128) for i in range(N)]
+                        expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(torch.complex128) for i in range(N)]
                         self.assertEqual(res, expected)
 
                         torch._foreach_abs_(tensors1)
@@ -398,7 +390,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops_sl:
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1 for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
@@ -433,7 +425,7 @@ class TestForeach(TestCase):
                     self.assertEqual(res, expected)
 
                 # test in-place
-                if foreach_bin_op_ == torch._foreach_div_sl_ and dtype in torch.testing.integral_types() and self.device_type == "cpu":
+                if foreach_bin_op_ == torch._foreach_div_ and dtype in torch.testing.integral_types() and self.device_type == "cpu":
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                         [t.div_(scalar) for t, scalar in zip(tensors, scalars)]
 
@@ -493,7 +485,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops_sl:
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1.1 for _ in range(N)]
 
@@ -580,7 +572,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops_sl:
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [3 + 5j for _ in range(N)]
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
@@ -663,7 +655,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def atest_bool_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops_sl:
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [True for _ in range(N)]
 
@@ -676,7 +668,7 @@ class TestForeach(TestCase):
                             foreach_bin_op_(tensors, scalars)
                         return
                     else:
-                        if foreach_bin_op == torch._foreach_sub_sl:
+                        if foreach_bin_op == torch._foreach_sub:
                             with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                                 foreach_bin_op_(tensors, scalars)
 
@@ -699,7 +691,7 @@ class TestForeach(TestCase):
                             foreach_bin_op(tensors, scalars)
                         return
 
-                    if foreach_bin_op == torch._foreach_sub_sl:
+                    if foreach_bin_op == torch._foreach_sub:
                         if self.device_type == "cpu":
                             # see TODO[Fix scalar list]
                             res = foreach_bin_op(tensors, scalars)
