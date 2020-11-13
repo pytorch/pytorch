@@ -629,13 +629,15 @@ void initJITBindings(PyObject* module) {
             using namespace torch::jit::tensorexpr;
             getTEMustUseLLVMOnCPU() = use_llvm;
           })
-      .def("_llvm_enabled", []() {
-        #ifdef TORCH_ENABLE_LLVM
-        return true;
-        #else
+      .def(
+          "_llvm_enabled",
+          []() {
+#ifdef TORCH_ENABLE_LLVM
+            return true;
+#else
         return false;
-        #endif
-      })
+#endif
+          })
       .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
