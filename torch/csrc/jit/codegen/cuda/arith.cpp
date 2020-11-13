@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+#include <cfloat>
 
 namespace torch {
 namespace jit {
@@ -511,6 +512,50 @@ TensorView* sum(
   }
 
   return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim);
+}
+
+TensorView* max(
+    TensorView* v1,
+    const std::vector<int>& axes,
+    bool keep_dim /*=false*/) {
+  Val* init = nullptr;
+  switch (v1->getDataType().value()) {
+    case (DataType::Float):
+      init = new Float(FLT_MIN);
+      break;
+    case (DataType::Int):
+      init = new Int(INT_MIN);
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Could not generate a max op for tensor with type: ",
+          v1->getDataType().value());
+  }
+
+  return reductionOp(BinaryOpType::Max, axes, init, v1, keep_dim);
+}
+
+TensorView* min(
+    TensorView* v1,
+    const std::vector<int>& axes,
+    bool keep_dim /*=false*/) {
+  Val* init = nullptr;
+  switch (v1->getDataType().value()) {
+    case (DataType::Float):
+      init = new Float(FLT_MAX);
+      break;
+    case (DataType::Int):
+      init = new Int(INT_MAX);
+      break;
+    default:
+      TORCH_CHECK(
+          false,
+          "Could not generate a min op for tensor with type: ",
+          v1->getDataType().value());
+  }
+
+  return reductionOp(BinaryOpType::Min, axes, init, v1, keep_dim);
 }
 
 TensorView* broadcast(

@@ -391,6 +391,53 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   return producer;
 }
 
+std::vector<TensorView*> TensorView::duplicate() {
+  FusionGuard fg(fusion());
+
+  TORCH_CHECK(
+      !fusion()->hasInput(this) && !fusion()->hasOutput(this),
+      "Cannot duplicate input or output tensors");
+
+  auto usages = fusion()->unordered_uses(this);
+  TORCH_CHECK(
+      usages.size() > 1, "Cannot duplicate TensorView that is only used once");
+
+  // Warning: error may occur if the same TensorView
+  // is used multiple times in the same expression
+  std::vector<TensorView*> duplicates;
+  Expr* origin_expr = fusion()->origin(this);
+  size_t count = 0;
+  for (auto expr : usages) {
+    // Skip the first usage to reuse original TensorView
+    if (count > 0) {
+      auto root_domain = getRootDomain();
+      TensorView* producer = new TensorView(
+          new TensorDomain(
+              root_domain, std::vector<bool>(root_domain.size(), true)),
+          getDataType().value());
+
+      producer->setDomain(
+          TransformReplay::fullSelfReplay(producer->domain(), this->domain()));
+
+      createExprConsumer(origin_expr, producer);
+      createExprProducer(expr, this, producer);
+
+      // Set ComputeAt position for this duplicate TV
+      if (hasComputeAt()) {
+        auto rel_ca_pos = getRelativeComputeAtAxis();
+        auto this_ca_pos = getThisComputeAtAxis();
+        auto expr = *fusion()->unordered_uses(producer).begin();
+        auto this_ca_view = expr->output(0)->as<TensorView>();
+        producer->setComputeAt(this_ca_view, this_ca_pos, rel_ca_pos);
+      }
+
+      duplicates.push_back(producer);
+    }
+    ++count;
+  }
+  return duplicates;
+}
+
 TensorView* TensorView::cache_before() {
   FusionGuard fg(fusion());
 
@@ -515,7 +562,7 @@ TensorView* TensorView::cache_before() {
 
   // Finally, make the cache tensor computed at the consumer. The
   // position is set at the deepest position among the position where
-  // its inputs are computed at. If that position is equial or smaller
+  // its inputs are computed at. If that position is equal or smaller
   // than the position already set by the case where the consumer has
   // computeAt, nothing needs to be done.
   // Note that this step isn't strictly necessary in terms of the
@@ -544,6 +591,8 @@ TensorView* TensorView::cache_before() {
 
 TensorView* TensorView::cache_after() {
   FusionGuard fg(fusion());
+
+  const bool kIsFusionInput = fusion()->hasInput(this);
 
   // Get all the uses for this Tensorview
   TORCH_CHECK(
@@ -594,12 +643,18 @@ TensorView* TensorView::cache_after() {
 
     setComputeAt(consumer, this_ca_pos, this_ca_pos);
     consumer->setComputeAt(this_ca_view, this_ca_pos, rel_ca_pos);
-  } else {
+  } else if (kIsFusionInput) {
+    bool cache_replayed = false;
     // Check users of this TV for computeAt for cache_after on inputs
     for (auto expr : fusion()->unordered_uses(consumer)) {
       for (TensorView* output :
            ir_utils::filterByType<TensorView>(expr->outputs())) {
         if (output->hasComputeAt()) {
+          if (!cache_replayed) {
+            // Completely transform consumer according to output
+            TransformReplay::replayPasC(consumer, output, -1);
+            cache_replayed = true;
+          }
           auto output_ca_pos = output->getThisComputeAtAxis();
           auto this_pos =
               TransformReplay::replayPasC(consumer, output, output_ca_pos)
@@ -700,7 +755,16 @@ struct CreateExprProducer : public OptInDispatch {
   }
 
   void handle(BinaryOp* binary_expr) final {
-    if (binary_expr->lhs()->sameAs(current_)) {
+    const bool lhs_match = binary_expr->lhs()->sameAs(current_);
+    const bool rhs_match = binary_expr->rhs()->sameAs(current_);
+
+    if (lhs_match && rhs_match) {
+      new BinaryOp(
+          binary_expr->getBinaryOpType(),
+          binary_expr->out(),
+          producer_,
+          producer_);
+    } else if (lhs_match) {
       new BinaryOp(
           binary_expr->getBinaryOpType(),
           binary_expr->out(),
@@ -716,14 +780,39 @@ struct CreateExprProducer : public OptInDispatch {
   }
 
   void handle(TernaryOp* ternary_expr) final {
-    if (ternary_expr->in1()->sameAs(current_)) {
+    const bool in1_match = ternary_expr->in1()->sameAs(current_);
+    const bool in2_match = ternary_expr->in2()->sameAs(current_);
+    const bool in3_match = ternary_expr->in3()->sameAs(current_);
+
+    if (in1_match && in2_match && in3_match) {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          producer_,
+          producer_,
+          producer_);
+    } else if (in1_match && in2_match) {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          producer_,
+          producer_,
+          ternary_expr->in3());
+    } else if (in2_match && in3_match) {
+      new TernaryOp(
+          ternary_expr->getTernaryOpType(),
+          ternary_expr->out(),
+          ternary_expr->in1(),
+          producer_,
+          producer_);
+    } else if (in1_match) {
       new TernaryOp(
           ternary_expr->getTernaryOpType(),
           ternary_expr->out(),
           producer_,
           ternary_expr->in2(),
           ternary_expr->in3());
-    } else if (ternary_expr->in2()->sameAs(current_)) {
+    } else if (in2_match) {
       new TernaryOp(
           ternary_expr->getTernaryOpType(),
           ternary_expr->out(),

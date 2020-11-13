@@ -305,7 +305,9 @@ LaunchParams FusionExecutor::computeLaunchParams(
       const auto val = expr_eval.evaluate(extent);
       TORCH_INTERNAL_ASSERT(
           val.has_value(),
-          "Tried to evaluate the extent to set launch bounds but could not.");
+          "Tried to evaluate the extent of ",
+          p_type,
+          " to set launch bounds but could not.");
       launch_params.bind(*val, p_type);
     }
   }

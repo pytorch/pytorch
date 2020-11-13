@@ -147,6 +147,29 @@ class NaiveTypePropagator {
         node->output()->setType(promoted_type);
         break;
       }
+      case aten::batch_norm: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output()->setType(out_type);
+        break;
+      }
+      case aten::layer_norm: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output()->setType(out_type);
+        break;
+      }
+      case aten::softmax: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+
+        // accept dtype input to `aten::softmax` node
+        if (!node->input(2)->type()->isSubtypeOf(
+                static_cast<c10::TypePtr>(NoneType::get()))) {
+          if (auto opt_ivalue = toIValue(node->input(2))) {
+            out_type = out_type->withScalarType(opt_ivalue->toScalarType());
+          }
+        }
+        node->output()->setType(out_type);
+        break;
+      }
       case aten::sum: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
 

@@ -301,6 +301,12 @@ class TORCH_CUDA_API TensorView : public Val {
   //
   TensorView* rFactor(const std::vector<int>& axes);
 
+  // For all usages of this TensorView, create a new TensorView and
+  // duplicate the origin expression.
+  // A common use case is to handle the recompute ComputeAt exception that
+  // occurs when inlining a TensorView used multiple times in a fusion.
+  std::vector<TensorView*> duplicate();
+
   // Create a TensorView before the original tensor. A common use case is to
   // write results into shared memory or registers before moving to global
   // memory. Analogous to TVM Cache_Write

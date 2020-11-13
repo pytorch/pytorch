@@ -17,7 +17,7 @@ TORCH_CUDA_API bool scheduleFusion(
 
 // Parameters the Reduction Heuristic Generates to describe the optimial
 // schedule. Warning: equal operator is intended for use in caching the kernel
-// associated with these reduction parameteres. It does not check if the launch
+// associated with these reduction parameters. It does not check if the launch
 // parameters are equivelent!
 struct ReductionParams {
   // Reducing inner most dimension?
@@ -27,9 +27,15 @@ struct ReductionParams {
   // Reduce across the grid?
   bool cross_grid = false;
   // Perform multiple reductions per block?
-  bool mul_reds_per_blk = false;
+  bool multiple_reds_per_blk = false;
   // Unrolling factor
-  int loop_unroll = 4;
+  int64_t loop_unroll = 4;
+  // Number of batches for each block
+  int64_t batches_per_block = 1;
+  // Number of warps per block
+  int64_t num_warps = 1;
+  // Store input in shared memory or registers to reduce global memory reads
+  bool persistent_kernel = false;
 
   LaunchParams lparams;
 
@@ -37,8 +43,11 @@ struct ReductionParams {
   bool operator==(const ReductionParams& other) const {
     bool attr_equal = other.fastest_dim == fastest_dim &&
         other.cross_block == cross_block && other.cross_grid == cross_grid &&
-        other.mul_reds_per_blk == mul_reds_per_blk &&
-        other.loop_unroll == loop_unroll;
+        other.multiple_reds_per_blk == multiple_reds_per_blk &&
+        other.loop_unroll == loop_unroll &&
+        other.batches_per_block == batches_per_block &&
+        other.num_warps == num_warps &&
+        other.persistent_kernel == persistent_kernel;
     return attr_equal;
   }
 };
@@ -51,7 +60,10 @@ class ReductionParamsHash {
     size_t attr_hash = static_cast<size_t>(rp.fastest_dim) << (bits - 1) |
         static_cast<size_t>(rp.cross_block) << (bits - 2) |
         static_cast<size_t>(rp.cross_grid) << (bits - 3) |
-        static_cast<size_t>(rp.mul_reds_per_blk) << (bits - 4);
+        static_cast<size_t>(rp.multiple_reds_per_blk) << (bits - 4) |
+        static_cast<size_t>(rp.batches_per_block) << (bits - 5) |
+        static_cast<size_t>(rp.num_warps) << (bits - 6) |
+        static_cast<size_t>(rp.persistent_kernel) << (bits - 7);
     return attr_hash;
   }
 };
@@ -66,6 +78,17 @@ TORCH_CUDA_API void scheduleReduction(
     const ReductionParams& rparams,
     TensorView* red_tv,
     std::vector<TensorView*> outs_of_red);
+
+TORCH_CUDA_API c10::optional<ReductionParams> getMultipleReductionHeuristics(
+    Fusion* fusion,
+    const at::ArrayRef<c10::IValue>& fusion_inputs,
+    const std::vector<TensorView*>& reduction_tv);
+
+TORCH_CUDA_API void scheduleMultipleReduction(
+    Fusion* fusion,
+    const ReductionParams& rparams,
+    const std::vector<TensorView*>& reduction_tv,
+    std::vector<TensorView*>& other_tv);
 
 } // namespace cuda
 } // namespace fuser

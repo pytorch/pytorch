@@ -169,7 +169,7 @@ class FusionExecutorCache {
   bool has_reduction_ = false;
 
   //! cache reduction_tv_ to avoid searching repetitively at runtime
-  TensorView* reduction_tv_ = nullptr;
+  std::vector<TensorView*> reduction_tv_;
 
   //! TODO: ugly logic for now. We should integrate the hashing of cache for
   //!       different kernels. (alternatively we could do so in scheduler).

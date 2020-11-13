@@ -279,12 +279,13 @@ void Fusion::validateInputs() {
     }
   }
   for (Val* input : all_inputs) {
-    if (!input->isConstScalar())
+    if (!input->isConstScalar()) {
       TORCH_CHECK(
-          hasInput(input),
+          hasInput(input) || inFusion(input),
           "Could not figure out how ",
           input,
           " is generated, however it was not specified as an input.");
+    }
   }
 }
 

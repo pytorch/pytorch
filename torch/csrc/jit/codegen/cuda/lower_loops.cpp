@@ -109,7 +109,9 @@ kir::Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
     alloc_loop->body().insert(for_loop_allocations_[alloc_loop], alloc);
     ++for_loop_allocations_[alloc_loop];
   } else {
-    lowered_exprs_.insert(lowered_exprs_.begin(), alloc);
+    lowered_exprs_.insert(
+        lowered_exprs_.begin() + lowered_exprs_allocations_, alloc);
+    ++lowered_exprs_allocations_;
   }
 
   return alloc;

@@ -39,8 +39,8 @@ void ComputeAtData::setPassPosition(unsigned int pos) {
     // the given tensor and its production should be duplicated.
     TORCH_CHECK(
         pos == current_traversal_position,
-        "Error during computeAt. ComputeAt pass wanted to set position of ",
-        tv_ref_,
+        "Error during computeAt. ComputeAt pass wanted to set position of TensorView: ",
+        tv_ref_->name(),
         " at position ",
         pos,
         " but was already set to position ",
@@ -175,9 +175,9 @@ void ComputeAt::run(
     TORCH_CHECK(
         !all_chains.empty(),
         "Compute At expects ",
-        producer,
+        producer->name(),
         " is a dependency of ",
-        consumer,
+        consumer->name(),
         ", however it is not.");
 
     std::unordered_set<TensorView*> added_producers;
@@ -304,9 +304,9 @@ void ComputeAt::setCommonConsumer() {
   TORCH_CHECK(
       !all_chains.empty(),
       "Compute At expects ",
-      producer_,
+      producer_->name(),
       " is a dependency of ",
-      consumer_,
+      consumer_->name(),
       ", however it is not.");
 
   // Remove all TVs from producer to consumer as common consumer must be at or

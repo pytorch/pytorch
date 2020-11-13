@@ -1,5 +1,6 @@
 import unittest
 import os
+import random
 
 import torch
 
@@ -650,6 +651,177 @@ class TestCudaFuser(JitTestCase):
                         perm1 = range(len(x))
                         self._reduction_helper(x, axes, torch.float32, "cuda", perm0, perm1, keepdim)
 
+    def _layer_norm_helper(self, shape, norm_shape, dtype, device, error):
+        class MyLayerNorm(torch.nn.Module):
+            __constants__ = ['norm_shape']
+
+            def __init__(self):
+                super(MyLayerNorm, self).__init__()
+                self.norm_shape = norm_shape
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                o = torch.add(x, y)
+                o = torch.nn.functional.layer_norm(o, self.norm_shape)
+                return o
+
+        t = MyLayerNorm()
+
+        x = torch.randn(shape, dtype=dtype, device=device)
+        y = torch.randn(shape, dtype=dtype, device=device)
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        # numerical issues here due to our scheduling.
+        # can't use `self.assertEqual(o, jit_o)`
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_layer_norm(self):
+        dims = 4
+        rnds = 3
+        for idx in range(rnds):
+            for offset in range(1, dims):
+                input_shape = [random.randint(30, 100) for idx in range(dims)]
+                norm_shape = [input_shape[idx] for idx in range(dims - offset, dims)]
+                self._layer_norm_helper(input_shape, norm_shape, torch.float32, "cuda", 1e-4)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_layer_norm_half(self):
+        dims = 4
+        rnds = 3
+        for idx in range(rnds):
+            for offset in range(1, dims):
+                input_shape = [random.randint(30, 100) for idx in range(dims)]
+                norm_shape = [input_shape[idx] for idx in range(dims - offset, dims)]
+                self._layer_norm_helper(input_shape, norm_shape, torch.float16, "cuda", 5e-3)
+
+    def _batch_norm_helper(self, shape, dtype, device, error):
+        class MyBatchNorm(torch.nn.Module):
+            def __init__(self):
+                super(MyBatchNorm, self).__init__()
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor, r_mean : torch.Tensor, r_var : torch.Tensor):
+                o = torch.add(x, y)
+                o = torch.nn.functional.batch_norm(o, r_mean, r_var, training=True)
+                return o
+
+        t = MyBatchNorm()
+
+        x = torch.randn(shape, dtype=dtype, device=device)
+        y = torch.randn(shape, dtype=dtype, device=device)
+        running_mean = torch.randn(shape[1], dtype=torch.float32, device=device)
+        running_var = torch.randn(shape[1], dtype=torch.float32, device=device)
+        t_jit = torch.jit.script(t)
+
+        eager_running_mean = running_mean.clone()
+        eager_running_var = running_var.clone()
+        jit_running_mean = running_mean.clone()
+        jit_running_var = running_var.clone()
+
+        jit_o = t_jit(x, y, running_mean.clone(), running_var.clone())
+        jit_o = t_jit(x, y, jit_running_mean, jit_running_var)
+        o = t(x, y, eager_running_mean, eager_running_var)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        # numerical issues here due to our scheduling.
+        # can't use `self.assertEqual(o, jit_o)`
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        # TODO: enable checks when we support in-place updates for batch_norm tensors
+        # self.assertTrue(self._compare("comparing output failed", eager_running_mean, jit_running_mean, error))
+        # self.assertTrue(self._compare("comparing output failed", eager_running_var, jit_running_var, error))
+        self.assertGraphContains(t_jit.graph_for(x, y, running_mean, running_var), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_batch_norm(self):
+        output_elements = 10000
+        channel_sizes = [67, 457, 1024, 4096]
+
+        for dims in range(3, 6):
+            output_size = int(pow(output_elements, 1. / (dims - 1)))
+            for C in channel_sizes:
+                x = [output_size for idx in range(dims)]
+                x[1] = C
+                self._batch_norm_helper(x, torch.float32, "cuda", 1e-4)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_batch_norm_half(self):
+        output_elements = 10000
+        channel_sizes = [67, 457, 1024, 4096]
+
+        for dims in range(3, 6):
+            output_size = int(pow(output_elements, 1. / (dims - 1)))
+            for C in channel_sizes:
+                x = [output_size for idx in range(dims)]
+                x[1] = C
+                self._batch_norm_helper(x, torch.float16, "cuda", 5e-3)
+
+    def _softmax_helper(self, shape, reduction_axis, dtype, device, error):
+        class MySoftmax(torch.nn.Module):
+            __constants__ = ['reduction_axis']
+
+            def __init__(self):
+                super(MySoftmax, self).__init__()
+                self.reduction_axis = reduction_axis
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                o = torch.add(x, y)
+                o = torch.nn.functional.softmax(o, dim=self.reduction_axis)
+                return o
+
+        t = MySoftmax()
+
+        x = torch.randn(shape, dtype=dtype, device=device)
+        y = torch.randn(shape, dtype=dtype, device=device)
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        # numerical issues here due to our scheduling.
+        # can't use `self.assertEqual(o, jit_o)`
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_softmax(self):
+        output_size = 10000
+        dims = 4
+        output_size = int(pow(output_size, 1. / dims))
+        reduction_sizes = [67, 256, 1024, 4096]
+
+        for reduction_dim in range(dims):
+            for reduction_size in reduction_sizes:
+                x = [output_size for idx in range(dims)]
+                x[reduction_dim] = reduction_size
+                self._softmax_helper(x, reduction_dim, torch.float32, "cuda", 1e-4)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_softmax_half(self):
+        output_size = 10000
+        dims = 4
+        output_size = int(pow(output_size, 1. / dims))
+        reduction_sizes = [67, 256, 1024, 4096]
+
+        for reduction_dim in range(dims):
+            for reduction_size in reduction_sizes:
+                x = [output_size for idx in range(dims)]
+                x[reduction_dim] = reduction_size
+                self._softmax_helper(x, reduction_dim, torch.float16, "cuda", 5e-3)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -825,7 +997,6 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
-
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

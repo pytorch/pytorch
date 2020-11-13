@@ -137,7 +137,8 @@ class AllocateReuseModifier {
 
     // Assume the first argument contains the primary variable
     // Follow path along point-wise operations
-    if (first_tv_input != nullptr) {
+    if (first_tv_input != nullptr &&
+        map_tv_to_last_usage_[first_tv_input] <= map_expr_to_pos_[expr]) {
       if (const auto def = first_tv_input->definition()) {
         return findCompatibleInputAllocate(output_size_str, def);
       }

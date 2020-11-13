@@ -111,6 +111,16 @@ TORCH_CUDA_API TensorView* sum(
     const std::vector<int>& reduction_axes,
     bool keep_dim = false);
 
+TORCH_CUDA_API TensorView* max(
+    TensorView* v1,
+    const std::vector<int>& reduction_axes,
+    bool keep_dim = false);
+
+TORCH_CUDA_API TensorView* min(
+    TensorView* v1,
+    const std::vector<int>& reduction_axes,
+    bool keep_dim = false);
+
 // COMPOUND OPERATIONS
 // add_alpha
 TORCH_CUDA_API Val* add_alpha(Val* v1, Val* v2, Val* s);

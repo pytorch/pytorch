@@ -88,6 +88,9 @@ class TORCH_CUDA_API LoopNestGenerator {
   // allocations in the correct order, which is necessary for memory aliasing
   std::unordered_map<kir::ForLoop*, size_t> for_loop_allocations_;
 
+  // Track number of allocations outside any for loop.
+  size_t lowered_exprs_allocations_ = 0;
+
   // Lowered exprs to return
   std::vector<kir::Expr*> lowered_exprs_;
 

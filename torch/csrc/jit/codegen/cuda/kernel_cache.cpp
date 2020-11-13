@@ -284,26 +284,21 @@ FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion>&& fusion)
     // instead of exprs.
 
     // The call is relatively heavy weight, consider caching
-    auto used_vals = DependencyCheck::getAllValsBetween(
+    auto all_values = DependencyCheck::getAllValsBetween(
         {fusion_->inputs().begin(), fusion_->inputs().end()},
         fusion_->outputs());
 
-    // Find the reduction tensor view, make sure there's only one
-    for (auto val : used_vals) {
-      if (val->getValType().value() == ValType::TensorView) {
-        auto tv = val->as<TensorView>();
-        if (tv->hasReduction()) {
-          TORCH_INTERNAL_ASSERT(
-              reduction_tv_ == nullptr,
-              "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
-          reduction_tv_ = tv;
-        }
+    // Separate the reduction TensorViews from the other TensorViews
+    // Ignore input TensorViews
+    for (auto tv : ir_utils::filterByType<TensorView>(all_values)) {
+      if (tv->hasReduction()) {
+        reduction_tv_.push_back(tv);
       }
     }
 
     TORCH_INTERNAL_ASSERT(
-        reduction_tv_ != nullptr,
-        "Could not find the reduction tensor view in the fusion.");
+        !reduction_tv_.empty(),
+        "Could not find any reduction TensorViews in the fusion.");
   }
 }
 
@@ -330,8 +325,10 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     // caching strategy is different for pw-fusion and reduction-fusion.
     if (has_reduction_) {
       // Generate the reduction parameters
-      auto reduction_params =
-          getReductionHeuristics(fusion_.get(), inputs, reduction_tv_);
+      auto reduction_params = (reduction_tv_.size() > 1)
+          ? getMultipleReductionHeuristics(fusion_.get(), inputs, reduction_tv_)
+          : getReductionHeuristics(
+                fusion_.get(), inputs, reduction_tv_.front());
 
       TORCH_INTERNAL_ASSERT(
           reduction_params.has_value(),
@@ -339,6 +336,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
       launch_params = reduction_params.value().lparams;
 
+      // cache based on launch parameters
       auto fusion_executor =
           &red_fusion_executor_cache_[device_index][reduction_params.value()];
 
@@ -347,53 +345,57 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
         // We clone *fusion_ to fusion so we can leave the unscheduled
         // computational graph intact for future compilation.
-        Fusion fusion = *fusion_;
-
-        FusionGuard fg(&fusion);
+        Fusion fusion_clone = *fusion_;
+        FusionGuard fg(&fusion_clone);
 
         // Heavy weight call
-        auto used_vals = DependencyCheck::getAllValsBetween(
-            {fusion.inputs().begin(), fusion.inputs().end()}, fusion.outputs());
+        auto all_values = DependencyCheck::getAllValsBetween(
+            {fusion_clone.inputs().begin(), fusion_clone.inputs().end()},
+            fusion_clone.outputs());
 
-        TensorView* reduction_tv = nullptr;
-
-        for (auto val : used_vals) {
-          if (val->getValType().value() == ValType::TensorView) {
-            auto tv = val->as<TensorView>();
-            if (tv->hasReduction()) {
-              TORCH_INTERNAL_ASSERT(
-                  reduction_tv == nullptr,
-                  "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
-              reduction_tv = tv;
-            }
+        // Separate the reduction TensorViews from the other TensorViews
+        // Ignore input TensorViews
+        std::vector<TensorView*> clone_reduction_tv;
+        std::vector<TensorView*> clone_other_tv;
+        for (auto tv : ir_utils::filterByType<TensorView>(all_values)) {
+          if (tv->hasReduction()) {
+            clone_reduction_tv.push_back(tv);
+          } else if (!fusion_clone.hasInput(tv)) {
+            clone_other_tv.push_back(tv);
           }
         }
 
-        TORCH_INTERNAL_ASSERT(
-            reduction_tv != nullptr,
-            "Could not find the reduction tensor view in the fusion.");
+        if (clone_reduction_tv.size() > 1) {
+          scheduleMultipleReduction(
+              &fusion_clone,
+              reduction_params.value(),
+              clone_reduction_tv,
+              clone_other_tv);
+        } else {
+          auto single_reduction_tv = clone_reduction_tv.front();
 
-        // Heavy weight call
-        auto outputsOfReduction =
-            DependencyCheck::getAllOutputsOf({reduction_tv});
+          // Heavy weight call
+          auto outputs_of_reduction =
+              DependencyCheck::getAllOutputsOf({single_reduction_tv});
 
-        auto tv_entries =
-            ir_utils::filterByType<TensorView>(outputsOfReduction);
+          auto tv_entries =
+              ir_utils::filterByType<TensorView>(outputs_of_reduction);
 
-        std::vector<TensorView*> tvOutputsOfReduction(
-            tv_entries.begin(), tv_entries.end());
+          std::vector<TensorView*> tv_outputs_of_reduction(
+              tv_entries.begin(), tv_entries.end());
 
-        scheduleReduction(
-            &fusion,
-            reduction_params.value(),
-            reduction_tv,
-            tvOutputsOfReduction);
+          scheduleReduction(
+              &fusion_clone,
+              reduction_params.value(),
+              single_reduction_tv,
+              tv_outputs_of_reduction);
+        }
 
-        // This means we have not found a previously generated kernel that's
+        // This means we have not found a previously generated kernel that is
         // compatible with the new reduction params. We need to finish codegen.
         CompileOptions options;
         options.device = c10::Device(DeviceType::CUDA, device_index);
-        fusion_executor->compileFusion(&fusion, options);
+        fusion_executor->compileFusion(&fusion_clone, options);
       }
       // record new short cut to `FusionExecutor`
       code_to_fe_lookup_[unique_id] = fusion_executor;
@@ -405,8 +407,8 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
             std::make_unique<FusionExecutor>();
         CompileOptions options;
         options.device = c10::Device(DeviceType::CUDA, device_index);
-        // no need to copy fusion_, as we are not generating more than 1 kernel
-        // for PW.
+        // We do not need to copy fusion_ because we are not generating
+        // multiple kernels for point-wise operations.
         scheduleFusion(fusion_.get(), inputs);
         pw_fusion_executor_cache_[device_index]->compileFusion(
             fusion_.get(), options);
