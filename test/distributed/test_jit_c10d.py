@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 
 import unittest
-import traceback
 import tempfile
 from sys import platform
 import torch
@@ -11,8 +10,6 @@ import torch.distributed as c10d
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_rocm_single_process
 from torch.testing._internal.common_utils import TestCase, load_tests, TEST_WITH_TSAN
-
-from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -77,6 +74,3 @@ class ProcessGroupNCCLJitTest(TestCase):
             return work.result()
 
         run_pg_nccl_alltoall(nccl_pg, output, input)
-
-
-

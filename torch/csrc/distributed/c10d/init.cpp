@@ -1228,8 +1228,9 @@ Arguments:
 // all the TorchBind issues and merge these two together. we shouldn't
 // document this until we finish the migration.
 
-static auto StoreTorchBind = torch::class_<::c10d::Store>("dist_c10d", "Store");
-static auto TCPStoreTorchBind =
+static const auto StoreTorchBind =
+    torch::class_<::c10d::Store>("dist_c10d", "Store");
+static const auto TCPStoreTorchBind =
     torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
         .def(torch::init([](const std::string& host_name,
                             int64_t port,
@@ -1240,7 +1241,7 @@ static auto TCPStoreTorchBind =
         }));
 
 // Torchbind the ProcessGroup to make it available in TorchScript
-static auto ProcessGroupWorkTorchBind =
+static const auto ProcessGroupWorkTorchBind =
     torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
         .def(torch::init<>())
         .def(
@@ -1253,7 +1254,7 @@ static auto ProcessGroupWorkTorchBind =
             })
         .def("result", &::c10d::ProcessGroup::Work::result);
 
-static auto ProcessGroupTorchBind =
+static const auto ProcessGroupTorchBind =
     torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
 
 #ifdef USE_C10D_NCCL
@@ -1263,13 +1264,13 @@ static auto ProcessGroupTorchBind =
 // didn't do that because: 1. no milisecond support yet
 // 2. no def_readwrite or property support yet.
 // TODO: make this binding the same as pybind11
-static auto ProcessGroupNCCLOptionsTorchBind =
+static const auto ProcessGroupNCCLOptionsTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL::Options>(
         "dist_c10d",
         "ProcessGroupNCCLOptions")
         .def(torch::init<int64_t, bool>());
 
-static auto ProcessGroupNCCLTorchBind =
+static const auto ProcessGroupNCCLTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
         .def(torch::init<
              const c10::intrusive_ptr<::c10d::Store>&,
