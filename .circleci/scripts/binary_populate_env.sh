@@ -43,6 +43,12 @@ configs=($BUILD_ENVIRONMENT)
 export PACKAGE_TYPE="${configs[0]}"
 export DESIRED_PYTHON="${configs[1]}"
 export DESIRED_CUDA="${configs[2]}"
+
+# Use split CUDA build to alleviate linker issues for CUDA 11.1
+if [[ "$DESIRED_CUDA" == 'cu111' ]]; then
+  export BUILD_SPLIT_CUDA=1
+fi
+
 if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
   export DESIRED_DEVTOOLSET=""
   export LIBTORCH_CONFIG="${configs[3]:-}"
