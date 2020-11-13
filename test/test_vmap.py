@@ -2,6 +2,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import Tensor, vmap
 import functools
+import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
@@ -1265,6 +1266,26 @@ class TestVmapOperators(Namespace.TestVmapBase):
         result = vmap(op)(real_tensor)
         self.assertEqual(result.data_ptr(), real_tensor.data_ptr())
 
+    def test_contiguous(self):
+        op = Tensor.contiguous
+
+        self._test_unary(op, TensorFactory.randn, 'cpu')
+
+        # check that contiguous returns the original tensor if the per-examples
+        # are already contiguous
+        B0 = 3
+        x = torch.randn(B0, 2, 5, 7)
+        x = x.movedim(0, 2)
+        result = vmap(Tensor.contiguous, in_dims=2, out_dims=2)(x)
+        self.assertTrue(result is x)
+
+        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        tensor = torch.randn(B0, 3)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(op, memory_format=torch.channels_last))(tensor)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(op, memory_format=torch.channels_last_3d))(tensor)
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -1431,6 +1452,62 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         self.assertEqual(vmap(foo)(ctensor), torch.tensor([1, 1, 1]))
         self.assertEqual(vmap(foo)(tensor), torch.tensor([0, 0, 0]))
+
+    def test_is_contiguous(self):
+        def foo(x):
+            if x.is_contiguous():
+                return torch.tensor(1.)
+            else:
+                return torch.tensor(0.)
+
+        B0, B1 = 3, 5
+
+        # Single batch dim
+        contig = torch.randn(B0, 2, 7)
+        self.assertEqual(vmap(foo)(contig), torch.ones(B0))
+
+        noncontig = torch.randn(2, B0, 7)
+        self.assertEqual(vmap(foo, in_dims=1)(noncontig), torch.zeros(B0))
+
+        noncontig = torch.randn(2, B0, 7).movedim(1, 0)
+        self.assertEqual(vmap(foo)(noncontig), torch.zeros(B0))
+
+        noncontig = torch.randn(2, 7, B0)
+        self.assertEqual(vmap(foo, in_dims=2)(noncontig), torch.zeros(B0))
+
+        # Multiple batch dims
+        contig = torch.randn(B0, B1, 3)
+        self.assertEqual(vmap(vmap(foo))(contig), torch.ones(B0, B1))
+
+        contig = torch.randn(B1, B0, 3)
+        self.assertEqual(vmap(vmap(foo), in_dims=1)(contig), torch.ones(B0, B1))
+
+        contig = torch.randn(B1, B0, 3).movedim(0, 1)
+        self.assertEqual(vmap(vmap(foo))(contig), torch.ones(B0, B1))
+
+        noncontig = torch.randn(B0, 3, B1)
+        self.assertEqual(vmap(vmap(foo, in_dims=1))(noncontig), torch.zeros(B0, B1))
+
+        # is_contiguous on empty tensor is True
+        def bar(x):
+            assert x.is_contiguous()
+            return x
+
+        vmap(bar)(torch.randn(B0, 0, 3))
+        vmap(bar, in_dims=1)(torch.randn(0, B0, 3))
+        vmap(bar)(torch.randn(B0, 0, 3).transpose(-1, -2))
+
+        # is_contiguous with other memory formats
+        def baz(x, memory_format):
+            x.is_contiguous(memory_format=memory_format)
+            return x
+
+        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        tensor = torch.randn(B0, 2, 7, 3)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(baz, memory_format=torch.channels_last))(tensor)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
 
     def test_movedim(self):
         op = torch.movedim
@@ -1628,18 +1705,32 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
 
+    def test_squeeze(self):
+        test = self._vmap_view_test
+        op = torch.squeeze
+        B0, B1 = 1, 11
+        test(op, (torch.rand(B0),))
+        test(op, (torch.rand(B0, 3, 5),))
+        test(op, (torch.rand(1, B0, 5),), in_dims=1)
+        test(op, (torch.rand(B0, 0, 1, 5, 1),))
+        test(op, (torch.rand(B0, 1, 1, 1, 1),))
+        test(vmap(op), (torch.rand(B0, B1, 1),))
+        test(vmap(op), (torch.rand(B1, 1, B0),), in_dims=2)
+
     def test_sum_dim(self):
         test = self._vmap_test
         B0, B1 = 5, 7
 
         # Single vmap, various in_dims / out_dims
         test(lambda x: x.sum(0), [torch.randn([B0])])
+        test(lambda x: x.sum(-1), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0, 3])])
         test(lambda x: x.sum(-1), [torch.randn([2, 5, B0, 3])], in_dims=2)
         test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
 
         # Doubly nested vmap
         test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
+        test(vmap(lambda x: x.sum(-1)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
         test(vmap(lambda x: x.sum(2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
              in_dims=2, out_dims=2)
@@ -1753,6 +1844,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
              in_dims=(2, None, None))
         test(vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+
+    def test_transpose(self):
+        op = torch.transpose
+        test = self._vmap_view_test
+
+        B0, B1, B2 = 7, 11, 13
+        test(lambda x: op(x, 0, 1), (torch.rand(B0, 2, 5),))
+        test(lambda x: op(x, -1, -2), (torch.rand(B0, 2, 5),))
+        test(lambda x: op(x, 3, 1), (torch.rand(B0, 2, 5, 4, 6),))
+        test(lambda x: op(x, 1, 0), (torch.rand(2, B0, 5),), in_dims=1)
+        test(vmap(lambda x: op(x, 0, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
+        test(vmap(vmap(lambda x: op(x, 0, 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 5, B2),), in_dims=2)
+
+        # Special case: scalar tensor
+        for dim1, dim2 in itertools.product([0, -1], [0, -1]):
+            x = torch.rand(B0)
+            result = vmap(lambda x: op(x, dim1, dim2))(x)
+            self.assertTrue(result is x)
 
     def test_t(self):
         op = torch.t
@@ -1954,7 +2064,9 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     # output_process_fn: a function that maps the outputs to the part
     #       that should be differentiated.
     # batch_size: the batch dim size for the batched grad
-    def _batched_grad_test(self, op, args, kwargs, output_process_fn=lambda x: x, batch_size=3):
+    def _batched_grad_test(self, op, args, kwargs=None, output_process_fn=lambda x: x, batch_size=3):
+        if kwargs is None:
+            kwargs = {}
         outputs = op(*args, **kwargs)
         outputs = differentiable(output_process_fn(outputs))
         batched_vectors = tuple(construct_v(out, batch_size) for out in outputs)
@@ -1978,7 +2090,9 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     # Regression.
     # It might be useful to have a test that computes batched first gradients and
     # then uses those to compute batched second gradients in the future.
-    def _batched_grad_grad_test(self, op, args, kwargs, output_process_fn=lambda x: x, batch_size=3):
+    def _batched_grad_grad_test(self, op, args, kwargs=None, output_process_fn=lambda x: x, batch_size=3):
+        if kwargs is None:
+            kwargs = {}
         outputs = op(*args, **kwargs)
         outputs = differentiable(output_process_fn(outputs))
         ones = tuple(torch.ones_like(out) for out in outputs)
@@ -2005,12 +2119,12 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(2, 3, requires_grad=True, device=device)
         y = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         scalar = 3.14
-        self._batched_grad_test(op, (x, y), {})
-        self._batched_grad_test(op, (scalar, y), {})
-        self._batched_grad_test(op, (x, scalar), {})
+        self._batched_grad_test(op, (x, y))
+        self._batched_grad_test(op, (scalar, y))
+        self._batched_grad_test(op, (x, scalar))
 
         if test_grad_grad:
-            self._batched_grad_grad_test(op, (x, y), {})
+            self._batched_grad_grad_test(op, (x, y))
 
     def test_add(self, device):
         self._test_arithmetic(torch.add, device, test_grad_grad=False)
@@ -2033,7 +2147,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
         def op(x):
             return x.expand(5, 5, 2, 3)
-        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_test(op, (x,))
 
     @allowVmapFallbackUsage
     def test_index(self, device):
@@ -2044,18 +2158,18 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             y = x * x
             return y[index]
 
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
+        self._batched_grad_test(op, (x,))
+        self._batched_grad_grad_test(op, (x,))
 
     def test_lgamma(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
-        self._batched_grad_test(Tensor.lgamma, (x,), {})
-        self._batched_grad_grad_test(Tensor.lgamma, (x,), {})
+        self._batched_grad_test(Tensor.lgamma, (x,))
+        self._batched_grad_grad_test(Tensor.lgamma, (x,))
 
     def test_log(self, device):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
-        self._batched_grad_test(torch.log, (x,), {})
-        self._batched_grad_grad_test(torch.log, (x,), {})
+        self._batched_grad_test(torch.log, (x,))
+        self._batched_grad_grad_test(torch.log, (x,))
 
     def test_logsumexp(self, device):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
@@ -2063,28 +2177,28 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         def op(x):
             return torch.logsumexp(x, -1)
 
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
+        self._batched_grad_test(op, (x,))
+        self._batched_grad_grad_test(op, (x,))
 
     def test_log1p(self, device):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
-        self._batched_grad_test(torch.log1p, (x,), {})
-        self._batched_grad_grad_test(torch.log1p, (x,), {})
+        self._batched_grad_test(torch.log1p, (x,))
+        self._batched_grad_grad_test(torch.log1p, (x,))
 
     @allowVmapFallbackUsage
     def test_max(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
-        self._batched_grad_test(torch.max, (x,), {})
+        self._batched_grad_test(torch.max, (x,))
 
     @allowVmapFallbackUsage
     def test_median(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
-        self._batched_grad_test(torch.median, (x,), {})
+        self._batched_grad_test(torch.median, (x,))
 
     @allowVmapFallbackUsage
     def test_min(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
-        self._batched_grad_test(torch.min, (x,), {})
+        self._batched_grad_test(torch.min, (x,))
 
     def test_permute(self, device):
         x = torch.randn(2, 3, 5, requires_grad=True, device=device)
@@ -2092,7 +2206,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         def op(x):
             return x.permute(2, 0, 1)
 
-        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_test(op, (x,))
 
     def test_reshape(self, device):
         x = torch.randn(2, 3, 5, requires_grad=True, device=device)
@@ -2100,12 +2214,12 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         def op(x):
             return x.reshape([2 * 3, 5])
 
-        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_test(op, (x,))
 
     def test_sigmoid(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
-        self._batched_grad_test(Tensor.sigmoid, (x,), {})
-        self._batched_grad_grad_test(Tensor.sigmoid, (x,), {})
+        self._batched_grad_test(Tensor.sigmoid, (x,))
+        self._batched_grad_grad_test(Tensor.sigmoid, (x,))
 
     def test_stack(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
@@ -2113,19 +2227,19 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
         def op(x, y):
             return torch.stack([x, y])
-        self._batched_grad_test(op, (x, y), {})
+        self._batched_grad_test(op, (x, y))
 
     def test_select(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
-        self._batched_grad_test(lambda x: x[1], (x,), {})
-        self._batched_grad_test(lambda x: x.select(1, 2), (x,), {})
-        self._batched_grad_test(lambda x: x.select(-1, 0), (x,), {})
+        self._batched_grad_test(lambda x: x[1], (x,))
+        self._batched_grad_test(lambda x: x.select(1, 2), (x,))
+        self._batched_grad_test(lambda x: x.select(-1, 0), (x,))
 
     def test_slice(self, device):
         x = torch.randn(2, 3, 5, device=device, requires_grad=True)
-        self._batched_grad_test(lambda x: x[0:1], (x,), {})
-        self._batched_grad_test(lambda x: x[:, 1:3], (x,), {})
-        self._batched_grad_test(lambda x: x[..., 1:3], (x,), {})
+        self._batched_grad_test(lambda x: x[0:1], (x,))
+        self._batched_grad_test(lambda x: x[:, 1:3], (x,))
+        self._batched_grad_test(lambda x: x[..., 1:3], (x,))
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
@@ -2160,10 +2274,10 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     def test_diagonal(self, device):
         x = torch.randn(4, 5, device=device, requires_grad=True)
-        self._batched_grad_test(lambda x: x.diagonal(1, 0, 1), (x,), {})
+        self._batched_grad_test(lambda x: x.diagonal(1, 0, 1), (x,))
 
         x = torch.randn(3, 4, 5, device=device, requires_grad=True)
-        self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,), {})
+        self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,))
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
