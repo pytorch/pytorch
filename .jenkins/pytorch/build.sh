@@ -9,13 +9,6 @@ set -ex
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
-# Temp: use new sccache
-if [[ -n "$IN_CI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  # Download customized sccache
-  sudo curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
-  sudo chmod 755 /opt/cache/bin/sccache
-fi
-
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
