@@ -811,8 +811,7 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
     if (compute_q) {
         // Fix the number of columns of q appropriately
         q_sizes[self.dim() - 1] = n_columns_q;
-        q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
-        q_working_copy = q_working_copy.expand_as(q_working_copy);
+        q_working_copy = at::zeros(q_sizes, self.options());
     } else {
       q_working_copy = at::empty({0}, self.options());
     }
