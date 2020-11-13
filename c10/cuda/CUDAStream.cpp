@@ -299,7 +299,7 @@ CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
       CUDAStream::UNCHECKED,
       Stream(
           Stream::UNSAFE,
-          c10::Device(DeviceType::CUDA, ptr->device_index),
+          c10::Device::cuda_unchecked(ptr->device_index),
           CUDAStream_getStreamId(ptr)));
 }
 

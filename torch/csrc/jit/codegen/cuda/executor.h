@@ -18,7 +18,7 @@ namespace cuda {
 
 // TODO: Should this actually be in launch params?
 struct TORCH_CUDA_API CompileOptions {
-  c10::Device device = c10::Device(c10::DeviceType::CUDA, 0);
+  c10::Device device = c10::Device::cuda_unchecked(0);
 };
 
 class TORCH_CUDA_API FusionExecutor : public NonCopyable {

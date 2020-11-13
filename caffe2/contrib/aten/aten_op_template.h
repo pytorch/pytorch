@@ -65,7 +65,7 @@ private:
     at::Device device = ten.GetDevice();
 #ifdef __HIP_PLATFORM_HCC__
     if (backend() == at::Backend::HIP) {
-      device = at::Device(kCUDA, device.index());
+      device = at::Device::cuda_unchecked(device.index());
     }
 #endif
     return at::TensorOptions(device).dtype(ten.dtype());

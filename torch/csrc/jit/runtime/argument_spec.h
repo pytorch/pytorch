@@ -16,7 +16,7 @@ namespace jit {
 // dimensionalitities and types of inputs.
 
 inline static at::Device ConvertIntToCPUOrCUDA(int device) {
-  return device < 0 ? at::kCPU : at::Device(DeviceType::CUDA, device);
+  return device < 0 ? at::kCPU : at::Device::cuda_unchecked(device);
 }
 struct ArgumentInfo {
   friend struct ArgumentSpec;

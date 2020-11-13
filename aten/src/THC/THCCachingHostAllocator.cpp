@@ -90,7 +90,7 @@ struct HostAllocator
     at::OptionalDeviceGuard device_guard;
     auto primary_ctx_device_index = at::detail::getCUDAHooks().getDevceIndexWithPrimaryContext();
     if (primary_ctx_device_index.has_value()) {
-      device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+      device_guard.reset_device(at::Device::cuda_unchecked(*primary_ctx_device_index));
     }
 
     // note that cudaHostAlloc may not touch pointer if size is 0

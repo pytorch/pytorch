@@ -314,7 +314,7 @@ class DeviceCachingAllocator {
     active_blocks.insert(block);
 
     c10::reportMemoryUsageToProfiler(
-        block, block->size, c10::Device(c10::DeviceType::CUDA, device));
+        block, block->size, c10::Device::cuda_unchecked(device));
 
     update_stat_array(stats.allocation, 1, params.stat_types);
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
@@ -331,7 +331,7 @@ class DeviceCachingAllocator {
     block->allocated = false;
 
     c10::reportMemoryUsageToProfiler(
-        block, -block->size, c10::Device(c10::DeviceType::CUDA, block->device));
+        block, -block->size, c10::Device::cuda_unchecked(block->device));
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -919,12 +919,12 @@ struct CudaCachingAllocator : public Allocator {
     void* r = nullptr;
     if (forceUncachedAllocator()) {
       C10_CUDA_CHECK(cudaMalloc(&r, size));
-      return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
+      return {r, r, &uncached_delete, Device::cuda_unchecked(device)};
     }
     if (size != 0) {
       caching_allocator.malloc(&r, device, size, cuda::getCurrentCUDAStream(device));
     }
-    return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
+    return {r, r, &raw_delete, Device::cuda_unchecked(device)};
   }
   DeleterFnPtr raw_deleter() const override {
     return &raw_delete;

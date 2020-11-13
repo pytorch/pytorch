@@ -23,7 +23,7 @@ at::DataPtr THCIpcDeleter::makeDataPtr(std::shared_ptr<void> basePtr, void* data
   int cur_device;
   THCudaCheck(cudaGetDevice(&cur_device));
   auto* context = new THCIpcDeleter(std::move(basePtr));
-  return {data, context, &deleteTHCIpcDeleter, at::Device(at::DeviceType::CUDA, cur_device)};
+  return {data, context, &deleteTHCIpcDeleter, at::Device::cuda_unchecked(cur_device)};
 }
 
 THCIpcDeleter::THCIpcDeleter(std::shared_ptr<void> basePtr)
