@@ -8,8 +8,8 @@ from random import randrange
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
-     onlyCUDA, onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes,
+     onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA)
 from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
@@ -61,8 +61,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
@@ -156,23 +155,9 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
             torch.linalg.cholesky(A, out=out)
 
-    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
-    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    def test_cholesky_xfailed(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-        A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
-        expected_L = np.linalg.cholesky(A.cpu().numpy())
-        actual_L = torch.linalg.cholesky(A)
-        self.assertEqual(actual_L, expected_L)
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float64, torch.complex128)
-    @dtypes(torch.float64)
+    @dtypes(torch.float64, torch.complex128)
     def test_cholesky_autograd(self, device, dtype):
         def func(root):
             x = 0.5 * (root + root.transpose(-1, -2).conj())
@@ -194,22 +179,6 @@ class TestLinalg(TestCase):
         shapes = ((3, 3), (4, 3, 2, 2))
         for shape in shapes:
             run_test(shape)
-
-    # TODO: enable CUDA tests once (merge with above test)
-    # batched matmul for complex dtypes on CUDA is implemented
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex128)
-    def test_cholesky_autograd_xfailed(self, device, dtype):
-        def func(root):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.linalg.cholesky(x)
-
-        shape = (3, 2, 2)
-        root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
-        root = root + torch.eye(shape[-1], dtype=dtype, device=device)
-        gradcheck(func, root)
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
     @slowTest
