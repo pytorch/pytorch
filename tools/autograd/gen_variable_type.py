@@ -840,7 +840,6 @@ def emit_body(declaration):
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.append(emit_history())
-    if requires_derivative:
         body.append(emit_save_outputs())
         body.extend(emit_check_if_in_complex_autograd_allowlist())
     if base_name in RESET_GRAD_ACCUMULATOR:
