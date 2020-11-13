@@ -1,6 +1,19 @@
 #include "caffe2/utils/threadpool/pthreadpool.h"
+#include "caffe2/utils/threadpool/pthreadpool-cpp.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
+namespace caffe2 {
+namespace {
+static thread_local bool using_new_threadpool{false};
+}
+WithCastToNewThreadPool::WithCastToNewThreadPool(bool use_new_threadpool) {
+  use_new_threadpool_ = using_new_threadpool;
+  using_new_threadpool = use_new_threadpool;
+}
+WithCastToNewThreadPool::~WithCastToNewThreadPool() {
+  using_new_threadpool = use_new_threadpool_;
+}
+}
 
 //
 // External API
@@ -19,12 +32,16 @@ void legacy_pthreadpool_compute_1d(
     }
     return;
   }
-  reinterpret_cast<caffe2::ThreadPool*>(threadpool)
-      ->run(
-          [function, argument](int threadId, size_t workId) {
-            function(argument, workId);
-          },
-          range);
+  if (caffe2::using_new_threadpool) {
+    pthreadpool_parallelize_1d(threadpool, function, argument, range, 0u);
+  } else {
+    reinterpret_cast<caffe2::ThreadPool*>(threadpool)
+        ->run(
+            [function, argument](int threadId, size_t workId) {
+              function(argument, workId);
+            },
+            range);
+  }
 }
 
 void legacy_pthreadpool_parallelize_1d(
