@@ -15,6 +15,7 @@ from . import reduction      # noqa: F401
 # from . import softmax        # noqa: F401
 from . import rnn_eltwise    # noqa: F401
 from . import swish          # noqa: F401
+from . import cpu_fusion     # noqa: F401
 
 
 def main():
