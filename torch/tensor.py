@@ -11,7 +11,7 @@ from typing import Any, Dict, Tuple, Union
 from numbers import Number
 import functools
 from functools import reduce
-from typing import Optional
+from typing import Optional, List
 import itertools
 from collections import defaultdict
 import math
@@ -1021,7 +1021,7 @@ class Tensor(torch._C._TensorBase):
             col_value[p1].append((p2, v))
         ro = [0]
         co = []
-        values = []
+        vals: List[Any] = []
 
         for i in range(reduce((lambda x, y: x * y), shape[:l])):
             cv = col_value.get(i, [])
@@ -1030,11 +1030,11 @@ class Tensor(torch._C._TensorBase):
             if len(cv) != 0:
                 c, v = zip(*cv)
                 co.extend(c)
-                values.extend(v)
+                vals.extend(v)
 
         return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
                                        torch.tensor(co, dtype=torch.int32),
-                                       torch.tensor(values, dtype=torch.double),
+                                       torch.tensor(vals, dtype=torch.double),
                                        torch.tensor(reduction), shape, fill_value)
 
 

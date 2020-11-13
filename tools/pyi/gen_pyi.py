@@ -482,6 +482,9 @@ def gen_pyi(declarations_path, out):
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+        'sparse_gcs_tensor' : ['def sparse_gcs_tensor(pointers: Tensor, indices: Tensor,'
+                               'values: Tensor, reduction: Tensor, shape: Any,'
+                               'fill_value: float) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
                   ' step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                   .format(FACTORY_PARAMS)],
