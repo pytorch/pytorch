@@ -34,7 +34,7 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
     )
     annotated_args: List[str] = []
     for pred, namespace in mappings:
-        groups = defaultdict(list)
+        groups: Dict[str, List[NativeFunction]] = defaultdict(list)
         for f in native_functions:
             if not should_generate_py_binding(f) or not pred(f):
                 continue
