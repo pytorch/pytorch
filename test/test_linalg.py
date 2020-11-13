@@ -211,7 +211,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_old_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import  random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def cholesky_test_helper(n, batch_dims, upper):
             A = random_hermitian_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
