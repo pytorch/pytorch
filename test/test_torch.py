@@ -1,6 +1,5 @@
 import sys
 import io
-import gc
 import inspect
 import itertools
 import math
@@ -36,7 +35,7 @@ from torch.testing._internal.common_utils import \
      wrapDeterministicFlagAPITest, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCUDAIfNotRocm, \
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, \
     onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
@@ -2951,20 +2950,34 @@ class AbstractTestCases:
                                    lambda: torch.tensor().new_zeros((5, 5), 0))
 
         def test_half_tensor(self):
-            x = torch.randn(5, 5).float()
-            y = torch.randn(5, 5).float()
-            xh, yh = x.half(), y.half()
+            devices = ["cpu"]
+            if torch.cuda.is_available():
+                devices.append("cuda")
 
-            self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
+            # contiguous tensor
+            # non-contiguous tensor
+            # dense non-overlapping tensor
+            # non-dense non-overlapping sliced tensor
+            # non-dense overlapping equal strides
+            for device in devices:
+                tset = (
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float).contiguous(),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float).transpose(0, 1),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float),
+                    torch.randn(4, 3, 2, device=device, dtype=torch.float)[:, :, ::2],
+                    torch.empty_strided(
+                        (4, 2, 3), (10, 3, 3), device=device, dtype=torch.float
+                    ).copy_(torch.rand((4, 2, 3), dtype=torch.float, device=device)),
+                )
 
-            z = torch.Tensor(5, 5)
-            self.assertEqual(z.copy_(xh), x, atol=1e-3, rtol=0)
-
-            with tempfile.NamedTemporaryFile() as f:
-                torch.save(xh, f)
-                f.seek(0)
-                xh2 = torch.load(f)
-                self.assertEqual(xh.float(), xh2.float())
+                for x in tset:
+                    self.assertEqual(x.half().float(), x, atol=1e-3, rtol=0)
+                    xh = x.half()
+                    with tempfile.NamedTemporaryFile() as f:
+                        torch.save(xh, f)
+                        f.seek(0)
+                        xh2 = torch.load(f)
+                        self.assertEqual(xh.float(), xh2.float())
 
         def test_from_buffer(self):
             a = bytearray([1, 2, 3, 4])
@@ -6053,15 +6066,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    def _test_trace(self, device, dtype, legacy):
+    @onlyOnCPUAndCUDA
+    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
+                                               include_bfloat16=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
+    def test_trace(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
-            diag = tensor.diag()
-            if legacy:
-                # NB: trace on cpu doesn't do type promotion... #47127
-                expected_dtype = dtype
-            else:
-                expected_dtype = tensor.sum().dtype
+            expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
             result = np.trace(tensor.cpu().numpy(), dtype=expected_dtype)
@@ -6077,16 +6089,6 @@ class TestTorchDeviceType(TestCase):
         )
         for shape in shapes:
             test(shape)
-
-    @onlyCPU
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
-    def test_trace_legacy(self, device, dtype):
-        self._test_trace(device, dtype, legacy=True)
-
-    @onlyCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
-    def test_trace(self, device, dtype):
-        self._test_trace(device, dtype, legacy=False)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -6182,88 +6184,6 @@ class TestTorchDeviceType(TestCase):
             out = torch.zeros(1, dtype=dtype, device=device)
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    def test_inverse(self, device):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        def test_inverse_helper(matrix, batches, n):
-            identity = torch.eye(n, dtype=torch.float64, device=device)
-
-            # correctness test, check matrix*matrix_inverse == identity
-            matrix_inverse = torch.inverse(matrix)
-
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse), atol=1e-8, rtol=0)
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix), atol=1e-8, rtol=0)
-
-            # torch.inverse with out and batches
-            matrix_inverse_out = torch.empty(*batches, n, n, dtype=torch.float64, device=device)
-            torch.inverse(matrix, out=matrix_inverse_out)
-            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
-
-            # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
-            if matrix.ndim > 2:
-                expected_inv_list = []
-                for mat in matrix.contiguous().view(-1, n, n):
-                    expected_inv_list.append(torch.inverse(mat))
-                expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
-                self.assertEqual(matrix_inverse, expected_inv)
-
-        for batches, n in product(
-            [[], [1], [4], [2, 3], [32]],
-            [5, 256]
-        ):
-            # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
-            if batches and batches[0] == 32 and n == 256:
-                continue
-            _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches).to(device)
-            test_inverse_helper(_matrices, batches, n)
-            test_inverse_helper(_matrices.transpose(-2, -1), batches, n)
-            test_inverse_helper(
-                random_fullrank_matrix_distinct_singular_value(n * 2, *batches).to(device)
-                .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
-                batches, n
-            )
-
-        # incorrect input test
-        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
-            torch.inverse(torch.randn(2, 3, 4, 3))
-
-        # test for zero-sized tensor
-        def test_inverse_helper_zero_size(size):
-            data = torch.zeros(*size, device=device)
-            out = torch.inverse(data)
-            self.assertTrue(out.size() == data.size())
-
-        test_inverse_helper_zero_size([0, 0])
-        test_inverse_helper_zero_size([3, 0, 0])
-        test_inverse_helper_zero_size([0, 3, 3])
-
-        # non-contiguous inputs
-        if not TEST_NUMPY:
-            return
-
-        from numpy.linalg import inv
-        matrices = random_fullrank_matrix_distinct_singular_value(3, 2).to(device).permute(0, 2, 1)
-        assert not matrices.is_contiguous()
-        matrices_inverse = torch.inverse(matrices)
-        expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
-        self.assertEqual(matrices_inverse, expected_inv.to(device))
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
-    def test_inverse_singular(self, device):
-        def helper(batch_dim, n):
-            x = torch.eye(3, 3, dtype=torch.float, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
-            x[n, -1, -1] = 0
-
-            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
-                torch.inverse(x)
-
-        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
-            helper(*params)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
@@ -7009,22 +6929,6 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(t1.is_set_to(t2))
         self.assertFalse(t2.is_set_to(t1))
 
-    @slowTest
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    def test_inverse_many_batches(self, device):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        def test_inverse_many_batches_helper(b, n):
-            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n).to(device)
-            matrices_inverse = torch.inverse(matrices)
-            self.assertEqual(torch.matmul(matrices_inverse, matrices),
-                             torch.eye(b, dtype=torch.float64, device=device).expand_as(matrices))
-
-        test_inverse_many_batches_helper(5, 256)
-        test_inverse_many_batches_helper(3, 512)
-        test_inverse_many_batches_helper(64, 64)
-
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -7709,87 +7613,6 @@ class TestTorchDeviceType(TestCase):
             run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
 
-    def solve_test_helper(self, A_dims, b_dims, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
-        return b, A
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_solve(self, device, dtype):
-        for (k, n) in zip([2, 3, 5], [3, 5, 7]):
-            b, A = self.solve_test_helper((n,), (n, k), device, dtype)
-            x = torch.solve(b, A)[0]
-            self.assertLessEqual(b.dist(A.mm(x)), 1e-12)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_solve_batched(self, device, dtype):
-        def solve_batch_helper(A_dims, b_dims):
-            b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
-            x_exp_list = []
-            for i in range(b_dims[0]):
-                x_exp_list.append(torch.solve(b[i], A[i])[0])
-            x_exp = torch.stack(x_exp_list)  # Stacked output
-            x_act = torch.solve(b, A)[0]  # Actual output
-            self.assertEqual(x_exp, x_act)  # Equality check
-            self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 1e-12)  # Correctness check
-
-        for batchsize in [1, 3, 4]:
-            solve_batch_helper((5, batchsize), (batchsize, 5, 10))
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.double)
-    def test_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype,
-                                                           device=device).permute(1, 0, 2)
-        b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
-        x, _ = torch.solve(b, A)
-        x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy())).to(dtype=dtype, device=device)
-        self.assertEqual(x, x_exp)
-
-    @slowTest
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_solve_batched_many_batches(self, device, dtype):
-        b, A = self.solve_test_helper((5, 256, 256), (5, 1), device, dtype)
-        x, _ = torch.solve(b, A)
-        self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
-
-        b, A = self.solve_test_helper((3,), (512, 512, 3, 1), device, dtype)
-        x, _ = torch.solve(b, A)
-        self.assertEqual(torch.matmul(A, x), b)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.double)
-    def test_solve_batched_broadcasting(self, device, dtype):
-        from numpy.linalg import solve
-
-        def run_test(A_dims, b_dims):
-            A_matrix_size = A_dims[-1]
-            A_batch_dims = A_dims[:-2]
-            b, A = self.solve_test_helper((A_matrix_size,) + A_batch_dims, b_dims, device, dtype)
-            x, _ = torch.solve(b, A)
-            x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy())).to(dtype=dtype, device=device)
-            self.assertEqual(x, x_exp)
-
-        # test against numpy.linalg.solve
-        run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6))  # no broadcasting
-        run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
-        run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
-        run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
-
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
@@ -8002,7 +7825,6 @@ class TestTorchDeviceType(TestCase):
         B = torch.mm(L, L.t().conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
-    @skipIfRocm  # This test has many dimensions, which is larger than the maximum dims supported by ROCm (16)
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
         template = torch.rand(3, 5, device=device)
@@ -9322,6 +9144,11 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
+        # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
+        # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
+        x = torch.tensor([2], device=device, dtype=dtype)
+        self.assertEqual(x.squeeze().kthvalue(1), x.kthvalue(1))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -9660,7 +9487,7 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
-    @onlyCUDA
+    @slowTest
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -9669,13 +9496,6 @@ class TestTorchDeviceType(TestCase):
         result = input_.sum(dim=0)
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
-        gc.collect()
-        torch.cuda.empty_cache()
-        a = torch.randn(8, 1, 128, 1024, 1024, device=device, dtype=torch.half)
-        self.assertEqual((a.sum(1) - a.squeeze()).abs().max(), 0)
-        gc.collect()
-        torch.cuda.empty_cache()
-        self.assertEqual((a.sum(1, keepdim=True) - a).abs().max(), 0)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
@@ -10205,6 +10025,11 @@ class TestTorchDeviceType(TestCase):
         expected = torch.diag(x.contiguous().view(-1))
         self.assertEqual(result, expected)
 
+        # Complex number support
+        result = torch.diagflat(torch.ones(4, dtype=torch.complex128))
+        expected = torch.eye(4, dtype=torch.complex128)
+        self.assertEqual(result, expected)
+
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
     @onlyOnCPUAndCUDA
     @skipCUDAIfNoMagma
@@ -10261,126 +10086,6 @@ class TestTorchDeviceType(TestCase):
         torch.geqrf(a, out=(b_placeholder, c_placeholder))
         self.assertEqual(b, b_placeholder)
         self.assertEqual(c, c_placeholder)
-
-    def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
-                                     device, dtype):
-        triangle_function = torch.triu if upper else torch.tril
-        b = torch.randn(*b_dims, dtype=dtype, device=device)
-        A = torch.randn(*A_dims, dtype=dtype, device=device)
-        A_triangular = triangle_function(A)
-        if unitriangular:
-            A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
-        return b, A_triangular
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_triangular_solve(self, device, dtype):
-        for (k, n), (upper, unitriangular, transpose) in product(zip([2, 3, 5], [3, 5, 7]),
-                                                                 product([True, False], repeat=3)):
-            b, A = self.triangular_solve_test_helper((n, n), (n, k), upper,
-                                                     unitriangular, device, dtype)
-            x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
-            if transpose:
-                self.assertLessEqual(b.dist(A.t().mm(x)), 4e-12)
-            else:
-                self.assertLessEqual(b.dist(A.mm(x)), 4e-12)
-
-    @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
-    @dtypes(torch.double)
-    def test_triangular_solve_batched(self, device, dtype):
-        def triangular_solve_batch_helper(A_dims, b_dims, upper, unitriangular, transpose):
-            b, A = self.triangular_solve_test_helper(A_dims, b_dims, upper,
-                                                     unitriangular, device, dtype)
-            x_exp_list = []
-            for i in range(b_dims[0]):
-                x_exp_list.append(torch.triangular_solve(b[i], A[i], upper=upper,
-                                                         unitriangular=unitriangular,
-                                                         transpose=transpose)[0])
-            x_exp = torch.stack(x_exp_list)  # Stacked output
-            x_act = torch.triangular_solve(b, A, upper=upper,
-                                           unitriangular=unitriangular,
-                                           transpose=transpose)[0]  # Actual output
-            self.assertEqual(x_act, x_exp)  # Equality check
-            if transpose:
-                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 1e-11)  # Correctness check
-            else:
-                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 1e-11)  # Correctness check
-
-        for (upper, unitriangular, transpose), batchsize in product(product([True, False], repeat=3), [1, 3, 4]):
-            triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
-                                          upper, unitriangular, transpose)
-
-
-    @slowTest
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_triangular_solve_batched_many_batches(self, device, dtype):
-        for upper, transpose, unitriangular in product([True, False], repeat=3):
-            b, A = self.triangular_solve_test_helper((256, 256, 5, 5), (5, 1),
-                                                     upper, unitriangular, device, dtype)
-            x, _ = torch.triangular_solve(b, A,
-                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
-            if transpose:
-                A = A.transpose(-2, -1)
-            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
-
-            b, A = self.triangular_solve_test_helper((3, 3), (512, 512, 3, 1),
-                                                     upper, unitriangular, device, dtype)
-            x, _ = torch.triangular_solve(b, A, upper=upper, transpose=transpose,
-                                          unitriangular=unitriangular)
-            if transpose:
-                A = A.transpose(-2, -1)
-            self.assertEqual(torch.matmul(A, x), b)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @dtypes(torch.double)
-    def test_triangular_solve_batched_broadcasting(self, device, dtype):
-        from scipy.linalg import solve_triangular as tri_solve
-
-        def scipy_tri_solve_batched(A, B, upper, trans, diag):
-            batch_dims_A, batch_dims_B = A.shape[:-2], B.shape[:-2]
-            single_dim_A, single_dim_B = A.shape[-2:], B.shape[-2:]
-            expand_dims = tuple(torch._C._infer_size(torch.Size(batch_dims_A),
-                                                     torch.Size(batch_dims_B)))
-            expand_A = np.broadcast_to(A, expand_dims + single_dim_A)
-            expand_B = np.broadcast_to(B, expand_dims + single_dim_B)
-            flat_A = expand_A.reshape((-1,) + single_dim_A)
-            flat_B = expand_B.reshape((-1,) + single_dim_B)
-            flat_X = np.vstack([tri_solve(a, b, lower=(not upper), trans=int(trans), unit_diagonal=diag)
-                                for a, b in zip(flat_A, flat_B)])
-            return flat_X.reshape(expand_B.shape)
-
-        def run_test(A_dims, b_dims, device, upper, transpose, unitriangular):
-            b, A = self.triangular_solve_test_helper(A_dims, b_dims, upper,
-                                                     unitriangular, device, dtype)
-            x_exp = torch.as_tensor(scipy_tri_solve_batched(A.cpu().numpy(), b.cpu().numpy(),
-                                                            upper, transpose, unitriangular))
-            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
-
-            self.assertEqual(x, x_exp.to(device))
-
-        for upper, transpose, unitriangular in product([True, False], repeat=3):
-            # test against scipy.linalg.solve_triangular
-            run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6), device, upper, transpose, unitriangular)  # no broadcasting
-            run_test((2, 1, 3, 4, 4), (4, 6), device, upper, transpose, unitriangular)  # broadcasting b
-            run_test((4, 4), (2, 1, 3, 4, 2), device, upper, transpose, unitriangular)  # broadcasting A
-            run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), device, upper, transpose, unitriangular)  # broadcasting A & b
-
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_triangular_solve_singular(self, device, dtype):
-        b = torch.rand(3, 1, device=device)
-        A = torch.eye(3, 3, device=device)
-        A[-1, -1] = 0  # Now A is singular
-        err_str = r"triangular_solve_cpu: U\(3,3\) is zero, singular U\."
-        with self.assertRaisesRegex(RuntimeError, err_str):
-            torch.triangular_solve(b, A)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -17353,8 +17058,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Use double copysign to verify the correctnes of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
-            self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
-                             torch.copysign(torch.tensor(1.0), expected))
+            # Special case: NaN conversions between FP32 and FP16 is not bitwise
+            # equivalent to pass this assertion.
+            if a.dtype != torch.float16 and b.dtype != torch.float16:
+                self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
+                                 torch.copysign(torch.tensor(1.0), expected))
 
         # Compare Result with NumPy
         # Type promotion
@@ -17944,10 +17652,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
 
         if not is_supported:
+            return
+            # NOTE: code below has been temporarily short circuited for unsupported types
+            # since they are supported for some code paths and don't always throw an error.
             b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
             b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
             self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.bmm(b1, b2))
-            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
@@ -18164,11 +17874,13 @@ else:
             (self.device_type == 'cuda' and dtype in cuda_supported_dtypes)
 
         if not is_supported:
+            return
+            # NOTE: code below has been temporarily short circuited for unsupported types
+            # since they are supported for some code paths and don't always throw an error.
             b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
             b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
             t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
             self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.baddbmm(t, b1, b2))
-            return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
@@ -19161,11 +18873,7 @@ else:
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            if (inp_dtype, out_dtype) == (torch.uint8, torch.float16):
-                # 25504.0 vs 25536.0
-                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=0, rtol=0.002)
-            else:
-                self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
@@ -19604,6 +19312,50 @@ else:
             actual = torch.dstack(torch_input)
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=False)))
+    def test_all_any_vs_numpy(self, device, dtype):
+        def _test_all_any(x):
+            self.compare_with_numpy(torch.all, np.all, x)
+            self.compare_with_numpy(torch.any, np.any, x)
+
+        def _test_all_any_with_dim(x, dim):
+            torch_fn = partial(torch.all, dim=dim)
+            np_fn = partial(np.all, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+            torch_fn = partial(torch.any, dim=dim)
+            np_fn = partial(np.any, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+        for ndim in range(5):
+            shape = self._rand_shape(ndim, 1, 5)
+            x = self._generate_input(shape, dtype, device, with_extremal=False)
+            _test_all_any(x)
+
+            x = self._generate_input(shape, dtype, device, with_extremal=True)
+            _test_all_any(x)
+
+            x = torch.zeros_like(x)
+            _test_all_any(x)
+
+            x = torch.ones_like(x)
+            _test_all_any(x)
+
+            for dim in range(ndim):
+                x = self._generate_input(shape, dtype, device, with_extremal=False)
+                _test_all_any_with_dim(x, dim)
+
+                x = self._generate_input(shape, dtype, device, with_extremal=True)
+                _test_all_any_with_dim(x, dim)
+
+                x = torch.zeros_like(x)
+                _test_all_any_with_dim(x, dim)
+
+                x = torch.ones_like(x)
+                _test_all_any_with_dim(x, dim)
 
     @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):
@@ -20670,11 +20422,11 @@ tensor_op_tests = [
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
+        [tf32_on_and_off(0.05), _wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
+        1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
+        _cpu_types, True, [tf32_on_and_off(0.05), _wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('addcdiv', '', _small_2d,
@@ -21169,8 +20921,7 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('sqrt'),
-                  _TorchMathTestMeta('erf', ref_backend='scipy'),
+torch_op_tests = [_TorchMathTestMeta('erf', ref_backend='scipy'),
                   _TorchMathTestMeta('erfc', ref_backend='scipy'),
                   _TorchMathTestMeta('exp'),
                   _TorchMathTestMeta('expm1'),
