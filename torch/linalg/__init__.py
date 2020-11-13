@@ -186,9 +186,6 @@ Examples::
 """)
 
 
-def qr(a, mode='reduced'):
-    if mode == 'reduced':
-        return torch.qr(a, some=True)
-    elif mode == 'complete':
-        return torch.qr(a, some=False)
-    raise NotImplementedError('unkown mode: %s' % mode)
+qr = _add_docstr(_linalg.linalg_qr, r"""
+WRITE ME
+""")

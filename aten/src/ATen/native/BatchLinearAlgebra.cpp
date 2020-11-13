@@ -786,7 +786,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #endif
 }
 
-std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, std::string mode) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
   bool some;
   if (mode == "reduced") {
     some = true;
@@ -856,23 +856,32 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, std::string mode) 
   return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
 }
 
-std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  std::string mode = some ? "reduced" : "complete";
-  return at::_qr_helper(self, mode);
+  return at::_linalg_qr_helper(self, mode);
 }
 
-std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  std::string mode = some ? "reduced" : "complete";
   Tensor Q_tmp, R_tmp;
-  std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, mode);
+  std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
   Q.resize_as_(Q_tmp).copy_(Q_tmp);
   R.resize_as_(R_tmp).copy_(R_tmp);
   return std::tuple<Tensor&, Tensor&>(Q, R);
 }
+
+std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr(self, mode);
+}
+
+std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr_out(Q, R, self, mode);
+}
+
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
