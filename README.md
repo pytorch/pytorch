@@ -235,32 +235,36 @@ On Windows
 
 Build with CPU
 
-It's faily easy to build with CPU. It is recommended to build the latest baseline with Visual Studio 2019 version 16.7.6 or higher. 
+It is fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
 
-Build with Cuda
+Build with CUDA
 
-[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed to build Pytorch with Cuda
+[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
-Be sure that CUDA with Nsight Compute is installed after Visual Studio.
+Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
 Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
 <br/> If Ninja is selected as the generator, the latest MSVC wil get selected as the underlying toolchain.
 
-CUDA and MSVC, MSVC and Pytorch have version dependency, please install the matched versions. 
-| CUDA version | Newest supported VS version                             | Pytorch version |
+CUDA and MSVC, MSVC and PyTorch have version dependency, please install the matched versions. 
+| CUDA version | Newest supported VS version                             | PyTorch version |
 | ------------ | ------------------------------------------------------- | --------------- |
 | 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |       <= 1.6    |
 | 10.0         | Visual Studio 2017 (15.X) (`_MSC_VER` < 1920)           |       <= 1.6    |
 | 10.1 ~ 11.0  | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |       >= 1.7    |
 
-[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), [Sccache](https://github.com/oneapi-src/oneDNN) are often needed. Please refer  https://github.com/pytorch/pytorch/tree/master/.jenkins/pytorch/win-test-helpers/installation-helpers to install them.
+Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in serveral Visual Studio 2019 versions since 16.7.1 . So please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
-Some environment variables could be refer https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/win-test-helpers/build_pytorch.bat
+Additional libraries are often needed such as
+[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/master/.jenkins/pytorch/win-test-helpers/installation-helpers) to install them.
+
+You can refer to [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
 
 
 ```cmd
 cmd
 
+:: [Optional] If you want to build with VS 2017 generator for old CUDA and PyTorch, please change the value in the next line to `Visual Studio 15 2017`.
 :: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
 set CMAKE_GENERATOR=Visual Studio 16 2019
 
@@ -272,14 +276,12 @@ set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
 set DISTUTILS_USE_SDK=1
 for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
-:: [Optional] If you want to override the Cuda host compiler
+:: [Optional] If you want to override the CUDA host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
 python setup.py install
 
 ```
-
-There's a compilation issue in serveral Visual Studio 2019 versions since 16.7.1 (https://github.com/oneapi-src/oneDNN/issues/812). So please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
 ##### Adjust Build Options (Optional)
 
