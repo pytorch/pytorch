@@ -75,7 +75,7 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  * CUDAGeneratorImpl class implementation
  */
 CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
-  : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
+  : c10::GeneratorImpl{Device::cuda_unchecked(device_index),
               DispatchKeySet(c10::DispatchKey::CUDA)} { }
 
 /**
