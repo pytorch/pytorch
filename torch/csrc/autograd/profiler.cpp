@@ -412,7 +412,7 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
-  return dynamic_cast<ProfilerThreadLocalState*>(
+  return static_cast<ProfilerThreadLocalState*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
 }
 
