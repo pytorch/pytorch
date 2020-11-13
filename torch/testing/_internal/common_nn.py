@@ -1164,7 +1164,7 @@ def multimarginloss_weights_no_reduce_test():
 def fractional_max_pool2d_test(test_case, return_indices=False):
     random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
     if test_case == 'ratio':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool2d(
                 2, output_ratio=0.5, _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
@@ -1174,7 +1174,7 @@ def fractional_max_pool2d_test(test_case, return_indices=False):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_ratio')
     elif test_case == 'size':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
                 4, 3), _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions({2, 3})
@@ -1184,7 +1184,7 @@ def fractional_max_pool2d_test(test_case, return_indices=False):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool2d_size')
     elif test_case == 'alert_nondeterministic':
-        return dict(
+        out = dict(
             constructor=lambda: nn.FractionalMaxPool2d(
                 2, output_ratio=0.5, _random_samples=random_samples, return_indices=return_indices),
             cpp_constructor_args='''torch::nn::FractionalMaxPool2dOptions(2)
@@ -1195,7 +1195,10 @@ def fractional_max_pool2d_test(test_case, return_indices=False):
             fullname='FractionalMaxPool2d_alert_nondeterministic',
             test_cpu=False,
             decorator=expectedAlertNondeterministic('fractional_max_pool2d_backward_cuda', fn_has_device_arg=False))
-
+    if return_indices:
+        del out['cpp_constructor_args']
+        out["fullname"] = out["fullname"] + "_return_indices"
+    return out
 
 def fractional_max_pool3d_test(test_case, return_indices=False):
     random_samples = torch.DoubleTensor(2, 4, 3).uniform_()
@@ -1300,14 +1303,12 @@ new_module_tests = [
     fractional_max_pool2d_test('ratio'),
     fractional_max_pool2d_test('size'),
     fractional_max_pool2d_test('alert_nondeterministic'),
+    fractional_max_pool2d_test('ratio', return_indices=True),
     fractional_max_pool3d_test('ratio'),
     fractional_max_pool3d_test('size'),
     fractional_max_pool3d_test('asymsize'),
     fractional_max_pool3d_test('alert_nondeterministic'),
     fractional_max_pool3d_test('ratio', return_indices=True),
-    fractional_max_pool3d_test('size', return_indices=True),
-    fractional_max_pool3d_test('asymsize', return_indices=True),
-    fractional_max_pool3d_test('alert_nondeterministic', return_indices=True),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
