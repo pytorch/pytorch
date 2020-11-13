@@ -788,7 +788,7 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
-  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  TORCH_CHECK(self.size(dim[0]) != 0, "Expected tensor with non-zero reduction dimension. Instead got: ", self.sizes());
   max_values_stub(iter.device_type(), iter);
   return result;
 }

@@ -13417,32 +13417,36 @@ class TestTorchDeviceType(TestCase):
             test_x((2, 3), 1, [1.0, 2.0], device)
             test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
 
+
     def test_reduction_empty(self, device):
         fns_to_test = [
-            # name, function, identity
-            ('max', torch.max, None),
-            ('amax', torch.amax, None),
-            ('argmax', torch.argmax, None),
-            ('min', torch.min, None),
-            ('amin', torch.amin, None),
-            ('argmin', torch.argmin, None),
-            ('mode', torch.mode, None),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
-            ('prod', torch.prod, 1.),
-            ('sum', torch.sum, 0.),
-            ('norm', torch.norm, 0.),
-            ('mean', torch.mean, nan),
-            ('var', torch.var, nan),
-            ('std', torch.std, nan),
-            ('logsumexp', torch.logsumexp, -inf),
+            # name, function, identity, kwargs
+            ('amax', torch.amax, None, {})#,
+            # ('amin', torch.amin, None, {}),
+            # ('argmax', torch.argmax, None, {'dtype': torch.int64}),
+            # ('argmin', torch.argmin, None, {'dtype': torch.int64}),
+
+            # ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
+            # ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
+            # ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
+            # ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, None, {}),
+            # ('mode', torch.mode, None, {}),
+
+            # ('prod', torch.prod, 1., {}),
+            # ('sum', torch.sum, 0., {}),
+            # ('norm', torch.norm, 0., {}),
+            # ('mean', torch.mean, nan, {}),
+            # ('var', torch.var, nan, {}),
+            # ('std', torch.std, nan, {}),
+            # ('logsumexp', torch.logsumexp, -inf, {}),
         ]
 
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
 
-        for fn in [torch.max, torch.min]:
+        for fn in [torch.max, torch.min, torch.argmax, torch.argmin]:
             ident_err = 'operation does not have an identity'
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
+            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
 
         # median and nanmedian have been updated to follow the new convention for empty tensors
         # where it should only fail if the dimension being reduced has size 0.
@@ -13456,20 +13460,16 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(fn(x, dim=2, keepdim=True)[0].shape, (shape[0], shape[1], 1))
 
         for item in fns_to_test:
-            name, fn, identity = item
+            name, fn, identity, dt = item
+            print("function: ", fn)
+            self.assertEqual(torch.empty((2, 0), device=device,**dt), fn(x, dim=2))
+            self.assertEqual(torch.empty((2, 0, 1), device=device,**dt), fn(x, dim=2, keepdim=True))
+
             if identity is None:
-                ident_err = 'does not have an identity'
-
-                # Reductions over non-zero dimensions should work even for empty tensors
-                # See https://github.com/pytorch/pytorch/issues/34907 for a discussion on this.
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2))
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2, keepdim=True))
-
+                ident_err = 'Expected tensor with non-zero'
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
                 self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
             else:
-                self.assertEqual(torch.empty((2, 0), device=device), fn(x, dim=2))
-                self.assertEqual(torch.empty((2, 0, 1), device=device), fn(x, dim=2, keepdim=True))
                 # assertEqual doesn't work with inf, -inf, nan and two tensors.
                 check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else
                          self.assertEqual)
