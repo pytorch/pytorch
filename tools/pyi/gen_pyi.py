@@ -155,7 +155,7 @@ def type_to_python(typename, size=None):
     # Disambiguate explicitly sized int/tensor lists from implicitly
     # sized ones.  These permit non-list inputs too.  (IntArrayRef[] and
     # TensorList[] are not real types; this is just for convenience.)
-    if typename in {'IntArrayRef', 'TensorList'} and size is not None:
+    if typename in {'IntArrayRef', 'TensorList', 'ScalarList'} and size is not None:
         typename += '[]'
 
     typename = {
@@ -173,6 +173,8 @@ def type_to_python(typename, size=None):
         'IntArrayRef[]': 'Union[_int, _size]',
         'TensorList': 'Union[Tuple[Tensor, ...], List[Tensor]]',
         'TensorList[]': 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]',
+        'ScalarList': 'Union[Tuple[Scalar, ...], List[Scalar]]',
+        'ScalarList[]': 'Union[Scalar, Tuple[Scalar, ...], List[Scalar]]',
         'bool': '_bool',
         'double': '_float',
         'int64_t': '_int',
@@ -185,6 +187,7 @@ def type_to_python(typename, size=None):
         'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
         'ArrayRef<double>' : 'Sequence[float]',
+        'ArrayRef<Scalar>' : 'Sequence[Number]',
         'Stream': 'Stream',
     }[typename]
 

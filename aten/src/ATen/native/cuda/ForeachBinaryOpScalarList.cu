@@ -5,6 +5,32 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
+std::vector<Tensor> foreach_binary_op_sl(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+    std::vector<std::vector<at::Tensor>> tensor_lists;
+    std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
+    for (const auto& t: tensors) {
+        vec_res.emplace_back(at::native::empty_like(t));
+    }
+
+    tensor_lists.emplace_back(tensors.vec());
+    tensor_lists.emplace_back(vec_res);
+
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda", [&]() {
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply2<2, opmath_t>(tensor_lists,
+                              scalars,
+                              BinaryOpScalarListFunctor<scalar_t, 
+                                                        /* depth */ 2,
+                                                        /* r_args_depth */ 1, 
+                                                        /* res_arg_index */ 1>(),
+                                                       
+                              Op<opmath_t>());
+    });
+    return tensor_lists[1];
+}
+
+template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<double> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
@@ -70,5 +96,14 @@ FOREACH_BINARY_OP_SCALARLIST(add, std::plus);
 FOREACH_BINARY_OP_SCALARLIST(sub, std::minus);
 FOREACH_BINARY_OP_SCALARLIST(mul, std::multiplies);
 FOREACH_BINARY_OP_SCALARLIST(div, std::divides);
+
+std::vector<Tensor> foreach_tensor_add_scalarlist2_kernel_cuda(TensorList tensors, ScalarList scalars) {
+    std::cout << "FAST SL" << std::endl;
+    //check_foreach_api_restrictions(tensors, scalars);                                                             
+    //if (!can_use_fast_route(tensors, scalars)) {                                                                  
+    //    return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                      
+    //}                                                                                                             
+    return foreach_binary_op_sl<std::plus>(tensors, scalars);                                                               
+}
 
 }} // namespace at::native

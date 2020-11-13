@@ -50,6 +50,7 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+using ScalarList = ArrayRef<Scalar>;
 
 using Stream = c10::Stream;
 

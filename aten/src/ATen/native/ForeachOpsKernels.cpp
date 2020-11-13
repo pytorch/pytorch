@@ -182,4 +182,17 @@ std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList
 FOREACH_MAXIMUM_MINIMUM_OP(maximum)
 FOREACH_MAXIMUM_MINIMUM_OP(minimum)
 
+std::vector<Tensor> foreach_tensor_add_scalarlist2_kernel_slow(TensorList tensors, ScalarList scalars) {
+  std::cout << "SLOW sc" << std::endl;
+  //check_foreach_api_restrictions(tensors, scalars);
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (int i = 0; i < tensors.size(); i++) {
+    result.emplace_back(tensors[i].add(scalars[i]));
+  }
+
+  return result;
+}
+
+
 }} // namespace at::native

@@ -7038,6 +7038,14 @@
     CPU: foreach_tensor_add_scalarlist_kernel_slow
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda
 
+- func: _foreach_add_sl(Tensor[] tensors, Scalar[] scalars) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_add_scalarlist2_kernel_slow
+    CUDA: foreach_tensor_add_scalarlist2_kernel_cuda
+
 - func: _foreach_add_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
   device_guard: False
