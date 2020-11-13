@@ -314,7 +314,7 @@ class TestFXExperimental(JitTestCase):
                 assert partition_to_latency_mapping[p] == (128.0, 80.0, 160.0)
             else:
                 assert partition_to_latency_mapping[p] == (16.0, 32.0, 32.0)
-        transfer_rate_bytes_per_sec = 0.5
+        transfer_rate_bytes_per_sec = 2
         critical_path_latency_sec = get_latency_of_partitioned_graph(
             partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
@@ -360,7 +360,7 @@ class TestFXExperimental(JitTestCase):
             devices,
             is_sparse_nn=False,
             is_cost_aware=True,
-            transfer_rate_bytes_per_sec=0.5,
+            transfer_rate_bytes_per_sec=2,
             node_to_latency_mapping=node_to_latency_mapping
         )
         partitioner = Partitioner()
