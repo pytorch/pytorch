@@ -786,7 +786,16 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #endif
 }
 
-std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
+std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, std::string mode) {
+  bool some;
+  if (mode == "reduced") {
+    some = true;
+  } else if (mode == "complete") {
+    some = false;
+  } else {
+    TORCH_CHECK(false, "Unrecognized mode '", mode, "'");
+  }
+
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
 
@@ -850,14 +859,16 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
 std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_qr_helper(self, some);
+  std::string mode = some ? "reduced" : "complete";
+  return at::_qr_helper(self, mode);
 }
 
 std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  std::string mode = some ? "reduced" : "complete";
   Tensor Q_tmp, R_tmp;
-  std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, some);
+  std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, mode);
   Q.resize_as_(Q_tmp).copy_(Q_tmp);
   R.resize_as_(R_tmp).copy_(R_tmp);
   return std::tuple<Tensor&, Tensor&>(Q, R);

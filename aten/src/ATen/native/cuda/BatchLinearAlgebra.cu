@@ -1447,7 +1447,15 @@ AT_ERROR("qr: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
+std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, std::string mode) {
+  bool some;
+  if (mode == "reduced") {
+    some = true;
+  } else if (mode == "complete") {
+    some = false;
+  } else {
+    TORCH_CHECK(false, "Unrecognized mode '", mode, "'");
+  }
   std::vector<int64_t> infos(batchCount(self), 0);
 
   // Setup input geometry and inputs for apply_qr
