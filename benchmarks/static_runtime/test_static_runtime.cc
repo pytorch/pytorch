@@ -21,7 +21,7 @@ TEST(StaticRuntime, TrivialModel) {
 }
 
 TEST(StaticRuntime, LeakyReLU) {
-  torch::jit::Module mod = getLeakyReLUScriptModel();
+  torch::jit::Module mod = getLeakyReLUConstScriptModel();
   auto inputs = torch::randn({2, 2});
 
   // run jit graph executor
