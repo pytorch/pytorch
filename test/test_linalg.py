@@ -346,15 +346,9 @@ class TestLinalg(TestCase):
                 x_exp = torch.stack(x_exp_list)  # Stacked output
                 x_act = torch.lu_solve(b, LU_data, LU_pivots)  # Actual output
                 self.assertEqual(x_exp, x_act)  # Equality check
-                # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-                if self.device_type == 'cuda' and dtype.is_complex:
-                    Ax_list = []
-                    for A_i, x_i in zip(A, x_act):
-                        Ax_list.append(torch.matmul(A_i, x_i))
-                    Ax = torch.stack(Ax_list)
-                else:
-                    Ax = torch.matmul(A, x_act)
-                    self.assertLessEqual(abs(b.dist(Ax, p=1)), self.precision)  # Correctness check
+
+                Ax = torch.matmul(A, x_act)
+                self.assertLessEqual(abs(b.dist(Ax, p=1)), self.precision)  # Correctness check
                 # In addition to the norm, check the individual entries
                 # 'norm_cuda' is not implemented for complex dtypes
                 self.assertEqual(b, Ax)
@@ -380,14 +374,7 @@ class TestLinalg(TestCase):
         def run_test(A_dims, b_dims):
             b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, True, device, dtype)
             x = torch.lu_solve(b, LU_data, LU_pivots)
-            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            if self.device_type == 'cuda' and dtype.is_complex:
-                Ax_list = []
-                for A_i, x_i in zip(A, x):
-                    Ax_list.append(torch.matmul(A_i, x_i))
-                Ax = torch.stack(Ax_list)
-            else:
-                Ax = torch.matmul(A, x)
+            Ax = torch.matmul(A, x)
             self.assertEqual(Ax, b.expand_as(Ax))
 
         run_test((5, 65536), (65536, 5, 10))
