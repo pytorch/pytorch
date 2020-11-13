@@ -27,6 +27,15 @@ class TracerBase:
 
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None):
+        '''
+        Create a Node from the given arguments, then return the Node
+        wrapped in a Proxy object.
+
+        If kind = 'placeholder', then we're creating a Node that
+        represents the parameter of a function. If we need to encode
+        a default parameter, we use the `args` tuple. `args` is
+        otherwise empty for `placeholder` Nodes.
+        '''
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
         assert isinstance(args_, tuple)

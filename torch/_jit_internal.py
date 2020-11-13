@@ -8,8 +8,10 @@ import contextlib
 import collections
 import enum
 import inspect
+import ast
 import weakref
 import warnings
+from textwrap import dedent
 import torch
 import sys
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
@@ -228,8 +230,8 @@ def can_compile_class(cls):
 
 def get_type_hint_captures(fn):
     """
-    Get a dictionary containing type resolution mapping necessary to resolve types
-    for the annotations on 'fn'. These are not considered to be closed-over by fn
+    Get a dictionary containing type resolution mappings necessary to resolve types
+    for the literal annotations on 'fn'. These are not considered to be closed-over by fn
     and must be obtained separately.
 
     Arguments:
@@ -238,18 +240,48 @@ def get_type_hint_captures(fn):
         A Dict[str, Any] containing a mapping from the literal annotations used on
         fn to the Python objects they refer to.
     """
-    captures = {}
     signature = inspect.signature(fn)
 
-    for name, parameter in signature.parameters.items():
-        if parameter.annotation is not inspect.Parameter.empty:
-            # The string representation of a Parameter is "name:[annotation]".
-            # This line splits this string at ':', takes the second part
-            # containing the annotation, and strips out all whitespace.
-            ty_str = str(parameter).split(':')[1].strip()
-            captures[ty_str] = parameter.annotation
+    # First, get the literal type annotations from the function declaration
+    # by source inspection. This accounts for the case in which aliases are used
+    # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
+    src = inspect.getsource(fn)
 
-    return captures
+    # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
+    a = ast.parse(dedent(src))
+    if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
+        raise RuntimeError(f"Expected {fn} to be a function")
+    f = a.body[0]
+
+    # This function converts ast.Name and ast.Attribute nodes to strings.
+    # The latter is how annotations like torch.device are represented; the Attribute
+    # node contains the value "device" and a reference to an ast.Name node containing "torch".
+    def get_annotation_str(annotation):
+        if isinstance(annotation, ast.Name):
+            return annotation.id
+        elif isinstance(annotation, ast.Attribute):
+            return '.'.join([get_annotation_str(annotation.value), annotation.attr])
+
+        raise RuntimeError(f"Unexpected node type: {type(annotation)}")
+
+    # Gather a dictionary of parameter name -> literal annotation.
+    name_to_annotation = {arg.arg: get_annotation_str(arg.annotation) for arg in f.args.args if arg.annotation}
+
+    # Gather a dictionary of parameter name -> type.
+    name_to_type = {
+        name: parameter.annotation
+        for name, parameter in signature.parameters.items()
+        if parameter.annotation is not inspect.Parameter.empty
+    }
+
+    # Join the two dictionaries above by key to get a dictionary from literal annotation -> type.
+    annotation_to_type = {annotation: name_to_type[name] for name, annotation in name_to_annotation.items()}
+
+    # If there is a return annotation, include it in annotation_to_type.
+    if signature.return_annotation is not inspect.Parameter.empty:
+        annotation_to_type[get_annotation_str(f.returns)] = signature.return_annotation
+
+    return annotation_to_type
 
 
 def createResolutionCallbackForClassMethods(cls):

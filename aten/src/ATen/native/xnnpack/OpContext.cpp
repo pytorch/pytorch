@@ -27,7 +27,17 @@ XNNPackLinearOpContext::create_context(
               output_max ? output_max->to<float>()
                          : xnnpack::ContextLinear::kMax)
           );
+  if (at::globalContext().releaseWeightsWhenPrepacking()) {
+    linear_op_context->free_orig_weight_and_bias();
+  }
+
   return linear_op_context;
+}
+
+void XNNPackLinearOpContext::free_orig_weight_and_bias() {
+  orig_weight_and_bias_freed_ = true;
+  orig_weight_.reset();
+  orig_bias_.reset();
 }
 
 Tensor XNNPackLinearOpContext::run(const Tensor& input) {
@@ -70,6 +80,10 @@ XNNPackConv2dOpContext::create_context(at::Tensor&& weight,
           output_max,
           std::move(op_context));
 
+  if (at::globalContext().releaseWeightsWhenPrepacking()) {
+    conv2d_op_context->free_orig_weight_and_bias();
+  }
+
   return conv2d_op_context;
 }
 
@@ -111,6 +125,10 @@ XNNPackTransposeConv2dOpContext::create_context(at::Tensor&& weight,
           output_max,
           std::move(op_context));
 
+  if (at::globalContext().releaseWeightsWhenPrepacking()) {
+    conv2d_op_context->free_orig_weight_and_bias();
+  }
+
   return conv2d_op_context;
 }
 
@@ -120,6 +138,18 @@ Tensor XNNPackConv2dOpContext::run(const Tensor& input) {
 
 Tensor XNNPackTransposeConv2dOpContext::run(const Tensor& input) {
   return xnnpack::internal::convolution2d::run(op_context_, input);
+}
+
+void XNNPackConv2dOpContext::free_orig_weight_and_bias() {
+  orig_weight_and_bias_freed_ = true;
+  orig_weight_.reset();
+  orig_bias_.reset();
+}
+
+void XNNPackTransposeConv2dOpContext::free_orig_weight_and_bias() {
+  orig_weight_and_bias_freed_ = true;
+  orig_weight_.reset();
+  orig_bias_.reset();
 }
 
 } // namespace xnnpack
