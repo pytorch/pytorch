@@ -293,12 +293,15 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
+            timeout = timedelta(seconds=60)
             dist.init_process_group(
                 init_method=self.init_method,
                 backend=BACKEND,
                 world_size=int(self.world_size),
                 rank=self.rank,
+                timeout=timeout,
             )
+            print(f"Initialized process group with timeout {timeout}")
         except RuntimeError as e:
             if "recompile" in e.args[0]:
                 sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
