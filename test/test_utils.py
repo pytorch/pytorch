@@ -637,9 +637,9 @@ class TestHipify(TestCase):
 class TestAssert(TestCase):
     def test_assert_true(self):
         # verify assertions work as expected
-        torch.Assert(True, "foo")
+        torch._assert(True, "foo")
         with self.assertRaisesRegex(AssertionError, "bar"):
-            torch.Assert(False, "bar")
+            torch._assert(False, "bar")
 
 
 if __name__ == '__main__':
