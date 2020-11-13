@@ -31,6 +31,7 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-py3.6-gcc7",
     "pytorch-linux-bionic-rocm3.7-py3.6",
     "pytorch-linux-bionic-rocm3.8-py3.6",
+    "pytorch-linux-bionic-rocm3.9-py3.6",
 ]
 
 
