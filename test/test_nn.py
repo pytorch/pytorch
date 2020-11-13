@@ -12575,6 +12575,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
+    @tf32_on_and_off(0.005)
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
             if var.size(0) == length:
