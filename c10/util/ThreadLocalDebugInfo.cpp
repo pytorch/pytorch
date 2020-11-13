@@ -7,20 +7,7 @@ thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
 }
 
 /* static */
-std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::get(
-    DebugInfoKind kind) {
-  auto cur = debug_info;
-  while (cur) {
-    if (cur->kind_ == kind) {
-      return cur->info_;
-    }
-    cur = cur->parent_info_;
-  }
-  return nullptr;
-}
-
-/* static */
-DebugInfoBase* ThreadLocalDebugInfo::getRawUnsafe(DebugInfoKind kind) {
+DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
   ThreadLocalDebugInfo* cur = debug_info.get();
   while (cur) {
     if (cur->kind_ == kind) {

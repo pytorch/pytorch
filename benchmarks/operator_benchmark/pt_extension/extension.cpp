@@ -1,9 +1,14 @@
 #include <torch/extension.h>
 #include <torch/script.h>
 
+using torch::List;
 using torch::Tensor;
 
 Tensor consume(Tensor a) {
+  return a;
+}
+
+List<Tensor> consume_list(List<Tensor> a) {
   return a;
 }
 
@@ -13,8 +18,10 @@ Tensor consume(Tensor a) {
 // in a loop and report the execution time. This diff resolves that issue by
 // registering this consume op with correct alias information which is DEFAULT.
 auto reg = torch::RegisterOperators()
-  .op("operator_benchmark::_consume", &consume);
+               .op("operator_benchmark::_consume", &consume)
+               .op("operator_benchmark::_consume.list", &consume_list);
 
 PYBIND11_MODULE(cpp_extension, m) {
   m.def("_consume", &consume, "consume");
+  m.def("_consume_list", &consume_list, "consume_list");
 }

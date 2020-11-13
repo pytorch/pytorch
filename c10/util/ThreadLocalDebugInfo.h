@@ -32,12 +32,7 @@ class C10_API DebugInfoBase {
 // profiling, etc)
 class C10_API ThreadLocalDebugInfo {
  public:
-  static std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
-
-  // getRawUnsafe skips reference counting operations, but the
-  // returned pointer will dangle if you call into a code path that
-  // uses ThreadLocalStateGuard (which is rare as of this writing).
-  static DebugInfoBase* getRawUnsafe(DebugInfoKind kind);
+  static DebugInfoBase* get(DebugInfoKind kind);
 
   // Get current ThreadLocalDebugInfo
   static std::shared_ptr<ThreadLocalDebugInfo> current();
