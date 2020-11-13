@@ -207,6 +207,20 @@ def get_device_to_partitions_mapping(partitions: List[Partition], devices: List[
             break
     return found_device
 
+def check_dependency(partition):
+    visited: Set[Partition] = set([partition])
+    queue: List[Partition] = [partition]
+    while queue:
+        p = queue.pop(0)
+        for child in p.children:
+            if child == partition:
+                return True
+            else:
+                if child not in visited:
+                    visited.add(child)
+                    queue.append(child)
+    return False
+
 class Partitioner:
     """A graph module may not fit into one device.
     Partitioner class helps cut one graph into subgraphs (partitions),
@@ -593,7 +607,6 @@ class Partitioner:
                Choose the pair that shows the minimum cost and then combine them
            #3. Repeat #2 until the cost cannot be reduced.
         """
-
         def try_combining_partitions(
             p0_index,
             p1_index,
@@ -609,6 +622,9 @@ class Partitioner:
             """
             if (abs(p0.bfs_level - p1.bfs_level) <= 1) or (p0 in p1.parents) or p0 in (p1.children):
                 combine_two_partitions(p0, p1, partitions)
+                # Check if a circular dependency exists after combining
+                if check_dependency(partitions[-1]):
+                    return float('inf')
                 # Check if the modified partition list can be mapped to devices after combination
                 found_deivce = get_device_to_partitions_mapping(partitions, self.devices)
                 if not found_deivce:
@@ -667,6 +683,7 @@ class Partitioner:
         set_parents_and_children(self.partitions)
         # Get bfs level for each partition
         get_bfs_level_partition(self.partitions)
+
         find_combination = True
         while find_combination:
             # Search for a pair partition to generate the minimum new cost,
