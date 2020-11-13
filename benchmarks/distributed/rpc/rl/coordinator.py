@@ -2,8 +2,8 @@ import torch
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import rpc_async, rpc_sync, remote
 
-from Agent import AgentBase
-from Observer import ObserverBase
+from agent import AgentBase
+from observer import ObserverBase
 
 import time
 import numpy as np
@@ -29,18 +29,12 @@ class CoordinatorBase:
             ob_ref = remote(ob_info, ObserverBase)
             self.ob_rrefs.append(ob_ref)
 
-            ob_ref.rpc_sync().set_state(state_size)
+            ob_ref.rpc_sync().set_state(state_size, batch)
 
         self.agent_rref.rpc_sync().set_world(
-            world_size, state_size, nlayers, out_features)
+            world_size, state_size, nlayers, out_features, self.batch)
 
     def run_coordinator(self, episodes, episode_steps):
-        agent_throughput = []
-        observer_throughput = []
-
-        agent_latency = []
-        observer_latency = []
-
         for ep in range(episodes):
             ep_start_time = time.time()
 
@@ -49,55 +43,15 @@ class CoordinatorBase:
 
             agent_start_time = time.time()
 
+            futs = []
             for ob_rref in self.ob_rrefs:
-                ob_start_time = time.time()
-                ob_rref.rpc_async().run_ob_episode(self.agent_rref, n_steps).wait()
-                ob_end_time = time.time()
+                futs.append(ob_rref.rpc_async().run_ob_episode(
+                    self.agent_rref, n_steps))
 
-                ob_time = ob_end_time - ob_start_time   # observer time
-                observer_latency.append(ob_time)
-                observer_throughput.append(n_steps / ob_time)
-
-            agent_end_time = time.time()
-            agent_time = agent_end_time - agent_start_time
-
-            agent_latency.append(agent_time)
-            agent_throughput.append(n_steps * len(self.ob_rrefs) / agent_time)
-
-            # if self.batch:
-            #     for ob_rref in self.ob_rrefs:
-            #         ob_rref.rpc_async().run_ob_episode(self.agent_rref, n_steps).wait()
-
-            # else:
-            #     for ob_rref in self.ob_rrefs:
-            #         ob_rref.rpc_sync().run_ob_episode(self.agent_rref, n_steps)
-
-            self.agent_rref.rpc_sync().finish_episode()
+            rets = torch.futures.wait_all(futs)
+            print("After waiting")
+            self.agent_rref.rpc_sync().finish_episode(rets)
 
             ep_end_time = time.time()
             episode_time = ep_end_time - ep_start_time
             print(episode_time)
-
-        print("\nAgent Throughput - ")
-        agent_throughput = sorted(agent_throughput)
-        for p in [50, 75, 90, 95]:
-            v = np.percentile(agent_throughput, p)
-            print("p" + str(p) + ":", round(v, 3))
-
-        print("\nObserver Throughput - ")
-        observer_throughput = sorted(observer_throughput)
-        for p in [50, 75, 90, 95]:
-            v = np.percentile(observer_throughput, p)
-            print("p" + str(p) + ":", round(v, 3))
-
-        print("\nAgent Latency - ")
-        agent_latency = sorted(agent_latency)
-        for p in [50, 75, 90, 95]:
-            v = np.percentile(agent_latency, p)
-            print("p" + str(p) + ":", round(v, 3))
-
-        print("\nObserver Latency - ")
-        observer_latency = sorted(observer_latency)
-        for p in [50, 75, 90, 95]:
-            v = np.percentile(observer_latency, p)
-            print("p" + str(p) + ":", round(v, 3))

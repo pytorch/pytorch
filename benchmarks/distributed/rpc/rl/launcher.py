@@ -5,13 +5,13 @@ import torch
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
 
-from Coordinator import CoordinatorBase
+from coordinator import CoordinatorBase
 
 COORDINATOR_NAME = "coordinator"
 AGENT_NAME = "agent"
 OBSERVER_NAME = "observer{}"
 
-TOTAL_EPISODES = 100
+TOTAL_EPISODES = 10
 TOTAL_EPISODE_STEPS = 100
 
 
@@ -27,7 +27,7 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='PyTorch RPC RL Benchmark')
-parser.add_argument('--world_size', type=int, default=3)
+parser.add_argument('--world_size', type=int, default=5)
 parser.add_argument('--master_addr', type=str, default='127.0.0.1')
 parser.add_argument('--master_port', type=str, default='29501')
 parser.add_argument('--batch', type=str2bool, default=True)
