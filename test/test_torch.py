@@ -11345,80 +11345,85 @@ class TestTorchDeviceType(TestCase):
             torch.signbit(t, out=out)
 
     def test_logical_any(self, device):
-        x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
+        for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                                  include_bool=True, include_complex=False):
+            x = torch.zeros([2, 3, 400], dtype=dtype, device=device)
+            out_dtype = torch.bool
 
-        self.assertEqual(
-            torch.tensor(0, dtype=torch.uint8, device=device),
-            x.any())
+            self.assertEqual(
+                torch.tensor(0, dtype=out_dtype, device=device),
+                x.any())
 
-        self.assertEqual(
-            torch.zeros([1, 3, 400], dtype=torch.uint8, device=device),
-            x.any(0, keepdim=True))
+            self.assertEqual(
+                torch.zeros([1, 3, 400], dtype=out_dtype, device=device),
+                x.any(0, keepdim=True))
 
-        self.assertEqual(
-            torch.zeros([2, 1, 400], dtype=torch.uint8, device=device),
-            x.any(1, keepdim=True))
+            self.assertEqual(
+                torch.zeros([2, 1, 400], dtype=out_dtype, device=device),
+                x.any(1, keepdim=True))
 
-        self.assertEqual(
-            torch.zeros([2, 3, 1], dtype=torch.uint8, device=device),
-            x.any(2, keepdim=True))
+            self.assertEqual(
+                torch.zeros([2, 3, 1], dtype=out_dtype, device=device),
+                x.any(2, keepdim=True))
 
-        # set the last element to 0
-        x[-1][-1][-1] = 1
+            # set the last element to 0
+            x[-1][-1][-1] = 1
 
-        self.assertEqual(
-            torch.tensor(1, dtype=torch.uint8, device=device),
-            x.any())
+            self.assertEqual(
+                torch.tensor(1, dtype=out_dtype, device=device),
+                x.any())
 
-        y = torch.zeros([1, 3, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(0, keepdim=True))
+            y = torch.zeros([1, 3, 400], dtype=out_dtype, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(0, keepdim=True))
 
-        y = torch.zeros([2, 1, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(1, keepdim=True))
+            y = torch.zeros([2, 1, 400], dtype=out_dtype, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(1, keepdim=True))
 
-        y = torch.zeros([2, 3, 1], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(2, keepdim=True))
+            y = torch.zeros([2, 3, 1], dtype=out_dtype, device=device)
+            y[-1][-1][-1] = 1
+            self.assertEqual(y, x.any(2, keepdim=True))
 
     def test_logical_all(self, device):
-        x = torch.ones([2, 3, 400], dtype=torch.uint8, device=device)
+        for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                                  include_bool=True, include_complex=False):
+            x = torch.ones([2, 3, 400], dtype=dtype, device=device)
+            out_dtype = torch.bool
+            self.assertEqual(
+                torch.tensor(1, dtype=out_dtype, device=device),
+                x.all())
 
-        self.assertEqual(
-            torch.tensor(1, dtype=torch.uint8, device=device),
-            x.all())
+            self.assertEqual(
+                torch.ones([1, 3, 400], dtype=out_dtype, device=device),
+                x.all(0, keepdim=True))
 
-        self.assertEqual(
-            torch.ones([1, 3, 400], dtype=torch.uint8, device=device),
-            x.all(0, keepdim=True))
+            self.assertEqual(
+                torch.ones([2, 1, 400], dtype=out_dtype, device=device),
+                x.all(1, keepdim=True))
 
-        self.assertEqual(
-            torch.ones([2, 1, 400], dtype=torch.uint8, device=device),
-            x.all(1, keepdim=True))
+            self.assertEqual(
+                torch.ones([2, 3, 1], dtype=out_dtype, device=device),
+                x.all(2, keepdim=True))
 
-        self.assertEqual(
-            torch.ones([2, 3, 1], dtype=torch.uint8, device=device),
-            x.all(2, keepdim=True))
+            # set the last element to 0
+            x[-1][-1][-1] = 0
 
-        # set the last element to 0
-        x[-1][-1][-1] = 0
+            self.assertEqual(
+                torch.tensor(0, dtype=out_dtype, device=device),
+                x.all())
 
-        self.assertEqual(
-            torch.tensor(0, dtype=torch.uint8, device=device),
-            x.all())
+            y = torch.ones([1, 3, 400], dtype=out_dtype, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(0, keepdim=True))
 
-        y = torch.ones([1, 3, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(0, keepdim=True))
+            y = torch.ones([2, 1, 400], dtype=out_dtype, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(1, keepdim=True))
 
-        y = torch.ones([2, 1, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(1, keepdim=True))
-
-        y = torch.ones([2, 3, 1], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(2, keepdim=True))
+            y = torch.ones([2, 3, 1], dtype=out_dtype, device=device)
+            y[-1][-1][-1] = 0
+            self.assertEqual(y, x.all(2, keepdim=True))
 
     def test_pairwise_distance_empty(self, device):
         shape = (2, 0)
@@ -19400,7 +19405,7 @@ else:
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                           include_bool=True, include_complex=True)))
+                                           include_bool=True, include_complex=False)))
     def test_all_any_vs_numpy(self, device, dtype):
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
