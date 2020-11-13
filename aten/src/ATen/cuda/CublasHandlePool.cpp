@@ -51,6 +51,11 @@ cublasHandle_t getCurrentCUDABlasHandle() {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   }
 #endif
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 308
+  if (at::globalContext().deterministic()) {
+    TORCH_CUDABLAS_CHECK(rocblas_set_atomics_mode(handle, rocblas_atomics_not_allowed));
+  }
+#endif
   return handle;
 }
 
