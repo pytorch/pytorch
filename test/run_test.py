@@ -427,11 +427,14 @@ def test_distributed(test_module, test_directory, options):
                 if backend == 'mpi':
                     # test mpiexec for --noprefix option
                     with open(os.devnull, 'w') as devnull:
+                        allowrunasroot_opt = '--allow-run-as-root' if subprocess.call(
+                            'mpiexec --allow-run-as-root -n 1 bash -c ""', shell=True,
+                            stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
                         noprefix_opt = '--noprefix' if subprocess.call(
-                            'mpiexec -n 1 --noprefix bash -c ""', shell=True,
+                            f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""', shell=True,
                             stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt]
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt, allowrunasroot_opt]
 
                     return_code = run_test(test_module, test_directory, options,
                                            launcher_cmd=mpiexec)
