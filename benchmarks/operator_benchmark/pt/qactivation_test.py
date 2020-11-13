@@ -45,9 +45,6 @@ qactivation_ops = op_bench.op_list(
         ('relu', nnq.functional.relu),
         ('relu6', torch.ops.quantized.relu6),
         ('functional.hardtanh', nnq.functional.hardtanh),
-        ('functional.hardswish', nnq.functional.hardswish),
-        ('functional.elu', nnq.functional.elu),
-        ('functional.celu', nnq.functional.celu),
         ('functional.hardsigmoid', nnq.functional.hardsigmoid),
         ('functional.leaky_relu', nnq.functional.leaky_relu),
         ('functional.sigmoid', torch.nn.functional.sigmoid),
@@ -66,28 +63,49 @@ class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
         self.zero_point = 0
 
         # Quantize the tensor
-        self.q_input = torch.quantize_per_tensor(f_input, scale=self.scale,
-                                                 zero_point=self.zero_point,
-                                                 dtype=dtype)
+        q_input = torch.quantize_per_tensor(f_input, scale=self.scale,
+                                            zero_point=self.zero_point,
+                                            dtype=dtype)
         if not contig:
             # Make non-contiguous
-            new_shape = list(range(self.q_input.ndim))[::-1]
-            self.q_input = self.q_input.permute(new_shape)
+            new_shape = list(range(q_input.ndim))[::-1]
+            q_input = q_input.permute(new_shape)
+
+        self.inputs = {
+            "q_input": q_input
+        }
 
     def init(self, dims, contig, inplace, dtype, op_func):
         self._setup(dims, contig, dtype)
         self.qop = op_func
 
-    def forward(self):
-        if self.qop in (nnq.functional.hardswish, nnq.functional.elu,
-                        nnq.functional.celu):
-            return self.qop(self.q_input, scale=self.scale, zero_point=self.zero_point)
-        return self.qop(self.q_input)
+
+class QActivationBenchmark(QActivationBenchmarkBase):
+    def forward(self, q_input):
+        return self.qop(q_input)
 
 
 op_bench.generate_pt_tests_from_op_list(qactivation_ops,
                                         qactivation_short_configs + qactivation_long_configs,
-                                        QActivationBenchmarkBase)
+                                        QActivationBenchmark)
+
+
+qactivation_scale_zero_point_ops = op_bench.op_list(
+    attrs=(
+        ('functional.hardswish', nnq.functional.hardswish),
+        ('functional.elu', nnq.functional.elu),
+        ('functional.celu', nnq.functional.celu),
+    ),
+    attr_names=('op_name', 'op_func'),
+)
+
+class QActivationScaleZeroPointBenchmark(QActivationBenchmarkBase):
+    def forward(self, q_input):
+        return self.qop(q_input, scale=self.scale, zero_point=self.zero_point)
+
+op_bench.generate_pt_tests_from_op_list(qactivation_scale_zero_point_ops,
+                                        qactivation_short_configs + qactivation_long_configs,
+                                        QActivationScaleZeroPointBenchmark)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
