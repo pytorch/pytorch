@@ -126,6 +126,7 @@ class TestTEFuser(JitTestCase):
         FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @unittest.skip("Disabled on release branch")
     def test_sum_simple(self):
         def func(x):
             x2 = x * x
@@ -1399,6 +1400,23 @@ class TestTEFuser(JitTestCase):
                 test, ref = pair
                 torch.testing.assert_allclose(test, ref)
         self.assertAllFused(script.graph_for(*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_sub_gt_and(self):
+        def eager(t1, t2, t3, t4, t: float):
+            w = t1 - t2
+            h = t3 - t4
+            k = (w > t) & (h > t)
+            assert k.dtype == torch.bool
+            if t > 0.5:
+                # Putting a use of k in a never-executed conditional prevents
+                # profiling its type, which leaves it as "Tensor".  If we
+                # propagate Tensor back to the definition of k, we have to be
+                # careful not to create a fusion group containing it.
+                return k + 1
+            return w
+        t = torch.rand(8, dtype=torch.float, device='cuda')
+        scripted = self.checkScript(eager, (t, t, t, t, 0.1))
 
 
 if __name__ == '__main__':
