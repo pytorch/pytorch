@@ -14,7 +14,7 @@ from torch.testing import \
      floating_types, floating_types_and, floating_and_complex_types,
      floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack,
      expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -436,7 +436,37 @@ op_db = [
                    ref=np.nan_to_num,
                    dtypes=all_types_and(torch.half, torch.bool),
                    dtypesIfCPU=None,
-                   dtypesIfCUDA=None)
+                   dtypesIfCUDA=None),
+    UnaryUfuncInfo('sqrt',
+                   ref=np.sqrt,
+                   domain=(0, float('inf')),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 7e-2}),),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/47358
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
+                                active_if=IS_MACOS),
+                       # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.bfloat16]),
+                       # RuntimeError: sqrt does not support automatic differentiation for outputs with complex dtype.
+                       SkipInfo('TestGradients', 'test_fn_grad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_fn_gradgrad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_method_grad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_method_gradgrad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_inplace_grad',
+                                dtypes=[torch.cdouble]),
+                       SkipInfo('TestGradients', 'test_inplace_gradgrad',
+                                dtypes=[torch.cdouble]),),
+                   promotes_integers_to_float=True,
+                   handles_complex_extremals=False),
 ]
 
 # Common operator groupings
@@ -867,11 +897,9 @@ def method_tests():
         ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
         ('kthvalue', (S,), (2, 0,), 'dim_1d', (), [1]),
         ('kthvalue', (S,), (2, 0, True,), 'keepdim_dim_1d', (), [1]),
-        # TODO: https://github.com/pytorch/pytorch/issues/30818
-        ('kthvalue', (), (1,), 'scalar', (), (), [expectedFailureCUDA]),
-        ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1], [expectedFailureCUDA]),
-        ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1], [expectedFailureCUDA]),
-        # END TODO
+        ('kthvalue', (), (1,), 'scalar', (), ()),
+        ('kthvalue', (), (1, 0,), 'scalar_dim', (), [1]),
+        ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', (), [1]),
         ('quantile', (S, S, S), (0.5,)),
         ('quantile', (S, S, S), (0.5, 0), 'dim', (), [1]),
         ('quantile', (S, S, S), (0.5, None, True), 'keepdim'),
@@ -962,6 +990,8 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('repeat', (S, S), (1, 1), 'keepdim0'),
+        ('repeat', (S, S), (3, 1, 1), 'keepdim1'),
         ('repeat', (S,), (0, ), 'zero_dim'),
         ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
@@ -1325,15 +1355,23 @@ def method_tests():
         ('lu', (3, S, S), (True, True), 'square_batch_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('lu', (3, 3, S, S), (True, False), 'square_many_batches_no_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('lu', (3, 3, S, S), (True, True), 'square_many_batches_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (S, S), (random_fullrank_matrix_distinct_singular_value(
-            S, silent=True),), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
+        ('solve', (S, S), (lambda dtype, device: random_fullrank_matrix_distinct_singular_value(
+            S, silent=True, dtype=dtype, device=device),), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('solve', (S, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, S, silent=True, dtype=dtype, device=device),),
          'batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3, silent=True),),
+        ('solve', (2, 3, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, 2, 3, silent=True, dtype=dtype, device=device),),
          'batched_dims', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1, silent=True),),
+        ('solve', (2, 2, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, 1, silent=True, dtype=dtype, device=device),),
          'batched_broadcast_A', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('solve', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2, silent=True),),
+        ('solve', (1, S, S),
+            (lambda dtype, device:
+                random_fullrank_matrix_distinct_singular_value(S, 2, 2, silent=True, dtype=dtype, device=device),),
          'batched_broadcast_b', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
@@ -1491,6 +1529,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
+        ('triangular_solve', (S, M), ((S, S), ), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('kron', (S, S), ((M, L),))
     ]
 

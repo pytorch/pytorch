@@ -2640,7 +2640,7 @@ Computes the dot product of two 1D tensors. The vdot(a, b) function handles comp
 differently than dot(a, b). If the first argument is complex, the complex conjugate of the
 first argument is used for the calculation of the dot product.
 
-.. note:: 
+.. note::
 
     Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
     of two 1D tensors with the same number of elements.
@@ -2672,7 +2672,7 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 
 .. note::
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-    for :func:`torch.symeig`
+    if eigenvalues and eigenvectors are all real valued.
 
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
@@ -3224,6 +3224,8 @@ A, in order as a namedtuple `solution, LU`.
 `torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
+
+Supports real-valued and complex-valued inputs.
 
 .. note::
 
@@ -7664,9 +7666,11 @@ This function returns a namedtuple ``(U, S, V)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
-If :attr:`some` is ``True`` (default), the method returns the reduced singular value decomposition
-i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the returned
-`U` and `V` matrices will contain only :math:`min(n, m)` orthonormal columns.
+If :attr:`some` is ``True`` (default), the method returns the reduced
+singular value decomposition i.e., if the last two dimensions of
+:attr:`input` are ``m`` and ``n``, then the returned `U` matrix will
+contain only :math:`min(n, m)` orthonormal columns and the size of `V`
+will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
@@ -8169,6 +8173,8 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
+
+Supports real-valued and complex-valued inputs.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where

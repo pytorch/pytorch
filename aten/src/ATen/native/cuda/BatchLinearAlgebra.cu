@@ -161,6 +161,28 @@ void magmaSolve<float>(
 }
 
 template<>
+void magmaSolve<c10::complex<double>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<double>* dA, magma_int_t ldda,
+    magma_int_t* ipiv, c10::complex<double>* dB, magma_int_t lddb, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zgesv_gpu(n, nrhs,
+    reinterpret_cast<magmaDoubleComplex*>(dA), ldda, ipiv,
+    reinterpret_cast<magmaDoubleComplex*>(dB), lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSolve<c10::complex<float>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<float>* dA, magma_int_t ldda,
+    magma_int_t* ipiv, c10::complex<float>* dB, magma_int_t lddb, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cgesv_gpu(n, nrhs,
+    reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv,
+    reinterpret_cast<magmaFloatComplex*>(dB), lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
 void magmaSolveBatched<double>(
     magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, double** dB_array, magma_int_t lddb,
@@ -175,6 +197,28 @@ void magmaSolveBatched<float>(
     magma_int_t** dipiv_array, float** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
   magma_sgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSolveBatched<c10::complex<double>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<double>** dA_array, magma_int_t ldda,
+    magma_int_t** dipiv_array, c10::complex<double>** dB_array, magma_int_t lddb,
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_zgesv_batched(n, nrhs,
+    reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, dipiv_array,
+    reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, dinfo_array, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSolveBatched<c10::complex<float>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<float>** dA_array, magma_int_t ldda,
+    magma_int_t** dipiv_array, c10::complex<float>** dB_array, magma_int_t lddb,
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_cgesv_batched(n, nrhs,
+    reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, dipiv_array,
+    reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, dinfo_array, batch_count, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -587,6 +631,30 @@ void magmaTriangularSolve<float>(
 }
 
 template<>
+void magmaTriangularSolve<c10::complex<double>>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    c10::complex<double>* dA, magma_int_t ldda, c10::complex<double>* dB, magma_int_t lddb) {
+  MagmaStreamSyncGuard guard;
+  magmaDoubleComplex alpha({1, 0});
+  magma_ztrsm(MagmaLeft, uplo, trans, diag, m, n, alpha,
+    reinterpret_cast<magmaDoubleComplex*>(dA), ldda,
+    reinterpret_cast<magmaDoubleComplex*>(dB), lddb);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaTriangularSolve<c10::complex<float>>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    c10::complex<float>* dA, magma_int_t ldda, c10::complex<float>* dB, magma_int_t lddb) {
+  MagmaStreamSyncGuard guard;
+  magmaFloatComplex alpha({1, 0});
+  magma_ctrsm(MagmaLeft, uplo, trans, diag, m, n, alpha,
+    reinterpret_cast<magmaFloatComplex*>(dA), ldda,
+    reinterpret_cast<magmaFloatComplex*>(dB), lddb);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
 void magmaTriangularSolveBatched<double>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     double** dA_array, magma_int_t ldda, double** dB_array, magma_int_t lddb, magma_int_t batchsize,
@@ -601,6 +669,30 @@ void magmaTriangularSolveBatched<float>(
     float** dA_array, magma_int_t ldda, float** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magmablas_strsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaTriangularSolveBatched<c10::complex<double>>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    c10::complex<double>** dA_array, magma_int_t ldda, c10::complex<double>** dB_array, magma_int_t lddb, magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magmaDoubleComplex alpha({1, 0});
+  magmablas_ztrsm_batched(MagmaLeft, uplo, trans, diag, m, n, alpha,
+    reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda,
+    reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaTriangularSolveBatched<c10::complex<float>>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    c10::complex<float>** dA_array, magma_int_t ldda, c10::complex<float>** dB_array, magma_int_t lddb, magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magmaFloatComplex alpha({1, 0});
+  magmablas_ctrsm_batched(MagmaLeft, uplo, trans, diag, m, n, alpha,
+    reinterpret_cast<magmaFloatComplex**>(dA_array), ldda,
+    reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1011,7 +1103,7 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "solve_cuda", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cuda", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
@@ -1483,7 +1575,7 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, con
                                                          bool upper, bool transpose, bool unitriangular) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "triangular_solve_cuda", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
   });
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
