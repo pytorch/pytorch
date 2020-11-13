@@ -1199,7 +1199,7 @@ endif()
 if(APPLE AND USE_PYTORCH_METAL)
   if(NOT INTERN_BUILD_MOBILE)
     include(../cmake/Metal.cmake)
-    # We need to link those frameworks explictly
+    # We need to link the system frameworks explictly
     find_library(metal NAMES Metal)
     find_library(mps NAMES MetalPerformanceShaders)
     find_library(foundation NAMES Foundation)
