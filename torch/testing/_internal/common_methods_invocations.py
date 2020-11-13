@@ -12,7 +12,8 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes,
      floating_types, floating_types_and, floating_and_complex_types,
-     floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
+     floating_and_complex_types_and, all_types_and_complex_and, all_types_and,
+     all_types_and_complex)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack,
      expectedAlertNondeterministic, precisionOverride)
@@ -470,9 +471,9 @@ op_db = [
     UnaryUfuncInfo('rsqrt',
                    ref=lambda x: np.reciprocal(np.sqrt(x)),
                    domain=(1e-15, float('inf')),
-                   dtypes=all_types_and_complex_and(torch.bool),
-                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   dtypes=all_types_and_complex(),
+                   dtypesIfCPU=all_types_and_complex(),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
