@@ -338,3 +338,10 @@ class TestTorchbind(JitTestCase):
         foo = torch.classes._TorchScriptTesting._StackString(["test"])
         with self.assertRaisesRegex(AttributeError, 'does not have a field'):
             foo.bar
+
+    def test_lambda_as_constructor(self):
+        obj_no_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, False)
+        self.assertEqual(obj_no_swap.diff(), 1)
+
+        obj_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, True)
+        self.assertEqual(obj_swap.diff(), -1)

@@ -61,7 +61,7 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
  public:
   ProcessGroupAgent(
       std::string workerName,
-      std::shared_ptr<c10d::ProcessGroup> pg,
+      c10::intrusive_ptr<::c10d::ProcessGroup> pg,
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout,
       std::unique_ptr<RequestCallback> cb);
@@ -209,7 +209,7 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
     return ++nextId_;
   }
 
-  std::shared_ptr<c10d::ProcessGroup> pg_;
+  c10::intrusive_ptr<::c10d::ProcessGroup> pg_;
   // worker name -> rank
   std::unordered_map<std::string, worker_id_t> nameMap_;
   std::vector<WorkerInfo> allWorkerInfo_;
