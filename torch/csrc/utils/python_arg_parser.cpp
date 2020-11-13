@@ -139,7 +139,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject* {
   py::object torch_api = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
   std::string module_name = "torch.Tensor." + property_name;
-  return handle_torch_function((PyObject *)self, "__get__", nullptr, torch_api.ptr(), module_name);
+  return handle_torch_function((PyObject *)self, "__get__", nullptr, nullptr, torch_api.ptr(), module_name);
 }
 
 auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int {
@@ -148,10 +148,10 @@ auto handle_torch_function_setter(THPVariable* self, const std::string& property
   if (value != nullptr)
   {
     py::tuple args_ = py::make_tuple(py::handle(value));
-    handle_torch_function((PyObject *)self, "__set__", args_.ptr(), torch_api.ptr(), module_name);
+    handle_torch_function((PyObject *)self, "__set__", args_.ptr(), nullptr, torch_api.ptr(), module_name);
   }
   else {
-    handle_torch_function((PyObject *)self, "__delete__", nullptr, torch_api.ptr(), module_name);
+    handle_torch_function((PyObject *)self, "__delete__", nullptr, nullptr, torch_api.ptr(), module_name);
   }
   return 0;
 }
@@ -175,13 +175,13 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
   return args_;
 }
 
-auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* torch_api, const std::string& module_name) -> PyObject* {
+auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* kwargs, PyObject* torch_api, const std::string& module_name) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
   py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
   py::object torch_function = PyObject_FastGetAttrString(self, "__torch_function__");
-  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), NULL));
+  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), kwargs));
   if (ret.ptr() == nullptr) {
     // if an exception occurred in a user's implementation of
     // __torch_function__, throw it

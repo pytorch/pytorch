@@ -172,13 +172,13 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.new,
         Tensor.new_tensor,
         Tensor.new_empty,
+        Tensor.new_empty_strided,
         Tensor.new_zeros,
         Tensor.new_ones,
         Tensor.new_full,
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
-        Tensor._reduce_ex_internal,
     }
 
 
@@ -322,7 +322,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.dist: lambda input, other, p=2: -1,
         torch.div: lambda input, other, out=None: -1,
         torch.divide: lambda input, other, out=None: -1,
-        torch.dot: lambda mat1, mat2: -1,
+        torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2: -1,
         torch.hsmm: lambda mat1, mat2: -1,
@@ -681,7 +681,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.randn_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch.ravel: lambda input: -1,
         torch.real: lambda input, out=None: -1,
-        torch.vdot: lambda mat1, mat2: -1,
+        torch.vdot: lambda input, other, out=None: -1,
         torch.view_as_real: lambda input: -1,
         torch.view_as_complex: lambda input: -1,
         torch.reciprocal: lambda input, out=None: -1,
