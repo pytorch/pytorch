@@ -1616,8 +1616,14 @@ Node* Graph::createTupleSlice(
   n->i_(attr::end, end);
   n->i_(attr::step_size, step_size);
   std::vector<TypePtr> output_types;
-  for (auto i = beg; i < end; i += step_size) {
-    output_types.push_back(tuple_type->elements().at(i));
+  if (step_size > 0) {
+    for (auto i = beg; i < end; i += step_size) {
+      output_types.push_back(tuple_type->elements().at(i));
+    }
+  } else {
+    for (auto i = end; i > beg; i += step_size) {
+      output_types.push_back(tuple_type->elements().at(i));
+    }
   }
   auto tt = TupleType::create(std::move(output_types));
   n->output()->setType(tt);

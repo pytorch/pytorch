@@ -253,8 +253,15 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
 void tupleSlice(Stack& stack, size_t begin, size_t end, int8_t step_size) {
   auto tuple = pop(stack).toTuple();
   std::vector<IValue> output_elems;
-  for (size_t i = begin; i < end; i += step_size) {
-    output_elems.emplace_back(tuple->elements()[i]);
+
+  if (step_size > 0) {
+    for (size_t i = begin; i < end; i += step_size) {
+      output_elems.emplace_back(tuple->elements()[i]);
+    }
+  } else {
+    for (int32_t i = end; i > (int32_t)begin; i += step_size) {
+      output_elems.emplace_back(tuple->elements()[i]);
+    }
   }
   push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
 }

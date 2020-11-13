@@ -3449,20 +3449,36 @@ struct to_ir {
       args.emplace_back(loc, "end", end);
     }
     if (sliceable->type()->cast<TupleType>()) {
+      if (start && end && step) {
+        return emitTupleSlice(loc, args[0], start, end, step);
+      }
+
+      if (start && end) {
+        return emitTupleSlice(loc, args[0], start, end, c10::nullopt);
+      }
+
+      if (start && step) {
+        return emitTupleSlice(loc, args[0], start, c10::nullopt, step);
+      }
+
       if (end && step) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2], step);
+        return emitTupleSlice(loc, args[0], c10::nullopt, end, step);
+      }
+
+      if (start) {
+        return emitTupleSlice(loc, args[0], start, c10::nullopt, c10::nullopt);
       }
 
       if (end) {
-        return emitTupleSlice(
-            loc, args[0], args[1], /*end*/ args[2], c10::nullopt);
+        return emitTupleSlice(loc, args[0], c10::nullopt, end, c10::nullopt);
       }
 
       if (step) {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt, step);
+        return emitTupleSlice(loc, args[0], c10::nullopt, c10::nullopt, step);
       }
 
-      return emitTupleSlice(loc, args[0], args[1], c10::nullopt, c10::nullopt);
+      return emitTupleSlice(
+          loc, args[0], c10::nullopt, c10::nullopt, c10::nullopt);
     }
 
     if (!step) {
@@ -3826,27 +3842,15 @@ struct to_ir {
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
-      const NamedValue& beg_val,
+      const at::optional<NamedValue>& beg_val,
       const at::optional<NamedValue>& end_val,
       const at::optional<NamedValue>& step) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
-    int64_t beg = getAdjTupleIndex(
-        loc,
-        tuple_type,
-        getSliceInd(beg_val.value(*graph), loc),
-        /*allow_out_of_bounds*/ true);
-    int64_t end;
     int64_t tuple_len = tuple_type->elements().size();
-    if (end_val) {
-      end = getAdjTupleIndex(
-          loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
-    } else {
-      end = tuple_len;
-    }
-    // slicing does not throw out of bounds errors
-    end = std::min(std::max((int64_t)0, end), tuple_len);
-    beg = std::min(std::max((int64_t)0, beg), tuple_len);
 
+    // first figure out the step sign to know if we want to flip the start or
+    // end For example, if we have x[::-3], the start should be len(x) - 1 and
+    // end should be 0
     int64_t step_size = 1;
     if (step) {
       auto val = toIValue(step->value(*graph));
@@ -3855,11 +3859,32 @@ struct to_ir {
       }
     }
 
-    if (step_size < 0) {
-      // TODO: add support for slicing tuples with a negative step
+    if (step_size > 127 || step_size < -127) {
       throw ErrorReport(loc)
-          << "Unsupported operation: slicing tuples with a negative step isn't supported";
+          << "tuple slicing step size can only be between [-127, 127]";
     }
+
+    int64_t beg;
+    if (beg_val) {
+      beg = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
+    } else {
+      // we want to flip the beg if we are slicing in the opposite direction
+      beg = step_size > 0 ? (int64_t)0 : tuple_len;
+    }
+
+    int64_t end;
+    if (end_val) {
+      end = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
+    } else {
+      // we want to flip the end if we are slicing in the opposite direction
+      end = step_size > 0 ? tuple_len : (int64_t)0;
+    }
+
+    // slicing does not throw out of bounds errors
+    end = std::min(std::max((int64_t)0, end), tuple_len);
+    beg = std::min(std::max((int64_t)0, beg), tuple_len);
 
     return graph
         ->insertNode(graph->createTupleSlice(

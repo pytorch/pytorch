@@ -880,7 +880,23 @@ struct CodeImpl {
     int64_t beg_ind = node->i(attr::beg);
     int64_t end_ind = node->i(attr::end);
     int64_t step_size = node->i(attr::step_size);
-    insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind, step_size);
+    if (step_size > 0) {
+      // TODO: hack to make sure there is no slicing happens (imagine case
+      // x[7:5:2])
+      if (end_ind < beg_ind) {
+        insertInstruction(TUPLE_SLICE, beg_ind, 0, std::abs(step_size));
+      } else {
+        insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind, step_size);
+      }
+    } else {
+      // TODO: hack to make sure there is no slicing happens (imagine case
+      // x[5:7:-2])
+      if (beg_ind < end_ind) {
+        insertInstruction(TUPLE_SLICE, end_ind, 0, std::abs(step_size));
+      } else {
+        insertInstruction(TUPLE_SLICE, end_ind, beg_ind - end_ind, step_size);
+      }
+    }
   }
 
   void emitFork(Node* node) {

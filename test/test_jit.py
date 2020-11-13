@@ -15479,6 +15479,36 @@ dedent """
 
         self.checkModule(E(), inp)
 
+        class F(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6)
+
+            def forward(self, a):
+                return self.x[5::-2]
+
+        self.checkModule(F(), inp)
+
+        class G(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
+
+            def forward(self, a):
+                return self.x[7:5:2]
+
+        self.checkModule(G(), inp)
+
+        class H(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
+
+            def forward(self, a):
+                return self.x[5:7:-2]
+
+        self.checkModule(H(), inp)
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
