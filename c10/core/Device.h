@@ -1,6 +1,5 @@
 #pragma once
 
-//#include <c10/cuda/CUDAFunctions.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -9,7 +8,6 @@
 #include <functional>
 #include <iosfwd>
 #include <string>
-#include <iostream>
 
 namespace c10 {
 
@@ -35,9 +33,8 @@ struct C10_API Device final {
   /// Constructs a new `Device` from a `DeviceType` and a device
   /// index.
   /// Also performs validation
-  /* implicit */ Device(DeviceType type, DeviceIndex index, const char* str = __builtin_FUNCTION())
+  /* implicit */ Device(DeviceType type, DeviceIndex index)
       : type_(type), index_(index) {
-          std::cout << "copy ctr called by: " << std::string(str) << std::endl;
     validate();
   }
 
@@ -117,7 +114,6 @@ struct C10_API Device final {
   DeviceType type_;
   DeviceIndex index_ = -1;
   void validate() {
-          std::cout << "validate called" << std::endl;
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
     TORCH_CHECK(!is_cpu() || index_ <= 0,

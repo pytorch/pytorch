@@ -477,9 +477,9 @@ void cuda_sparse_coo_softmax_backward(
       }
     } else {
       auto host_out_offsets =
-          out_offsets.to(at::kCPU, indices.dtype(), false, true);
+          out_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
       auto host_grad_offsets =
-          grad_offsets.to(at::kCPU, indices.dtype(), false, true);
+          grad_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
       auto out_offsets_accessor = host_out_offsets.data_ptr<int64_t>();
       auto grad_offsets_accessor = host_grad_offsets.data_ptr<int64_t>();
       for (int64_t i = 0; i < out_nnz; i++) {
