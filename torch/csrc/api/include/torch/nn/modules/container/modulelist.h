@@ -8,7 +8,7 @@
 namespace torch {
 namespace nn {
 
-/// A list of `Module`s that registers its elements by string names.
+/// A list of `Module`s that registers its elements.
 ///
 /// \rst
 /// .. code-block:: cpp
