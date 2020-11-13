@@ -7943,6 +7943,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             "setCurrentCUDAStream",
             ("setCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH),
         ),
+        ("Device::cuda_unchecked", ("Device::hip_unchecked", API_PYTORCH)),
         # TODO: Undo this special-case; see the header for motivation behind this
         # hack.  It's VERY important this is only applied to PyTorch HIPify.
         (

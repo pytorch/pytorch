@@ -25,7 +25,7 @@ public:
         HIPStream(
           Stream(
             Stream::UNSAFE,
-            Device::cuda_unchecked(stream.device_index()),
+            Device::hip_unchecked(stream.device_index()),
             stream.id())
         )
       ) {}
