@@ -29,10 +29,11 @@ Tensor& scalar_fill(Tensor& self, Scalar value) {
   return self;
 }
 
-Tensor scalar_tensor_static(Scalar s, const TensorOptions& options) {
+Tensor scalar_tensor_static(Scalar s, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
+                            c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoNonVariableTypeMode non_var_type_mode(true);
-  auto result = at::detail::empty_cpu({}, options);
+  auto result = at::detail::empty_cpu({}, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
   scalar_fill(result, s);
   return result;
 }

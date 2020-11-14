@@ -141,11 +141,11 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      const std::shared_ptr<::c10d::Store>& store,
+      const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      std::shared_ptr<c10d::ProcessGroup> processGroup,
+      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts,
       std::unique_ptr<RequestCallback> cb);
 
@@ -283,7 +283,7 @@ class TensorPipeAgent : public RpcAgent {
   // The join method is required to behave like a barrier and perform collective
   // operations. For simplicity and reliability, we offload this to a process
   // group, but probably one day we might want to re-implement them using RPCs.
-  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+  const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
