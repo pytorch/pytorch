@@ -1,4 +1,5 @@
-from typing import Optional, List, Sequence
+import itertools
+from typing import Optional, List, Sequence, Union
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
@@ -6,7 +7,31 @@ from tools.codegen.code_template import CodeTemplate
 from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
 from tools.codegen.model import *
 
-from .gen_variable_type import MANUAL_TRACER
+# Note [Manual Backend kernels]
+# For these ops, we want to manually register to dispatch key Backend and
+# skip codegen-ed registeration to all keys before Backend.
+# For codegen this means:
+#   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
+#     where we skip codegen backend kernels
+#   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
+#   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
+# Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_BACKEND = set([
+    'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
+    '_backward', 'requires_grad_',
+])
+
+# For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD_AND_TRACER = set([
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
+])
+
+# Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
+#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
 
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue

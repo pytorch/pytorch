@@ -161,6 +161,28 @@ void magmaSolve<float>(
 }
 
 template<>
+void magmaSolve<c10::complex<double>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<double>* dA, magma_int_t ldda,
+    magma_int_t* ipiv, c10::complex<double>* dB, magma_int_t lddb, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zgesv_gpu(n, nrhs,
+    reinterpret_cast<magmaDoubleComplex*>(dA), ldda, ipiv,
+    reinterpret_cast<magmaDoubleComplex*>(dB), lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSolve<c10::complex<float>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<float>* dA, magma_int_t ldda,
+    magma_int_t* ipiv, c10::complex<float>* dB, magma_int_t lddb, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cgesv_gpu(n, nrhs,
+    reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv,
+    reinterpret_cast<magmaFloatComplex*>(dB), lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
 void magmaSolveBatched<double>(
     magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, double** dB_array, magma_int_t lddb,
@@ -175,6 +197,28 @@ void magmaSolveBatched<float>(
     magma_int_t** dipiv_array, float** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
   magma_sgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSolveBatched<c10::complex<double>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<double>** dA_array, magma_int_t ldda,
+    magma_int_t** dipiv_array, c10::complex<double>** dB_array, magma_int_t lddb,
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_zgesv_batched(n, nrhs,
+    reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, dipiv_array,
+    reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, dinfo_array, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSolveBatched<c10::complex<float>>(
+    magma_int_t n, magma_int_t nrhs, c10::complex<float>** dA_array, magma_int_t ldda,
+    magma_int_t** dipiv_array, c10::complex<float>** dB_array, magma_int_t lddb,
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_cgesv_batched(n, nrhs,
+    reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, dipiv_array,
+    reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, dinfo_array, batch_count, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1059,7 +1103,7 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "solve_cuda", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cuda", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
@@ -1289,10 +1333,11 @@ AT_ERROR("cholesky: MAGMA library not found in "
 
   auto self_data = self.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+  auto lda = std::max<magma_int_t>(1, n);
 
   if (self.dim() == 2) {
     magma_int_t info = 0;
-    magmaCholesky<scalar_t>(uplo, n, self_data, n, &info);
+    magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info);
     infos[0] = info;
   } else {
     auto self_mat_stride = matrixStride(self);
@@ -1323,14 +1368,14 @@ AT_ERROR("cholesky: MAGMA library not found in "
       magma_int_t* info_array_cur = &info_array[mini_idx];
 
       magmaCholeskyBatched<scalar_t>(
-        uplo, n, self_array_cur, n, info_array_cur, batch_limit, magma_queue);
+        uplo, n, self_array_cur, lda, info_array_cur, batch_limit, magma_queue);
     }
 
     // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
     // which concisely is equal to batch_size % batch_limit
     if (batch_size % batch_limit != 0) {
       magmaCholeskyBatched<scalar_t>(
-        uplo, n, &self_array[mini_idx], n, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
+        uplo, n, &self_array[mini_idx], lda, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
     }
 
     for (int64_t i = 0; i < batch_size; i++) {

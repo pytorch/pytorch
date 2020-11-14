@@ -2596,30 +2596,6 @@ class TestAutograd(TestCase):
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
-    def test_cholesky(self):
-        def func(root, upper):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.cholesky(x, upper)
-
-        def run_test(upper, dims, dtype):
-            root = torch.rand(*dims, dtype=dtype, requires_grad=True)
-            root = root + torch.eye(dims[-1])
-
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
-
-            root = torch.rand(*dims, dtype=dtype)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
-            root.requires_grad_()
-            chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
-
-        for upper, dims, dtype in product([True, False],
-                                          [(3, 3), (4, 3, 2, 2)],
-                                          [torch.double, torch.cdouble]):
-            run_test(upper, dims, dtype)
-
-    @skipIfNoLapack
     def test_cholesky_solve(self):
         def _test_with_size(A_dims, B_dims, upper):
             root = torch.rand(*A_dims).requires_grad_()
@@ -4987,10 +4963,12 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'mean', 'inverse', 'triangular_solve'] + separate_complex_tests
+                'exp', 'mean', 'inverse', 'triangular_solve', 'solve'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
-skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex', 'inverse_batched_complex']
+skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex', 'inverse_batched_complex',
+                  'solve_batched_broadcast_A_complex', 'solve_batched_broadcast_b_complex',
+                  'solve_batched_complex', 'solve_batched_dims_complex']
 
 def add_test(
         name,
