@@ -1333,10 +1333,11 @@ AT_ERROR("cholesky: MAGMA library not found in "
 
   auto self_data = self.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+  auto lda = std::max<magma_int_t>(1, n);
 
   if (self.dim() == 2) {
     magma_int_t info = 0;
-    magmaCholesky<scalar_t>(uplo, n, self_data, n, &info);
+    magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info);
     infos[0] = info;
   } else {
     auto self_mat_stride = matrixStride(self);
@@ -1367,14 +1368,14 @@ AT_ERROR("cholesky: MAGMA library not found in "
       magma_int_t* info_array_cur = &info_array[mini_idx];
 
       magmaCholeskyBatched<scalar_t>(
-        uplo, n, self_array_cur, n, info_array_cur, batch_limit, magma_queue);
+        uplo, n, self_array_cur, lda, info_array_cur, batch_limit, magma_queue);
     }
 
     // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
     // which concisely is equal to batch_size % batch_limit
     if (batch_size % batch_limit != 0) {
       magmaCholeskyBatched<scalar_t>(
-        uplo, n, &self_array[mini_idx], n, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
+        uplo, n, &self_array[mini_idx], lda, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
     }
 
     for (int64_t i = 0; i < batch_size; i++) {
