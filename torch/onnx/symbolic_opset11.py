@@ -80,6 +80,105 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         ]
         index = g.op("Concat", *indices_list, axis_i=-1)
     else:
+        # Replace index_put node with masked_scatter or masked_fill
+        # when inputs to the index_put node contains boolean inputs
+        #
+        # index_put -> masked_fill
+        #
+        # before graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=1, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %6 : None = prim::Constant()
+        #   %mask : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::clone(%0, %6)
+        #   %8 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::ne(%mask, %some_const)
+        #   %26 : Long(requires_grad=0, device=cpu) = prim::Constant[value={11}]()
+        #   %27 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %11 : Device = prim::Constant[value="cpu"]()
+        #   %12 : None = prim::Constant()
+        #   %28 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %29 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %15 : None = prim::Constant()
+        #   %16 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = 
+        #               aten::to(%8, %26, %27, %11, %12, %28, %29, %15)
+        #   %18 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
+        #   %30 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %22 : int[] = prim::Constant[value=[-1]]()
+        #   %23 : Tensor = aten::view(%16, %22)
+        #   %24 : Tensor?[] = prim::ListConstruct(%23)
+        #   %25 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = 
+        #                aten::index_put(%mask, %24, %18, %30)
+        #   return (%25)
+        #
+        # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %3 : Tensor = onnx::Equal(%0, %some_const)
+        #   %4 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%3) 
+        #   %12 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%4)
+        #   %19 : Tensor = onnx::Cast[to=9](%12)
+        #   %20 : Tensor = onnx::Constant[value={1}]()
+        #   %21 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #                = onnx::Where(%19, %20, %0)
+        #   return (%21)
+        #
+        # index_put -> masked_scatter
+        #
+        # before graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=1, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %6 : None = prim::Constant()
+        #   %mask : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = aten::clone(%0, %6)
+        #   %28 : Float(8, strides=[1], requires_grad=0, device=cpu)
+        #                = prim::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
+        #   %15 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #                = aten::ne(%mask, %some_const)
+        #   %34 : Long(requires_grad=0, device=cpu) = prim::Constant[value={11}]()
+        #   %35 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %18 : Device = prim::Constant[value="cpu"]()
+        #   %19 : None = prim::Constant()
+        #   %36 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %37 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %22 : None = prim::Constant()
+        #   %23 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #                = aten::to(%15, %34, %35, %18, %19, %36, %37, %22) 
+        #   %38 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+        #   %30 : int[] = prim::Constant[value=[-1]]()
+        #   %31 : Tensor = aten::view(%23, %30)
+        #   %32 : Tensor?[] = prim::ListConstruct(%31)
+        #   %33 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
+        #               = aten::index_put(%mask, %32, %28, %38)
+        #   return (%33)
+        #
+        # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
+        #       %some_const : Float(requires_grad=0, device=cpu)):
+        #   %3 : Float(8, strides=[1], requires_grad=0, device=cpu) 
+        #               = onnx::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
+        #   %4 : Tensor = onnx::Equal(%0, %some_const)
+        #   %5 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%4)
+        #   %13 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%5)
+        #   %19 : Tensor = onnx::Shape(%0)
+        #   %20 : Tensor = onnx::Expand(%13, %19)
+        #   %21 : Tensor = onnx::NonZero(%20)
+        #   %22 : Tensor = onnx::Transpose[perm=[1, 0]](%21)
+        #   %23 : Tensor = onnx::Constant[value={-1}]()
+        #   %24 : Tensor = onnx::Reshape(%3, %23)
+        #   %25 : Tensor = onnx::Shape(%22)
+        #   %27 : Tensor = onnx::Constant[value={0}]()
+        #   %28 : Tensor = onnx::Gather[axis=0](%25, %27)
+        #   %29 : Tensor = onnx::Constant[value={0}]()
+        #   %30 : Tensor = onnx::Unsqueeze[axes=[0]](%29)
+        #   %31 : Tensor = onnx::Unsqueeze[axes=[0]](%28)
+        #   %32 : Tensor = onnx::Constant[value={0}]()
+        #   %33 : Tensor = onnx::Unsqueeze[axes=[0]](%32)
+        #   %34 : Tensor = onnx::Slice(%24, %30, %31, %33)
+        #   %35 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) 
+        #               = onnx::ScatterND(%0, %22, %34)
+        #   return (%35)
+
+        bool_inp = list(index.node().inputs())[0]
+        if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
+            if values.type() is not None:
+                if values.type().dim() == 0:
+                    from torch.onnx.symbolic_opset9 import masked_fill
+                    return masked_fill(g, self, bool_inp, values)
+                return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = g.op("Unsqueeze", index, axes_i=[-1])
     sub_data_shape = sym_help._slice_helper(
@@ -274,7 +373,8 @@ def masked_scatter(g, self, mask, source):
 def _len(g, self):
     if _is_tensor_list(self) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
-    return g.op("Size", self)
+    sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    return g.op('Squeeze', sz_0, axes_i=[0])
 
 
 def __getitem_(g, self, i):
@@ -634,7 +734,7 @@ def __rshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     rshift = g.op('Div', self, two_pow)
     return rshift
 
@@ -653,7 +753,7 @@ def __lshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     lshift = g.op('Mul', self, two_pow)
     return lshift
 

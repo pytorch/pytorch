@@ -433,8 +433,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   :meth:`~torch.distributed.autograd.get_gradients` should be
                   used to retrieve the gradients. If ``dist_autograd_ctx_id``
                   is ``None``, it is assumed that this is a local autograd graph
-                  and we only perform a local backward pass. The value of the
-                  RRef is expected to be a scalar Tensor.
+                  and we only perform a local backward pass. In the local case,
+                  the node calling this API has to be the owner of the RRef.
+                  The value of the RRef is expected to be a scalar Tensor.
 
                 Arguments:
                     dist_autograd_ctx_id (int, optional): The distributed
@@ -493,7 +494,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(py::init([](std::string workerName,
-                       const std::shared_ptr<::c10d::ProcessGroup>& pg,
+                       const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(
@@ -575,11 +576,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
-          py::init([](const std::shared_ptr<::c10d::Store>& store,
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       std::string selfName,
                       worker_id_t selfId,
                       int worldSize,
-                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
+                      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
             return std::make_shared<TensorPipeAgent>(
                 store,

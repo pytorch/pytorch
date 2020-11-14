@@ -3032,6 +3032,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 FunctionalLinear(weight, bias), x,
                 "quantized::linear_dynamic", tracing=tracing, dynamic=True)
 
+    @skipIfNoFBGEMM
     def test_embedding_bag(self):
         class M(torch.nn.Module):
             def __init__(self, weights):
