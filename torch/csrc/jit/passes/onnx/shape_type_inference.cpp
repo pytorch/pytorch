@@ -198,65 +198,83 @@ bool IsSupportedNode(const Node* n) {
   return true;
 }
 
+Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
+  auto lc_node = v->node();
+  TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
+  // In jit/passes/onnx/peephole.cpp::eraseListConstruct,
+  // prim::ListConstruct is converted to onnx::Concat. The conversion should
+  // eventually be moved to symbolic. For now, treat this operator as
+  // special case, and change from list type to tensor type. The scalar type
+  // is preserved. If the elemtype is Int, insert a onnx::Concat node into
+  // the graph.
+  TypePtr elem = v->type()->cast<ListType>()->getElementType();
+  c10::optional<at::ScalarType> scalar_type = c10::nullopt;
+  if (elem->cast<IntType>()) {
+    scalar_type = at::kLong;
+
+    auto lc_node = v->node();
+    // ListConstruct Int[] output case, we need to transform to ONNX
+    // Concat to ensure the output is a single tensor(dynamic) type in
+    // order to be consumed as inputs
+    std::vector<Value*> unsqueezed;
+    for (auto* input : lc_node->inputs()) {
+      Node* unsqueezed_node =
+          n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
+      auto new_input = n_graph->addInput();
+      new_input->copyMetadata(input);
+      unsqueezed_node->addInput(new_input);
+      unsqueezed_node->is_(attr::axes, {0});
+      unsqueezed.emplace_back(unsqueezed_node->output());
+    }
+    Node* concat_node =
+        n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
+    concat_node->i_(attr::axis, 0);
+    for (auto v : unsqueezed) {
+      concat_node->addInput(v);
+    }
+    return concat_node->output();
+  } else if (elem->cast<FloatType>()) {
+    scalar_type = at::kFloat;
+  } else if (elem->cast<BoolType>()) {
+    scalar_type = at::kBool;
+  } else if (auto t_type = elem->cast<TensorType>()) {
+    scalar_type = t_type->scalarType();
+  }
+
+  auto input = n_graph->addInput();
+  if (scalar_type) {
+    auto v_type = TensorType::create(
+        scalar_type.value(),
+        at::kCPU,
+        c10::SymbolicShape(),
+        c10::VaryingShape<c10::Stride>{},
+        {});
+    input->setType(v_type);
+  }
+  return input;
+}
+
 // Clone the node n for the new graph.
 Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
   auto clone_node = n_graph->createClone(n, [&n_graph](Value* v) {
     auto v_n = v->node();
-    if (v_n->kind() == ::c10::onnx::Constant) {
-      // Clone the input if it is constant.
-      auto constant_n = n_graph->insertNode(
-          n_graph->createClone(v_n, [](Value* v) { return v; }));
-      return constant_n->output();
-    } else if (v_n->kind() == ::c10::prim::ListConstruct) {
-      // In jit/passes/onnx/peephole.cpp::eraseListConstruct,
-      // prim::ListConstruct is converted to onnx::Concat. The conversion should
-      // eventually be moved to symbolic. For now, treat this operator as
-      // special case, and change from list type to tensor type. The scalar type
-      // is preserved. If the elemtype is Int, insert a onnx::Concat node into
-      // the graph.
-      TypePtr elem = v->type()->cast<ListType>()->getElementType();
-      c10::optional<at::ScalarType> scalar_type = c10::nullopt;
-      if (elem->cast<IntType>()) {
-        scalar_type = at::kLong;
-
-        auto lc_node = v->node();
-        // ListConstruct Int[] output case, we need to transform to ONNX
-        // Concat to ensure the output is a single tensor(dynamic) type in
-        // order to be consumed as inputs
-        std::vector<Value*> unsqueezed;
-        for (auto* input : lc_node->inputs()) {
-          Node* unsqueezed_node =
-              n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
-          auto new_input = n_graph->addInput();
-          new_input->copyMetadata(input);
-          unsqueezed_node->addInput(new_input);
-          unsqueezed_node->is_(attr::axes, {0});
-          unsqueezed.emplace_back(unsqueezed_node->output());
-        }
-        Node* concat_node =
-            n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
-        concat_node->i_(attr::axis, 0);
-        for (auto v : unsqueezed) {
-          concat_node->addInput(v);
-        }
-        return concat_node->output();
-      } else if (elem->cast<FloatType>()) {
-        scalar_type = at::kFloat;
-      } else if (elem->cast<BoolType>()) {
-        scalar_type = at::kBool;
-      } else if (auto t_type = elem->cast<TensorType>()) {
-        scalar_type = t_type->scalarType();
+    switch (v_n->kind()) {
+      case ::c10::onnx::Constant: {
+        // Clone the input if it is constant.
+        auto constant_n = n_graph->insertNode(
+            n_graph->createClone(v_n, [](Value* v) { return v; }));
+        return constant_n->output();
       }
-
-      auto input = n_graph->addInput();
-      if (scalar_type) {
-        auto v_type = TensorType::create(
-            scalar_type.value(),
-            at::kCPU,
-            c10::SymbolicShape(),
-            c10::VaryingShape<c10::Stride>{},
-            {});
-        input->setType(v_type);
+      case ::c10::prim::ListConstruct: {
+        return CloneValueFromListConstruct(v, n_graph);
+      }
+      default: {
+        // If the input is not constant, we cannot depend on its value
+        // in shape inference. Set it to graph input in the new graph,
+        // and copy over metadata, such as datatype and shape.
+        auto input = n_graph->addInput();
+        input->copyMetadata(v);
+        return input;
       }
       return input;
     } else if (v_n->kind() == ::c10::prim::PackPadded) {
@@ -377,6 +395,27 @@ void UpdateOutputTypeByONNXProto(
   }
 }
 
+void FetchBlockInputMetadataFromParent(Block* b) {
+  auto n = b->owningNode();
+  if (nullptr != n && n->kind() == ::c10::onnx::Loop) {
+    // Copy node input metadata to subgraph input.
+    for (size_t i = 0; i < n->inputs().size(); ++i) {
+      b->inputs().at(i)->copyMetadata(n->inputs().at(i));
+    }
+  }
+}
+
+void ONNXShapeTypeInference(Block* b, int opset_version) {
+  FetchBlockInputMetadataFromParent(b);
+  for (auto n : b->nodes()) {
+    for (auto subblock : n->blocks()) {
+      ONNXShapeTypeInference(subblock, opset_version);
+    }
+    ONNXShapeTypeInference(n, opset_version);
+  }
+}
+
+
 } // namespace
 
 void ONNXShapeTypeInference(Node* n, int opset_version) {
@@ -496,9 +535,7 @@ void ONNXAssignOutputShape(
 }
 
 void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
-  for (auto n : graph->nodes()) {
-    ONNXShapeTypeInference(n, opset_version);
-  }
+  ONNXShapeTypeInference(graph->block(), opset_version);
 }
 
 } // namespace jit

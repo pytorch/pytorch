@@ -200,7 +200,9 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
             input_names = [] if input_names is None else input_names
             dynamic_axes = {} if dynamic_axes is None else dynamic_axes
             torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
+        print(graph)
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+        print(graph)
         torch._C._jit_pass_lint(graph)
 
         torch._C._jit_pass_onnx_scalar_type_analysis(graph)
@@ -459,7 +461,7 @@ def _model_to_graph(model, args, verbose=False,
 
     if verbose:
         print(graph)
-
+    print(graph)
     params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
     torch._C._jit_decay_packed_param_input_types(graph)
 
