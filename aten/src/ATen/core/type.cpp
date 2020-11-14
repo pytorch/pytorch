@@ -233,7 +233,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
+    return t1->expect<TensorType>()->merge(*t2->expect<TensorType>());
   }
 
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
@@ -560,16 +560,16 @@ VaryingShape<int64_t> TensorType::sizes() const {
       }));
 }
 
-TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
-  auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-  auto dev = merge_primitive(device(), other->device());
-  auto sprops = stride_properties().merge(other->stride_properties());
-  auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-  auto undef = merge_primitive(undefined(), other->undefined());
+TensorTypePtr TensorType::merge(const TensorType& other, bool merge_sizes) const {
+  auto scalar_type = merge_primitive(scalarType(), other.scalarType());
+  auto dev = merge_primitive(device(), other.device());
+  auto sprops = stride_properties().merge(other.stride_properties());
+  auto gr = merge_primitive(requiresGrad(), other.requiresGrad());
+  auto undef = merge_primitive(undefined(), other.undefined());
   return TensorType::create(
       scalar_type,
       dev,
-      merge_sizes ? symbolic_sizes().merge(other->symbolic_sizes())
+      merge_sizes ? symbolic_sizes().merge(other.symbolic_sizes())
                   : symbolic_sizes(),
       sprops,
       gr,
@@ -1023,7 +1023,7 @@ bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const 
     if (this == rhs_p.get()) {
       return true;
     }
-    return *merge(rhs_p) == *rhs_p;
+    return *merge(*rhs_p) == *rhs_p;
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }

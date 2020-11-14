@@ -758,7 +758,7 @@ struct CAFFE2_API TensorType : public Type {
 
   const SymbolicShape& symbolic_sizes() const;
 
-  TensorTypePtr merge(TensorTypePtr other, bool merge_sizes = true) const;
+  TensorTypePtr merge(const TensorType& other, bool merge_sizes = true) const;
 
   bool matchTensor(const at::Tensor& t);
 
