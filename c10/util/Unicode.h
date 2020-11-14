@@ -6,7 +6,7 @@
 #include <windows.h>
 
 #include <string>
-#include <c10/util/Excepton.h>
+#include <c10/util/Exception.h>
 #endif
 
 namespace c10 {
