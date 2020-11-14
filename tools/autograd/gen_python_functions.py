@@ -84,6 +84,7 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
     'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
 ]
 
+# TODO: remove after migrating the entire file to the new data model.
 def should_generate_python_binding(declaration):
     name = declaration['name']
     for pattern in SKIP_PYTHON_BINDINGS:
@@ -94,6 +95,22 @@ def should_generate_python_binding(declaration):
     signature = '{}({})'.format(name, ', '.join(simple_types))
     for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
         if pattern == signature:
+            return False
+
+    return True
+
+@with_native_function
+def should_generate_py_binding(f: NativeFunction) -> bool:
+    name = cpp.name(f.func)
+    for pattern in SKIP_PYTHON_BINDINGS:
+        if re.match('^' + pattern + '$', name):
+            return False
+
+    args = ', '.join(argument_type_str(arg.type)
+                     for arg in signature(f).arguments())
+    sig = f'{name}({args})'
+    for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
+        if pattern == sig:
             return False
 
     return True
@@ -109,7 +126,7 @@ def get_py_variable_methods(declarations):
     """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                not is_nn_module_function(declaration) and
+                not declaration.get('python_module') and
                 is_tensor_method(declaration))
 
     return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
@@ -209,9 +226,7 @@ def get_py_torch_functions(declarations):
     """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                not is_nn_module_function(declaration) and
-                not is_fft_module_function(declaration) and
-                not is_linalg_module_function(declaration) and
+                not declaration.get('python_module') and
                 is_torch_function(declaration))
 
     return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
@@ -308,6 +323,22 @@ def op_name(declaration):
                 '{}: name ends with \'_out\', expecting output params'.
                 format(declaration['name']))
         return name
+
+
+def is_py_variable_method(f: NativeFunction) -> bool:
+    return f.python_module is None and Variant.method in f.variants
+
+def is_py_torch_function(f: NativeFunction) -> bool:
+    return f.python_module is None and Variant.function in f.variants
+
+def is_py_nn_function(f: NativeFunction) -> bool:
+    return f.python_module == 'nn'
+
+def is_py_fft_function(f: NativeFunction) -> bool:
+    return f.python_module == 'fft'
+
+def is_py_linalg_function(f: NativeFunction) -> bool:
+    return f.python_module == 'linalg'
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
