@@ -410,7 +410,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -438,7 +438,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -466,7 +466,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -498,7 +498,7 @@ terrible spacing
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
