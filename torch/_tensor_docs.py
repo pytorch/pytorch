@@ -3575,6 +3575,13 @@ t_() -> Tensor
 In-place version of :meth:`~Tensor.t`
 """)
 
+add_docstr_all('tile',
+               r"""
+tile(*reps) -> Tensor
+
+See :func:`torch.tile`
+""")
+
 add_docstr_all('to',
                r"""
 to(*args, **kwargs) -> Tensor

@@ -9900,6 +9900,35 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `1` appears `n2` times, `2` appears `n3` times, etc.
 """.format(**common_args))
 
+add_docstr(torch.tile,
+           r"""
+tile(input, reps) -> Tensor
+
+Construct a Tensor by repeating the elements of the input tensor the number of times given by reps.
+
+.. note::
+
+    This is similar to ``numpy.tile``.
+
+Args:
+    input (Tensor): A tensor whose elements to repeat.
+    reps (tuple): The number of repetitions per dimension.
+
+Returns:
+    Tensor: Tiled tensor.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> x.tile((2,))
+    tensor([1, 2, 3, 1, 2, 3])
+    >>> y = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.tile(y, (2, 2))
+    tensor([[1, 2, 1, 2],
+            [3, 4, 3, 4],
+            [1, 2, 1, 2],
+            [3, 4, 3, 4]])
+""")
 
 add_docstr(torch.quantize_per_tensor,
            r"""

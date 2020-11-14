@@ -840,6 +840,20 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
+Tensor tile(const Tensor& self, IntArrayRef reps){
+  // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
+  // 1’s to it to keep the same behaviour as `numpy.tile`.
+  // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
+  // as (1, 1, 2, 2).
+  if (self.dim() > reps.size()){
+    std::vector<int64_t> new_reps(self.dim(), 1);
+    new_reps.insert(new_reps.end() - reps.size(), reps.vec().begin(), reps.vec().end());
+    reps = IntArrayRef(&new_reps[0], (size_t)self.dim());
+  }
+  // `torch.tile` is equivalent to the already implemented `torch.Tensor.repeat`
+  return repeat(self, reps);;
+}
+
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const c10::IntArrayRef sizes,

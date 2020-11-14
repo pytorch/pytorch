@@ -2435,6 +2435,21 @@ class AbstractTestCases:
                     self.assertEqual(tensor.repeat(*repeat).numpy(),
                                      np.tile(tensor.numpy(), repeat))
 
+        @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+        def test_tile(self):
+            initial_shape = (8, 4)
+            reps = ((3, 1, 1),
+                    (3, 3, 3),
+                    (1, 2, 1),
+                    (2, 2, 2, 2),
+                    (2,),
+                    (1, 2, 0))
+
+            tensor = torch.from_numpy(np.random.random(initial_shape))
+            for dims in reps:
+                self.assertEqual(torch.tile(tensor, dims).numpy(),
+                                 np.tile(tensor.numpy(), dims))
+
         def test_is_same_size(self):
             t1 = torch.Tensor(3, 4, 9, 10)
             t2 = torch.Tensor(3, 4)

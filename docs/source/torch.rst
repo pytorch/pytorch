@@ -102,6 +102,7 @@ Indexing, Slicing, Joining, Mutating Ops
     t
     take
     tensor_split
+    tile
     transpose
     unbind
     unsqueeze
