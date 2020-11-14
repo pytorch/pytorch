@@ -1126,6 +1126,9 @@
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
 
+- name: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
+  output_differentiability: [False]
+
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
 

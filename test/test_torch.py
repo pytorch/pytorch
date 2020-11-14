@@ -7896,6 +7896,37 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
+    def test_view_dtype(self, device):
+        def generate_inputs():
+            yield make_tensor((5, 5, 5), device, torch.float32, low=-5, high=5)
+            yield make_tensor((5, 5, 5), device, torch.float32, low=-5, high=5).permute(2, 0, 1)
+            yield make_tensor((1, 5, 1), device, torch.float32, low=-5, high=5).expand(5, 5, 5)
+            yield make_tensor((10, 5, 10), device, torch.float32, low=-5, high=5)[::2, :, ::2]
+            yield make_tensor((0, 5, 10), device, torch.float32, low=-5, high=5)
+            # commented out due to https://github.com/pytorch/pytorch/issues/47948
+            # yield make_tensor((), device, torch.float32, low=-5, high=5)
+
+        def run_test(f32):
+            self.assertRaises(RuntimeError, lambda: f32.view(torch.int64))
+            self.assertRaises(RuntimeError, lambda: f32.view(torch.int8))
+
+            i32 = f32.view(torch.int32)
+            self.assertEqual(i32.dtype, torch.int32)
+            self.assertEqual(i32.shape, f32.shape)
+            self.assertEqual(i32.stride(), f32.stride())
+
+            self.assertEqual(f32, i32.view(torch.float32), rtol=0, atol=0)
+            self.assertEqual(f32.cpu().numpy().view(np.int32), i32, rtol=0, atol=0)
+
+            i32.zero_()
+            self.assertEqual(f32, torch.zeros_like(f32))
+
+            i32.fill_(7039851)  # 0x006b6b6b
+            self.assertEqual(f32, torch.full_like(f32, 9.86493239538e-39))
+
+        for f32 in generate_inputs():
+            run_test(f32)
+
     def test_flip(self, device):
         data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device).view(2, 2, 2)
 

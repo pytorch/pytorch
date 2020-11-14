@@ -5177,6 +5177,13 @@
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
 
+- func: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: method
+  device_guard: False
+  dispatch:
+    DefaultBackend: view_dtype
+
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
