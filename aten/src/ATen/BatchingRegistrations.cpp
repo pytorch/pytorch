@@ -49,13 +49,19 @@ namespace at {
 // if not use the same mechanism. In order to accomplish that we might have to
 // do some refactoring.
 
+// PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
+static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
+  return dim == 0 || dim == -1;
+}
+
 Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
   // PyTorch has a special case where sum(scalar_tensor, dim=0) does not fail
-  // and instead returns a new scalar tensor. If the following happens:
+  // and instead returns a new scalar tensor (this also happens for dim=-1)
+  // If the following happens:
   // >>> x = torch.randn(B0)  # the per-examples are all scalars
   // >>> vmap(partial(torch.sum, dim=0), x)
   // then we replicate the behavior of sum(scalar_tensor, dim=0).
-  if (/*logical*/self.dim() == 0 && dims.size() == 1 && dims[0] == 0) {
+  if (/*logical*/self.dim() == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
     return self.clone();
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -209,6 +215,27 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+Tensor squeeze_batching_rule(const Tensor& self) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_sizes = self_physical.tensor().sizes();
+
+  // Don't squeeze the batch dims!
+  VmapDimVector squeezed_sizes;
+  int64_t num_batch_dims = self_physical.numBatchDims();
+  squeezed_sizes.insert(
+      squeezed_sizes.end(),
+      physical_sizes.begin(),
+      physical_sizes.begin() + num_batch_dims);
+  for (auto it = physical_sizes.begin() + num_batch_dims; it != physical_sizes.end(); ++it) {
+    if (*it != 1) {
+      squeezed_sizes.push_back(*it);
+    }
+  }
+
+  auto result = self_physical.tensor().view(squeezed_sizes);
+  return self_physical.newLogicalFromPhysical(result);
+}
+
 Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -217,6 +244,15 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
 }
 
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
+  // PyTorch has a special case where scalar_tensor.transpose(dim0, dim1) works
+  // for dim0, dim1 in {0, -1} and returns the scalar tensor. If the following happens:
+  // >>> x = torch.randn(B0)  # the per-examples are all scalars
+  // >>> vmap(lambda x: x.transpose(0, -1), x)
+  // then we replicate this behavior.
+  if (/*logical*/self.dim() == 0 && is_allowed_dim_on_scalar_tensor(dim0) &&
+      is_allowed_dim_on_scalar_tensor(dim1)) {
+    return self;
+  }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim0_physical = self_physical.getPhysicalDim(dim0);
   auto dim1_physical = self_physical.getPhysicalDim(dim1);
@@ -336,6 +372,15 @@ Tensor unfold_batching_rule(const Tensor& self, int64_t dim, int64_t size, int64
   auto dim_physical = self_physical.getPhysicalDim(dim);
   auto result = self_physical.tensor().unfold(dim_physical, size, step);
   return self_physical.newLogicalFromPhysical(result);
+}
+
+Tensor contiguous_batching_rule(const Tensor& self, MemoryFormat memory_format) {
+  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+      "NYI: Tensor.contiguous(...) inside of vmap for memory_format other ",
+      "than torch.contiguous_format");
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto result = physical_view.tensor().contiguous(memory_format);
+  return physical_view.newLogicalFromPhysical(result);
 }
 
 Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
@@ -824,10 +869,13 @@ Tensor new_zeros_batching_rule(
 Tensor new_empty_batching_rule(
     const Tensor& self,
     IntArrayRef size,
-    const TensorOptions& options) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
-  auto result = physical_view.tensor().new_empty(physical_size, options);
+  auto result = physical_view.tensor().new_empty(physical_size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
   return physical_view.newLogicalFromPhysical(result);
 }
 
@@ -926,6 +974,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
+  m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("transpose.int", transpose_int_batching_rule);
@@ -1050,6 +1099,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl_UNBOXED("new_empty", new_empty_batching_rule);
   m.impl_UNBOXED("new_empty_strided", new_empty_strided_batching_rule);
   m.impl("new_zeros", new_zeros_batching_rule);
+
+  m.impl("contiguous", contiguous_batching_rule);
 }
 
 } // namespace at
