@@ -24,7 +24,7 @@ sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 def get_arg_return_types_from_interface(module_interface):
     assert getattr(
         module_interface, "__torch_script_interface__", False
-    ), "Expect a TorchScript class interface decorated by @torch.jit.interface."
+    ), "Expect a TorchScript class interface decorated by @torch.jit.interface()."
     qualified_name = torch._jit_internal._qualified_name(module_interface)
     cu = torch.jit._state._python_cu
     module_interface_c = cu.get_interface(qualified_name)
@@ -97,7 +97,7 @@ def instantiate_scriptable_remote_module_template(module_interface_cls):
     if not getattr(module_interface_cls, "__torch_script_interface__", False):
         raise ValueError(
             f"module_interface_cls {module_interface_cls} must be a type object decorated by "
-            "@torch.jit.interface"
+            "@torch.jit.interface()"
         )
 
     # Generate the template instance name.

@@ -6710,7 +6710,7 @@ a")
             def one(self, x, y):
                 return bar(x, y)
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class IFace(object):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor

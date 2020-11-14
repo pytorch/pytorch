@@ -752,7 +752,7 @@ def call_prepare_scriptable_func(obj):
                 sub_module[k] = call_prepare_scriptable_func(v)
             obj.__setattr__(name, sub_module)
         elif isinstance(sub_module, torch.nn.Module) and not isinstance(sub_module, ScriptModule):
-            obj.__setattr__(name, call_prepare_scriptable_func(sub_module)) 
+            obj.__setattr__(name, call_prepare_scriptable_func(sub_module))
     return obj
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
@@ -907,7 +907,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
 
     if isinstance(obj, torch.nn.Module):
-        obj = call_prepare_scriptable_func(obj) 
+        obj = call_prepare_scriptable_func(obj)
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
@@ -1030,35 +1030,38 @@ def _check_directly_compile_overloaded(obj):
         )
 
 
-def interface(obj):
-    if not inspect.isclass(obj):
-        raise RuntimeError("interface must be applied to a class")
-    if not _is_new_style_class(obj):
-        raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+def interface(match_args=True):
+    def interface_impl(obj):
+        if not inspect.isclass(obj):
+            raise RuntimeError("interface must be applied to a class")
+        if not _is_new_style_class(obj):
+            raise RuntimeError("TorchScript interfaces must inherit from 'object'")
 
-    # Expected MRO is:
-    #   User module
-    #   torch.nn.modules.module.Module
-    #   object
-    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
+        # Expected MRO is:
+        #   User module
+        #   torch.nn.modules.module.Module
+        #   object
+        is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
 
-    if not is_module_interface and len(obj.mro()) > 2:
-        raise RuntimeError(
-            "TorchScript interface does not support inheritance yet. "
-            "Please directly inherit from 'object' or 'nn.Module'."
+        if not is_module_interface and len(obj.mro()) > 2:
+            raise RuntimeError(
+                "TorchScript interface does not support inheritance yet. "
+                "Please directly inherit from 'object' or 'nn.Module'."
+            )
+
+        qualified_name = _qualified_name(obj)
+        rcb = _jit_internal.createResolutionCallbackFromFrame(1)
+        # if this type is a `nn.Module` subclass, generate an module interface type
+        # instead of a class interface type, an module interface type only compile
+        # the user provided methods as part of the interface
+        ast = get_jit_class_def(obj, obj.__name__)
+        torch._C._jit_script_interface_compile(
+            qualified_name, ast, rcb, is_module_interface, match_args
         )
+        obj.__torch_script_interface__ = True
+        return obj
 
-    qualified_name = _qualified_name(obj)
-    rcb = _jit_internal.createResolutionCallbackFromFrame(1)
-    # if this type is a `nn.Module` subclass, generate an module interface type
-    # instead of a class interface type, an module interface type only compile
-    # the user provided methods as part of the interface
-    ast = get_jit_class_def(obj, obj.__name__)
-    torch._C._jit_script_interface_compile(
-        qualified_name, ast, rcb, is_module_interface
-    )
-    obj.__torch_script_interface__ = True
-    return obj
+    return interface_impl
 
 
 def _recursive_compile_class(obj, loc):

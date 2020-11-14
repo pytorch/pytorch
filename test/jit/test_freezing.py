@@ -1229,7 +1229,7 @@ class TestFreezing(JitTestCase):
         Test that a Module contained a non-static ModuleDict index
         cannot be frozen.
         """
-        @torch.jit.interface
+        @torch.jit.interface()
         class ModuleInterface(torch.nn.Module):
             def forward(self, inp: Any) -> Any:
                 pass

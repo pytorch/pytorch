@@ -342,7 +342,7 @@ class MyScriptClass:
         return self.a
 
 
-@torch.jit.interface
+@torch.jit.interface()
 class MyModuleInterface(torch.nn.Module):
     def forward(self) -> Tensor:
         pass

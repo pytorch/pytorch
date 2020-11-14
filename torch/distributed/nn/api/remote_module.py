@@ -113,7 +113,7 @@ class _RemoteModule(nn.Module):
             args (Sequence, optional): args to be passed to ``module_cls``.
             kwargs (Dict, optional): kwargs to be passed to ``module_cls``.
             _module_interface_cls (type, optional): The TorchScript interface type for the module
-                to be created. The type object should be decorated by @torch.jit.interface.
+                to be created. The type object should be decorated by @torch.jit.interface().
                 If not provided, the generated RemoteModule is not torchscript-able.
                 Warning, this is an experimental API and susceptible to frequent changes.
 

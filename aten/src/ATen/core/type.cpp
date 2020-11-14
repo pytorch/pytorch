@@ -1028,9 +1028,9 @@ bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const 
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
-InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {
+InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module, bool match_args) {
   return InterfaceTypePtr(
-      new InterfaceType(std::move(qualifiedName), is_module));
+      new InterfaceType(std::move(qualifiedName), is_module, match_args));
 }
 
 void ClassType::addMethod(torch::jit::Function* method) {
@@ -1126,7 +1126,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
         return false;
       }
       if (!self_method->getSchema().isSubtypeOf(
-              schema, /*is_method=*/true, why_not)) {
+              schema, /*is_method=*/true, iface->match_args(), why_not)) {
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
@@ -1201,10 +1201,11 @@ const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
 void InterfaceType::addMethod(FunctionSchema schema) {
   methods_->emplace_back(std::move(schema));
 }
-InterfaceType::InterfaceType(QualifiedName name, bool is_module)
+InterfaceType::InterfaceType(QualifiedName name, bool is_module, bool match_args)
     : NamedType(InterfaceType::Kind, std::move(name)),
       methods_(std::make_shared<std::vector<FunctionSchema>>()),
-      is_module_(is_module) {}
+      is_module_(is_module),
+      match_args_(match_args) {}
 
 InterfaceType::~InterfaceType() = default;
 

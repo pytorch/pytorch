@@ -1369,12 +1369,14 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          ResolutionCallback rcb,
-         bool is_module) {
+         bool is_module,
+         bool match_args) {
         get_python_cu()->define_interface(
             c10::QualifiedName(qualifiedName),
             classDef,
             pythonResolver(std::move(rcb)),
-            is_module);
+            is_module,
+            match_args);
       });
 
   py::class_<torch::jit::ErrorReport::CallStack>(

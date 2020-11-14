@@ -400,7 +400,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
 
     def test_insert_observers_interface(self):
-        @torch.jit.interface
+        @torch.jit.interface()
         class SubInterface(torch.nn.Module):
             def addOne(self, inp) -> torch.Tensor:
                 pass
@@ -430,7 +430,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = prepare_jit(m, qconfig_dict)
 
     def test_insert_observers_interface_unshare_type(self):
-        @torch.jit.interface
+        @torch.jit.interface()
         class OperatorIf(nn.Module):
             def forward(self, inp: torch.Tensor) -> torch.Tensor:
                 pass
@@ -1321,7 +1321,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             def forward(self, x, y):
                 return self.embedding1(x, y)
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class ModInterface(torch.nn.Module):
             def forward(self, x, y):
                 # type:  (Tensor, Tensor) -> Tensor

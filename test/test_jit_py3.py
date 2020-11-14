@@ -731,7 +731,7 @@ class TestScriptPy3(JitTestCase):
     def test_export_opnames_interface(self):
         global OneTwoModule
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class OneTwoModule(nn.Module):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor

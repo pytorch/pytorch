@@ -534,7 +534,7 @@ class TestClassType(JitTestCase):
             def two(self, x):
                 return 2 / x
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class OneTwo(object):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
@@ -544,7 +544,7 @@ class TestClassType(JitTestCase):
                 # type: (Tensor) -> Tensor
                 pass
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class OneTwoThree(object):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
@@ -558,7 +558,7 @@ class TestClassType(JitTestCase):
                 # type: (Tensor) -> Tensor
                 pass
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class OneTwoWrong(object):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor

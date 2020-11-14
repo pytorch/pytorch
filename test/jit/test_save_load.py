@@ -681,7 +681,7 @@ class TestSaveLoad(JitTestCase):
         Exercise the situation where we have the same qualified name
         in two different CompilationUnits on save/load.
         """
-        @torch.jit.interface
+        @torch.jit.interface()
         class MyInterface(object):
             def bar(self, x):
                 # type: (Tensor) -> Tensor
@@ -712,7 +712,7 @@ class TestSaveLoad(JitTestCase):
 
         clear_class_registry()
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class MyInterface(object):
             def not_bar(self, x):
                 # type: (Tensor) -> Tensor
@@ -768,7 +768,7 @@ class TestSaveLoad(JitTestCase):
         class MyCoolNamedTuple(NamedTuple):
             a: int
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class MyInterface(object):
             def bar(self, x):
                 # type: (Tensor) -> Tensor
@@ -810,7 +810,7 @@ class TestSaveLoad(JitTestCase):
 
         clear_class_registry()
 
-        @torch.jit.interface
+        @torch.jit.interface()
         class MyInterface(object):
             def not_bar(self, x):
                 # type: (Tensor) -> Tensor

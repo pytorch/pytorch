@@ -434,7 +434,7 @@ class TestModuleContainers(JitTestCase):
         Test that a type annotation can be provided for a ModuleDict that allows
         non-static indexing.
         """
-        @torch.jit.interface
+        @torch.jit.interface()
         class ModuleInterface(torch.nn.Module):
             def forward(self, inp: Any) -> Any:
                 pass

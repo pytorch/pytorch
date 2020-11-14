@@ -349,7 +349,7 @@ public:
   // schema and have the program typecheck?
   // as_method - if true, treat this schema as a method and ignore
   // the first argument, which will be the object in both cases
-  bool isSubtypeOf(const FunctionSchema& rhs, bool as_method, std::ostream* why_not=nullptr) const;
+  bool isSubtypeOf(const FunctionSchema& rhs, bool as_method, bool match_args, std::ostream* why_not=nullptr) const;
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {

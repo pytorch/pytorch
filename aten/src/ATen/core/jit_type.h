@@ -2336,7 +2336,7 @@ using ::torch::jit::CompilationUnit;
 // 2. if rhs is module interface, the lhs must be module interface or module itself
 struct CAFFE2_API InterfaceType : public NamedType {
   static InterfaceTypePtr create(
-      QualifiedName qualifiedName, bool is_module=false);
+      QualifiedName qualifiedName, bool is_module=false, bool match_args=true);
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<InterfaceType>()) {
@@ -2363,10 +2363,14 @@ struct CAFFE2_API InterfaceType : public NamedType {
   bool is_module() const override{
     return is_module_;
   }
+  bool match_args() const {
+    return match_args_;
+  }
+
   static const TypeKind Kind = TypeKind::InterfaceType;
   ~InterfaceType() override;
  private:
-  InterfaceType(QualifiedName name, bool is_module);
+  InterfaceType(QualifiedName name, bool is_module, bool match_args);
   static bool isSubTypeImpl(
       const InterfaceType& lhs,
       const InterfaceType& rhs,
@@ -2381,6 +2385,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
+  bool match_args_;
 };
 
 template <TypeKind K>

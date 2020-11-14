@@ -467,6 +467,9 @@ struct MethodValue : public SugaredValue {
         }
         schemas.push_back(&method.getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+        if (!interface_type->match_args()) {
+          throw ErrorReport(loc) << method_name << " cannot be called with keyword arguments";
+        }
         schemas.push_back(interface_type->getMethod(method_name));
       } else {
         TORCH_INTERNAL_ASSERT(

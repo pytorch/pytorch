@@ -29,7 +29,7 @@ class ModuleCreationMode(enum.Enum):
     MODULE_CTOR = "module_ctor"
 
 
-@torch.jit.interface
+@torch.jit.interface()
 class MyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
@@ -37,7 +37,7 @@ class MyModuleInterface:
         pass
 
 
-@torch.jit.interface
+@torch.jit.interface()
 class RemoteMyModuleInterface:
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
