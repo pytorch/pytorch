@@ -268,7 +268,7 @@ def get_type_hint_captures(fn):
         elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
             return f"{annotation.value}"
 
-        raise RuntimeError(f"Unexpected node type: {type(annotation)}")
+        raise RuntimeError(f"Unexpected node type: {type(annotation)} in function {fn}")
 
     # Gather a dictionary of parameter name -> literal annotation.
     name_to_annotation = {arg.arg: get_annotation_str(arg.annotation) for arg in f.args.args if arg.annotation}
