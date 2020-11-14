@@ -71,13 +71,15 @@ VkCommandBuffer allocate_command_buffer(
 } // namespace
 
 Command::Buffer::Buffer()
-  : command_buffer_(VK_NULL_HANDLE) {
+  : command_buffer_(VK_NULL_HANDLE),
+    bound_{} {
 }
 
 Command::Buffer::Buffer(
     const VkDevice device,
     const VkCommandPool command_pool)
-  : command_buffer_(allocate_command_buffer(device, command_pool)) {
+  : command_buffer_(allocate_command_buffer(device, command_pool)),
+    bound_{} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "Invalid Vulkan command buffer!");
@@ -99,6 +101,9 @@ void Command::Buffer::Buffer::begin() {
   VK_CHECK(vkBeginCommandBuffer(
       command_buffer_,
       &command_buffer_begin_info));
+
+  // Reset
+  bound_ = {};
 }
 
 void Command::Buffer::Buffer::end() {
@@ -273,9 +278,6 @@ void Command::Buffer::dispatch(
       utils::div_up(
           global_work_group.depth,
           bound_.pipeline.local_work_group.depth));
-
-  // Reset
-  bound_ = {};
 }
 
 void Command::Buffer::submit(

@@ -119,7 +119,8 @@ Tensor avg_pool2d(
       input_size[Layout::Activation4D::height],
       input_size[Layout::Activation4D::width],
       output_height,
-      output_width);
+      output_width,
+      self_arg.suggest_memory_format());
 
   api::Context* const context = api::context();
 
