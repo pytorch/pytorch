@@ -18,6 +18,11 @@ def sum(model, blob_in, blob_out, **kwargs):
     return model.net.Sum(blob_in, blob_out, **kwargs)
 
 
+def reduce_sum(model, blob_in, blob_out, **kwargs):
+    """ReduceSum"""
+    return model.net.ReduceSum(blob_in, blob_out, **kwargs)
+
+
 def sub(model, blob_in, blob_out, **kwargs):
     """Subtract"""
     return model.net.Sub(blob_in, blob_out, **kwargs)
