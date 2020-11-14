@@ -4102,6 +4102,68 @@ Example::
     >>> torch.equal(b, c)
     False
 
+
+view(dtype) -> Tensor
+
+Returns a new tensor with the same data as the :attr:`self` tensor but of a
+different :attr:`dtype`.
+
+The returned tensor shares the same data and must have the same number
+of elements, but may have a different dtype. For a tensor to be viewed, the new
+dtype must have the same number of bytes with its original dtype.
+
+Args:
+    dtype (:class:`torch.dtype`): the desired dtype
+
+Example::
+
+    >>> x = torch.randn(4, 4)
+    >>> x
+    tensor([[-0.3113, -1.6569,  0.5822,  0.0424],
+            [ 1.1197, -1.5123, -0.8537, -1.9865],
+            [ 1.0786,  1.4348,  0.1338,  0.0893],
+            [-0.3087,  1.3192,  0.3953, -0.6418]])
+    >>> x.dtype
+    torch.float32
+    >>> x.size()
+    torch.Size([4, 4])
+    >>> x.stride()
+    (4, 1)
+
+    >>> z = x.view(torch.int32)
+    >>> z
+    tensor([[-1096850773, -1076619988,  1058343474,  1026415044],
+            [ 1066357317, -1077832550, -1084584289, -1073854989],
+            [ 1066012529,  1069000315,  1040774669,  1035397278],
+            [-1096937622,  1068030568,  1053450185, -1088139960]],
+        dtype=torch.int32)
+    >>> z.dtype
+    torch.int32
+    >>> z.size()
+    torch.Size([4, 4])
+    >>> z.stride()
+    (4, 1)
+    >>> z.view(torch.float32)
+    tensor([[-0.3113, -1.6569,  0.5822,  0.0424],
+            [ 1.1197, -1.5123, -0.8537, -1.9865],
+            [ 1.0786,  1.4348,  0.1338,  0.0893],
+            [-0.3087,  1.3192,  0.3953, -0.6418]])
+
+    >>> x.view(torch.int16)
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+    RuntimeError: Viewing a tensor as a new dtype with different bytes is not supported.
+
+    >>> z.zero_()
+    tensor([[0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0]], dtype=torch.int32)
+    >>> x
+    tensor([[0., 0., 0., 0.],
+            [0., 0., 0., 0.],
+            [0., 0., 0., 0.],
+            [0., 0., 0., 0.]])
 """)
 
 add_docstr_all('view_as',
