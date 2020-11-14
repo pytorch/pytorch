@@ -23,8 +23,9 @@ from setuptools.command.build_ext import build_ext
 
 
 IS_WINDOWS = sys.platform == 'win32'
-LIB_EXT = 'pyd' if IS_WINDOWS else 'so'
-EXEC_EXT = 'exe' if IS_WINDOWS else 'o'
+LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
+EXEC_EXT = '.exe' if IS_WINDOWS else ''
+SHARED_FLAG = '/DLL' if IS_WINDOWS else '-shared'
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
@@ -1240,8 +1241,11 @@ def _jit_compile(name,
 
     if verbose:
         print(f'Loading extension module {name}...')
-    return _import_module_from_library(
-        name, build_directory, is_python_module, is_standalone)
+
+    if is_standalone:
+        return _get_exec_path(name, build_directory)
+
+    return _import_module_from_library(name, build_directory, is_python_module)
 
 
 def _write_ninja_file_and_compile_objects(
@@ -1597,12 +1601,13 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         raise RuntimeError(message) from e
 
 
-def _import_module_from_library(module_name, path, is_python_module, is_standalone):
-    if is_standalone:
-        if IS_WINDOWS and TORCH_LIB_PATH not in os.getenv('PATH', ''):
-            os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
-        return os.path.join(path, f'{module_name}.{EXEC_EXT}')
+def _get_exec_path(module_name, path):
+    if IS_WINDOWS and TORCH_LIB_PATH not in os.getenv('PATH', '').split(';'):
+        os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
+    return os.path.join(path, f'{module_name}{EXEC_EXT}')
 
+
+def _import_module_from_library(module_name, path, is_python_module):
     # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
     file, path, description = imp.find_module(module_name, [path])
     # Close the .so file after load.
@@ -1714,13 +1719,8 @@ def _write_ninja_file_to_build_library(path,
         return target
 
     objects = [object_file_path(src) for src in sources]
+    ldflags = ([] if is_standalone else SHARED_FLAG) + extra_ldflags
 
-    if is_standalone:
-        ldflags = extra_ldflags
-    elif IS_WINDOWS:
-        ldflags = ['/DLL'] + extra_ldflags
-    else:
-        ldflags = ['-shared'] + extra_ldflags
     # The darwin linker needs explicit consent to ignore unresolved symbols.
     if sys.platform.startswith('darwin'):
         ldflags.append('-undefined dynamic_lookup')
@@ -1728,7 +1728,7 @@ def _write_ninja_file_to_build_library(path,
         ldflags = _nt_quote_args(ldflags)
 
     ext = EXEC_EXT if is_standalone else LIB_EXT
-    library_target = f'{name}.{ext}'
+    library_target = f'{name}{ext}'
 
     _write_ninja_file(
         path=path,
