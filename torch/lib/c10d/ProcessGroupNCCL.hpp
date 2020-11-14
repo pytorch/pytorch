@@ -180,9 +180,6 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   struct Options : torch::CustomClassHolder {
     explicit Options();
-    // XXX: this constructor should ONLY be used by TorchBind bindings
-    explicit Options(int64_t timeout, bool isHighStream = false)
-        : opTimeout(timeout), isHighPriorityStream(isHighStream){};
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
