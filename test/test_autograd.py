@@ -2596,30 +2596,6 @@ class TestAutograd(TestCase):
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
-    def test_cholesky(self):
-        def func(root, upper):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.cholesky(x, upper)
-
-        def run_test(upper, dims, dtype):
-            root = torch.rand(*dims, dtype=dtype, requires_grad=True)
-            root = root + torch.eye(dims[-1])
-
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
-
-            root = torch.rand(*dims, dtype=dtype)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
-            root.requires_grad_()
-            chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
-
-        for upper, dims, dtype in product([True, False],
-                                          [(3, 3), (4, 3, 2, 2)],
-                                          [torch.double, torch.cdouble]):
-            run_test(upper, dims, dtype)
-
-    @skipIfNoLapack
     def test_cholesky_solve(self):
         def _test_with_size(A_dims, B_dims, upper):
             root = torch.rand(*A_dims).requires_grad_()
