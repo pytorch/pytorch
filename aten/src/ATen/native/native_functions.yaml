@@ -530,11 +530,19 @@
   dispatch:
     CPU, CUDA: argmax
 
+- func: argmax.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: argmax_out
+
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: argmin
+
+- func: argmin.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: argmin_out
 
 - func: acosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
