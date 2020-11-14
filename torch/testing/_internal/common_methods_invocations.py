@@ -196,8 +196,8 @@ class UnaryUfuncInfo(OpInfo):
 
     def sample_inputs(self, device, dtype, requires_grad=False):
         low, high = self.domain
-        low = low if low is None else low + self._domain_eps
-        high = high if high is None else high - self._domain_eps
+        low = low if low is None else low
+        high = high if high is None else high
 
         return (SampleInput(make_tensor((L,), device, dtype,
                                         low=low, high=high,
