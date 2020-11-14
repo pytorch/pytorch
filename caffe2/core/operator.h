@@ -1446,7 +1446,7 @@ C10_DECLARE_REGISTRY(
 // You should not need to use this class.
 struct StaticLinkingProtector {
   StaticLinkingProtector() {
-    const int registered_ops = CPUOperatorRegistry()->Keys().size();
+    const auto registered_ops = CPUOperatorRegistry()->Keys().size();
     // Note: this is a check failure instead of an exception, because if
     // the linking is wrong, Caffe2 won't be able to run properly anyway,
     // so it's better to fail loud.
