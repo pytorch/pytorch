@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
@@ -535,11 +536,12 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
+  auto lda = std::max<int64_t>(1, n);
 
   int info;
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
+    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, lda, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -581,6 +583,20 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
     return result.resize_as_(self);
   }
   result.copy_(native::cholesky(self, upper));
+  return result;
+}
+
+Tensor linalg_cholesky(const Tensor &self) {
+  squareCheckInputs(self);
+  return at::_cholesky_helper(self, /*upper=*/false).tril_();
+}
+
+Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  Tensor result_tmp = at::linalg_cholesky(self);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
