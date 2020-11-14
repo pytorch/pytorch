@@ -82,7 +82,14 @@ def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target:
             setattr(to_module, item, t)
         from_module, to_module = f, t
 
-    setattr(to_module, field, getattr(from_module, field))
+    orig = getattr(from_module, field)
+    # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
+    # So, we register it as a named buffer in the target module.
+    if isinstance(orig, torch.Tensor) and not isinstance(orig, torch.nn.Parameter):
+        to_module.register_buffer(field, orig)
+    else:
+        setattr(to_module, field, orig)
+
 
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
