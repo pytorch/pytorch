@@ -305,9 +305,12 @@ at::Tensor embedding_bag_byte_impl(
         success,
         "FBGEMM GenerateEmbeddingSpMDMRowWiseSparse kernel failed for 8-bit input");
   }
+  return output;
 #endif
   // TODO add default (non-FBGEMM) implementation.
-  return output;
+  TORCH_CHECK(
+      false,
+      "embedding_bag_byte expects FBGEMM support. This PyTorch installation was not built with FBGEMM operators");
 }
 
 at::Tensor embedding_bag_byte_helper(
@@ -509,12 +512,23 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  if (per_sample_weights_.has_value()) {
+    TORCH_CHECK(
+        (per_sample_weights_.value().scalar_type() == at::kFloat ||
+         per_sample_weights_.value().scalar_type() == at::kHalf),
+        "Expect fp32 or fp16 weights, but found",
+        per_sample_weights_.value().scalar_type(),
+        " instead")
+  }
+
   return embedding_bag_4bit_helper(
       packed_w.contiguous(),
       indices,
       offsets_in,
       pruned_weights,
-      per_sample_weights_,
+      per_sample_weights_.has_value()
+          ? per_sample_weights_.value().to(at::kFloat)
+          : per_sample_weights_,
       compressed_indices_mapping,
       include_last_offset);
 }
@@ -554,12 +568,23 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  if (per_sample_weights_.has_value()) {
+    TORCH_CHECK(
+        (per_sample_weights_.value().scalar_type() == at::kFloat ||
+         per_sample_weights_.value().scalar_type() == at::kHalf),
+        "Expect fp32 or fp16 weights, but found",
+        per_sample_weights_.value().scalar_type(),
+        " instead")
+  }
+
   return embedding_bag_4bit_helper(
       weight.contiguous(),
       indices,
       offsets_in,
       pruned_weights,
-      per_sample_weights_,
+      per_sample_weights_.has_value()
+          ? per_sample_weights_.value().to(at::kFloat)
+          : per_sample_weights_,
       compressed_indices_mapping,
       include_last_offset);
 }
@@ -588,12 +613,12 @@ class QEmbeddingBag final {
           false /* is_embedding_op */);
     } else if (bit_rate == 4) {
       return packed_weight->embeddingbag_4bit(
-          indices,
-          offsets,
-          pruned_weights,
-          per_sample_weights_,
-          compressed_indices_mapping,
-          include_last_offset);
+        indices,
+        offsets,
+        pruned_weights,
+        per_sample_weights_,
+        compressed_indices_mapping,
+        include_last_offset);
     } else {
       TORCH_INTERNAL_ASSERT(
           "Currently only support 8-bit embedding_bag quantization");

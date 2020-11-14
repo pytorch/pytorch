@@ -18,6 +18,8 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 
+#include <c10/util/Half.h>
+
 #include <sleef.h>
 #include <algorithm>
 #include <memory>
@@ -52,6 +54,10 @@ static void registerIntrinsics(
         entry("roundf", &roundf), entry("truncf", &truncf),
         entry("atan2f", &atan2f), entry("fmodf", &fmodf),
         entry("remainderf", &remainderf),
+
+        // float -> half & half -> float conversions
+        entry("__gnu_h2f_ieee", &c10::detail::fp16_ieee_to_fp32_value),
+        entry("__gnu_f2h_ieee", &c10::detail::fp16_ieee_from_fp32_value),
 
         // FP32 Sleef functions -- SSE
         entry("Sleef_acosf4", &Sleef_acosf4_u10),
