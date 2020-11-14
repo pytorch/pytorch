@@ -273,6 +273,9 @@ void Command::Buffer::dispatch(
       utils::div_up(
           global_work_group.depth,
           bound_.pipeline.local_work_group.depth));
+
+  // Reset
+  bound_ = {};
 }
 
 void Command::Buffer::submit(

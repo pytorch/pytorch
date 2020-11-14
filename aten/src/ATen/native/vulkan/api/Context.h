@@ -128,7 +128,7 @@ inline void bind(
     const std::index_sequence<Indices...>,
     Arguments&&...arguments) {
   C10_UNUSED const int _[]{
-    (descriptor_set.bind(Indices, arguments), 0)...,
+    (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };
 }
 
