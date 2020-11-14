@@ -725,6 +725,7 @@ class TestModuleInterface(JitTestCase):
 
         @torch.jit.script
         def as_module_interface(a: ModuleInterface) -> ModuleInterface:
+            a.forward(3, torch.tensor([1]))
             return a
 
         def uses_kwargs(a: ModuleInterface) -> ModuleInterface:
