@@ -239,14 +239,14 @@ It's fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC tool
 
 Build with CUDA
 
-[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA
+[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
 Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
-<br/> If Ninja is selected as the generator, the latest MSVC wil get selected as the underlying toolchain.
+<br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
-CUDA and MSVC, MSVC and PyTorch have version dependency, please install the matched versions. 
+CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions from this table:
 | CUDA version | Newest supported VS version                             | PyTorch version |
 | ------------ | ------------------------------------------------------- | --------------- |
 | 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |  0.4.1 ~ 1.5.1  |
@@ -254,18 +254,18 @@ CUDA and MSVC, MSVC and PyTorch have version dependency, please install the matc
 | 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
 
-Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in serveral Visual Studio 2019 versions since 16.7.1 . So please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
+Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/812) in serveral Visual Studio 2019 versions since 16.7.1, so please make sure your Visual Studio 2019 version is not in 16.7.1 ~ 16.7.5
 
-Additional libraries are often needed such as
+Additional libraries such as
 [Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/master/.jenkins/pytorch/win-test-helpers/installation-helpers) to install them.
 
-You can refer to [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
+You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
 
 
 ```cmd
 cmd
 
-:: [Optional] If you want to build with VS 2017 generator for old CUDA and PyTorch, please change the value in the next line to `Visual Studio 15 2017`.
+:: [Optional] If you want to build with the VS 2017 generator for old CUDA and PyTorch, please change the value in the next line to `Visual Studio 15 2017`.
 :: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
 set CMAKE_GENERATOR=Visual Studio 16 2019
 
