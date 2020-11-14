@@ -75,6 +75,21 @@ android {
             addManifestPlaceholders([APP_NAME: "MBQ"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbvulkan\"")
         }
+        segm {
+            dimension "model"
+            applicationIdSuffix ".segm"
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"xirp_cpu_fp32.pt\"")
+            addManifestPlaceholders([APP_NAME: "SEGM"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-segm\"")
+        }
+        segmVulkan {
+            dimension "model"
+            applicationIdSuffix ".segm_vulkan"
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"xirp_vulkan_fp32.pt\"")
+            buildConfigField("boolean", "USE_VULKAN_DEVICE", 'true')
+            addManifestPlaceholders([APP_NAME: "SEGM_VULKAN"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-segm-vulkan\"")
+        }
         resnet18 {
             dimension "model"
             applicationIdSuffix ".resnet18"
@@ -100,12 +115,17 @@ android {
             dimension "activity"
             addManifestPlaceholders([MAIN_ACTIVITY: "org.pytorch.testapp.CameraActivity"])
         }
+        cameraSegm {
+            dimension "activity"
+            addManifestPlaceholders([MAIN_ACTIVITY: "org.pytorch.testapp.CameraSegmentationActivity"])
+        }
         base {
             dimension "activity"
             sourceSets {
                 main {
                     java {
-                        exclude 'org/pytorch/testapp/CameraActivity.java'
+                        //exclude 'org/pytorch/testapp/CameraActivity.java'
+                        //exclude 'org/pytorch/testapp/CameraSegmentationActivity.java'
                     }
                 }
             }
@@ -161,6 +181,9 @@ dependencies {
     cameraImplementation "androidx.camera:camera-core:$camerax_version"
     cameraImplementation "androidx.camera:camera-camera2:$camerax_version"
     cameraImplementation 'com.google.android.material:material:1.0.0-beta01'
+    cameraSegmImplementation "androidx.camera:camera-core:$camerax_version"
+    cameraSegmImplementation "androidx.camera:camera-camera2:$camerax_version"
+    cameraSegmImplementation 'com.google.android.material:material:1.0.0-beta01'
 }
 
 task extractAARForNativeBuild {

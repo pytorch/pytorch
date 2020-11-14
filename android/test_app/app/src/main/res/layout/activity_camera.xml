@@ -20,4 +20,9 @@
             android:textSize="16sp"
             android:textStyle="bold"
             android:textColor="#ff0000"/>
+
+    <ImageView android:id="@+id/camera_overlay"
+          android:layout_width="match_parent"
+          android:layout_height="match_parent"/>
+
 </FrameLayout>

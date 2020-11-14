@@ -24,6 +24,7 @@ import androidx.camera.core.Preview;
 import androidx.camera.core.PreviewConfig;
 import androidx.core.app.ActivityCompat;
 import java.nio.FloatBuffer;
+import org.pytorch.Device;
 import org.pytorch.IValue;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
@@ -108,8 +109,9 @@ public class CameraActivity extends AppCompatActivity {
     }
   }
 
-  private static final int TENSOR_WIDTH = 224;
-  private static final int TENSOR_HEIGHT = 224;
+  protected boolean useFaceCamera() {
+    return false;
+  }
 
   private void setupCameraX() {
     final TextureView textureView =
@@ -125,10 +127,13 @@ public class CameraActivity extends AppCompatActivity {
             textureView.setSurfaceTexture(output.getSurfaceTexture());
           }
         });
-
+    final ImageAnalysisConfig.Builder imageAnalysisConfigBuilder = new ImageAnalysisConfig.Builder();
+    if (useFaceCamera()) {
+      imageAnalysisConfigBuilder.setLensFacing(CameraX.LensFacing.FRONT);
+    }
     final ImageAnalysisConfig imageAnalysisConfig =
-        new ImageAnalysisConfig.Builder()
-            .setTargetResolution(new Size(TENSOR_WIDTH, TENSOR_HEIGHT))
+        imageAnalysisConfigBuilder
+            .setTargetResolution(new Size(getTensorSize(), getTensorSize()))
             .setCallbackHandler(mBackgroundHandler)
             .setImageReaderMode(ImageAnalysis.ImageReaderMode.ACQUIRE_LATEST_IMAGE)
             .build();
@@ -163,28 +168,28 @@ public class CameraActivity extends AppCompatActivity {
   private FloatBuffer mInputTensorBuffer;
   private Tensor mInputTensor;
 
+  protected int getTensorSize() {
+    return 224;
+  }
+
   @WorkerThread
   @Nullable
   protected Result analyzeImage(ImageProxy image, int rotationDegrees) {
     Log.i(TAG, String.format("analyzeImage(%s, %d)", image, rotationDegrees));
     if (mModule == null) {
       Log.i(TAG, "Loading module from asset '" + BuildConfig.MODULE_ASSET_NAME + "'");
-      mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
-      mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * TENSOR_WIDTH * TENSOR_HEIGHT);
-      mInputTensor =
-          Tensor.fromBlob(mInputTensorBuffer, new long[] {1, 3, TENSOR_WIDTH, TENSOR_HEIGHT});
+      mModule =
+          BuildConfig.USE_VULKAN_DEVICE
+              ? PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
+              : PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
+
+      mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * getTensorSize() * getTensorSize());
+      mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[] {1, 3, getTensorSize(), getTensorSize()});
     }
 
     final long startTime = SystemClock.elapsedRealtime();
-    TensorImageUtils.imageYUV420CenterCropToFloatBuffer(
-        image.getImage(),
-        rotationDegrees,
-        TENSOR_WIDTH,
-        TENSOR_HEIGHT,
-        TensorImageUtils.TORCHVISION_NORM_MEAN_RGB,
-        TensorImageUtils.TORCHVISION_NORM_STD_RGB,
-        mInputTensorBuffer,
-        0);
+    fillInputTensorBuffer(image, rotationDegrees, mInputTensorBuffer);
+
     final long moduleForwardStartTime = SystemClock.elapsedRealtime();
     final Tensor outputTensor = mModule.forward(IValue.from(mInputTensor)).toTensor();
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;
@@ -193,6 +198,21 @@ public class CameraActivity extends AppCompatActivity {
     final long analysisDuration = SystemClock.elapsedRealtime() - startTime;
 
     return new Result(scores, moduleForwardDuration, analysisDuration);
+  }
+
+  protected void fillInputTensorBuffer(
+      ImageProxy image,
+      int rotationDegrees,
+      FloatBuffer inputTensorBuffer) {
+    TensorImageUtils.imageYUV420CenterCropToFloatBuffer(
+        image.getImage(),
+        rotationDegrees,
+        getTensorSize(),
+        getTensorSize(),
+        TensorImageUtils.TORCHVISION_NORM_MEAN_RGB,
+        TensorImageUtils.TORCHVISION_NORM_STD_RGB,
+        inputTensorBuffer,
+        0);
   }
 
   @UiThread
