@@ -294,6 +294,9 @@
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
 
+- name: linalg_cholesky(Tensor self) -> Tensor
+  self: cholesky_backward(grad, false, result)
+
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
 
@@ -587,7 +590,7 @@
   index: non_differentiable
 
 - name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
+  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable

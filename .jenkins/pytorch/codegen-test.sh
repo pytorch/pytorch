@@ -12,6 +12,7 @@
 set -eu -o pipefail
 
 if [ "$#" -eq 0 ]; then
+  # shellcheck disable=SC2034
   COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
   source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
   OUT="$(dirname "${BASH_SOURCE[0]}")/../../codegen_result"
@@ -42,6 +43,7 @@ python -m tools.pyi.gen_pyi \
 # autograd codegen (called by torch codegen but can run independently)
 python -m tools.autograd.gen_autograd \
   "$OUT"/torch/share/ATen/Declarations.yaml \
+  aten/src/ATen/native/native_functions.yaml \
   "$OUT"/autograd \
   tools/autograd
 
