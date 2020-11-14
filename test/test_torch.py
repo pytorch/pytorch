@@ -7919,10 +7919,10 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(f32.cpu().numpy().view(np.int32), i32, rtol=0, atol=0)
 
             i32.zero_()
-            self.assertEqual(f32, torch.zeros_like(f32))
+            self.assertEqual(f32, torch.zeros_like(f32), rtol=0, atol=0)
 
             i32.fill_(7039851)  # 0x006b6b6b
-            self.assertEqual(f32, torch.full_like(f32, 9.86493239538e-39))
+            self.assertEqual(f32, torch.full_like(f32, 9.86493239538e-39), rtol=0, atol=0)
 
         for f32 in generate_inputs():
             run_test(f32)
