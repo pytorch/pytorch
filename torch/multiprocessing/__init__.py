@@ -33,13 +33,6 @@ __all__ += multiprocessing.__all__
 torch._C._multiprocessing_init()
 
 
-if sys.version_info < (3, 3):
-    """Override basic classes in Python 2.7 and Python 3.3 to use ForkingPickler
-    for serialization. Later versions of Python already use ForkingPickler."""
-    from .queue import Queue, SimpleQueue
-    from .pool import Pool
-
-
 """Add helper function to spawn N processes and wait for completion of any of
 them. This depends `mp.get_context` which was added in Python 3.4."""
 from .spawn import spawn, SpawnContext, _supports_context, start_processes, ProcessContext, \
