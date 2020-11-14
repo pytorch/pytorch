@@ -12,6 +12,7 @@
 set -eu -o pipefail
 
 if [ "$#" -eq 0 ]; then
+  # shellcheck disable=SC2034
   COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
   source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
   OUT="$(dirname "${BASH_SOURCE[0]}")/../../codegen_result"
@@ -56,6 +57,6 @@ python -m tools.jit.gen_unboxing_wrappers \
 # annotated_fn_args codegen (called by torch codegen but can run independently)
 mkdir -p "$OUT"/annotated_fn_args
 python -m tools.autograd.gen_annotated_fn_args \
-  "$OUT"/torch/share/ATen/Declarations.yaml \
+  aten/src/ATen/native/native_functions.yaml \
   "$OUT"/annotated_fn_args \
   tools/autograd

@@ -871,6 +871,10 @@ def batch_isend_irecv(p2p_op_list):
         >>> recv_tensor
         tensor([2, 3])     # Rank 0
         tensor([0, 1])     # Rank 1
+
+    .. note:: Note that when this API is used with the NCCL PG backend, users must set
+        the current GPU device with `torch.cuda.set_device`, otherwise it will
+        lead to unexpected hang issues.
     """
     _check_p2p_op_list(p2p_op_list)
     backend = get_backend(p2p_op_list[0].group)
