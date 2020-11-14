@@ -3225,6 +3225,8 @@ A, in order as a namedtuple `solution, LU`.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
+Supports real-valued and complex-valued inputs.
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
@@ -8171,6 +8173,8 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
+
+Supports real-valued and complex-valued inputs.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where

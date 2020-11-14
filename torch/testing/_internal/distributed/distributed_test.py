@@ -590,7 +590,6 @@ class DistributedTest:
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_nccl(self):
@@ -598,6 +597,7 @@ class DistributedTest:
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
             device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             p2p_op_list = []
 
             for val in ["1", "0"]:
@@ -642,7 +642,6 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @skip_if_small_worldsize
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_no_rank_zero_nccl(self):
@@ -650,6 +649,7 @@ class DistributedTest:
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
             device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
             p2p_op_list = []
 
             if rank == 1:
@@ -796,6 +796,7 @@ class DistributedTest:
             rank = dist.get_rank()
             rank_to_GPU = self._init_multigpu_helper()
             device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
 
             tensor = _build_tensor(rank + 1, device_id=device_id)
 
@@ -1380,6 +1381,7 @@ class DistributedTest:
             "Only Gloo and NCCL backends will have CUDA allReduce tested",
         )
         @skip_if_no_gpu
+        @skip_if_rocm
         def test_all_reduce_sum_cuda_async(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -3738,7 +3740,8 @@ class DistributedTest:
                         net.module.weight.grad.item(), expected_grad
                     )
 
-            self.assertFalse(net.ddp_join_enabled)
+            join_config = net.ddp_uneven_inputs_config
+            self.assertFalse(join_config.ddp_join_enabled)
             self.validate_net_equivalence(net)
 
         @require_backend({"gloo", "nccl"})
