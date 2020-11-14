@@ -407,6 +407,7 @@ namespace jit {
   _(FuserPass_UnfusibleDevice)                      \
   _(FuserPass_UnknownShapes)                        \
   _(FuserPass_UnknownShapesIgnored)                 \
+  _(FuserPass_IgnoreUnknownShapeAtStart)            \
   _(FuserPass_Multidevice)                          \
   _(FuserPass_MergeGroups)                          \
   _(TrainBasic)                                     \

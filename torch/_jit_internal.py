@@ -262,7 +262,7 @@ def get_type_hint_captures(fn):
         elif isinstance(annotation, ast.Attribute):
             return '.'.join([get_annotation_str(annotation.value), annotation.attr])
         elif isinstance(annotation, ast.Subscript):
-            return f"{annotation.value}[{get_annotation_str(annotation.slice.value)}]"
+            return f"{annotation.value}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
         elif isinstance(annotation, ast.Tuple):
             return ','.join([get_annotation_str(elt) for elt in annotation.elts])
         elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
@@ -1029,14 +1029,14 @@ def container_checker(obj, target_type):
 
 
 def _isinstance(obj, target_type) -> bool:
-    origin_type = get_origin(target_type)    
+    origin_type = get_origin(target_type)
     if origin_type:
         return container_checker(obj, target_type)
 
     # Check to handle weird python type behaviors
-    # 1. python 3.6 returns None for origin of containers without 
+    # 1. python 3.6 returns None for origin of containers without
     #    contained type (intead of returning outer container type)
-    # 2. non-typed optional origin returns as none instead 
+    # 2. non-typed optional origin returns as none instead
     #    of as optional in 3.6-3.8
     check_args_exist(target_type)
 

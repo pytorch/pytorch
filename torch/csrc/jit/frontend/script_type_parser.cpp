@@ -149,9 +149,6 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     case TK_NONE: {
       return "None";
     }
-    case TK_STRINGLITERAL: {
-      return StringLiteral(expr).text();
-    }
     case '.': {
       auto select = Select(expr);
       const std::string& name = select.selector().name();
@@ -190,6 +187,15 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     }
     return subscriptToType(*value_name, subscript);
 
+  } else if (expr.kind() == TK_STRINGLITERAL) {
+    const auto& type_name = StringLiteral(expr).text();
+    if (resolver_) {
+      if (auto typePtr = resolver_->resolveType(type_name, expr.range())) {
+        return typePtr;
+      }
+    }
+
+    throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = string_to_type_lut().find(*name);
     if (itr != string_to_type_lut().end()) {
