@@ -178,8 +178,10 @@ class TestTorchLibrary(common.TestCase):
 
     def test_torch_library(self):
         import torch_test_cpp_extension.torch_library  # noqa: F401
+
         def f(a: bool, b: bool):
             return torch.ops.torch_library.logical_and(a, b)
+
         self.assertTrue(f(True, True))
         self.assertFalse(f(True, False))
         self.assertFalse(f(False, True))
