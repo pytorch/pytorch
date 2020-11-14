@@ -727,24 +727,6 @@ inline IValue toIValue(
             " it must be scripted before being passed as a value for an argument of type ",
             type->repr_str()));
       }
-
-      // otherwise is a normal class object, we create a fresh
-      // ivalue::Object to use from the py object.
-      // 1. create a bare ivalue
-      // const size_t numAttrs = classType->numAttributes();
-      // auto cu = classType->compilation_unit();
-      // auto userObj = c10::ivalue::Object::create(
-      //     c10::StrongTypePtr(cu, classType), numAttrs);
-
-      // // 2. copy all the contained types
-      // for (size_t slot = 0; slot < numAttrs; slot++) {
-      //   const auto& attrType = classType->getAttribute(slot);
-      //   const auto& attrName = classType->getAttributeName(slot);
-
-      //   const auto& contained = py::getattr(obj, attrName.c_str());
-      //   userObj->setSlot(slot, toIValue(contained, attrType));
-      // }
-      // return userObj;
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();

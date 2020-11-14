@@ -13,7 +13,6 @@ import copy
 import pickle
 import warnings
 from typing import Any, Dict
-import pdb
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -269,11 +268,6 @@ class ConstMap:
 
 
 if _enabled:
-
-    class ScriptClass(object):
-        def __init__(self):
-            super().__init__()
-
     class RecursiveScriptClass(object):
         def __init__(self, cpp_class):
             super(RecursiveScriptClass, self).__init__()
@@ -875,11 +869,6 @@ if _enabled:
 
 
 else:
-
-    class ScriptClass(object):  # type: ignore
-        def __init__(self):
-            super().__init__()
-
     # TODO MAKE SURE THAT DISABLING WORKS
     class RecursiveScriptClass(object):  # type: ignore
         def __init__(self):
@@ -1094,7 +1083,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _compile_and_register_class(obj, _rcb, qualified_name)
 
         return ScriptClassWrapper(obj)
-
     elif inspect.isfunction(obj):
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb

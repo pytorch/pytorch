@@ -1,5 +1,4 @@
 from collections import namedtuple
-import pdb
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck

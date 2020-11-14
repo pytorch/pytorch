@@ -647,6 +647,14 @@ def inline_everything_mode(should_inline):
     finally:
         torch._C._jit_set_inline_everything_mode(old)
 
+@contextmanager
+def set_fusion_group_inlining(inlining):
+    old = torch._C._debug_get_fusion_group_inlining()
+    torch._C._debug_set_fusion_group_inlining(inlining)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_fusion_group_inlining(old)
 
 # note: not re-entrant, use unnested only
 @contextmanager
