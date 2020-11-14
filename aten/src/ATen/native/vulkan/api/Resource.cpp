@@ -156,11 +156,11 @@ Resource::Image::Sampler::Factory::operator()(
     descriptor.address_mode,
     0.0f,
     VK_FALSE,
-    0.0f,
+    1.0f,
     VK_FALSE,
     VK_COMPARE_OP_NEVER,
     0.0f,
-    0.0f,
+    VK_LOD_CLAMP_NONE,
     descriptor.border,
     VK_FALSE,
   };

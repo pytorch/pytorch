@@ -6,7 +6,7 @@ layout(std430) uniform;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D uImage;
+layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict writeonly image3D uImage;
 layout(set = 0, binding = 1)          buffer  PRECISION restrict readonly  Buffer {
   float data[];
 } uBuffer;

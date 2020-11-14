@@ -14,7 +14,13 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
 
-  return diff.abs().max().item<float>() < (2e-6 * maxValue);
+#ifdef USE_VULKAN_FP16_INFERENCE
+  constexpr float tolerance = 1e-2;
+#else
+  constexpr float tolerance = 1e-5;
+#endif
+
+  return diff.abs().max().item<float>() < (tolerance * maxValue);
 }
 
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {

@@ -61,15 +61,15 @@ Tensor mul_scalar(
 }
 
 Tensor& mul_scalar_(
-    Tensor& self_arg,
+    Tensor& self,
     const Scalar other) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place mul_scalar is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
@@ -103,7 +103,7 @@ Tensor& mul_scalar_(
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
 
-  return self_arg;
+  return self;
 }
 
 #ifdef USE_VULKAN_API

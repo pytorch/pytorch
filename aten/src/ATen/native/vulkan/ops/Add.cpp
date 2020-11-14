@@ -62,16 +62,16 @@ Tensor add_scalar(
 }
 
 Tensor& add_scalar_(
-    Tensor& self_arg,
+    Tensor& self,
     const Scalar other,
     const Scalar alpha) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place add is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
@@ -105,7 +105,7 @@ Tensor& add_scalar_(
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
 
-  return self_arg;
+  return self;
 }
 
 Tensor add_tensor(
@@ -170,16 +170,16 @@ Tensor add_tensor(
 }
 
 Tensor& add_tensor_(
-    Tensor& self_arg,
+    Tensor& self,
     const Tensor& other_arg,
     const Scalar alpha) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place add is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
   const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
   const vTensor& v_other = convert(other);
@@ -187,7 +187,7 @@ Tensor& add_tensor_(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_self.has_image() && v_other.has_image()) {
+    if (v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
       const struct {
         float alpha;
       } block {
@@ -220,7 +220,7 @@ Tensor& add_tensor_(
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
 
-  return self_arg;
+  return self;
 }
 
 #ifdef USE_VULKAN_API

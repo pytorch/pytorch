@@ -68,7 +68,7 @@ Tensor clamp(
 }
 
 Tensor& clamp_(
-    Tensor& self_arg,
+    Tensor& self,
     const c10::optional<Scalar> min_value,
     const c10::optional<Scalar> max_value) {
   api::Context* const context = api::context();
@@ -78,10 +78,10 @@ Tensor& clamp_(
       "At least one of 'min' or 'max' must not be None");
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
+      self.is_vulkan(),
       "Vulkan: In-place clamp is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
@@ -117,7 +117,7 @@ Tensor& clamp_(
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
 
-  return self_arg;
+  return self;
 }
 
 Tensor hardtanh(
