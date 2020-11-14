@@ -217,15 +217,16 @@ def load_deprecated_signatures(
     # We join the deprecated and the original signatures using type-only form.
 
     # native function -> type-only signature
+    @with_native_function
     def signature_original(f: NativeFunction) -> str:
         # remove inplace suffix but keep outplace suffix
         opname = str(f.func.name.name.base)
         if f.func.is_out_fn():
             opname += '_out'
-        types = ', '.join(argument_type_str(a.type)
-                          for a in itertools.chain(f.func.out_arguments,
-                                                   f.func.arguments,
-                                                   f.func.kwarg_only_arguments))
+        args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+        # Simply ignore TensorOptionsArguments as it does not exist in deprecated.yaml.
+        types = ', '.join(argument_type_str(a.argument.type)
+                          for a in args if isinstance(a.argument, Argument))
         return f'{opname}({types})'
 
     # deprecated -> type-only native signature (according to the call order)
