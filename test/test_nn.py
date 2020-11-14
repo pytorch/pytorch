@@ -10463,6 +10463,19 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
 
+    def test_AvgPool2d_empty(self, device):
+        avgpool = torch.nn.AvgPool2d(3, stride=2).to(device)
+        inp = torch.randn(0, 16, 20, 32, device=device)
+        self._test_module_empty_input(avgpool, inp, check_size=False)
+
+        clast_inp = torch.randn(0, 16, 20, 32, device=device).contiguous(memory_format=torch.channels_last)
+        self._test_module_empty_input(avgpool, clast_inp, check_size=False)
+
+        # test with empty non-batch input
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+            inp = torch.randn(16, 0, 20, 32, device=device)
+            avgpool(inp)
+
     @onlyCUDA
     @largeTensorTest('16GB')
     def test_prelu_backward_32bit_indexing(self, device):
