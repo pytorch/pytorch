@@ -1719,7 +1719,7 @@ def _write_ninja_file_to_build_library(path,
         return target
 
     objects = [object_file_path(src) for src in sources]
-    ldflags = ([] if is_standalone else SHARED_FLAG) + extra_ldflags
+    ldflags = ([] if is_standalone else [SHARED_FLAG]) + extra_ldflags
 
     # The darwin linker needs explicit consent to ignore unresolved symbols.
     if sys.platform.startswith('darwin'):
