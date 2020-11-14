@@ -8,8 +8,10 @@ import contextlib
 import collections
 import enum
 import inspect
+import ast
 import weakref
 import warnings
+from textwrap import dedent
 import torch
 import sys
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
@@ -226,6 +228,68 @@ def can_compile_class(cls):
     return all(has_code)
 
 
+def get_type_hint_captures(fn):
+    """
+    Get a dictionary containing type resolution mappings necessary to resolve types
+    for the literal annotations on 'fn'. These are not considered to be closed-over by fn
+    and must be obtained separately.
+
+    Arguments:
+        fn: A callable.
+    Returns:
+        A Dict[str, Any] containing a mapping from the literal annotations used on
+        fn to the Python objects they refer to.
+    """
+    signature = inspect.signature(fn)
+
+    # First, get the literal type annotations from the function declaration
+    # by source inspection. This accounts for the case in which aliases are used
+    # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
+    src = inspect.getsource(fn)
+
+    # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
+    a = ast.parse(dedent(src))
+    if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
+        raise RuntimeError(f"Expected {fn} to be a function")
+    f = a.body[0]
+
+    # This function converts ast.Name and ast.Attribute nodes to strings.
+    # The latter is how annotations like torch.device are represented; the Attribute
+    # node contains the value "device" and a reference to an ast.Name node containing "torch".
+    def get_annotation_str(annotation):
+        if isinstance(annotation, ast.Name):
+            return annotation.id
+        elif isinstance(annotation, ast.Attribute):
+            return '.'.join([get_annotation_str(annotation.value), annotation.attr])
+        elif isinstance(annotation, ast.Subscript):
+            return f"{annotation.value}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
+        elif isinstance(annotation, ast.Tuple):
+            return ','.join([get_annotation_str(elt) for elt in annotation.elts])
+        elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
+            return f"{annotation.value}"
+
+        raise RuntimeError(f"Unexpected node type: {type(annotation)}")
+
+    # Gather a dictionary of parameter name -> literal annotation.
+    name_to_annotation = {arg.arg: get_annotation_str(arg.annotation) for arg in f.args.args if arg.annotation}
+
+    # Gather a dictionary of parameter name -> type.
+    name_to_type = {
+        name: parameter.annotation
+        for name, parameter in signature.parameters.items()
+        if parameter.annotation is not inspect.Parameter.empty
+    }
+
+    # Join the two dictionaries above by key to get a dictionary from literal annotation -> type.
+    annotation_to_type = {annotation: name_to_type[name] for name, annotation in name_to_annotation.items()}
+
+    # If there is a return annotation, include it in annotation_to_type.
+    if signature.return_annotation is not inspect.Parameter.empty:
+        annotation_to_type[get_annotation_str(f.returns)] = signature.return_annotation
+
+    return annotation_to_type
+
+
 def createResolutionCallbackForClassMethods(cls):
     """
     This looks at all the methods defined in a class and pulls their closed-over
@@ -238,6 +302,7 @@ def createResolutionCallbackForClassMethods(cls):
 
     for fn in fns:
         captures.update(get_closure(fn))
+        captures.update(get_type_hint_captures(fn))
 
     def lookup_in_class(key):
         if key in captures:
@@ -964,14 +1029,14 @@ def container_checker(obj, target_type):
 
 
 def _isinstance(obj, target_type) -> bool:
-    origin_type = get_origin(target_type)    
+    origin_type = get_origin(target_type)
     if origin_type:
         return container_checker(obj, target_type)
 
     # Check to handle weird python type behaviors
-    # 1. python 3.6 returns None for origin of containers without 
+    # 1. python 3.6 returns None for origin of containers without
     #    contained type (intead of returning outer container type)
-    # 2. non-typed optional origin returns as none instead 
+    # 2. non-typed optional origin returns as none instead
     #    of as optional in 3.6-3.8
     check_args_exist(target_type)
 

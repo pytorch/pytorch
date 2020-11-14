@@ -1308,3 +1308,30 @@ class TestClassType(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, r"Class does not define __delitem__", "example[key]"):
             self.checkScript(fn, ())
+
+    def test_recursive_script_builtin_type_resolution(self):
+        """
+        Test resolution of built-in torch types(e.g. torch.Tensor, torch.device) when a class is recursively compiled.
+        """
+        # A will be implicitly compiled because it is not annotated with @torch.jit.script
+        # but is used in g() below.
+        tensor_t = torch.Tensor
+        device_t = torch.device
+
+        class A:
+            def __init__(self):
+                pass
+
+            def f(self, x: tensor_t, y: torch.device):
+                return x.to(device=y)
+
+            def h(self, x: device_t) -> device_t:
+                return x
+
+        def g():
+            a = A()
+            return a.f(torch.tensor([1]), torch.device("cpu"))
+
+        self.checkScript(g, ())
+        s = self.getExportImportCopy(torch.jit.script(g))
+        self.assertEqual(s(), g())

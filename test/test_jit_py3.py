@@ -53,7 +53,7 @@ class TestScriptPy3(JitTestCase):
         def fn():
             return NormalizationInfo(1, 2, 3, 4, 5)
 
-        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+        with self.assertRaisesRegex(OSError, "could not get source code"):
             torch.jit.script(fn)
 
     def test_optional_dict_construct(self):
