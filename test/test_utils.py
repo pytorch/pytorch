@@ -669,10 +669,10 @@ class TestStandaloneCPPJIT(TestCase):
                 is_standalone=True,
             )
 
-            ext = "exe" if IS_WINDOWS else "o"
+            ext = ".exe" if IS_WINDOWS else ""
             self.assertEqual(
                 exec_path,
-                os.path.join(build_dir, f"standalone_load_test.{ext}")
+                os.path.join(build_dir, f"standalone_load_test{ext}")
             )
 
             for shell in [True, False]:

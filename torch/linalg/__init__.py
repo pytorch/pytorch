@@ -146,7 +146,7 @@ linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 Computes a tensor ``x`` such that ``tensordot(input, x, dims=x.ndim) = other``.
 The resulting tensor ``x`` has the same shape as ``input[other.ndim:]``.
 
-Supports real-valued and, only on the CPU, complex-valued inputs.
+Supports real-valued and complex-valued inputs.
 
 .. note:: If :attr:`input` does not satisfy the requirement
           ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``
