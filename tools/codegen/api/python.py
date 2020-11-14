@@ -527,11 +527,11 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # arguments are created based on different rules - see below.
     args = tuple(a for a in cpp.group_arguments(f.func, method=method) if isinstance(a, Argument))
 
-    arg_set = set(a.name for a in f.func.arguments)
+    input_arg_set = set(a.name for a in f.func.arguments)
     kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
     out_arg_set = set(a.name for a in f.func.out_arguments)
 
-    input_args = tuple(map(argument, filter(lambda a: a.name in arg_set, args)))
+    input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
     input_kwargs = tuple(map(argument, filter(lambda a: a.name in kwarg_only_set, args)))
     outputs = tuple(map(argument, filter(lambda a: a.name in out_arg_set, args)))
 
