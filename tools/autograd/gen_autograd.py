@@ -191,7 +191,7 @@ def gen_autograd(aten_path, native_functions_path, out, autograd_dir, operator_s
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
     # Some non-selectable ops (e.g. prim ops) need factory methods so we pass in `full_aten_decls` here.
-    gen_variable_factories(out, full_aten_decls, template_path)
+    gen_variable_factories(out, native_functions_path, template_path)
 
 
 def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
