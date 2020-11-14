@@ -38,6 +38,7 @@ import yaml
 from .gen_trace_type import should_trace
 
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.api.types import *
 from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, parse_native_yaml, with_native_function, FileManager
 from tools.codegen.model import *
