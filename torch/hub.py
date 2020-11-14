@@ -155,43 +155,9 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
 
 
 def _check_module_exists(name):
-    if sys.version_info >= (3, 4):
-        import importlib.util
-        return importlib.util.find_spec(name) is not None
-    elif sys.version_info >= (3, 3):
-        # Special case for python3.3
-        import importlib.find_loader
-        return importlib.find_loader(name) is not None
-    else:
-        # NB: Python2.7 imp.find_module() doesn't respect PEP 302,
-        #     it cannot find a package installed as .egg(zip) file.
-        #     Here we use workaround from:
-        #     https://stackoverflow.com/questions/28962344/imp-find-module-which-supports-zipped-eggs?lq=1
-        #     Also imp doesn't handle hierarchical module names (names contains dots).
-        try:
-            # 1. Try imp.find_module(), which searches sys.path, but does
-            # not respect PEP 302 import hooks.
-            import imp
-            result = imp.find_module(name)
-            if result:
-                return True
-        except ImportError:
-            pass
-        path = sys.path
-        for item in path:
-            # 2. Scan path for import hooks. sys.path_importer_cache maps
-            # path items to optional "importer" objects, that implement
-            # find_module() etc.  Note that path must be a subset of
-            # sys.path for this to work.
-            importer = sys.path_importer_cache.get(item)
-            if importer:
-                try:
-                    result = importer.find_module(name, [item])
-                    if result:
-                        return True
-                except ImportError:
-                    pass
-        return False
+    import importlib.util
+    return importlib.util.find_spec(name) is not None
+
 
 def _check_dependencies(m):
     dependencies = _load_attr_from_module(m, VAR_DEPENDENCY)
