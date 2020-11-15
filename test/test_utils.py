@@ -683,7 +683,8 @@ class TestStandaloneCPPJIT(TestCase):
                 )
                 self.assertEqual(r.returncode, 0)
                 self.assertEqual(
-                    textwrap.dedent(r.stdout.decode("utf-8")),
+                    # Windows prints "\r\n" for newlines.
+                    textwrap.dedent(r.stdout.decode("utf-8")).replace("\r\n", "\n"),
                     textwrap.dedent("""\
                      1  0  0
                      0  1  0
