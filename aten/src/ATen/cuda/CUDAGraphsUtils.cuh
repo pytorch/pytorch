@@ -16,7 +16,7 @@ namespace philox {
 __device__ __forceinline__ std::tuple<uint64_t, uint64_t>
 unpack(at::PhiloxCudaState arg) {
   if (arg.captured_) {
-    return std::make_tuple(arg.seed_, *(arg.offset_.ptr) + arg.offset_intragraph);
+    return std::make_tuple(arg.seed_, *(arg.offset_.ptr) + arg.offset_intragraph_);
   } else {
     return std::make_tuple(arg.seed_, arg.offset_.val);
   }
@@ -24,23 +24,24 @@ unpack(at::PhiloxCudaState arg) {
 
 } // namespace philox
 
-inline cudaStreamCaptureStatus currentStreamCaptureStatus() {
+inline int currentStreamCaptureStatus() {
   #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
   cudaStreamCaptureStatus is_capturing;
   AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
                                       &is_capturing));
-  return is_capturing;
+  return int(is_capturing);
   #else
   return 0;
   #endif
 }
 
 inline void assertNotCapturing(std::string attempt) {
-  TORCH_CHECK(currentStreamCaptureStatus() == 0,
+  auto status = currentStreamCaptureStatus;
+  TORCH_CHECK(status == 0,
               attempt,
               " during graph capture. ",
               "Current cudaStreamCaptureStatus: ",
-              is_capturing);
+              status);
 }
 
 } // namespace cuda

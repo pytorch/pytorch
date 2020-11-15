@@ -203,7 +203,7 @@ inline void launcher(
     Tensor& mask,
     double p,
     const int64_t nelem,
-    const std::pair<uint64_t, uint64_t> rng_engine_inputs,
+    const PhiloxCudaState rng_engine_inputs,
     dim3 grid,
     dim3 dim_block) {
   AT_DISPATCH_FLOATING_TYPES_AND2(

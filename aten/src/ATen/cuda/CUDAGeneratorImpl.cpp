@@ -54,7 +54,8 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
   std::call_once(cuda_gens_init_flag[idx], [&] {
     default_gens_cuda[idx] = make_generator<CUDAGeneratorImpl>(idx);
     default_gens_cuda[idx].seed();
-    default_gens_cuda[idx].set_is_default(true);
+    // chooses minor ugliness over adding an arg to make_generator
+    reinterpret_cast<CUDAGeneratorImpl*>(&default_gens_cuda[idx])->set_is_default(true);
   });
   return default_gens_cuda[idx];
 }
@@ -105,7 +106,7 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
  * Gets the current seed of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::current_seed() const {
-  TORCH_INTERNAL_ASSERT((at::cuda::currentStreamCaptureStatus() == 0) || is_default());
+  TORCH_INTERNAL_ASSERT((at::cuda::currentStreamCaptureStatus() == 0) || is_default_);
   return seed_;
 }
 
@@ -147,7 +148,7 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
  * offset_intragraph tracks the offset in the graphed region.
  */
 void CUDAGeneratorImpl::graph_prologue(int64_t* offset_intergraph) {
-  TORCH_INTERNAL_ASSERT(is_default());
+  TORCH_INTERNAL_ASSERT(is_default_);
   offset_intergraph_ = offset_intergraph;
   offset_intragraph_ = 0;
 }
@@ -156,7 +157,7 @@ void CUDAGeneratorImpl::graph_prologue(int64_t* offset_intergraph) {
  * Finalizes a cuda graph capture region for this instance.
  */
 uint64_t CUDAGeneratorImpl::graph_epilogue() {
-  TORCH_INTERNAL_ASSERT(is_default());
+  TORCH_INTERNAL_ASSERT(is_default_);
   return offset_intragraph_;
 }
 
@@ -182,13 +183,13 @@ uint64_t CUDAGeneratorImpl::graph_epilogue() {
  * See Note [Acquire lock when using random generators]
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
-  if (at::cuda::currenStreamCaptureStatus()) {
-    TORCH_INTERNAL_ASSERT(is_default());
+  if (at::cuda::currentStreamCaptureStatus()) {
+    TORCH_INTERNAL_ASSERT(is_default_);
     uint32_t offset = this->offset_intragraph_;
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
                           std::numeric_limits<uint32_t>::max() - increment); 
     this->offset_intragraph_ += increment;
-    return PhiloxCudaState(this->seed,
+    return PhiloxCudaState(this->seed_,
                            this->offset_intergraph_,
                            offset);
   } else {
@@ -215,7 +216,6 @@ std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t i
  * Used for type checking during run time.
  */
 DeviceType CUDAGeneratorImpl::device_type() {
-  TORCH_INTERNAL_ASSERT((at::cuda::currentStreamCaptureStatus() == 0) || is_default());
   return DeviceType::CUDA;
 }
 

@@ -117,11 +117,6 @@ struct PhiloxCudaState {
   Payload offset_;
   uint32_t offset_intragraph_;
   bool captured_ = false;
-
-  void set_increment(uint64_t increment) {
-    TORCH_INTERNAL_ASSERT(increment <= std::numeric_limits<int>::max());
-    increment_ = int(increment);
-  }
 };
 
 struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
@@ -136,17 +131,16 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread();
-  void capture_prologue(int64_t* offset_intergraph_);
-  uint64_t capture_epilogue();
-  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
+  void graph_prologue(int64_t* offset_intergraph_);
+  uint64_t graph_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
-  bool set_is_default(bool is_default) {
+  void set_is_default(bool is_default) {
     is_default_ = is_default;
   }
 
   // Temporarily accommodates call sites that use philox_engine_inputs.
   // Allows incremental refactor of call sites to use philox_cuda_state.
-  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment) override;
+  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
 
   static DeviceType device_type();
 
