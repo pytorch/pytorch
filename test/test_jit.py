@@ -82,7 +82,7 @@ from copy import deepcopy
 from itertools import product
 import itertools
 from textwrap import dedent
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, NamedTuple, Optional, Tuple, Union
 import inspect
 import math
 import functools
@@ -412,6 +412,15 @@ class TestJit(JitTestCase):
         self.assertEqual(origin_result, m2(input))
         self.assertEqual(origin_result, m3(input.cpu()))
         self.assertEqual(origin_result, m4(input.cuda(0)))
+
+    def test_trace_retains_train(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x
+        m = M()
+        m.eval()
+        tm = torch.jit.trace(m, (torch.rand(3)))
+        self.assertEqual(tm.training, m.training)
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_shared_storage_on_cuda(self):
@@ -7408,6 +7417,19 @@ dedent """
         self.assertEqual(any_refinement2(3), torch.tensor(3))
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
 
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "bug persists in deprecated executor")
+    def test_unspecialized_any_binding(self):
+        # any binding will infer the type, if it infers
+        # a specialized tensor type `x` Dict type will fail isinstance check
+
+        @torch.jit.script
+        def foo(x: Any):
+            assert isinstance(x, Dict[str, torch.Tensor])
+
+        foo({"1": torch.tensor(3)})
+        with self.assertRaises(Exception):
+            foo(2)
+
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -13297,7 +13319,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Function_0", 2).check("None = prim::Constant") \
+        FileCheck().check_count("prim::Closure_0", 2).check("None = prim::Constant") \
                    .check_next("return").run(g)
 
         code = dedent('''
@@ -13314,7 +13336,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Function_0", 2).check("int = prim::If") \
+        FileCheck().check_count("prim::Closure_0", 2).check("int = prim::If") \
                    .run(g)
 
         code = dedent('''
@@ -13328,9 +13350,9 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         fc = FileCheck()
-        fc.check("prim::Function").check("(Tensor, None) = prim::TupleConstruct")
+        fc.check("prim::Closure").check("(Tensor, None) = prim::TupleConstruct")
         # Loop then two if's added in exit transform
-        fc.check("prim::Function").check("prim::Loop").check_count("prim::If", 2)
+        fc.check("prim::Closure").check("prim::Loop").check_count("prim::If", 2)
         fc.run(cu.loop_in_closure.graph)
 
         code = dedent('''
@@ -13795,6 +13817,23 @@ dedent """
 
         out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
         self.assertEqual(out, torch.tensor(6.0))
+
+    def test_namedtuple_type_inference(self):
+        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])
+        _UnannotatedNamedTuple = namedtuple('_NamedTupleUnAnnotated', ['value'])
+
+        def test_check_named_tuple_value():
+            named_tuple = _AnnotatedNamedTuple(1)
+            return named_tuple.value
+
+        self.checkScript(test_check_named_tuple_value, ())
+
+        def test_error():
+            return _UnannotatedNamedTuple(1)
+
+        with self.assertRaisesRegex(RuntimeError, r"Expected a value of type \'Tensor \(inferred\)\' "
+                                                  r"for argument \'value\' but instead found type \'int\'."):
+            torch.jit.script(test_error)
 
     def test_isinstance_dynamic(self):
         @torch.jit.script
@@ -15387,6 +15426,18 @@ dedent """
         ref = a * b
         self.assertEqual(test, ref)
 
+    def test_signed_float_zero(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return torch.div(x, -0.)
+
+        inp = torch.ones(1)
+        self.checkModule(MyModule(), inp)
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
@@ -15631,7 +15682,7 @@ def add_autograd_test(
 
     # Disable complex tests
     # TODO: Add complex support for jit
-    if 'complex' in variant_name or name in ['view_as_complex', 'complex']:
+    if 'complex' in variant_name or name in ['view_as_complex', 'complex', 'angle']:
         return
 
     # Skips aliases, which are tested in test_op_aliases.py

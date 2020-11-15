@@ -8,6 +8,80 @@ Tensor = torch.Tensor
 # Note: This not only adds doc strings for functions in the linalg namespace, but
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
+cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
+linalg.cholesky(input, *, out=None) -> Tensor
+
+Computes the Cholesky decomposition of a Hermitian (or symmetric for real-valued matrices)
+positive-definite matrix or the Cholesky decompositions for a batch of such matrices.
+Each decomposition has the form:
+
+.. math::
+
+    \text{input} = LL^H
+
+where :math:`L` is a lower-triangular matrix and :math:`L^H` is the conjugate transpose of :math:`L`,
+which is just a transpose for the case of real-valued input matrices.
+In code it translates to ``input = L @ L.t()` if :attr:`input` is real-valued and
+``input = L @ L.conj().t()`` if :attr:`input` is complex-valued.
+The batch of :math:`L` matrices is returned.
+
+Supports real-valued and complex-valued inputs.
+
+.. note:: If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
+          and one or more of them is not a Hermitian positive-definite matrix, then a RuntimeError will be thrown.
+          If :attr:`input` is a batch of matrices, then the error message will include the batch index
+          of the first matrix that is not Hermitian positive-definite.
+
+.. warning:: This function always checks whether :attr:`input` is a Hermitian positive-definite matrix
+             using `info` argument to LAPACK/MAGMA call. For CUDA this causes cross-device memory synchronization.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian positive-definite
+                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = torch.mm(a, a.t().conj())  # creates a Hermitian positive-definite matrix
+    >>> l = torch.linalg.cholesky(a)
+    >>> a
+    tensor([[2.5266+0.0000j, 1.9586-2.0626j],
+            [1.9586+2.0626j, 9.4160+0.0000j]], dtype=torch.complex128)
+    >>> l
+    tensor([[1.5895+0.0000j, 0.0000+0.0000j],
+            [1.2322+1.2976j, 2.4928+0.0000j]], dtype=torch.complex128)
+    >>> torch.mm(l, l.t().conj())
+    tensor([[2.5266+0.0000j, 1.9586-2.0626j],
+            [1.9586+2.0626j, 9.4160+0.0000j]], dtype=torch.complex128)
+
+    >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
+    >>> a = torch.matmul(a, a.transpose(-2, -1))  # creates a symmetric positive-definite matrix
+    >>> l = torch.linalg.cholesky(a)
+    >>> a
+    tensor([[[ 1.1629,  2.0237],
+            [ 2.0237,  6.6593]],
+
+            [[ 0.4187,  0.1830],
+            [ 0.1830,  0.1018]],
+
+            [[ 1.9348, -2.5744],
+            [-2.5744,  4.6386]]], dtype=torch.float64)
+    >>> l
+    tensor([[[ 1.0784,  0.0000],
+            [ 1.8766,  1.7713]],
+
+            [[ 0.6471,  0.0000],
+            [ 0.2829,  0.1477]],
+
+            [[ 1.3910,  0.0000],
+            [-1.8509,  1.1014]]], dtype=torch.float64)
+    >>> torch.allclose(torch.matmul(l, l.transpose(-2, -1)), a)
+    True
+""")
+
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
@@ -68,8 +142,7 @@ Keyword args:
         :attr:`dtype` before performing the operation, and the returned tensor's type
         will be :attr:`dtype`. If this argument is used in conjunction with the
         :attr:`out` argument, the output tensor's type must match this argument or a
-        RuntimeError will be raised. This argument is not currently supported for
-        :attr:`ord='nuc'` or :attr:`ord='fro'`. Default: ``None``
+        RuntimeError will be raised. Default: ``None``
 
 Examples::
 
@@ -139,4 +212,49 @@ Using the :attr:`dim` argument to compute matrix norms::
     tensor([ 3.7417, 11.2250])
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
+""")
+
+tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
+linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
+
+Computes a tensor ``x`` such that ``tensordot(input, x, dims=x.ndim) = other``.
+The resulting tensor ``x`` has the same shape as ``input[other.ndim:]``.
+
+Supports real-valued and complex-valued inputs.
+
+.. note:: If :attr:`input` does not satisfy the requirement
+          ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``
+          after (optionally) moving the dimensions using :attr:`dims`, then a RuntimeError will be thrown.
+
+Args:
+    input (Tensor): "left-hand-side" tensor, it must satisfy the requirement
+                    ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
+    other (Tensor): "right-hand-side" tensor of shape ``input.shape[other.ndim]``.
+    dims (Tuple[int]): dimensions of :attr:`input` to be moved before the computation.
+                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim, 0))``.
+                       If None (default), no dimensions are moved.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
+    >>> b = torch.randn(2 * 3, 4)
+    >>> x = torch.linalg.tensorsolve(a, b)
+    >>> x.shape
+    torch.Size([2, 3, 4])
+    >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b)
+    True
+
+    >>> a = torch.randn(6, 4, 4, 3, 2)
+    >>> b = torch.randn(4, 3, 2)
+    >>> x = torch.linalg.tensorsolve(a, b, dims=(0, 2))
+    >>> x.shape
+    torch.Size([6, 4])
+    >>> a = a.permute(1, 3, 4, 0, 2)
+    >>> a.shape[b.ndim:]
+    torch.Size([6, 4])
+    >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b, atol=1e-6)
+    True
 """)

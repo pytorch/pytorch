@@ -5,6 +5,10 @@ from torch.fx import (
 
 from torch.fx.graph import Graph
 
+from ..utils import (
+    get_combined_dict
+)
+
 from .pattern_utils import (
     is_match,
     get_default_fusion_patterns,
@@ -12,22 +16,17 @@ from .pattern_utils import (
 
 from .fusion_patterns import *  # noqa: F401
 
-import copy
 class Fuser:
-    def fuse(self, model, inplace=False, fuse_custom_config_dict=None):
+    def fuse(self, model, fuse_custom_config_dict=None):
         if fuse_custom_config_dict is None:
             fuse_custom_config_dict = {}
-        if not inplace:
-            model = copy.deepcopy(model)
 
         input_root = model
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
         additional_fusion_patterns = fuse_custom_config_dict.get("additional_quant_pattern", {})
-        fusion_patterns = get_default_fusion_patterns().copy()
-        for k, v in additional_fusion_patterns.items():
-            fusion_patterns[k] = v
+        fusion_patterns = get_combined_dict(get_default_fusion_patterns(), additional_fusion_patterns)
         # find fusion
         fusion_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
         self.fused_graph = Graph()

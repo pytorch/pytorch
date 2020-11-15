@@ -25,6 +25,7 @@
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
 
+#include <c10/macros/Macros.h>
 #include <c10/util/in_place.h>
 
 #include <cassert>
@@ -34,6 +35,8 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+
+#include <c10/util/Metaprogramming.h>
 
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
@@ -137,10 +140,9 @@ constexpr struct trivial_init_t {
 
 // 20.5.7, Disengaged state indicator
 struct nullopt_t {
-  struct init {};
-  constexpr explicit nullopt_t(init) {}
+  constexpr explicit nullopt_t(int) {}
 };
-constexpr nullopt_t nullopt{nullopt_t::init()};
+constexpr nullopt_t nullopt {0};
 
 // 20.5.8, class bad_optional_access
 class bad_optional_access : public std::logic_error {
@@ -185,7 +187,21 @@ struct optional_base {
 
   constexpr optional_base() noexcept : init_(false), storage_(trivial_init){};
 
+  explicit constexpr optional_base(const optional_base<T>& v) : init_(v.init_), storage_(trivial_init) {
+    if (init_) {
+      ::new (dataptr()) T(v.storage_.value_);
+    }
+  }
+
   explicit constexpr optional_base(const T& v) : init_(true), storage_(v) {}
+
+  explicit constexpr optional_base(optional_base<T>&& v) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : init_(v.init_), storage_(trivial_init) {
+    if (init_) {
+      ::new (dataptr()) T(std::move(v.storage_.value_));
+    }
+  }
 
   explicit constexpr optional_base(T&& v)
       : init_(true), storage_(constexpr_move(v)) {}
@@ -204,9 +220,51 @@ struct optional_base {
       Args&&... args)
       : init_(true), storage_(il, std::forward<Args>(args)...) {}
 
+  optional_base& operator=(const optional_base& rhs) {
+    if (init_ && !rhs.init_) {
+      clear();
+    } else if (!init_ && rhs.init_) {
+      init_ = true;
+      ::new (dataptr()) T(rhs.storage_.value_);
+    } else if (init_ && rhs.init_) {
+      storage_.value_ = rhs.storage_.value_;
+    }
+    return *this;
+  }
+
+  optional_base& operator=(optional_base&& rhs) noexcept(
+      std::is_nothrow_move_assignable<T>::value &&
+          std::is_nothrow_move_constructible<T>::value) {
+    if (init_ && !rhs.init_) {
+      clear();
+    } else if (!init_ && rhs.init_) {
+      init_ = true;
+      ::new (dataptr()) T(std::move(rhs.storage_.value_));
+    } else if (init_ && rhs.init_) {
+      storage_.value_ = std::move(rhs.storage_.value_);
+    }
+    return *this;
+  }
+
   ~optional_base() {
     if (init_)
       storage_.value_.T::~T();
+  }
+
+ private:
+  typename std::remove_const<T>::type* dataptr() {
+    return std::addressof(storage_.value_);
+  }
+
+  constexpr const T* dataptr() const {
+    return detail_::static_addressof(storage_.value_);
+  }
+
+  void clear() noexcept {
+    if (init_) {
+      dataptr()->~T();
+    }
+    init_ = false;
   }
 };
 
@@ -217,6 +275,20 @@ struct constexpr_optional_base {
 
   constexpr constexpr_optional_base() noexcept
       : init_(false), storage_(trivial_init){};
+
+  explicit constexpr constexpr_optional_base(const constexpr_optional_base<T>& v) : init_(v.init_), storage_(trivial_init) {
+    if (init_) {
+      ::new (dataptr()) T(v.storage_.value_);
+    }
+  }
+
+  explicit constexpr constexpr_optional_base(constexpr_optional_base<T>&& v) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : init_(v.init_), storage_(trivial_init) {
+    if (init_) {
+      ::new (dataptr()) T(std::move(v.storage_.value_));
+    }
+  }
 
   explicit constexpr constexpr_optional_base(const T& v)
       : init_(true), storage_(v) {}
@@ -239,23 +311,112 @@ struct constexpr_optional_base {
       : init_(true), storage_(il, std::forward<Args>(args)...) {}
 
   ~constexpr_optional_base() = default;
+
+  constexpr_optional_base& operator=(const constexpr_optional_base& rhs) {
+    if (init_ && !rhs.init_) {
+      clear();
+    } else if (!init_ && rhs.init_) {
+      init_ = true;
+      ::new (dataptr()) T(rhs.storage_.value_);
+    } else if (init_ && rhs.init_) {
+      storage_.value_ = rhs.storage_.value_;
+    }
+    return *this;
+  }
+
+  constexpr_optional_base& operator=(constexpr_optional_base&& rhs) noexcept(
+      std::is_nothrow_move_assignable<T>::value &&
+          std::is_nothrow_move_constructible<T>::value) {
+    if (init_ && !rhs.init_) {
+      clear();
+    } else if (!init_ && rhs.init_) {
+      init_ = true;
+      ::new (dataptr()) T(std::move(rhs.storage_.value_));
+    } else if (init_ && rhs.init_) {
+      storage_.value_ = std::move(rhs.storage_.value_);
+    }
+    return *this;
+  }
+
+ private:
+  typename std::remove_const<T>::type* dataptr() {
+    return std::addressof(storage_.value_);
+  }
+
+  constexpr const T* dataptr() const {
+    return detail_::static_addressof(storage_.value_);
+  }
+
+  void clear() noexcept {
+    init_ = false;
+  }
+};
+
+// HACK: Optimization for trivially copyable types. The mainline
+// implementation fails to have trivial copy/move operations in these
+// cases, and we care about them, so just implement that directly.
+template <class T>
+struct trivially_copyable_optimization_optional_base {
+  bool init_;
+  constexpr_storage_t<T> storage_;
+
+  constexpr trivially_copyable_optimization_optional_base() noexcept
+  : init_(false), storage_(trivial_init) {}
+
+  explicit constexpr trivially_copyable_optimization_optional_base(const T& v)
+      : init_(true), storage_(v) {}
+
+  explicit constexpr trivially_copyable_optimization_optional_base(T&& v)
+      : init_(true), storage_(constexpr_move(v)) {}
+
+  template <class... Args>
+  explicit constexpr trivially_copyable_optimization_optional_base(in_place_t, Args&&... args)
+      : init_(true), storage_(constexpr_forward<Args>(args)...) {}
+
+  template <
+      class U,
+      class... Args,
+      TR2_OPTIONAL_REQUIRES(std::is_constructible<T, std::initializer_list<U>>)>
+  constexpr explicit trivially_copyable_optimization_optional_base(
+      in_place_t,
+      std::initializer_list<U> il,
+      Args&&... args)
+      : init_(true), storage_(il, std::forward<Args>(args)...) {}
+
+  ~trivially_copyable_optimization_optional_base() = default;
 };
 
 template <class T>
 using OptionalBase = typename std::conditional<
-    std::is_trivially_destructible<T>::value, // if possible
-    constexpr_optional_base<typename std::remove_const<
-        T>::type>, // use base with trivial destructor
-    optional_base<typename std::remove_const<T>::type>>::type;
+    std::is_trivially_destructible<T>::value &&
+    C10_IS_TRIVIALLY_COPYABLE(T) &&
+    // Avoid using is_trivially_copy_{constructible,assignable}
+    // because old GCC versions don't support them. Also,
+    // is_trivially_copyable seems not to do what I expect, so check
+    // trivially_copyable_optimization_optional_base directly.
+    std::is_copy_constructible<trivially_copyable_optimization_optional_base<T>>::value &&
+    std::is_copy_assignable<trivially_copyable_optimization_optional_base<T>>::value,
+    trivially_copyable_optimization_optional_base<T>,
+    typename std::conditional<
+        std::is_trivially_destructible<T>::value, // if possible
+        constexpr_optional_base<typename std::remove_const<
+            T>::type>, // use base with trivial destructor
+        optional_base<typename std::remove_const<T>::type>>::type>::type;
 
 template <class T>
 class optional : private OptionalBase<T> {
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = typename std::conditional<
-      std::is_trivially_destructible<U>::value, // if possible
-      constexpr_optional_base<typename std::remove_const<
-          U>::type>, // use base with trivial destructor
-      optional_base<typename std::remove_const<U>::type>>::type;
+      std::is_trivially_destructible<U>::value &&
+      C10_IS_TRIVIALLY_COPYABLE(U) &&
+      std::is_copy_constructible<trivially_copyable_optimization_optional_base<U>>::value &&
+      std::is_copy_assignable<trivially_copyable_optimization_optional_base<U>>::value,
+      trivially_copyable_optimization_optional_base<U>,
+      typename std::conditional<
+          std::is_trivially_destructible<U>::value, // if possible
+          constexpr_optional_base<typename std::remove_const<
+              U>::type>, // use base with trivial destructor
+          optional_base<typename std::remove_const<U>::type>>::type>::type;
 
   static_assert(
       !std::is_same<typename std::decay<T>::type, nullopt_t>::value,
@@ -313,21 +474,9 @@ class optional : private OptionalBase<T> {
   constexpr optional() noexcept : OptionalBase<T>(){};
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
-  optional(const optional& rhs) : OptionalBase<T>() {
-    if (rhs.initialized()) {
-      ::new (static_cast<void*>(dataptr())) T(*rhs);
-      OptionalBase<T>::init_ = true;
-    }
-  }
+  optional(const optional& rhs) = default;
 
-  optional(optional&& rhs) noexcept(
-      std::is_nothrow_move_constructible<T>::value)
-      : OptionalBase<T>() {
-    if (rhs.initialized()) {
-      ::new (static_cast<void*>(dataptr())) T(std::move(*rhs));
-      OptionalBase<T>::init_ = true;
-    }
-  }
+  optional(optional&& rhs) = default;
 
   // see https://github.com/akrzemi1/Optional/issues/16
   // and https://en.cppreference.com/w/cpp/utility/optional/optional,
@@ -381,27 +530,9 @@ class optional : private OptionalBase<T> {
     return *this;
   }
 
-  optional& operator=(const optional& rhs) {
-    if (initialized() == true && rhs.initialized() == false)
-      clear();
-    else if (initialized() == false && rhs.initialized() == true)
-      initialize(*rhs);
-    else if (initialized() == true && rhs.initialized() == true)
-      contained_val() = *rhs;
-    return *this;
-  }
+  optional& operator=(const optional& rhs) = default;
 
-  optional& operator=(optional&& rhs) noexcept(
-      std::is_nothrow_move_assignable<T>::value&&
-          std::is_nothrow_move_constructible<T>::value) {
-    if (initialized() == true && rhs.initialized() == false)
-      clear();
-    else if (initialized() == false && rhs.initialized() == true)
-      initialize(std::move(*rhs));
-    else if (initialized() == true && rhs.initialized() == true)
-      contained_val() = std::move(*rhs);
-    return *this;
-  }
+  optional& operator=(optional&& rhs) = default;
 
   template<class U = T>
   auto operator=(U&& v) -> typename std::enable_if<
@@ -513,6 +644,22 @@ class optional : private OptionalBase<T> {
     clear();
   }
 };
+
+template <class T, class F>
+constexpr T value_or_else(const optional<T>& v, F&& func) {
+  static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
+    "func parameters must be a callable that returns a type convertible to the value stored in the optional");
+  return v.has_value() ? *v : detail_::convert<T>(std::forward<F>(func)());
+}
+
+template <class T, class F>
+constexpr T value_or_else(optional<T>&& v, F&& func) {
+  static_assert(std::is_convertible<typename guts::infer_function_traits_t<F>::return_type, T>::value,
+    "func parameters must be a callable that returns a type convertible to the value stored in the optional");
+  return v.has_value()
+    ? constexpr_move(std::move(v).contained_val())
+    : detail_::convert<T>(std::forward<F>(func)());
+}
 
 
 // XXX: please refrain from using optional<T&>, since it is being against with

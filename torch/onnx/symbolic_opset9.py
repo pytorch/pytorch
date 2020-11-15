@@ -209,6 +209,44 @@ def matmul(g, self, other):
 
 @parse_args('v', 'v', 'v', 't', 't')
 def addmm(g, self, mat1, mat2, beta, alpha):
+    dtype = None
+    self_dtype = self.type().scalarType()
+    mat1_dtype = mat1.type().scalarType()
+    mat2_dtype = mat2.type().scalarType()
+    if self_dtype is not None:
+        dtype = self_dtype
+    elif mat1_dtype is not None:
+        dtype = mat1_dtype
+    elif mat2_dtype is not None:
+        dtype = mat2_dtype
+
+    mat1_rank = mat1.type().dim()
+    mat2_rank = mat2.type().dim()
+
+    def isNotNoneAnd(v, u):
+        return v is not None and v != u
+
+    if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+
+        res1 = g.op("MatMul", mat1, mat2)
+        res2 = self
+
+        alpha = sym_help._scalar(alpha)
+        beta = sym_help._scalar(beta)
+
+        if alpha != 1:
+            alpha = g.op("Constant",
+                         value_t=torch.tensor(alpha, dtype=dtype))
+            res1 = g.op("Mul", res1, alpha)
+        if beta != 1:
+            beta = g.op("Constant",
+                        value_t=torch.tensor(sym_help._scalar(beta), dtype=dtype))
+            res2 = g.op("Mul", res2, beta)
+
+        return g.op("Add", res1, res2)
+
     return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
 
 
@@ -620,7 +658,8 @@ def floor(g, input):
 
 
 def _len(g, self):
-    return g.op("Size", self)
+    sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
+    return g.op('Squeeze', sz_0, axes_i=[0])
 
 
 @parse_args('v', 't', 't')
@@ -1057,7 +1096,7 @@ def __rshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     rshift = g.op('Div', self, two_pow)
     return rshift
 
@@ -1073,7 +1112,7 @@ def __lshift_(g, self, other):
     if not sym_help._is_fp(self):
         other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     two_pow = g.op('Pow', two, other)
-
+    two_pow = g.op('Cast', two_pow, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
     lshift = g.op('Mul', self, two_pow)
     return lshift
 
@@ -1085,7 +1124,7 @@ def where(g, condition, self=None, other=None, _outputs=None):
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
     if self is None:
         condition = torch.onnx.symbolic_opset9.nonzero(g, condition)
-        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
+        return sym_help._unbind_helper(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
     return g.op("Where", condition, self, other)
 
 
@@ -1110,7 +1149,8 @@ def log_softmax(g, input, dim, dtype=None):
         dim = input_dim - 1
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != 'prim::Constant':
-        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
+        parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+        return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
     if is_transpose_required:
         return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
@@ -1645,10 +1685,22 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
-def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
-    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
-    tensor = zeros(g, shape, dtype, layout, device)
-    return g.op("EyeLike", tensor)
+def eye(g, *args):
+    if len(args) == 5:
+        # aten::eye(n, dtype, layout, device, pin_memory)
+        n, dtype, layout, device, pin_memory = args
+        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        shape = g.op("Concat", dim_size, dim_size, axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    elif len(args) == 6:
+        # aten::eye(n, m, dtype, layout, device, pin_memory)
+        n, m, dtype, layout, device, pin_memory = args
+        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    else:
+        raise NotImplementedError("Unknown aten::eye signature")
 
 
 def slice(g, self, *args):
@@ -2052,11 +2104,11 @@ def randn(g, shapes, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
-    if sym_help._is_packed_list(shapes):
+    shape = sym_help._maybe_get_const(shapes, "is")
+    if sym_help._is_value(shape):
         shape_const = g.op("ConstantOfShape", shapes,
                            value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
         return g.op('RandomNormalLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
-    shape = sym_help._get_const(shapes, "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
@@ -2064,11 +2116,11 @@ def rand(g, shapes, dtype, *options):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
-    if sym_help._is_packed_list(shapes):
+    shape = sym_help._maybe_get_const(shapes, "is")
+    if sym_help._is_value(shape):
         shape_const = g.op("ConstantOfShape", shapes,
                            value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
         return g.op('RandomUniformLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
-    shape = sym_help._get_const(shapes, "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
@@ -2193,6 +2245,30 @@ def log2(g, self):
 def prim_shape(g, self):
     return g.op('Shape', self)
 
+def prim_data(g, self):
+    return self
+
+def is_floating_point(g, self):
+    if sym_help._is_fp(self):
+        return g.op("Constant", value_t=torch.BoolTensor([1]))
+    return g.op("Constant", value_t=torch.BoolTensor([0]))
+
+
+def prim_dtype(g, self):
+    dtype = sym_help._try_get_scalar_type(self)
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return g.op("Constant", value_t=torch.IntTensor([dtype]))
+
+
+# tolist is currently supported only for 1D input tensors.
+# dim_val and elem_ty_val represent dimension and type annotations
+# that need to match dimension and type of the input tensor.
+def prim_tolist(g, input, dim_val, elem_ty_val):
+    dim = sym_help._maybe_get_const(dim_val, 'i')
+    if dim > 1:
+        return _unimplemented("prim_tolist", "dim_val > 1")
+    return input
+
 
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):
@@ -2217,20 +2293,19 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args('v', 'is', 'b', 'i')
 def _var_mean(g, input, dim, unbiased, keepdim):
-    sqrd = g.op("Mul", input, input)
     if dim is None:
-        sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
         mean = g.op("ReduceMean", input, keepdims_i=0)
         num_elements = numel(g, input)
     else:
-        sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
         redudced_dims = g.op("Shape", input)
         # dim could contain one or multiple dimensions
         redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
         num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
-    meansqrd = g.op("Mul", mean, mean)
-    var = g.op("Sub", sqrdmean, meansqrd)
+    sub_v = g.op("Sub", input, mean)
+    sqr_sub = g.op("Mul", sub_v, sub_v)
+    keepdim_mean = 0 if dim is None else keepdim
+    var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
     # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
     if unbiased:
         num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
@@ -2507,6 +2582,11 @@ def meshgrid(g, tensor_list):
 
 
 def remainder(g, input, other):
+    # torch.remainder does not follow regular type promotion logic.
+    # Instead, it is implicitly casting `other` to the same type of `input`.
+    input_scalar_type = input.type().scalarType()
+    if input_scalar_type:
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input_scalar_type])
     div = g.op("Div", input, other)
     if sym_help._is_fp(input):
         div = g.op("Floor", div)

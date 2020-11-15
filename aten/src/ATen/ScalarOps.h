@@ -4,6 +4,20 @@
 #include <ATen/Tensor.h>
 #include <ATen/Functions.h>
 
+namespace at {
+namespace detail {
+// When filling a number to 1-element CPU tensor, we want to skip
+// everything but manipulate data ptr directly.
+// Ideally this fast pass should be implemented in TensorIterator,
+// but we also want to skip compute_types which in not avoidable
+// in TensorIterator for now.
+Tensor& scalar_fill(Tensor& self, Scalar value);
+TORCH_API Tensor scalar_tensor_static(Scalar s, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
+                                      c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt,
+                                      c10::optional<c10::MemoryFormat> memory_format_opt);
+} // namespace detail
+} // namespace at
+
 // This is in the c10 namespace because we use ADL to find the functions in it.
 namespace c10 {
 
@@ -11,16 +25,14 @@ namespace c10 {
 // to implement this without going through Derived Types (which are not part of core).
 inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
-  if (device == at::kCPU) {
+  if (device == at::kCPU && !s.isComplex()) {
     if (s.isFloatingPoint()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kDouble));
+      return at::detail::scalar_tensor_static(s, at::kDouble, c10::nullopt, at::kCPU, c10::nullopt, c10::nullopt);
     } else if (s.isBoolean()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kBool));
-    } else if (s.isComplex()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kComplexDouble));
+      return at::detail::scalar_tensor_static(s, at::kBool, c10::nullopt, at::kCPU, c10::nullopt, c10::nullopt);
     } else {
       AT_ASSERT(s.isIntegral(false));
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kLong));
+      return at::detail::scalar_tensor_static(s, at::kLong, c10::nullopt, at::kCPU, c10::nullopt, c10::nullopt);
     }
   }
   if (s.isFloatingPoint()) {

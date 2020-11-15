@@ -42,6 +42,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  # enable build option in CMake
+  export USE_CPP_CODE_COVERAGE=ON
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
@@ -146,8 +151,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$IN_CI" ]]; then
-      # Set ROCM_ARCH to gtx900 and gtx906 in CircleCI
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
 
@@ -160,7 +165,7 @@ fi
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
 if [ -z "$MAX_JOBS" ]; then
-  if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
+  if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]; } && which sccache > /dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 fi

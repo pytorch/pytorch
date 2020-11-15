@@ -50,16 +50,16 @@ TESTS = [
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
     'test_native_functions',
-    'test_nn',
     'test_numba_integration',
+    'test_nn',
     'test_ops',
     'test_optim',
     'test_pytree',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
     'test_vulkan',
-    'test_quantization',
     'test_sparse',
+    'test_quantization',
     'test_spectral_ops',
     'test_serialization',
     'test_show_pickle',
@@ -313,6 +313,11 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     if extra_unittest_args:
         assert isinstance(extra_unittest_args, list)
         unittest_args.extend(extra_unittest_args)
+
+    # If using pytest, replace -f with equivalent -x
+    if options.pytest:
+        unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
+
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args
@@ -422,11 +427,14 @@ def test_distributed(test_module, test_directory, options):
                 if backend == 'mpi':
                     # test mpiexec for --noprefix option
                     with open(os.devnull, 'w') as devnull:
+                        allowrunasroot_opt = '--allow-run-as-root' if subprocess.call(
+                            'mpiexec --allow-run-as-root -n 1 bash -c ""', shell=True,
+                            stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
                         noprefix_opt = '--noprefix' if subprocess.call(
-                            'mpiexec -n 1 --noprefix bash -c ""', shell=True,
+                            f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""', shell=True,
                             stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt]
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt, allowrunasroot_opt]
 
                     return_code = run_test(test_module, test_directory, options,
                                            launcher_cmd=mpiexec)

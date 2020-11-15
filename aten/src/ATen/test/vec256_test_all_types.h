@@ -1211,22 +1211,7 @@ std::enable_if_t<!is_complex<T>::value, T> local_sqrt(T x) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_sqrt(Complex<T> x) {
-#if defined(TEST_AGAINST_DEFAULT)
     return std::sqrt(x);
-#else 
-    PreventFma noFma;
-    // sqrt(2) / 2 * [sqrt(abs() + a) + sgn(b) * sqrt(abs() - a)i]
-    T real = x.real();
-    T imag = x.imag();
-    T abs = local_abs(x).real();
-    T sqrt2_2 = std::sqrt(static_cast<T>(2)) / static_cast<T>(2);
-    T abs_r = noFma.add(abs, real);
-    T abs_i = noFma.sub(abs, real);
-    T res_r = sqrt2_2 * std::sqrt(abs_r);
-    T res_i = sqrt2_2 * std::sqrt(abs_i);
-    if (std::signbit(imag)) res_i = -res_i;
-    return Complex<T>(res_r, res_i);
-#endif
 }
 
 template <typename T>
@@ -1236,26 +1221,7 @@ std::enable_if_t<!is_complex<T>::value, T> local_asin(T x) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_asin(Complex<T> x) {
-#if defined(TEST_AGAINST_DEFAULT)
     return std::asin(x);
-#else
-    // asin(x)
-    // = -i*ln(iz + sqrt(1 -z^2))
-    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
-    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
-    PreventFma noFma;
-    T a = x.real();
-    T b = x.imag();
-    T aa = a * a;
-    T bb = b * b;
-    T _ab = a * (-b);
-    T _2ab = noFma.add(_ab, _ab);
-    T aa_bb = static_cast<T>(1) - noFma.sub(aa, bb); // 1 - (a*a-b*b)
-    Complex<T> temp = Complex<T>(-b, a) + local_sqrt(Complex<T>(aa_bb, _2ab));
-    auto ln = std::log(temp);
-    //-i*ln() => -i * ln => (ln.imag, -ln.real)
-    return Complex<T>(ln.imag(), -ln.real());
-#endif
 }
 
 template <typename T>
@@ -1265,13 +1231,7 @@ std::enable_if_t<!is_complex<T>::value, T> local_acos(T x) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_acos(Complex<T> x) {
-#if defined(TEST_AGAINST_DEFAULT)
     return std::acos(x);
-#else
-    // pi/2 - asin(x) 
-    auto half_pi = static_cast<T>(M_PI) / static_cast<T>(2);
-    return Complex<T>(half_pi, 0) - local_asin(x);
-#endif
 }
 
 template<typename T>

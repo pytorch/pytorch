@@ -233,14 +233,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::eq.device(Device a, Device b) -> bool",
-         [](Stack* stack) {
-           auto a = pop(stack).toDevice();
-           auto b = pop(stack).toDevice();
-           push(stack, a == b);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::requires_grad(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -568,6 +560,18 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
+     // This operator is generated inside the compiler for indexing into
+     // ModuleDict without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           push(stack, module_dict.toModule().attr(ind.toStringRef()));
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::dict() -> Dict(str, Tensor)",
          [](Stack* stack) {

@@ -44,7 +44,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments or torch.Tensor): the inputs to
             the model, e.g., such that ``model(*args)`` is a valid
-            invocation of the model.  Any non-Tensor arguments will
+            invocation of the model.  Any non-Tensor arguments (including None) will
             be hard-coded into the exported model; any Tensor arguments
             will become inputs of the exported model, in the order they
             occur in args.  If args is a Tensor, this is equivalent
@@ -175,7 +175,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                                              2:'height'},
                                   'input_2':{0:'batch'},
                                   'output':{0:'batch',
-                                            1:'detections'}``
+                                            1:'detections'}}``
                 where provided names will be applied to exported dynamic axes
 
             3. MIXED MODE OF (1) and (2)::

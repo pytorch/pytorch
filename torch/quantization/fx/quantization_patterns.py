@@ -4,6 +4,10 @@ from torch.fx.graph import (
 )
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.quantization import (
+    default_affine_fixed_qparams_fake_quant,
+    default_symmetric_fixed_qparams_fake_quant,
+)
 
 from ..quantization_mappings import (
     get_static_quant_module_class,
@@ -16,10 +20,12 @@ from .utils import (
     _parent_name,
     quantize_node,
     get_per_tensor_qparams,
+    get_swapped_custom_module_class,
     activation_is_statically_quantized,
     weight_is_quantized,
     weight_dtype,
     get_linear_prepack_op_for_dtype,
+    get_qconfig_dtypes,
 )
 
 from abc import ABC, abstractmethod
@@ -42,7 +48,8 @@ class QuantizeHandler(ABC):
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
-        self.all_nodes = True
+        self.num_node_args = len(node.args)
+        self.all_node_args = True
 
     @abstractmethod
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
@@ -67,18 +74,24 @@ class Add(QuantizeHandler):
             node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.add, torch.add]
         self.add_node = node
-        self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
+        self.num_node_args = len([a for a in self.add_node.args[:2] if isinstance(a, Node)])
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if self.num_node_args == 1:
             # add scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
+
+            if isinstance(self.add_node.args[0], Node):
+                quantized_index = 0
+            else:
+                quantized_index = 1
+
             return quantizer.quantized_graph.create_node(
                 'call_function', op,
-                load_arg(quantized=[0])(self.add_node.args), self.add_node.kwargs)
+                load_arg(quantized=[quantized_index])(self.add_node.args), self.add_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
@@ -92,6 +105,7 @@ class Add(QuantizeHandler):
             return quantizer.quantized_graph.create_node(
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
+# TODO: merge with Add
 @register_quant_pattern(operator.mul)
 @register_quant_pattern(torch.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
@@ -108,17 +122,23 @@ class Mul(QuantizeHandler):
             node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
-        self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
+        self.num_node_args = len([a for a in self.mul_node.args[:2] if isinstance(a, Node)])
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if self.num_node_args == 1:
             # mul scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
+
+            if isinstance(self.mul_node.args[0], Node):
+                quantized_index = 0
+            else:
+                quantized_index = 1
+
             return quantizer.quantized_graph.create_node(
-                'call_function', op, load_arg(quantized=[0])(self.mul_node.args), self.mul_node.kwargs)
+                'call_function', op, load_arg(quantized=[quantized_index])(self.mul_node.args), self.mul_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
@@ -134,7 +154,7 @@ class Mul(QuantizeHandler):
 @register_quant_pattern(torch.cat)
 class Cat(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if not self.all_node_args:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
@@ -154,7 +174,9 @@ class Cat(QuantizeHandler):
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU3d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvBn1d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBn2d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU2d)
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv2d))
@@ -176,6 +198,12 @@ class ConvRelu(QuantizeHandler):
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # TODO: debug option for conv module
+        qconfig = quantizer.qconfig_map[node.name]
+        activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        # only static qunatization (for both ptq and qat) is supported for conv
+        if not activation_statically_quantized:
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
@@ -258,7 +286,21 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             self.linear = quantizer.modules[self.linear_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+        #  dynamic      float32 (quint8)            qint8
+        #  weight_only  float32                    float16
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+            (torch.float32, torch.qint8, torch.quint8),
+            (torch.float16, torch.float16, None),
+        ]
         qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
+            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':
@@ -398,11 +440,22 @@ class Embedding(QuantizeHandler):
         super().__init__(quantizer, node)
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        # Supported combinations are:
+        # quant_type  | activation (compute_type) | weight
+        # weight_only |  float32 (torch.uint8)    | quint8
+        # weight_only |  float32 (torch.uint8)    | quint4x2
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.float32, torch.quint8, torch.quint8),
+            (torch.float32, torch.quint4x2, torch.quint8),
+        ]
         assert node.op == 'call_module'
         emb_node = node
         emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
-        assert not activation_is_statically_quantized(qconfig)
+        dtypes = get_qconfig_dtypes(qconfig)
+        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
+            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
@@ -434,7 +487,7 @@ class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if not self.all_node_args:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
@@ -487,6 +540,22 @@ class ELU(QuantizeHandler):
         return quantizer.quantized_graph.create_node(
             'call_function', quantized_op, args, kwargs)
 
+@register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern('sigmoid', default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_fake_quant)
+@register_quant_pattern('tanh', default_symmetric_fixed_qparams_fake_quant)
+@register_quant_pattern('tanh_', default_symmetric_fixed_qparams_fake_quant)
+class FixedQParamsOpQuantizeHandler(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
@@ -495,20 +564,16 @@ class ELU(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool2d)
 @register_quant_pattern(torch.nn.AvgPool3d)
 @register_quant_pattern(torch.nn.Dropout)
-@register_quant_pattern(torch.nn.Hardsigmoid)
 @register_quant_pattern(torch.nn.Hardtanh)
 @register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
 @register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
-@register_quant_pattern(torch.nn.Sigmoid)
-@register_quant_pattern(torch.nn.Tanh)
 @register_quant_pattern(torch.adaptive_avg_pool1d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool3d)
 @register_quant_pattern(torch.nn.functional.dropout)
-@register_quant_pattern(torch.nn.functional.hardsigmoid)
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
@@ -528,11 +593,9 @@ class ELU(QuantizeHandler):
 @register_quant_pattern(torch.mean)
 @register_quant_pattern(torch.min)
 @register_quant_pattern(torch.repeat_interleave)
-@register_quant_pattern(torch.sigmoid)
 @register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
-@register_quant_pattern(torch.tanh)
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern(operator.getitem)
 @register_quant_pattern(operator.floordiv)
@@ -541,8 +604,6 @@ class ELU(QuantizeHandler):
 @register_quant_pattern('contiguous')
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
-@register_quant_pattern('hardsigmoid')
-@register_quant_pattern('hardsigmoid_')
 @register_quant_pattern('mean')
 @register_quant_pattern('numel')
 @register_quant_pattern('permute')
@@ -553,13 +614,9 @@ class ELU(QuantizeHandler):
 @register_quant_pattern('reshape')
 @register_quant_pattern('resize_')
 @register_quant_pattern('shape')
-@register_quant_pattern('sigmoid')
-@register_quant_pattern('sigmoid_')
 @register_quant_pattern('size')
 @register_quant_pattern('squeeze')
 @register_quant_pattern('squeeze_')
-@register_quant_pattern('tanh')
-@register_quant_pattern('tanh_')
 @register_quant_pattern('transpose')
 @register_quant_pattern('unsqueeze')
 @register_quant_pattern('unsqueeze_')
@@ -570,9 +627,9 @@ class CopyNode(QuantizeHandler):
 
 # Default quantization handler, used for quantization of input and output
 # of quantizable objects (e.g. modules and functionals)
-class DefaultQuant(QuantizeHandler):
+class DefaultQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node):
-        assert self.all_nodes
+        assert self.all_node_args
         root_module = quantizer.modules['']
         return quantize_node(
             root_module,
@@ -587,13 +644,14 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         assert convert_custom_config_dict is not None
         custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
         assert custom_module_class_mapping is not None
+        qconfig = quantizer.qconfig_map[node.name]
         observed_custom_module = quantizer.modules[node.target]
-        if node.name in quantizer.activation_post_process_map:
+        if activation_is_statically_quantized(qconfig):
+            assert node.name in quantizer.activation_post_process_map
             observed_custom_module.activation_post_process = \
                 quantizer.activation_post_process_map[node.name]
-        quantized_custom_module_class = custom_module_class_mapping.get(type(observed_custom_module), None)
-        assert quantized_custom_module_class is not None, "did not found quantized custom module for:" + \
-            str(type(observed_custom_module))
+        quantized_custom_module_class = get_swapped_custom_module_class(
+            observed_custom_module, custom_module_class_mapping, qconfig)
         quantized_custom_module = \
             quantized_custom_module_class.from_observed(observed_custom_module)
         parent_name, name = _parent_name(node.target)
