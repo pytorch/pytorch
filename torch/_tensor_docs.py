@@ -4112,6 +4112,11 @@ The returned tensor shares the same data and must have the same number
 of elements, but may have a different dtype. For a tensor to be viewed, the new
 dtype must have the same number of bytes with its original dtype.
 
+.. warning::
+
+    This operator is not supported by TorchScript yet.
+
+
 Args:
     dtype (:class:`torch.dtype`): the desired dtype
 
