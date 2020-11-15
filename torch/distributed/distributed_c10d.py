@@ -1411,7 +1411,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_sizes_tensor = torch.zeros(group_size, dtype=int, device=current_device)  # type:ignore[call-overload]
+    object_sizes_tensor = torch.zeros(group_size, dtype=torch.long, device=current_device)
     object_size_list = [
         object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
@@ -1485,7 +1485,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_sizes_tensor = torch.zeros(group_size, dtype=torch.int, device=current_device)
+    object_sizes_tensor = torch.zeros(group_size, dtype=torch.long, device=current_device)
     object_size_list = [
         object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
