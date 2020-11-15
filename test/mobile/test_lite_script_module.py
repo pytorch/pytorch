@@ -112,10 +112,16 @@ class TestLiteScriptModule(unittest.TestCase):
                 self.B0 = B()
 
             def forward(self, x):
-                return self.A0(self.B0(x)) + 1
+                z = self.B0(x)
+                return self.A0(z)
+                # return self.A0(self.B0(x)) + 1
 
         input = torch.tensor([5])
         scripted_module = torch.jit.script(C(), input)
+        print("start")
+        print(scripted_module._c.dump_to_str())
+        print("end")
+
         optimized_scripted_module = optimize_for_mobile(scripted_module)
 
         exported_module = scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)

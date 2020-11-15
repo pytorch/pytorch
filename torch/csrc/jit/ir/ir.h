@@ -1406,7 +1406,8 @@ TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs,
-    std::unordered_map<Value*, Value*>& value_map);
+    std::unordered_map<Value*, Value*>& value_map,
+    std::unordered_map<Node*, Node*>& node_map);
 
 /** Insert function \p CALLEE after node \p TO_REPLACE, remove the node and
  * replace all its uses with corresponding outputs of the inserted function.

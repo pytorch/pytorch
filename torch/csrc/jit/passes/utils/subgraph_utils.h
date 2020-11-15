@@ -63,7 +63,8 @@ TORCH_API void mergeNodeIntoSubgraphAndUpdateAliasing(
 TORCH_API void unmergeSubgraph(Node* subgraphNode);
 TORCH_API void unmergeSubgraph(
     Node* subgraphNode,
-    std::unordered_map<Value*, Value*>& vmap);
+    std::unordered_map<Value*, Value*>& vmap,
+    std::unordered_map<Node*, Node*>& nmap);
 
 // Convenience function
 std::shared_ptr<Graph> getSubgraph(Node* n);

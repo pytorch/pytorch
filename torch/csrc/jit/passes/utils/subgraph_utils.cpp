@@ -107,7 +107,8 @@ void mergeSubgraph(
   // created in the main graph (we will call them "unmerged" values) as we
   // unmerged the mergeTo's subgraph.
   std::unordered_map<Value*, Value*> unmerge_vmap;
-  unmergeSubgraph(mergeFrom, unmerge_vmap);
+  std::unordered_map<Node*, Node*> unmerge_nmap;
+  unmergeSubgraph(mergeFrom, unmerge_vmap, unmerge_nmap);
 
   std::vector<Node*> nodes;
   const auto end_it = nodeBeforeMergeFrom->reverseIterator();
@@ -165,12 +166,13 @@ std::shared_ptr<Graph> getSubgraph(Node* n) {
 
 void unmergeSubgraph(
     Node* subgraphNode,
-    std::unordered_map<Value*, Value*>& vmap) {
+    std::unordered_map<Value*, Value*>& vmap,
+    std::unordered_map<Node*, Node*>& nmap) {
   // Inline the graph, replace uses of node outputs and destroy the node
   auto outerGraph = subgraphNode->owningGraph();
   WithInsertPoint guard(subgraphNode);
   const auto subgraphOutputs = insertGraph(
-      *outerGraph, *getSubgraph(subgraphNode), subgraphNode->inputs(), vmap);
+      *outerGraph, *getSubgraph(subgraphNode), subgraphNode->inputs(), vmap, nmap);
   AT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
     subgraphNode->outputs()[i]->replaceAllUsesWith(subgraphOutputs[i]);
@@ -180,7 +182,8 @@ void unmergeSubgraph(
 
 void unmergeSubgraph(Node* subgraphNode) {
   std::unordered_map<Value*, Value*> vmap;
-  unmergeSubgraph(subgraphNode, vmap);
+  std::unordered_map<Node*, Node*> nmap;
+  unmergeSubgraph(subgraphNode, vmap, nmap);
 }
 
 void collectNestedUses(

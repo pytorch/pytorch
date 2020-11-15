@@ -14,6 +14,7 @@ void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
+    cur->dump();
     switch (cur->kind()) {
       case prim::CallFunction: {
         AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
@@ -50,8 +51,10 @@ void inlineCalls(Block* block) {
 
 void Inline(Graph& graph) {
   GRAPH_DUMP("Before Inlining: ", &graph);
+  std::cout << "before inline: " << graph.toString() << std::endl;
   inlineCalls(graph.block());
   GRAPH_DUMP("After Inlining: ", &graph);
+  std::cout << "after inline: " << graph.toString() << std::endl;
 }
 
 } // namespace jit
