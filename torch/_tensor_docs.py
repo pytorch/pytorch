@@ -4114,7 +4114,9 @@ dtype must have the same number of bytes with its original dtype.
 
 .. warning::
 
-    This operator is not supported by TorchScript yet.
+    This operator is not supported by TorchScript yet. Confusing error message
+    like `RuntimeError: shape '[3]' is invalid for input of size 125` or silent
+    wrong result might be produced if you try to use this operator in TorchScript
 
 
 Args:
