@@ -19,6 +19,7 @@ from .optimizer import Optimizer
 from .lbfgs import LBFGS
 from . import lr_scheduler
 from . import swa_utils
+from . import Adabound
 
 del adadelta
 del adagrad
@@ -32,3 +33,4 @@ del rprop
 del rmsprop
 del optimizer
 del lbfgs
+del Adabound
