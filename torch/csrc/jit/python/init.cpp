@@ -345,7 +345,7 @@ void initJITBindings(PyObject* module) {
           py::arg("prefix") = "top")
       .def(
           "_jit_pass_remove_inplace_ops",
-          [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
+          [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
       .def(
           "_jit_pass_create_functional_graphs",
@@ -375,7 +375,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_lint", LintGraph)
       .def(
           "_jit_pass_complete_shape_analysis",
-          [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
+          [](const std::shared_ptr<Graph>& graph,
+             const py::tuple& inputs,
+             bool with_grad) {
             ArgumentSpecCreator arg_spec_creator(*graph);
             Stack stack;
             stack.reserve(inputs.size()); // captures?
@@ -397,7 +399,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_interpret_graph",
-          [](std::shared_ptr<Graph>& graph, py::tuple inputs) {
+          [](std::shared_ptr<Graph>& graph, const py::tuple& inputs) {
             Stack stack;
             stack.reserve(inputs.size()); // captures?
             for (auto& obj : inputs) {
@@ -437,7 +439,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
           "_jit_pass_create_autodiff_subgraphs",
-          [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
+          [](const std::shared_ptr<Graph>& graph) {
+            CreateAutodiffSubgraphs(graph);
+          })
 #if defined(BUILDING_TESTS) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
@@ -465,7 +469,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_unflatten",
-          [](autograd::variable_list vars, python::IODescriptor& desc) {
+          [](const autograd::variable_list& vars, python::IODescriptor& desc) {
             return py::reinterpret_steal<py::object>(
                 python::unflatten(vars, desc));
           })
@@ -490,8 +494,8 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_check_alias_annotation",
-          [](std::shared_ptr<Graph> g,
-             py::tuple args,
+          [](const std::shared_ptr<Graph>& g,
+             const py::tuple& args,
              const std::string& unqualified_op_name) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
@@ -549,7 +553,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_try_infer_type",
           [](py::object obj) -> TypePtr {
-            auto match = tryToInferType(obj);
+            auto match = tryToInferType(std::move(obj));
             if (match.success()) {
               return match.type();
             }
@@ -643,7 +647,7 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
       .def(
           "_jit_fuser_get_fused_kernel_code",
-          [](Graph& g, std::vector<at::Tensor> inps) {
+          [](Graph& g, const std::vector<at::Tensor>& inps) {
             return debugGetFusedKernelCode(g, inps);
           })
       .def(
@@ -941,7 +945,7 @@ void initJITBindings(PyObject* module) {
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
-        auto adapter = std::make_unique<BufferAdapter>(std::move(buffer));
+        auto adapter = std::make_unique<BufferAdapter>(buffer);
         return std::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def(
@@ -1131,7 +1135,7 @@ void initJITBindings(PyObject* module) {
   m.def("_jit_get_custom_class_schemas", customClassSchemasForBCCheck);
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
-    auto operations = getAllOperatorsFor(symbol);
+    const auto& operations = getAllOperatorsFor(symbol);
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });
@@ -1277,8 +1281,8 @@ void initJITBindings(PyObject* module) {
             });
       });
 
-  m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
-    toIValue(obj, type);
+  m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
+    toIValue(std::move(obj), type);
   });
 
   initPythonCustomClassBindings(module);
