@@ -5178,7 +5178,6 @@
   variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
