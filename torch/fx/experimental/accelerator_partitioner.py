@@ -251,7 +251,6 @@ class Partitioner:
         self.devices = partitioner_config.devices
         if len(self.devices) == 0:
             raise RuntimeError('No devices')
-        available_mem_bytes = self.devices[0].available_mem_bytes
         # Check if there are op nodes in the graph
         nodes = self.graph_module.graph.nodes
         if all(node.op in {'placeholder', 'get_attr', 'output'} for node in nodes):
@@ -269,6 +268,7 @@ class Partitioner:
             raise RuntimeError('Devices have no enough memory for the module')
         else:
             if partitioner_config.is_sparse_nn:
+                available_mem_bytes = self.devices[0].available_mem_bytes
                 if not all(device.available_mem_bytes == available_mem_bytes for device in self.devices):
                     raise RuntimeError('All devices must have same memory size!')
                 # sparse_nn_partition only support same memory size
@@ -280,7 +280,7 @@ class Partitioner:
                     partitioner_config.node_to_latency_mapping
                 )
             else:
-                self.size_based_partition(available_mem_bytes)
+                self.size_based_partition()
         module_with_submodules = self.do_partition()
         # The DAG contains DAGNodes with info of each partition's input nodes, output nodes
         # and how partitions are connected.
@@ -301,7 +301,7 @@ class Partitioner:
         self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return
 
-    def size_based_partition(self, available_mem_bytes: int) -> None:
+    def size_based_partition(self) -> None:
         """This method is to partition the graph based on memory size.
            It uses greedy approach. The result may not be the best.
            The basic idea is:
