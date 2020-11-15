@@ -424,7 +424,7 @@ vTensor::View::View(
 
 class vTensor::View::CMD final {
  public:
-  CMD(const View&);
+  explicit CMD(const View&);
   CMD(const View&, api::Command::Buffer&);
   CMD(const CMD&) = delete;
   CMD& operator=(const CMD&) = delete;
