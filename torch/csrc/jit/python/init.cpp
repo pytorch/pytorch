@@ -283,12 +283,15 @@ void initJITBindings(PyObject* module) {
           "_freeze_module",
           [](Module& module,
              std::vector<std::string>& preservedAttrs,
-             bool freezeInterfaces) {
-            return freeze_module(module, preservedAttrs, freezeInterfaces);
+             bool freezeInterfaces,
+             bool preserveParameters) {
+            return freeze_module(
+                module, preservedAttrs, freezeInterfaces, preserveParameters);
           },
           py::arg("module"),
           py::arg("preservedAttrs") = std::vector<std::string>(),
-          py::arg("freezeInterfaces") = true)
+          py::arg("freezeInterfaces") = true,
+          py::arg("preserveParameters") = false)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -616,6 +619,27 @@ void initJITBindings(PyObject* module) {
           []() -> bool {
             using namespace torch::jit::tensorexpr;
             return getTEGenerateBlockCode();
+          })
+      .def(
+          "_jit_get_te_must_use_llvm_cpu",
+          []() -> bool {
+            using namespace torch::jit::tensorexpr;
+            return getTEMustUseLLVMOnCPU();
+          })
+      .def(
+          "_jit_set_te_must_use_llvm_cpu",
+          [](bool use_llvm) {
+            using namespace torch::jit::tensorexpr;
+            getTEMustUseLLVMOnCPU() = use_llvm;
+          })
+      .def(
+          "_llvm_enabled",
+          []() {
+#ifdef TORCH_ENABLE_LLVM
+            return true;
+#else
+        return false;
+#endif
           })
       .def(
           "_jit_pass_fuse_tensorexprs",
