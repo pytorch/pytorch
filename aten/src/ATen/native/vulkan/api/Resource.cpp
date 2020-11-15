@@ -89,6 +89,9 @@ void release_image(const Resource::Image& image) {
 void* map(
     const Resource::Memory& memory,
     const Resource::Memory::Access::Flags access) {
+  void* data = nullptr;
+  VK_CHECK(vmaMapMemory(memory.allocator, memory.allocation, &data));
+
   if (access & Resource::Memory::Access::Read) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
@@ -96,9 +99,6 @@ void* map(
     VK_CHECK(vmaInvalidateAllocation(
         memory.allocator, memory.allocation, 0u, VK_WHOLE_SIZE));
   }
-
-  void* data = nullptr;
-  VK_CHECK(vmaMapMemory(memory.allocator, memory.allocation, &data));
 
   return data;
 }
@@ -124,14 +124,14 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
     return;
   }
 
-  vmaUnmapMemory(allocator_, allocation_);
-
   if (access_ & Access::Write) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
     // we want.
     VK_CHECK(vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE));
   }
+
+  vmaUnmapMemory(allocator_, allocation_);
 }
 
 Resource::Image::Sampler::Factory::Factory(const GPU& gpu)

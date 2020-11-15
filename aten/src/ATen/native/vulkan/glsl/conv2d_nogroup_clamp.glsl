@@ -23,7 +23,7 @@ uConstBlock;
 
 #define UP_DIV(x, y) (((x) + (y)-1) / (y))
 
-layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
   ivec3 gpos = ivec3(gl_GlobalInvocationID);
