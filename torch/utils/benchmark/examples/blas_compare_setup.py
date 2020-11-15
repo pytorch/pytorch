@@ -109,7 +109,7 @@ def main():
             "python=3",
         )
 
-        print(f"Testing that env can be activated:")
+        print("Testing that env can be activated:")
         base_source = subprocess.run(
             f"source activate {env_path}",
             shell=True,
