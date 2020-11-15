@@ -127,7 +127,7 @@ To do it properly:
 
 \code
 #define VMA_IMPLEMENTATION
-#include "vk_mem_alloc.h"
+#include vk_mem_alloc.h
 \endcode
 
 It may be a good idea to create dedicated CPP file just for this purpose.

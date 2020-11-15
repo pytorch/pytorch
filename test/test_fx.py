@@ -9,7 +9,6 @@ import functools
 import contextlib
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
-from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
@@ -655,24 +654,6 @@ class TestFX(JitTestCase):
         gm.graph.lint(gm)
         out = gm(input)
         self.assertEqual(out, ref_out)
-
-    def test_replace_target_nodes_with(self):
-        class testModule(torch.nn.Module):
-            def forward(self, a, b):
-                return a + b
-        m = testModule()
-        traced = symbolic_trace(m)
-        input1 = torch.randn(1)
-        input2 = torch.randn(1)
-        assert (input1 + input2) == traced(input1, input2)
-        GraphManipulation.replace_target_nodes_with(
-            fx_module=traced,
-            old_op="call_function",
-            old_target=operator.add,
-            new_op="call_function",
-            new_target=operator.mul,
-        )
-        assert (input1 * input2) == traced(input1, input2)
 
     def test_pretty_print(self):
         st = SimpleTest()
