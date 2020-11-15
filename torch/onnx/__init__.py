@@ -175,7 +175,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                                              2:'height'},
                                   'input_2':{0:'batch'},
                                   'output':{0:'batch',
-                                            1:'detections'}``
+                                            1:'detections'}}``
                 where provided names will be applied to exported dynamic axes
 
             3. MIXED MODE OF (1) and (2)::
