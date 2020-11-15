@@ -5185,7 +5185,7 @@
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
 
-# Warning: If you want to change the name and overload name of this
+# Warning: If you want to change the name or overload name of this
 # operator, you might also want to change the `isBlockListedSchema`
 # function in `torch/csrc/jit/frontend/schema_catching.cpp`.
 # The name and overload name of this operator is hardcoded in that
