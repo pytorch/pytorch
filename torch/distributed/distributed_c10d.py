@@ -1405,13 +1405,13 @@ def all_gather_object(object_list, obj, group=group.WORLD):
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
         # true.
-        current_device = torch.device('cuda', torch.cuda.current_device())
+        current_device = torch.cuda.current_device()  # type: ignore[assignment]
         input_tensor = input_tensor.to(current_device)
         local_size = local_size.to(current_device)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_sizes_tensor = torch.zeros(group_size, dtype=torch.int, device=current_device)
+    object_sizes_tensor = torch.zeros(group_size, dtype=torch.int, device=current_device)  # type: ignore[call-overload]
     object_size_list = [
         object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
@@ -1422,7 +1422,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
         max_object_size * group_size, dtype=torch.uint8, device=current_device
-    )
+    )  # type: ignore[call-overload]
     # Output tensors are nonoverlapping views of coalesced_output_tensor
     output_tensors = [
         coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
