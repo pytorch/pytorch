@@ -26,13 +26,12 @@ fi
 git remote add upstream https://github.com/pytorch/pytorch.git
 git fetch upstream
 IFS=$'\n'
-master_commit_ids=($(git rev-list upstream/master))
-for commit_id in "${master_commit_ids[@]}"; do
+while IFS='' read -r commit_id; do
     if aws s3 ls s3://ossci-perf-test/pytorch/gpu_runtime/${commit_id}.json; then
         LATEST_TESTED_COMMIT=${commit_id}
         break
     fi
-done
+done < <(git rev-list upstream/master)
 aws s3 cp s3://ossci-perf-test/pytorch/gpu_runtime/${LATEST_TESTED_COMMIT}.json gpu_runtime.json
 
 if [[ "$COMMIT_SOURCE" == master ]]; then

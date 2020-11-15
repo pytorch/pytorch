@@ -575,11 +575,15 @@ void testMemDependencyCheckerLoopReduce() {
   // The loop contents depend on the initializer too.
   ASSERT_TRUE(analyzer.dependsDirectly(loop, aInit));
 
+  // Find loads within the reduction:
+  auto reduceLoads = NodeFinder<Load>::find(reduce.node());
   // Pull out the access for the load inside the loop.
-  auto loopLoad = analyzer.accessFor(reduce.node());
-  // It should have 10 element long bounds.
-  ASSERT_TRUE(indexBoundsEquals(
-      loopLoad->bounds(), {Bound(new IntImm(0), new IntImm(9))}));
+  for (auto* load : reduceLoads) {
+    auto loopLoad = analyzer.accessFor(load);
+    // It should have 10 element long bounds.
+    ASSERT_TRUE(indexBoundsEquals(
+        loopLoad->bounds(), {Bound(new IntImm(0), new IntImm(9))}));
+  }
 }
 
 // Lowering a reduction doesn't affect dependency analysis.
