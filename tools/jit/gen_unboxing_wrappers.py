@@ -277,6 +277,12 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
+# Blocked by JIT compatibility issue: 
+OP_BLOCKLIST = {
+    'aten::view.dtype',  # https://github.com/pytorch/pytorch/issues/47964
+}
+
+
 def gen_unboxing_wrappers(
     declarations,
     out,
@@ -390,6 +396,8 @@ def gen_unboxing_wrappers(
     def filter_decls(jit_decls, disable_autograd, operator_selector: SelectiveBuilder, force_schema_registration):
         result = []
         for decl in jit_decls:
+            if decl['operator_name_with_overload'] in OP_BLOCKLIST:
+                continue
             if disable_autograd and is_backward_op(decl):
                 continue
             op_name = op_name_with_overload(decl)

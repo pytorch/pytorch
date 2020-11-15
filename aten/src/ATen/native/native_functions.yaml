@@ -5186,7 +5186,6 @@
     MkldnnCPU: mkldnn_view
 
 - func: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
