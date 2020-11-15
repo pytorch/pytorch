@@ -7804,6 +7804,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
+    @onlyOnCPUAndCUDA
     def test_view_dtype(self, device):
         def generate_inputs():
             yield make_tensor((5, 5, 5), device, torch.float32, low=-5, high=5)
