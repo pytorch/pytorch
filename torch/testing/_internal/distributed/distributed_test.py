@@ -293,11 +293,13 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
+            timeout = timedelta(seconds=60)
             dist.init_process_group(
                 init_method=self.init_method,
                 backend=BACKEND,
                 world_size=int(self.world_size),
                 rank=self.rank,
+                timeout=timeout,
             )
         except RuntimeError as e:
             if "recompile" in e.args[0]:
@@ -364,7 +366,11 @@ class DistributedTest:
             if BACKEND == "nccl":
                 apply_hack_for_nccl()
 
-            nGPUs_per_process = nGPUs // world_size
+            # If rank is lesser than or equal to number of available GPU's
+            # then each rank can be mapped to corresponding GPU.
+            nGPUs_per_process = 1
+            if world_size > nGPUs:
+                nGPUs_per_process = nGPUs // world_size
             rank_to_GPU = {
                 i: list(
                     visible_devices[i * nGPUs_per_process: (i + 1) * nGPUs_per_process]
