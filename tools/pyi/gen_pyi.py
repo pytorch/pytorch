@@ -7,11 +7,8 @@ import yaml
 import re
 import argparse
 
-from ..autograd.utils import YamlLoader, CodeTemplate, write
-from ..autograd.gen_python_functions import (
-    get_py_torch_functions,
-    get_py_variable_methods,
-)
+from ..autograd.utils import YamlLoader, CodeTemplate, write, group_declarations_by_op_name, is_tensor_method, is_torch_function
+from ..autograd.gen_python_functions import SKIP_PYTHON_BINDINGS, SKIP_PYTHON_BINDINGS_SIGNATURES
 from ..autograd.gen_autograd import load_aten_declarations
 
 """
@@ -37,6 +34,48 @@ Here's our general strategy:
 There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
+
+# TODO: remove after migrating entire codegen to the new data model.
+def should_generate_python_binding(declaration):
+    name = declaration['name']
+    for pattern in SKIP_PYTHON_BINDINGS:
+        if re.match('^' + pattern + '$', name):
+            return False
+
+    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+    signature = '{}({})'.format(name, ', '.join(simple_types))
+    for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
+        if pattern == signature:
+            return False
+
+    return True
+
+
+def get_py_variable_methods(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as methods on Tensor.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                not declaration.get('python_module') and
+                is_tensor_method(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def get_py_torch_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "torch" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                not declaration.get('python_module') and
+                is_torch_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
 
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
