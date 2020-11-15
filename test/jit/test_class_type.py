@@ -1318,7 +1318,7 @@ class TestClassType(JitTestCase):
         tensor_t = torch.Tensor
         device_t = torch.device
 
-        class A:
+        class A(object):
             def __init__(self):
                 pass
 
@@ -1327,6 +1327,12 @@ class TestClassType(JitTestCase):
 
             def h(self, x: device_t) -> device_t:
                 return x
+
+            def i(self) -> 'A':
+                return A()
+
+            def j(self, a: List[int]):
+                pass
 
         def g():
             a = A()

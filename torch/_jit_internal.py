@@ -232,7 +232,7 @@ def get_type_hint_captures(fn):
     """
     Get a dictionary containing type resolution mappings necessary to resolve types
     for the literal annotations on 'fn'. These are not considered to be closed-over by fn
-    and must be obtained separately.
+    and must be obtained separately (e.g. using this function).
 
     Arguments:
         fn: A callable.
@@ -268,24 +268,41 @@ def get_type_hint_captures(fn):
         elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
             return f"{annotation.value}"
 
-        raise RuntimeError(f"Unexpected node type: {type(annotation)}")
+        # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
+        return None
 
-    # Gather a dictionary of parameter name -> literal annotation.
-    name_to_annotation = {arg.arg: get_annotation_str(arg.annotation) for arg in f.args.args if arg.annotation}
+    # Gather a dictionary of parameter name -> literal annotation, skipping any
+    # that cannot be converted to a string name. They will likely be handled by
+    # ScriptTypeParser.
+    name_to_annotation = {
+        arg.arg: get_annotation_str(arg.annotation)
+        for arg in f.args.args
+        if arg.annotation and get_annotation_str(arg.annotation) is not None
+    }
 
-    # Gather a dictionary of parameter name -> type.
+    # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
+    # types are strings. These are only understood by TorchScript in the context of a type annotation
+    # that refers to a class in its own definition, but trying to include a mapping for this in the result
+    # function would cause infinite recursion because the class is currently being compiled.
+    # In addition, there is logic in ScriptTypeParser to handle this.
     name_to_type = {
         name: parameter.annotation
         for name, parameter in signature.parameters.items()
-        if parameter.annotation is not inspect.Parameter.empty
+        if parameter.annotation is not inspect.Parameter.empty and not isinstance(parameter.annotation, str)
     }
 
     # Join the two dictionaries above by key to get a dictionary from literal annotation -> type.
     annotation_to_type = {annotation: name_to_type[name] for name, annotation in name_to_annotation.items()}
 
-    # If there is a return annotation, include it in annotation_to_type.
-    if signature.return_annotation is not inspect.Parameter.empty:
-        annotation_to_type[get_annotation_str(f.returns)] = signature.return_annotation
+    # If there is a valid return annotation, include it in annotation_to_type. As with argument annotations,
+    # the literal annotation has to be convertible to a string by get_annotation_str, and the actual type
+    # of the annotation cannot be a string.
+    literal_return_annotation = get_annotation_str(f.returns)
+    valid_literal_annotation = literal_return_annotation is not None
+    return_annotation = signature.return_annotation
+    valid_return_annotation_type = return_annotation is not inspect.Parameter.empty and not isinstance(return_annotation, str)
+    if valid_literal_annotation and valid_return_annotation_type:
+        annotation_to_type[literal_return_annotation] = return_annotation
 
     return annotation_to_type
 
