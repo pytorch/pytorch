@@ -8,12 +8,6 @@
 namespace torch {
 namespace jit {
 
-namespace {
-c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
-  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-}
-} // namespace
-
 bool insertableTensor(const at::Tensor& ten) {
   return !ten.requires_grad();
 }
@@ -53,7 +47,7 @@ Value* insertConstant(
     const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  auto value = tryInsertConstant(g, val, loc, scope);
+  auto value = tryInsertConstant(g, val, std::move(loc), std::move(scope));
   if (value) {
     return *value;
   }
