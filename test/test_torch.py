@@ -5337,15 +5337,6 @@ class TestTorchDeviceType(TestCase):
                                          r'Please use torch.sgn instead\.')):
                 torch.sign(torch.tensor([4j], device=device, dtype=dtype))
 
-            a = torch.rand((2, 2), dtype=dtype, device=device)
-            b = torch.rand((2, 2), dtype=dtype, device=device)
-            c = torch.rand((2, 2), dtype=dtype, device=device)
-            alpha = 3
-
-            # addcmul is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError, lambda: torch.addcmul(a, b, c, value=alpha))
-
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
                                    expected_failure=False):
@@ -12286,7 +12277,9 @@ class TestTorchDeviceType(TestCase):
                 rtol=0,
                 exact_dtype=False)
 
-    def test_addcmul(self, device):
+    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
+    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')))
+    def test_addcmul(self, device, dtype):
         def rand_tensor(size, dtype, device):
             if dtype.is_floating_point or dtype.is_complex:
                 return torch.rand(size=size, dtype=dtype, device=device)
@@ -12295,27 +12288,20 @@ class TestTorchDeviceType(TestCase):
             else:
                 return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
 
-        for dtype in torch.testing.get_all_math_dtypes(device):
-            a = rand_tensor((2, 2), dtype=dtype, device=device)
-            b = rand_tensor((2, 2), dtype=dtype, device=device)
-            c = rand_tensor((2, 2), dtype=dtype, device=device)
-            if dtype.is_floating_point:
-                alpha = 0.1
-            else:
-                alpha = 3
+        a = rand_tensor((2, 2), dtype=dtype, device=device)
+        b = rand_tensor((2, 2), dtype=dtype, device=device)
+        c = rand_tensor((2, 2), dtype=dtype, device=device)
 
-            # addcmul is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                continue
+        alpha = _number(0.5, 3, dtype)
 
-            actual = torch.addcmul(a, b, c, value=alpha)
-            expected = a + alpha * b * c
+        actual = torch.addcmul(a, b, c, value=alpha)
+        expected = a + alpha * b * c
 
-            self.assertEqual(expected, actual)
+        self.assertEqual(expected, actual)
 
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of addcmul is deprecated"):
-                self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of addcmul is deprecated"):
+            self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @tf32_on_and_off(0.005)
@@ -13230,19 +13216,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.ones((), device=device, dtype=torch.uint8), xb.all())
 
     @onlyOnCPUAndCUDA
-    def test_addcdiv(self, device):
-        def _test_addcdiv(a, alpha, b, c):
-            actual = torch.addcdiv(a, b, c, value=alpha)
-            # implementation of addcdiv downcasts alpha. arithmetic ops don't.
-            if not actual.dtype.is_floating_point:
-                alpha = int(alpha)
-            expected = a + (alpha * b) / c
-            self.assertEqual(expected, actual)
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of addcdiv is deprecated"):
-                self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
-
+    @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
+    @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')))
+    def test_addcdiv(self, device, dtype):
         def non_zero_rand(size, dtype, device):
             if dtype.is_floating_point or dtype.is_complex:
                 a = torch.rand(size=size, dtype=dtype, device=device)
@@ -13252,30 +13228,26 @@ class TestTorchDeviceType(TestCase):
                 a = torch.randint(-5, 5, size=size, dtype=dtype, device=device)
             return a + (a == 0).to(dtype)
 
-        def _helper():
-            _test_addcdiv(
-                non_zero_rand((2, 2), dtype=dtype, device=device),
-                0.5,
-                non_zero_rand((2, 2), dtype=dtype, device=device),
-                non_zero_rand((2, 2), dtype=dtype, device=device))
+        def _test_addcdiv():
+            a = non_zero_rand((2, 2), dtype=dtype, device=device)
+            b = non_zero_rand((2, 2), dtype=dtype, device=device)
+            c = non_zero_rand((2, 2), dtype=dtype, device=device)
+            alpha = _number(0.5, 3, dtype)
 
-        for dtype in torch.testing.get_all_math_dtypes(device):
-            if dtype.is_complex:
-                # CPU complex addcdiv is wildly inaccurate
-                if self.device_type == 'cpu':
-                    with self.assertRaises(AssertionError):
-                        _helper()
+            expected = a + (alpha * b) / c
+            actual = torch.addcdiv(a, b, c, value=alpha)
+            self.assertEqual(expected, actual)
 
-                # CUDA complex addcdiv is not implemented
-                if self.device_type == 'cuda':
-                    with self.assertRaises(RuntimeError):
-                        _helper()
-            elif not dtype.is_floating_point:
-                # Integer division with addcdiv is prohibited
-                with self.assertRaises(RuntimeError):
-                    _helper()
-            else:
-                _helper()
+            with self.maybeWarnsRegex(
+                    UserWarning, "This overload of addcdiv is deprecated"):
+                self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
+
+        if not (dtype.is_floating_point or dtype.is_complex):
+            # Integer division with addcdiv is prohibited
+            with self.assertRaises(RuntimeError):
+                _test_addcdiv()
+        else:
+            _test_addcdiv()
 
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.float64)
@@ -20192,7 +20164,10 @@ _div_min = 2**-8
 def _number(floating, integer, dtype):
     if dtype in [torch.half, torch.float, torch.double, torch.bfloat16]:
         return floating
-    return integer
+    elif dtype in [torch.cfloat, torch.cdouble]:
+        return floating * (1 + 1j)
+    else:
+        return integer
 
 # Converts half/bfloat16 dtype to float when device is cpu
 def _convert_t(dtype, device):
@@ -20360,10 +20335,10 @@ tensor_op_tests = [
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _float_types, _cpu_types, True),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 1e-1, 1e-3,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False)),
+        torch.testing.get_all_dtypes(include_complex=True, include_bool=False)),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
-        1e-1, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, True,
+        1e-1, 1e-5, torch.testing.get_all_dtypes(include_complex=True, include_bool=False), _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM),
