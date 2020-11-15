@@ -621,6 +621,8 @@ inline std::string recvString(int socket) {
 }
 
 // Other helpers
+std::string getLocalSocketAddr(int fd);
+
 std::string sockaddrToString(struct sockaddr* addr);
 
 std::pair<int, PortType> listen(PortType port);
