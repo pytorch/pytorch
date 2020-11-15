@@ -39,8 +39,7 @@ test please see `caffe2/test/test_quantized_op.py`.
 
 class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
-        relu_module = nn.ReLU()
-        # TODO: remove nnq.ReLU6 and remove this test
+        relu_module = nnq.ReLU()
         relu6_module = nnq.ReLU6()
 
         x = torch.arange(-10, 10, dtype=torch.float)
@@ -305,11 +304,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             check_save_load=True)
 
         # Test from_float
-        fused_conv_module = torch.nn.intrinsic._FusedModule(conv_module)
-        fused_conv_module.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(fused_conv_module, inplace=True)
-        fused_conv_module(X.float())
-        converted_qconv_module = fused_conv_module
+        conv_module.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(conv_module, inplace=True)
+        conv_module(X.float())
+        converted_qconv_module = torch.nn.Sequential(conv_module)
         torch.quantization.convert(converted_qconv_module, inplace=True)
 
         # Smoke test to make sure the module actually runs
