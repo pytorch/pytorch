@@ -57,6 +57,6 @@ python -m tools.jit.gen_unboxing_wrappers \
 # annotated_fn_args codegen (called by torch codegen but can run independently)
 mkdir -p "$OUT"/annotated_fn_args
 python -m tools.autograd.gen_annotated_fn_args \
-  "$OUT"/torch/share/ATen/Declarations.yaml \
+  aten/src/ATen/native/native_functions.yaml \
   "$OUT"/annotated_fn_args \
   tools/autograd

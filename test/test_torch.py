@@ -7729,98 +7729,6 @@ class TestTorchDeviceType(TestCase):
         inv1 = torch.cholesky_inverse(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
-    @slowTest
-    @skipCUDAIf(True, "See issue #26789.")
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_cholesky_batched_many_batches(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
-
-        def cholesky_test_helper(n, batchsize, device, upper):
-            A = random_symmetric_pd_matrix(n, batchsize, dtype=dtype, device=device)
-            chol_fact = torch.cholesky(A, upper=upper)
-            if upper:
-                # Correctness check
-                self.assertEqual(A, chol_fact.transpose(-2, -1).matmul(chol_fact))
-                # Upper triangular check
-                self.assertEqual(chol_fact, chol_fact.triu())
-            else:
-                # Correctness check
-                self.assertEqual(A, chol_fact.matmul(chol_fact.transpose(-2, -1)))
-                # Lower triangular check
-                self.assertEqual(chol_fact, chol_fact.tril())
-
-        for upper, batchsize in product([True, False], [262144, 524288]):
-            cholesky_test_helper(2, batchsize, device, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_cholesky_batched(self, device, dtype):
-        from torch.testing._internal.common_utils import \
-            (random_symmetric_pd_matrix,
-             random_fullrank_matrix_distinct_singular_value)
-
-        def cholesky_test_helper(n, batch_dims, upper):
-            # This is a workaround while there is no support for complex random_symmetric_pd_matrix
-            if dtype.is_complex:
-                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
-                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
-                A = A_real + 1j * A_imag
-                # There is no support for complex batched matmul yet
-                matmul_list = []
-                for mat in A.contiguous().view(-1, n, n):
-                    matmul_list.append(mat @ mat.t().conj())
-                A = torch.stack(matmul_list).view(*batch_dims, n, n)
-            else:
-                A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
-            cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
-            cholesky_exp = cholesky_exp.reshape_as(A)
-            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
-
-        for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
-            cholesky_test_helper(3, batchsize, upper)
-
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import \
-            (random_symmetric_pd_matrix,
-             random_fullrank_matrix_distinct_singular_value)
-
-        # This is a workaround while there is no support for complex random_symmetric_pd_matrix
-        if dtype.is_complex:
-            real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-            A_real = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
-            A_imag = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
-            A = A_real + 1j * A_imag
-            A = A @ A.t().conj()
-        else:
-            A = random_symmetric_pd_matrix(10, dtype=dtype, device=device)
-
-        # default Case
-        C = torch.cholesky(A)
-        C_ = C.cpu().numpy()
-        B = np.matmul(C_, C_.T.conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0)
-
-        # test Upper Triangular
-        U = torch.cholesky(A, True)
-        U_ = U.cpu().numpy()
-        B = np.matmul(U_.T.conj(), U_)
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
-
-        # test Lower Triangular
-        L = torch.cholesky(A, False)
-        L_ = L.cpu().numpy()
-        B = np.matmul(L_, L_.T.conj())
-        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
-
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
         template = torch.rand(3, 5, device=device)
@@ -9144,6 +9052,114 @@ class TestTorchDeviceType(TestCase):
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
         x = torch.tensor([2], device=device, dtype=dtype)
         self.assertEqual(x.squeeze().kthvalue(1), x.kthvalue(1))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.double)
+    def test_lu_solve_batched_non_contiguous(self, device, dtype):
+        from numpy.linalg import solve
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device='cpu')
+        b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
+        x_exp = torch.as_tensor(solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy())).to(device)
+        A = A.to(device).permute(0, 2, 1)
+        b = b.to(device).permute(2, 1, 0)
+        assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
+        LU_data, LU_pivots = torch.lu(A)
+        x = torch.lu_solve(b, LU_data, LU_pivots)
+        self.assertEqual(x, x_exp)
+
+    def lu_solve_test_helper(self, A_dims, b_dims, pivot, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        b = torch.randn(*b_dims, dtype=dtype, device=device)
+        A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
+        LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
+        self.assertEqual(info, torch.zeros_like(info))
+        return b, A, LU_data, LU_pivots
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.double)
+    def test_lu_solve(self, device, dtype):
+        def sub_test(pivot):
+            for k, n in zip([2, 3, 5], [3, 5, 7]):
+                b, A, LU_data, LU_pivots = self.lu_solve_test_helper((n,), (n, k), pivot, device, dtype)
+                x = torch.lu_solve(b, LU_data, LU_pivots)
+                self.assertLessEqual(b.dist(A.mm(x)), 1e-12)
+
+        sub_test(True)
+        if self.device_type == 'cuda':
+            sub_test(False)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_lu_solve_batched(self, device, dtype):
+        def sub_test(pivot):
+            def lu_solve_batch_test_helper(A_dims, b_dims, pivot):
+                b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, pivot, device, dtype)
+                x_exp_list = []
+                for i in range(b_dims[0]):
+                    x_exp_list.append(torch.lu_solve(b[i], LU_data[i], LU_pivots[i]))
+                x_exp = torch.stack(x_exp_list)  # Stacked output
+                x_act = torch.lu_solve(b, LU_data, LU_pivots)  # Actual output
+                self.assertEqual(x_exp, x_act)  # Equality check
+                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 1e-12)  # Correctness check
+
+            for batchsize in [1, 3, 4]:
+                lu_solve_batch_test_helper((5, batchsize), (batchsize, 5, 10), pivot)
+
+        # Tests tensors with 0 elements
+        b = torch.randn(3, 0, 3, dtype=dtype, device=device)
+        A = torch.randn(3, 0, 0, dtype=dtype, device=device)
+        LU_data, LU_pivots = torch.lu(A)
+        self.assertEqual(torch.empty_like(b), b.lu_solve(LU_data, LU_pivots))
+
+        sub_test(True)
+        if self.device_type == 'cuda':
+            sub_test(False)
+
+    @slowTest
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_lu_solve_batched_many_batches(self, device, dtype):
+        def run_test(A_dims, b_dims):
+            b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, True, device, dtype)
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            b_ = torch.matmul(A, x)
+            self.assertEqual(b_, b.expand_as(b_))
+
+        run_test((5, 65536), (65536, 5, 10))
+        run_test((5, 262144), (262144, 5, 10))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.double)
+    def test_lu_solve_batched_broadcasting(self, device, dtype):
+        from numpy.linalg import solve
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        def run_test(A_dims, b_dims, pivot=True):
+            A_matrix_size = A_dims[-1]
+            A_batch_dims = A_dims[:-2]
+            A = random_fullrank_matrix_distinct_singular_value(A_matrix_size, *A_batch_dims, dtype=dtype)
+            b = torch.randn(*b_dims, dtype=dtype)
+            x_exp = torch.as_tensor(solve(A.numpy(), b.numpy())).to(dtype=dtype, device=device)
+            A, b = A.to(device), b.to(device)
+            LU_data, LU_pivots = torch.lu(A, pivot=pivot)
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            self.assertEqual(x, x_exp)
+
+        # test against numpy.linalg.solve
+        run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6))  # no broadcasting
+        run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
+        run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
+        run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
     # Assert for illegal dtype would not be raised on XLA
     @onlyOnCPUAndCUDA

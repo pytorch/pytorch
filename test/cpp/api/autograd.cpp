@@ -168,26 +168,24 @@ TEST(AutogradAPITests, AnomalyMode) {
     ASSERT_TRUE(
         warnings.str().find("Traceback of forward") != std::string::npos);
   }
-  // TODO(@t-vi): `pow` returns inf for this case, so this test should be updated to test for
-  // a case which returns nan
-  // {
-  //   WarningCapture warnings;
-  //   // Double backward
-  //   auto x = torch::tensor({0.0}, torch::requires_grad());
-  //   auto y = x.pow(1.5);
-  //   auto gr =
-  //       grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
-  //   ASSERT_THROWS_WITH(grad({gr[0]}, {x});, "returned nan");
-  //   auto msgs = warnings.messages();
-  //   ASSERT_EQ(msgs.size(), 2);
-  //   ASSERT_TRUE(
-  //       msgs[0].find("Traceback of forward call that caused the error") !=
-  //       std::string::npos);
-  //   ASSERT_TRUE(
-  //       msgs[1].find(
-  //           "Traceback of forward call that induced the previous calculation") !=
-  //       std::string::npos);
-  // }
+  {
+    WarningCapture warnings;
+    // Double backward
+    auto x = torch::tensor({0.0}, torch::requires_grad());
+    auto y = x.pow(1.5);
+    auto gr =
+        grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});, "returned nan");
+    auto msgs = warnings.messages();
+    ASSERT_EQ(msgs.size(), 2);
+    ASSERT_TRUE(
+        msgs[0].find("Traceback of forward call that caused the error") !=
+        std::string::npos);
+    ASSERT_TRUE(
+        msgs[1].find(
+            "Traceback of forward call that induced the previous calculation") !=
+        std::string::npos);
+  }
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
