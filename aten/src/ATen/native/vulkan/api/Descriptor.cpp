@@ -194,7 +194,13 @@ Descriptor::Set& Descriptor::Set::bind(
         .image = {
           image.sampler,
           image.view,
-          image.layout
+          [](const VkDescriptorType type, const VkImageLayout layout) {
+            if (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE == type) {
+              return VK_IMAGE_LAYOUT_GENERAL;
+            }
+
+            return layout;
+          }(shader_layout_signature_[binding], image.layout),
         },
       },
     });

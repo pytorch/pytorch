@@ -275,8 +275,8 @@ Barrier categorize(
   const vTensor::Access::Flags src_access = convert(vk_src_access);
   const vTensor::Access::Flags dst_access = convert(vk_dst_access);
 
-  if (vTensor::Access::Read == (src_access & vTensor::Access::Read)) {
-    if (vTensor::Access::Read == (dst_access & vTensor::Access::Read)) {
+  if ((src_access & vTensor::Access::Read) == src_access) {
+    if ((dst_access & vTensor::Access::Read) == dst_access) {
       // RAR (Read after Read)
       return Barrier::None;
     }
@@ -926,7 +926,7 @@ vTensor::Image& vTensor::View::image(
               return vk_access;
             }(),
             [access]() {
-              if (Access::Read == (access & Access::Read)) {
+              if ((access & Access::Read) == access) {
                 return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
               }
 
@@ -1073,7 +1073,7 @@ vTensor::View::State::transition(const Bundle bundle) {
     to.image = bundle.image;
   }
 
-// #ifdef DEBUG
+#ifdef DEBUG
   // Forward declaration
   std::ostream& operator<<(
       std::ostream&,
@@ -1081,7 +1081,7 @@ vTensor::View::State::transition(const Bundle bundle) {
 
   std::cout << "From:" << std::endl << from << std::endl;
   std::cout << "To:" << std::endl << to << std::endl;
-// #endif /* DEBUG */
+#endif /* DEBUG */
 
   return Transition{
     from,
