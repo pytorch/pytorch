@@ -2437,14 +2437,14 @@ class AbstractTestCases:
 
         @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
         def test_tile(self):
-            initial_shape = (8, 4)
+            initial_shape = (8, 4, 3)
             reps = ((3, 1, 1),
                     (3, 3, 3),
                     (1, 2, 1),
                     (2, 2, 2, 2),
+                    (2, 2),
                     (2,),
                     (1, 2, 0))
-
             tensor = torch.from_numpy(np.random.random(initial_shape))
             for dims in reps:
                 self.assertEqual(torch.tile(tensor, dims).numpy(),
