@@ -105,13 +105,13 @@ struct ConstantPropagator {
   // Runs constant propagation with an aliasing db and checks if inputs or
   // outputs might be mutated in the graph
   static ConstantPropagator WithAliasDb(std::shared_ptr<Graph> graph) {
-    return ConstantPropagator(graph, true);
+    return ConstantPropagator(std::move(graph), true);
   }
 
   // Runs constant propagation only on ops that clearly do not have aliased
   // inputs or outputs without computing aliasing information
   static ConstantPropagator NoAliasDb(std::shared_ptr<Graph> graph) {
-    return ConstantPropagator(graph, false);
+    return ConstantPropagator(std::move(graph), false);
   }
 
   void run() {
