@@ -1028,7 +1028,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M()
-        print(m.__dict__.keys())
         m.eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         prepared = prepare_fx(m, qconfig_dict)

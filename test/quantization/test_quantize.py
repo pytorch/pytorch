@@ -536,6 +536,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.checkQuantizedLinear(model.fc)
 
 
+    @skipIfNoFBGEMM
     def test_quantized_embedding_bag(self):
         r""" Test the post-training quantization flow, serialization and scripting
         of embedding_bag modules
