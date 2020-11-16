@@ -295,9 +295,9 @@ def einsum(equation, *operands):
         e.g. for an input operand with 5 dimensions, the ellipsis in the equation `'ab...c'` cover the third and fourth
         dimensions. The ellipsis does not need to cover the same number of dimensions across the :attr:`operands` but the
         'shape' of the ellipsis (the size of the dimensions covered by them) must broadcast together. If the output is not
-        explicitly defined with the arrow ('->') notation, the dimensions covered by the ellipsis will come first in the
-        output, before the dimensions whose subscripts appear exactly once for the input operands. e.g. the following
-        equation implements batch matrix multiplication `'...ij,...jk'`.
+        explicitly defined with the arrow ('->') notation, the ellipsis will come first in the output, before the subscript
+        labels that appear exactly once for the input operands. e.g. the following equation implements batch matrix
+        multiplication `'...ij,...jk'`.
 
         A few final notes: the equation may contain whitespaces between the different elements (subscripts, ellipsis,
         arrow and comma) but something like `'. . .'` is not valid. An empty string `''` is valid for scalar operands.

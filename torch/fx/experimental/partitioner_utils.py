@@ -197,7 +197,7 @@ def get_comm_latency_between(parent_partition: Partition, child_partition: Parti
                 if size_bytes is not None:
                     comm_size += size_bytes.output_size
                 visited_nodes.add(n)
-    return comm_size * transfer_rate_bytes_per_sec
+    return comm_size / transfer_rate_bytes_per_sec
 
 def get_latency_of_partitioned_graph(
     partitions: List[Partition],
