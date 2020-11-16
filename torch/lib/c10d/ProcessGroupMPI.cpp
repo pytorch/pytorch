@@ -2,10 +2,12 @@
 
 #include <limits>
 #include <map>
+#include <iostream>
+#include <fstream>
 
 #include <c10/core/DeviceGuard.h>
 
-#if defined(OPEN_MPI) && OPEN_MPI
+#if ((defined(OPEN_MPI) && OPEN_MPI) || (defined(MVAPICH2_NUMVERSION) && (MVAPICH2_NUMVERSION >= 20205300))) && !USE_CUDA_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
 #endif
 
@@ -43,18 +45,20 @@ std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
 };
 
 // Checking CUDA-aware MPI support, currently we only support CUDA aware
-// MPI ops through Open MPI
+// MPI ops through Open MPI and MVAPICH2-GDR
 bool cudaAwareMpiCheck() {
 // Run time check
-#if defined(MPIX_CUDA_AWARE_SUPPORT)
+#if !defined(USE_CUDA_MPI) && defined(MPIX_CUDA_AWARE_SUPPORT)
   if (MPIX_Query_cuda_support() == 1) {
     return true;
   } else {
     return false;
   }
+#elif defined(USE_CUDA_MPI)
+  return true;
 #else // !defined(MPIX_CUDA_AWARE_SUPPORT)
   return false;
-#endif // MPIX_CUDA_AWARE_SUPPORT
+#endif // MPIX_CUDA_AWARE_SUPPORT && !USE_CUDA_MPI
 }
 
 // Checking the input tensor's validity

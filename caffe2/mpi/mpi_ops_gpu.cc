@@ -35,11 +35,27 @@ namespace caffe2 {
 #define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 0
 #endif // CAFFE2_OMPI_VERSION >= 10805
 #endif // CAFFE2_OMPI_VERSION >= 2000
-#else // !OPEN_MPI
+#elif MVAPICH2_NUMVERSION // !OPEN_MPI
+#define CAFFE2_MV2_VERSION MVAPICH2_NUMVERSION
+#if CAFFE2_MV2_VERSION >= 20305300
+#include "mpi-ext.h"
+#if MPIX_CUDA_AWARE_SUPPORT
+#define CAFFE2_HAS_CUDA_MPI_BASICS 1
+#define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 1
+#endif // MPIX_CUDA_AWARE_SUPPORT
+#else //CAFFE2_MV2_VERSION >= 235
+// In the case of MVAPICH2-GDR before 2.3.5, we don't have compile-time flags
+// // to figure out if CUDA is supported; as a result, we will assume that the
+// // user has built MVAPICH2-GDR with CUDA support.
+#define CAFFE2_HAS_CUDA_MPI_BASICS 1
+#define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 1
+#endif //CAFFE2_MV2_VERSION >= 235
+#else // !OPEN_MPI && !MVAPICH_GDR
+//
 // We have not really tested against other MPI environments, so let's go for a
 // safe path and basically say we don't have cuda-aware functions.
-#define CAFFE2_HAS_CUDA_MPI_BASICS 0
-#define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 0
+#define CAFFE2_HAS_CUDA_MPI_BASICS 1
+#define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 1
 #endif // OPEN_MPI
 
 // We allow a macro to force using fallback functions.
@@ -49,6 +65,15 @@ namespace caffe2 {
 #define CAFFE2_HAS_CUDA_MPI_BASICS 0
 #define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 0
 #endif // CAFFE2_FORCE_FALLBACK_CUDA_MPI
+
+// For advanced users, we allow a macro to force using CUDA functions
+#ifdef CAFFE2_FORCE_CUDA_MPI
+#undef CAFFE2_HAS_CUDA_MPI_BASICS
+#undef CAFFE2_HAS_CUDA_MPI_ALLREDUCE
+#define CAFFE2_HAS_CUDA_MPI_BASICS 1
+#define CAFFE2_HAS_CUDA_MPI_ALLREDUCE 1
+#endif // CAFFE2_FORCE_CUDA_MPI
+
 
 REGISTER_CUDA_OPERATOR(
     MPICreateCommonWorld,
