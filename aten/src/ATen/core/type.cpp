@@ -107,118 +107,118 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-AnyTypePtr AnyType::get() {
+const AnyTypePtr AnyType::get() {
   static auto value = AnyType::create();
   return value;
 }
 
-TensorTypePtr TensorType::get() {
+const TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
       {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
   return value;
 }
 
-NumberTypePtr NumberType::get() {
+const NumberTypePtr NumberType::get() {
   static auto value = NumberType::create();
   return value;
 }
-IntTypePtr IntType::get() {
+const IntTypePtr IntType::get() {
   static auto value = IntType::create();
   return value;
 }
-FloatTypePtr FloatType::get() {
+const FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
-BoolTypePtr BoolType::get() {
+const BoolTypePtr BoolType::get() {
   static auto value = BoolType::create();
   return value;
 }
-NoneTypePtr NoneType::get() {
+const NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;
 }
-GeneratorTypePtr GeneratorType::get() {
+const GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;
 }
-QuantizerTypePtr QuantizerType::get() {
+const QuantizerTypePtr QuantizerType::get() {
   static auto value = QuantizerType::create();
   return value;
 }
-QSchemeTypePtr QSchemeType::get() {
+const QSchemeTypePtr QSchemeType::get() {
   static auto value = QSchemeType::create();
   return value;
 }
-StringTypePtr StringType::get() {
+const StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;
 }
-DeviceObjTypePtr DeviceObjType::get() {
+const DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
   return value;
 }
-StreamObjTypePtr StreamObjType::get() {
+const StreamObjTypePtr StreamObjType::get() {
   static auto value = StreamObjType::create();
   return value;
 }
-ScalarTypeTypePtr ScalarTypeType::get() {
+const ScalarTypeTypePtr ScalarTypeType::get() {
 static auto value = ScalarTypeType::create();
 return value;
 }
-LayoutTypePtr LayoutType::get() {
+const LayoutTypePtr LayoutType::get() {
 static auto value = LayoutType::create();
 return value;
 }
-OptionalTypePtr OptionalType::ofTensor() {
+const OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
-PyObjectTypePtr PyObjectType::get() {
+const PyObjectTypePtr PyObjectType::get() {
   static auto value = PyObjectType::create();
   return value;
 }
-CapsuleTypePtr CapsuleType::get() {
+const CapsuleTypePtr CapsuleType::get() {
   static auto value = CapsuleType::create();
   return value;
 }
-ListTypePtr ListType::ofTensors() {
+const ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(TensorType::get());
   return value;
 }
-ListTypePtr ListType::ofInts() {
+const ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
-ListTypePtr ListType::ofFloats() {
+const ListTypePtr ListType::ofFloats() {
   static auto value = ListType::create(FloatType::get());
   return value;
 }
-ListTypePtr ListType::ofBools() {
+const ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
   return value;
 }
-ListTypePtr ListType::ofStrings() {
+const ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
   return value;
 }
 
-AnyListTypePtr AnyListType::get() {
+const AnyListTypePtr AnyListType::get() {
   static auto value = AnyListType::create();
   return value;
 }
 
-AnyTupleTypePtr AnyTupleType::get() {
+const AnyTupleTypePtr AnyTupleType::get() {
   static auto value = AnyTupleType::create();
   return value;
 }
 
-AnyClassTypePtr AnyClassType::get() {
+const AnyClassTypePtr AnyClassType::get() {
   static auto value = AnyClassType::create();
   return value;
 }
 
-AnyEnumTypePtr AnyEnumType::get() {
+const AnyEnumTypePtr AnyEnumType::get() {
   static auto value = AnyEnumType::create();
   return value;
 }
