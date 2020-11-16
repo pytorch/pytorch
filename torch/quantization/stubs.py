@@ -40,6 +40,10 @@ class QuantWrapper(nn.Module):
     will be swapped to `nnq.Quantize` which does actual quantization. Similarly
     for `DeQuantStub`.
     """
+    quant: QuantStub
+    dequant: DeQuantStub
+    module: nn.Module
+
     def __init__(self, module):
         super(QuantWrapper, self).__init__()
         qconfig = module.qconfig if hasattr(module, 'qconfig') else None

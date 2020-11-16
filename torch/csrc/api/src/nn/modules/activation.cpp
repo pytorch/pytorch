@@ -294,6 +294,18 @@ void GELUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+Tensor SiLUImpl::forward(const Tensor& input) {
+  return F::silu(input);
+}
+
+void SiLUImpl::reset() {}
+
+void SiLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SiLU()";
+}
+
+// ============================================================================
+
 Tensor SigmoidImpl::forward(const Tensor& input) {
   return torch::sigmoid(input);
 }
@@ -404,7 +416,7 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
   bool need_weights, const Tensor& attn_mask) {
   if (!_qkv_same_embed_dim) {
     return F::multi_head_attention_forward(
-      query, key, value, 
+      query, key, value,
       F::MultiheadAttentionForwardFuncOptions(
         /*embed_dim_to_check=*/options.embed_dim(),
         /*num_heads=*/options.num_heads(),
@@ -427,7 +439,7 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
     );
   } else {
     return F::multi_head_attention_forward(
-      query, key, value, 
+      query, key, value,
       F::MultiheadAttentionForwardFuncOptions(
         /*embed_dim_to_check=*/options.embed_dim(),
         /*num_heads=*/options.num_heads(),
@@ -454,18 +466,23 @@ void MultiheadAttentionImpl::reset() {
   TORCH_CHECK(head_dim * options.num_heads() == options.embed_dim(),
               "embed_dim must be divisible by num_heads");
   if (!_qkv_same_embed_dim) {
-    q_proj_weight = torch::empty({options.embed_dim(), options.embed_dim()});
-    k_proj_weight = torch::empty({options.embed_dim(), options.kdim()});
-    v_proj_weight = torch::empty({options.embed_dim(), options.vdim()});
+    q_proj_weight = register_parameter(
+      "q_proj_weight", torch::empty({options.embed_dim(), options.embed_dim()}));
+    k_proj_weight = register_parameter(
+      "k_proj_weight", torch::empty({options.embed_dim(), options.kdim()}));
+    v_proj_weight = register_parameter(
+      "v_proj_weight", torch::empty({options.embed_dim(), options.vdim()}));
     register_parameter("in_proj_weight", {}, /*requires_grad=*/false);
   } else {
-    in_proj_weight = torch::empty({3 * options.embed_dim(), options.embed_dim()});
+    in_proj_weight = register_parameter(
+      "in_proj_weight", torch::empty({3 * options.embed_dim(), options.embed_dim()}));
     register_parameter("q_proj_weight", {}, /*requires_grad=*/false);
     register_parameter("k_proj_weight", {}, /*requires_grad=*/false);
     register_parameter("v_proj_weight", {}, /*requires_grad=*/false);
   }
   if (options.bias()) {
-    in_proj_bias = torch::empty(3 * options.embed_dim());
+    in_proj_bias = register_parameter(
+      "in_proj_bias", torch::empty(3 * options.embed_dim()));
   } else {
     register_parameter("in_proj_bias", {}, /*requires_grad=*/false);
   }
@@ -475,8 +492,8 @@ void MultiheadAttentionImpl::reset() {
       options.embed_dim()).bias(options.bias()))
   );
   if (options.add_bias_kv()) {
-    bias_k = torch::empty({1, 1, options.embed_dim()});
-    bias_v = torch::empty({1, 1, options.embed_dim()});
+    bias_k = register_parameter("bias_k", torch::empty({1, 1, options.embed_dim()}));
+    bias_v = register_parameter("bias_v", torch::empty({1, 1, options.embed_dim()}));
   } else {
     bias_k = {};
     bias_v = {};

@@ -14,5 +14,9 @@ namespace jit {
 TORCH_API Symbol
 get_symbol_for_version(const Symbol name, const uint64_t version);
 
+// Maps the given kind to the minimum version that supports it.
+// See note [Dynamic Versions and torch.jit.save vs. torch.save]
+TORCH_API uint64_t get_min_version_for_kind(const NodeKind& kind);
+
 } // namespace jit
 } // namespace torch

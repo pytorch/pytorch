@@ -1,6 +1,6 @@
 import torch
 
-from torch.jit import validate_map_location
+from torch.jit._serialization import validate_map_location
 
 import pathlib
 import os
@@ -59,6 +59,9 @@ class LiteScriptModule(object):
 
     def __call__(self, *input):
         return self._c.forward(input)
+
+    def find_method(self, method_name):
+        return self._c.find_method(method_name)
 
     def forward(self, *input):
         return self._c.forward(input)

@@ -1,100 +1,138 @@
 #pragma once
 
-#include <ATen/core/ivalue.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
-
-/*
- * The exposed APIs in this file is used by manager.h/cpp
- *
- * code here handles CUDA code generation and execution from Fusion IR.
- * NVRTC is used for kernel compilation. CUDA Driver API is used to load and
- * execute compiled kernel.
- *
- * A stringify trick is used to unify the IO data structure for kernel
- * execution. We stringify the data structure and assert it direclty in the
- * generated CUDA source to avoid runtime search of header files.
- * The header file is included twice: one time as a c++ code to allow host code
- * to prepare IO data; the other time for stringify.
- */
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-// TODO: given that KernelArgsReq is becoming complicated and not really
-//       hashable, I should throw this inside CudaKernel.
-// Interfacing object allows kernel to return whether a given input
-// configuration could/should be handled.
-struct KernelArgsReq {
-  virtual bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) = 0;
-  virtual ~KernelArgsReq() = default;
+//! Summary of interesting facts about the kernel
+//!
+//! TODO(kir): const node ptrs
+//!
+struct KernelSummary {
+  //! List of Write-After-Read (WAR) synchronization barriers
+  std::unordered_map<size_t, kir::Sync*> war_hazard_syncs;
+
+  //! List of global buffers
+  std::vector<kir::Allocate*> global_allocations;
+
+  //! List of dynamic shared memory buffers
+  std::vector<kir::Allocate*> dynamic_smem_allocations;
+
+  //! List of static shared memory buffers
+  std::vector<kir::Allocate*> static_smem_allocations;
+
+  //! Indicate the need to generate random numbers
+  bool is_stochastic = false;
+
+  //! Do we have any block reductions?
+  bool has_block_reductions = false;
+
+  //! Do we have any grid reductions?
+  bool has_grid_reductions = false;
+
+  //! Do we have any block broadcasts?
+  bool has_block_broadcasts = false;
+
+  //! Largest shared memory buffer base type
+  DataType largest_smem_data_type = DataType::Null;
 };
 
-// naive P-wise kernel only requires same dimensionality for input tensors.
-struct NaivePWKernelArgsReq : KernelArgsReq {
-  bool matchKernelSize(const at::ArrayRef<c10::IValue> inputs) override;
-  std::vector<int> dims_;
-};
-
-class CudaKernel {
+//! Container for a lowered Kernel IR
+//!
+//! TODO(kir): currently, it is just pointing to nodes owned
+//!  by a Fusion object. The goal is to have the Kernel object
+//!  own the Kernel IR nodes
+//!
+class TORCH_CUDA_API Kernel final : public NonCopyable {
  public:
-  std::deque<Val*> inputs;
-  std::deque<Val*> outputs;
+  Kernel() = default;
 
-  CudaKernel() = default;
+  //! Finalize a kernel definition
+  //!
+  //! At this point we have a complete kernel definition and we can
+  //! run analysis passes to build a KernelSummary
+  //!
+  void finalize(
+      std::vector<Expr*> top_level_exprs,
+      ThreadPredicateMap predicate_map);
 
-  CUmodule& getModule() {
-    return module_;
+  //! Register input as an input of the kernel
+  void addInput(Val* input) {
+    inputs_.push_back(input);
   }
 
-  CUfunction& getFunction() {
-    return function_;
+  //! Register output as an output of the kernel
+  void addOutput(Val* output) {
+    outputs_.push_back(output);
   }
 
-  int16_t device_;
-  CUmodule module_;
-  CUfunction function_;
-  int max_blocks_;
-  int unroll_factor_ = 1;
-
-  // WARNING:
-  // Block and Grid dimension setting is here for testing purposes only
-  // These are not here for general use and only for use with
-  // the runTestKernel() function.
-  void block(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    block_ = dim3(x, y, z);
-  }
-  void grid(unsigned int x = 1, unsigned int y = 1, unsigned int z = 1) {
-    grid_ = dim3(x, y, z);
+  const auto& inputs() const {
+    return inputs_;
   }
 
-  dim3 block_;
-  dim3 grid_;
-  bool has_random_;
+  const auto& outputs() const {
+    return outputs_;
+  }
+
+  const auto& topLevelExprs() const {
+    return top_level_exprs_;
+  }
+
+  const KernelSummary& summary() const {
+    return summary_;
+  }
+
+  const ThreadPredicateMap& predicateMap() const {
+    return *predicate_map_;
+  }
+
+  //! Register a new Kernel IR node
+  //!
+  //! \note This is a specialized helper for kir::IrBuilder, not
+  //!   intendted for general use
+  //!
+  void registerIrNode(std::unique_ptr<Statement> node) {
+    ir_nodes_.push_back(std::move(node));
+  }
+
+  //! Debug dump of the Kernel IR
+  void print() const;
+
+ private:
+  // Analyze the kernel IR and caches the summary of interesting data
+  void analyze();
+
+ private:
+  // Kernel IR nodes
+  std::vector<std::unique_ptr<Statement>> ir_nodes_;
+
+  // Map from value to its definition expression
+  std::unordered_map<const Val*, Expr*> definitions_;
+
+  // Top level expressions
+  std::vector<Expr*> top_level_exprs_;
+
+  // Kernel inputs and outputs
+  std::vector<Val*> inputs_;
+  std::vector<Val*> outputs_;
+
+  // Summary of interesting kernel data
+  KernelSummary summary_;
+
+  // Predicate map
+  // TODO(kir): consider a simpler, kernel IR based version
+  std::unique_ptr<ThreadPredicateMap> predicate_map_;
 };
-
-// compile Fusion to CUDA functions:
-// 1. JIT compilation via nvrtc to generate CUDA c++ kernel code;
-// 2. CUDA Drive API to load CUDA c++ kernel code as function_;
-TORCH_CUDA_API void compileKernel(Fusion& fusion, CudaKernel* entry);
-
-// run loaded kernel through Function.
-// inputs/outputs is given in the sense of a PyTorch JIT ir node. This function
-// wraps IO data structure for tensors on host.
-TORCH_CUDA_API void runKernel(
-    CudaKernel* entry,
-    const at::ArrayRef<c10::IValue> inputs,
-    std::vector<at::Tensor> outputs);
-
-// Facility API to run kernel in tests.
-TORCH_CUDA_API void runTestKernel(
-    CudaKernel* entry,
-    const at::ArrayRef<c10::IValue> inputs,
-    std::vector<at::Tensor> outputs);
 
 } // namespace cuda
 } // namespace fuser

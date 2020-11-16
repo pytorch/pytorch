@@ -1,5 +1,7 @@
 import re
 import os
+import yaml
+from collections import defaultdict
 from .nested_dict import nested_dict
 
 
@@ -8,11 +10,7 @@ __all__ = [
     'split_name_params', 'write',
 ]
 
-try:
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 # You should use these lines, rather than doing it manually.
 # Especially if you see this error!
@@ -74,10 +72,49 @@ def write(dirname, name, template, env):
 def is_tensor_method(declaration):
     return 'Tensor' in declaration['method_of']
 
+def is_torch_function(declaration):
+    return 'namespace' in declaration['method_of']
+
 def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
-def signature_without_args(decl):
-    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
-    return 'aten::{}{}'.format(name, overload_name)
+def op_name_with_overload(decl):
+    return decl['operator_name_with_overload']
+
+def load_op_list_and_strip_overload(op_list, op_list_path):
+    if op_list is None and op_list_path is None:
+        return None
+    if op_list is None:
+        op_list = []
+    if op_list_path is not None:
+        with open(op_list_path, 'r') as f:
+            op_list += yaml.load(f, Loader=YamlLoader)
+    # strip out the overload part
+    return {opname.split('.', 1)[0] for opname in op_list}
+
+def group_declarations_by_op_name(declarations):
+    groups = defaultdict(list)
+    for d in declarations:
+        groups[op_name(d)].append(d)
+    return groups
+
+def is_output(arg):
+    return arg.get('output', False)
+
+def has_outputs(declaration):
+    return any([is_output(arg) for arg in declaration['arguments']])
+
+def op_name(declaration):
+    name = declaration['name']
+    if has_outputs(declaration):
+        if not name.endswith("_out"):
+            raise RuntimeError(
+                '{} has output params, expecting name ending with \'_out\''.
+                format(declaration['name']))
+        return name[:-4]
+    else:
+        if name.endswith("_out"):
+            raise RuntimeError(
+                '{}: name ends with \'_out\', expecting output params'.
+                format(declaration['name']))
+        return name

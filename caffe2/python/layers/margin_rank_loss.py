@@ -1,9 +1,9 @@
 ## @package random_neg_rank_loss
 # Module caffe2.python.layers.random_neg_rank_loss
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema, core
 from caffe2.python.layers.layers import (

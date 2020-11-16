@@ -117,4 +117,13 @@ void fma_fp16(int N, const float* A, const float* B, float* Out) {
   }
 }
 
+float fmafp32_avx_emulation(float v1, float v2, float v3) {
+  __m256 v1Vec = _mm256_set1_ps(v1);
+  __m256 v2Vec = _mm256_set1_ps(v2);
+  __m256 v3Vec = _mm256_set1_ps(v3);
+  __m256 resVec = _mm256_fmadd_ps(v1Vec, v2Vec, v3Vec);
+  float *result = (float *)&resVec;
+  return *result;
+}
+
 } // namespace fake_fp16

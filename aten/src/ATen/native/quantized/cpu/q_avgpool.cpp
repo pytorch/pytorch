@@ -5,7 +5,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -375,7 +375,7 @@ Tensor qnnpack_avg_pool2d(
   CAFFE_ENFORCE(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Average Pooling operator");
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
   TORCH_INTERNAL_ASSERT(
@@ -386,7 +386,7 @@ Tensor qnnpack_avg_pool2d(
 } // qnnp_avgpool_helper
 #endif
 
-Tensor quantized_avg_pool2d(
+Tensor avg_pool2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -408,7 +408,7 @@ Tensor quantized_avg_pool2d(
         divisor_override);
   }
 #endif
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "quantized_avg_pool2d", [&]() {
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool2d_quantized_cpu", [&]() {
     output = q_avg_pool2d<scalar_t>(
         input,
         kernel_size,

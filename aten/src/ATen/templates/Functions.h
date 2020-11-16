@@ -15,12 +15,47 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 
 namespace at {
 
 using native::tensor;
 
 ${function_declarations}
+
+// Special C++ only overloads for std()-like functions (See gh-40287)
+// These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
+// So, for example std(0) would select the std(unbiased=False) overload
+inline Tensor var(const Tensor& self, int dim) {
+  return at::native::var(self, IntArrayRef{dim});
+}
+
+inline std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim) {
+  return at::native::var_mean(self, IntArrayRef{dim});
+}
+
+inline Tensor std(const Tensor& self, int dim) {
+  return at::native::std(self, IntArrayRef{dim});
+}
+
+inline std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim) {
+  return at::native::std_mean(self, IntArrayRef{dim});
+}
+
+namespace {
+  inline std::vector<int64_t> zero_sizes(const TensorOptions& options) {
+    if (options.has_memory_format()) {
+      auto memory_format = *options.memory_format_opt();
+      if (at::MemoryFormat::ChannelsLast == memory_format) {
+        return {0, 0, 0, 0};
+      }
+      if (at::MemoryFormat::ChannelsLast3d == memory_format) {
+        return {0, 0, 0, 0, 0};
+      }
+    }
+    return {0};
+  }
+}
 
 inline Tensor from_blob(
     void* data,
@@ -45,7 +80,7 @@ inline Tensor from_blob(
       InefficientStdFunctionContext::makeDataPtr(data, deleter, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-  return empty({0}, options).set_(storage, 0, sizes, strides);
+  return empty(IntArrayRef(zero_sizes(options)), options).set_(storage, 0, sizes, strides);
 }
 
 inline Tensor from_blob(
@@ -76,7 +111,7 @@ inline Tensor from_blob(
       DataPtr(data, nullptr, [](void*) {}, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-  return empty({0}, options).set_(storage, 0, sizes, strides);
+  return empty(IntArrayRef(zero_sizes(options)), options).set_(storage, 0, sizes, strides);
 }
 
 inline Tensor from_blob(

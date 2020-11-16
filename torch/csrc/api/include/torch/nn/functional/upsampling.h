@@ -53,8 +53,8 @@ inline std::vector<int64_t> _interp_output_size(
       }
     }
     if (is_float_scale_factor) {
-      TORCH_WARN("The default behavior for interpolate/upsample with float scale_factor will change "
-                 "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+      TORCH_WARN("The default behavior for interpolate/upsample with float scale_factor changed "
+                 "in 1.6.0 to align with other frameworks/libraries, and uses scale_factor directly, "
                  "instead of relying on the computed output size. "
                  "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                  "See the documentation of nn.Upsample for details. ");
@@ -98,7 +98,7 @@ inline Tensor interpolate(
 
   auto scale_factor_len = input.dim() - 2;
   std::vector<c10::optional<double>> scale_factor_list(scale_factor_len, c10::nullopt);
-  if (scale_factor != c10::nullopt && recompute_scale_factor.has_value() && !recompute_scale_factor.value()) {
+  if (scale_factor != c10::nullopt && !recompute_scale_factor.value_or(false)) {
     auto _scale_factor_repeated = *scale_factor;
     scale_factor_list = {};
     for (const auto& elem : _scale_factor_repeated) {

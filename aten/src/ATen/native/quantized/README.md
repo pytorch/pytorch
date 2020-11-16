@@ -77,7 +77,7 @@ The registration is done using `TORCH_LIBRARY_IMPL`.
 
 ```c++
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("xand", quantized_xand);
+  m.impl("xand", TORCH_FN(quantized_xand));
 }
 ```
 
@@ -128,7 +128,7 @@ namespace at {
   }
 
   TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-    m.impl("xand", quantized_xand);
+    m.impl("xand", TORCH_FN(quantized_xand));
   }
 }}  // namespace at::native
 ```

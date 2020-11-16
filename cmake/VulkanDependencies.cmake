@@ -85,62 +85,80 @@ if(ANDROID)
     list(APPEND Vulkan_LIBS ${GOOGLE_SHADERC_LIBRARIES})
   endif(USE_VULKAN_SHADERC_RUNTIME)
 else()
-  # USE_VULKAN AND NOT ANDROID
-  if(NOT DEFINED ENV{VULKAN_SDK})
-    message(FATAL_ERROR "USE_VULKAN requires environment var VULKAN_SDK set")
-  endif()
-  message(STATUS "VULKAN_SDK:$ENV{VULKAN_SDK}")
+  if(DEFINED ENV{VULKAN_SDK})
+    message(STATUS "VULKAN_SDK:$ENV{VULKAN_SDK}")
 
-  set(VULKAN_INCLUDE_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Headers/include")
-  message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
-
-  if(USE_VULKAN_WRAPPER)
-    # Vulkan wrapper from VULKAN_SDK
-    set(VULKAN_SDK_WRAPPER_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Tools/common")
-    message(STATUS "Vulkan_SDK_WRAPPER_DIR:${VULKAN_SDK_WRAPPER_DIR}")
-    set(VULKAN_WRAPPER_DIR "${VULKAN_SDK_WRAPPER_DIR}")
-
-    add_library(
-      VulkanWrapper
-      STATIC
-      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
-      ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
-
-    target_include_directories(VulkanWrapper PUBLIC .)
-    target_include_directories(VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
-
-    target_link_libraries(VulkanWrapper ${CMAKE_DL_LIBS})
-
-    list(APPEND Vulkan_INCLUDES ${VULKAN_WRAPPER_DIR})
-    list(APPEND Vulkan_LIBS VulkanWrapper)
-  else(USE_VULKAN_WRAPPER)
-    find_library(VULKAN_LIBRARY
-      NAMES vulkan
-      PATHS
-      "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib")
-
-    if(NOT VULKAN_LIBRARY)
-      message(FATAL_ERROR "USE_VULKAN: Vulkan library not found")
-    endif()
-
-    message(STATUS "VULKAN_LIBRARY:${VULKAN_LIBRARY}")
+    set(VULKAN_INCLUDE_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Headers/include")
     message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
 
-    list(APPEND Vulkan_INCLUDES ${VULKAN_INCLUDE_DIR})
-    list(APPEND Vulkan_LIBS ${VULKAN_LIBRARY})
-  endif(USE_VULKAN_WRAPPER)
+    if(USE_VULKAN_WRAPPER)
+      # Vulkan wrapper from VULKAN_SDK
+      set(VULKAN_SDK_WRAPPER_DIR "$ENV{VULKAN_SDK}/source/Vulkan-Tools/common")
+      message(STATUS "Vulkan_SDK_WRAPPER_DIR:${VULKAN_SDK_WRAPPER_DIR}")
+      set(VULKAN_WRAPPER_DIR "${VULKAN_SDK_WRAPPER_DIR}")
+
+      add_library(
+        VulkanWrapper
+        STATIC
+        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.h
+        ${VULKAN_WRAPPER_DIR}/vulkan_wrapper.cpp)
+
+      target_include_directories(VulkanWrapper PUBLIC .)
+      target_include_directories(VulkanWrapper PUBLIC "${VULKAN_INCLUDE_DIR}")
+
+      target_link_libraries(VulkanWrapper ${CMAKE_DL_LIBS})
+
+      list(APPEND Vulkan_INCLUDES ${VULKAN_WRAPPER_DIR})
+      list(APPEND Vulkan_LIBS VulkanWrapper)
+    else(USE_VULKAN_WRAPPER)
+      find_library(VULKAN_LIBRARY
+        NAMES vulkan
+        PATHS
+        "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib")
+
+      if(NOT VULKAN_LIBRARY)
+        message(FATAL_ERROR "USE_VULKAN: Vulkan library not found")
+      endif()
+
+      message(STATUS "VULKAN_LIBRARY:${VULKAN_LIBRARY}")
+      message(STATUS "VULKAN_INCLUDE_DIR:${VULKAN_INCLUDE_DIR}")
+
+      list(APPEND Vulkan_INCLUDES ${VULKAN_INCLUDE_DIR})
+      list(APPEND Vulkan_LIBS ${VULKAN_LIBRARY})
+    endif(USE_VULKAN_WRAPPER)
+
+    set(GOOGLE_SHADERC_INCLUDE_SEARCH_PATH $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/include)
+    set(GOOGLE_SHADERC_LIBRARY_SEARCH_PATH $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib)
+
+  else()
+    # Try looking in system path as a last resort.
+    find_package(Vulkan)
+    if(NOT Vulkan_FOUND)
+      message(FATAL_ERROR "USE_VULKAN requires either Vulkan installed on system path or environment var VULKAN_SDK set")
+    endif()
+
+    list(APPEND Vulkan_INCLUDES ${Vulkan_INCLUDE_DIRS})
+    list(APPEND Vulkan_LIBS ${Vulkan_LIBRARIES})
+
+    if(USE_VULKAN_WRAPPER)
+      message(STATUS "USE_VULKAN_WRAPPER is unsupported when environment var VULKAN_SDK not set")
+      caffe2_update_option(USE_VULKAN_WRAPPER OFF)
+    endif()
+
+    set(GOOGLE_SHADERC_INCLUDE_SEARCH_PATH ${Vulkan_INCLUDE_DIR})
+    set(GOOGLE_SHADERC_LIBRARY_SEARCH_PATH ${Vulkan_LIBRARY})
+  endif()
 
   if(USE_VULKAN_SHADERC_RUNTIME)
-    # shaderc from VULKAN_SDK
     find_path(
         GOOGLE_SHADERC_INCLUDE_DIRS
         NAMES shaderc/shaderc.hpp
-        PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/include)
+        PATHS ${GOOGLE_SHADERC_INCLUDE_SEARCH_PATH})
 
     find_library(
         GOOGLE_SHADERC_LIBRARIES
         NAMES shaderc_combined
-        PATHS $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib)
+        PATHS ${GOOGLE_SHADERC_LIBRARY_SEARCH_PATH})
 
     find_package_handle_standard_args(
         Shaderc

@@ -395,7 +395,7 @@ support in TorchScript. The categorizations are as follows:
      - Not Supported
      -
    * - `8.5. The with statement <https://docs.python.org/3/reference/compound_stmts.html#the-with-statement>`_
-     - Not Supported
+     - Supported
      -
    * - `8.6. Function definitions <https://docs.python.org/3/reference/compound_stmts.html#function-definitions>`_
      - Not Supported
@@ -430,4 +430,3 @@ support in TorchScript. The categorizations are as follows:
    * - `9.4. Expression input <https://docs.python.org/3/reference/toplevel_components.html#expression-input>`_
      - Not Relevant
      -
-

@@ -140,7 +140,7 @@ class ConstraintRegistry(object):
             factory = self._registry[type(constraint)]
         except KeyError:
             raise NotImplementedError(
-                'Cannot transform {} constraints'.format(type(constraint).__name__))
+                f'Cannot transform {type(constraint).__name__} constraints') from None
         return factory(constraint)
 
 

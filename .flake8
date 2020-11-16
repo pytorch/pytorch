@@ -12,5 +12,5 @@ ignore =
     B007,B008,
     # these ignores are from flake8-comprehensions; please fix!
     C400,C401,C402,C403,C404,C405,C407,C411,C413,C414,C415
-per-file-ignores = __init__.py: F401
+per-file-ignores = __init__.py: F401 torch/utils/cpp_extension.py: B950
 exclude = docs/src,venv,third_party,caffe2,scripts,docs/caffe2,torch/lib/include,torch/lib/tmp_install,build,torch/include,*.pyi,.git,build,build_test_custom_build,build_code_analyzer

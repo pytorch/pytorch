@@ -61,13 +61,14 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
 
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
-  CAFFE_ENFORCE_GT(X.dim32(0), 0);
-  batch_permutation_loop<true>(
-      X.dim32(0),
-      X.numel() / X.dim32(0),
-      X.data<float>(),
-      indices.data<int>(),
-      Y->mutable_data<float>());
+  if (X.dim32(0) > 0) {
+    batch_permutation_loop<true>(
+        X.dim32(0),
+        X.numel() / X.dim32(0),
+        X.data<float>(),
+        indices.data<int>(),
+        Y->mutable_data<float>());
+  }
   return true;
 }
 
@@ -78,13 +79,14 @@ bool BatchPermutationGradientOp<float, CPUContext>::RunOnDevice() {
 
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
 
-  CAFFE_ENFORCE_GT(dY.dim32(0), 0);
-  batch_permutation_loop<false>(
-      dY.dim32(0),
-      dY.numel() / dY.dim32(0),
-      dY.data<float>(),
-      indices.data<int>(),
-      dX->mutable_data<float>());
+  if (dY.dim32(0) > 0) {
+    batch_permutation_loop<false>(
+        dY.dim32(0),
+        dY.numel() / dY.dim32(0),
+        dY.data<float>(),
+        indices.data<int>(),
+        dX->mutable_data<float>());
+  }
   return true;
 }
 

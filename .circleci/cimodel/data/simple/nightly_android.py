@@ -1,4 +1,7 @@
-from cimodel.data.simple.util.docker_constants import DOCKER_IMAGE_NDK
+from cimodel.data.simple.util.docker_constants import (
+    DOCKER_IMAGE_NDK,
+    DOCKER_REQUIREMENT_NDK
+)
 
 
 class AndroidNightlyJob:
@@ -48,12 +51,13 @@ class AndroidNightlyJob:
 
         return [{self.template_name: props_dict}]
 
+BASE_REQUIRES = [DOCKER_REQUIREMENT_NDK]
 
 WORKFLOW_DATA = [
-    AndroidNightlyJob(["x86_32"], "pytorch_linux_build"),
-    AndroidNightlyJob(["x86_64"], "pytorch_linux_build"),
-    AndroidNightlyJob(["arm", "v7a"], "pytorch_linux_build"),
-    AndroidNightlyJob(["arm", "v8a"], "pytorch_linux_build"),
+    AndroidNightlyJob(["x86_32"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["x86_64"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["arm", "v7a"], "pytorch_linux_build", requires=BASE_REQUIRES),
+    AndroidNightlyJob(["arm", "v8a"], "pytorch_linux_build", requires=BASE_REQUIRES),
     AndroidNightlyJob(["android_gradle"], "pytorch_android_gradle_build",
                       with_docker=False,
                       requires=[

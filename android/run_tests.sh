@@ -4,42 +4,10 @@ set -eux
 PYTORCH_DIR="$(cd $(dirname $0)/..; pwd -P)"
 PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
 
-echo "ANDROID_HOME:$ANDROID_HOME"
-if [ ! -z "$ANDROID_HOME" ]; then
-  echo "ANDROID_HOME not set; please set it to Android sdk directory"
-fi
+source "$PYTORCH_ANDROID_DIR/common.sh"
 
-if [ ! -d $ANDROID_HOME ]; then
-  echo "ANDROID_HOME not a directory; did you install it under $ANDROID_HOME?"
-  exit 1
-fi
-
-echo "ANDROID_NDK:$ANDROID_NDK"
-if [ ! -z "$ANDROID_NDK" ]; then
-  echo "ANDROID_NDK not set; please set it to Android sdk directory"
-fi
-
-if [ ! -d $ANDROID_NDK ]; then
-  echo "ANDROID_NDK not a directory; did you install it under $ANDROID_NDK?"
-  exit 1
-fi
-
-GRADLE_PATH=gradle
-GRADLE_NOT_FOUND_MSG="Unable to find gradle, please add it to PATH or set GRADLE_HOME"
-
-if [ ! -x "$(command -v gradle)" ]; then
-  if [ -z "$GRADLE_HOME" ]; then
-    echo GRADLE_NOT_FOUND_MSG 
-    exit 1
-  fi
-  GRADLE_PATH=$GRADLE_HOME/bin/gradle
-  if [ ! -f "$GRADLE_PATH" ]; then
-    echo GRADLE_NOT_FOUND_MSG 
-    exit 1
-  fi
-fi
-echo "GRADLE_PATH:$GRADLE_PATH"
-
+check_android_sdk
+check_gradle
 
 # Run android instrumented tests on x86 emulator
 
@@ -70,7 +38,7 @@ cat <<- EOF
   $ANDROID_HOME/platform-tools/adb devices
 
   If everything is ok the output will be:
-  
+
   List of devices attached
   emulator-5554   device
 EOF

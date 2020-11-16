@@ -19,7 +19,7 @@ chmod +x /home/circleci/project/ci_test_script.sh
 VOLUME_MOUNTS="-v /home/circleci/project/:/circleci_stuff -v /home/circleci/project/final_pkgs:/final_pkgs -v ${PYTORCH_ROOT}:/pytorch -v ${BUILDER_ROOT}:/builder"
 # Run the docker
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia ${VOLUME_MOUNTS} -t -d "${DOCKER_IMAGE}")
+  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all ${VOLUME_MOUNTS} -t -d "${DOCKER_IMAGE}")
 else
   export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined ${VOLUME_MOUNTS} -t -d "${DOCKER_IMAGE}")
 fi

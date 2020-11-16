@@ -273,12 +273,6 @@ namespace cuda {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cuda", [&] {
     if ((
       std::is_same<scalar_t, int64_t>::value ||
@@ -319,12 +313,6 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
     if (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
@@ -361,12 +349,6 @@ struct RandomFromToKernel {
 
 template<typename RNG>
 void random_kernel(TensorIterator& iter, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "random_kernel_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       auto random_func = [] __device__ (uint64_t rand) {
@@ -462,12 +444,6 @@ struct NormalKernel {
 
 template<typename RNG>
 void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "uniform_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
@@ -522,7 +498,7 @@ struct LogNormalKernel {
 template<typename RNG>
 void geometric_kernel(TensorIterator& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cuda", [&] {
-    using accscalar_t = at::GeometricType<scalar_t>::type;
+    using accscalar_t = at::DiscreteDistributionType<scalar_t>::type;
     // define lambda for geometric transformation
     auto geometric_func = [p] __device__ (accscalar_t rand) {
       return static_cast<scalar_t>(transformation::geometric<accscalar_t>(rand, p));
@@ -655,35 +631,22 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
 }
 
 template<typename RNG>
-void bernoulli_kernel(TensorIterator& iter, double p_, RNG gen) {
+void bernoulli_kernel(TensorIterator& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
-      if (std::is_same<scalar_t, double>::value) {
+      using accscalar_t = at::DiscreteDistributionType<scalar_t>::type;
       // define lambda for bernoulli transformation
-      auto bernoulli_func = [p_] __device__ (double rand) {
-        return static_cast<scalar_t>(rand <= p_);
+      auto bernoulli_func = [p] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(transformation::bernoulli<accscalar_t>(rand, p));
       };
-      distribution_nullary_kernel<scalar_t, double, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        bernoulli_func);
-    } else {
-      auto p = static_cast<float>(p_);
-      auto bernoulli_func = [p] __device__ (float rand) {
-        return static_cast<scalar_t>(rand <= p);
-      };
-      distribution_nullary_kernel<scalar_t, float, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        bernoulli_func);
-    }
+      uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, bernoulli_func);
    });
 }
 
 template<typename RNG>
 struct BernoulliKernel {
-  void operator()(TensorIterator& iter, double p_, c10::optional<Generator> gen) {
-    bernoulli_kernel(iter, p_, check_generator<RNG>(gen));
+  void operator()(TensorIterator& iter, double p, c10::optional<Generator> gen) {
+    bernoulli_kernel(iter, p, check_generator<RNG>(gen));
   }
   void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
     bernoulli_kernel(self, p_, check_generator<RNG>(gen));

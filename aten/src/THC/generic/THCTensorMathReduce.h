@@ -17,15 +17,6 @@ THC_API accreal THCTensor_(var_all)(THCState *state, THCTensor *self, bool unbia
 
 THC_API void THCTensor_(prod)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim);
 
-THC_API accreal THCTensor_(meanall)(THCState *state, THCTensor *self);
-
-THC_API scalar_t THCTensor_(medianall)(THCState *state, THCTensor *self);
-
-THC_API void THCTensor_(median)(THCState *state,
-                                THCTensor *values,
-                                THCudaLongTensor *indices,
-                                THCTensor *src, int dim, int keepdim);
-
 #endif
 
 #endif

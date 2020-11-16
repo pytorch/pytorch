@@ -11,7 +11,7 @@ c10::intrusive_ptr<Conv2dOpContext> VulkanConv2dOpContext::create_context(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& dilation,
-    int64_t groups,
+    const int64_t groups,
     const c10::optional<Scalar> output_min,
     const c10::optional<Scalar> output_max) {
   auto op_context = vulkan::detail::convolution2d::create(
@@ -23,7 +23,7 @@ c10::intrusive_ptr<Conv2dOpContext> VulkanConv2dOpContext::create_context(
       groups,
       output_min ? output_min->to<float>() : vulkan::ContextConv2D::kMin,
       output_max ? output_max->to<float>() : vulkan::ContextConv2D::kMax);
-  auto conv2d_op_context = c10::make_intrusive<VulkanConv2dOpContext>(
+  return c10::make_intrusive<VulkanConv2dOpContext>(
       std::move(weight),
       std::move(bias),
       std::move(padding),
@@ -33,7 +33,6 @@ c10::intrusive_ptr<Conv2dOpContext> VulkanConv2dOpContext::create_context(
       output_min,
       output_max,
       std::move(op_context));
-  return conv2d_op_context;
 }
 
 Tensor VulkanConv2dOpContext::run(const Tensor& input) {

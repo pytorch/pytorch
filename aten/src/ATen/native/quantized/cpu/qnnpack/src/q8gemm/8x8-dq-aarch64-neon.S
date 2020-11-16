@@ -687,14 +687,14 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon
 
     SUB x1, x1, 4
 
-    MOV V8.4s, V9.4s
-    MOV v10.4s, v11.4s
-    MOV v12.4s, V13.4s
-    MOV V14.4s, V15.4s
-    MOV V16.4s, V17.4s
-    MOV V18.4s, V19.4s
-    MOV V20.4s, V21.4s
-    MOV V22.4s, V23.4s
+    MOV V8.16b, V9.16b
+    MOV v10.16b, v11.16b
+    MOV v12.16b, V13.16b
+    MOV V14.16b, V15.16b
+    MOV V16.16b, V17.16b
+    MOV V18.16b, V19.16b
+    MOV V20.16b, V21.16b
+    MOV V22.16b, V23.16b
 
 5:
     CMP x1, 2

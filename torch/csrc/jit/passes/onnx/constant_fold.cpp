@@ -14,39 +14,34 @@ using namespace ::c10::onnx;
 
 namespace {
 
+enum OnnxType : int {
+  ONNX_FLOAT = 1,
+  ONNX_UINT8,
+  ONNX_INT8,
+  ONNX_UINT16,
+  ONNX_INT16,
+  ONNX_INT32,
+  ONNX_INT64,
+  ONNX_FLOAT16 = 10,
+  ONNX_DOUBLE,
+  ONNX_UINT32,
+};
+
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
     // ScalarType type.
-    {1, at::kFloat},
-    {2, at::kByte},
-    {3, at::kChar},
-    {4, at::kInt},
-    {5, at::kShort},
-    {6, at::kInt},
-    {7, at::kLong},
-    {10, at::kFloat},
-    {11, at::kDouble},
-    {12, at::kLong},
+    {ONNX_FLOAT, at::kFloat},
+    {ONNX_UINT8, at::kByte},
+    {ONNX_INT8, at::kChar},
+    {ONNX_UINT16, at::kInt},
+    {ONNX_INT16, at::kShort},
+    {ONNX_INT32, at::kInt},
+    {ONNX_INT64, at::kLong},
+    {ONNX_FLOAT16, at::kFloat},
+    {ONNX_DOUBLE, at::kDouble},
+    {ONNX_UINT32, at::kLong},
 };
-
-void buildParamsMapFromValueToParamsMap(
-    const ValueToParamPairMap& valsToParamsMap,
-    ParamMap& paramsDict) {
-  paramsDict.clear();
-  for (const auto& nameTensorParamPair : valsToParamsMap) {
-    paramsDict.insert(nameTensorParamPair.second);
-  }
-}
-
-void eraseUnusedBlockInputs(Block* b) {
-  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
-    size_t i = i_1 - 1;
-    if (!b->inputs().at(i)->hasUses()) {
-      b->eraseInput(i);
-    }
-  }
-}
 
 void handleNegativeStartEndIndex(
     int64_t& start,
@@ -108,7 +103,10 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
 c10::optional<at::Tensor> runTorchSlice_opset10(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues) {
-  if (inputTensorValues.size() < 3 || inputTensorValues.size() > 5) {
+  const int maxSliceInputCount = 5;
+  const int minSliceInputCount = 3;
+  if (inputTensorValues.size() < minSliceInputCount ||
+      inputTensorValues.size() > maxSliceInputCount) {
     std::cerr
         << "Warning: Constant folding - Invalid number of inputs found for opset 10 or 11 onnx::Slice op. "
         << "Constant folding not applied." << std::endl;
@@ -254,11 +252,9 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Cast) {
     assert(inputTensorValues.size() == 1);
-    if (node->hasAttributeS("to") &&
-        onnxTypeToScalarTypeMap.find(node->i(attr::to)) !=
-            onnxTypeToScalarTypeMap.end()) {
-      updated_val =
-          inputTensorValues[0].to(onnxTypeToScalarTypeMap[node->i(attr::to)]);
+    if (node->hasAttributeS("to") && ONNXTypeToATenType(node->i(attr::to))) {
+      updated_val = inputTensorValues[0].to(
+          ONNXTypeToATenType(node->i(attr::to)).value());
       return c10::optional<at::Tensor>(updated_val);
     }
     return c10::nullopt;

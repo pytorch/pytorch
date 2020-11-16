@@ -13,51 +13,6 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
   return THTensor_(nElement)(t);
 }
 
-static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
-{
-  std::atomic<int> equal{1};
-  if(!THTensor_(isSameSizeAs)(ta, tb))
-    return 0;
-
-  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
-    scalar_t *tap = ta->data<scalar_t>();
-    scalar_t *tbp = tb->data<scalar_t>();
-    ptrdiff_t sz = THTensor_(nElement)(ta);
-    ptrdiff_t i;
-    at::parallel_for(
-        0,
-        sz,
-        TH_OMP_OVERHEAD_THRESHOLD,
-        [&](int64_t begin, int64_t end) {
-          for (auto iter = begin; iter < end; iter++) {
-            if (!equal) {
-              break;
-            }
-            if (tap[iter] != tbp[iter]) {
-              equal = 0;
-              break;
-            }
-          }
-        });
-  } else {
-    // Short-circuit the apply function on inequality
-    TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
-                     if (equal && *ta_data != *tb_data) {
-                        equal = 0;
-                        TH_TENSOR_APPLY_hasFinished = 1; break;
-                     })
-  }
-  return equal.load();
-}
-
-int THTensor_(equal)(THTensor *ta, THTensor* tb) {
-  if (!at::namedinference::are_names_equal(ta, tb)) {
-    return 0;
-  }
-  at::NoNamesGuard guard;
-  return THTensor_(equalImpl)(ta, tb);
-}
-
 #if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_BOOL)
 /* I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
@@ -275,36 +230,6 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
 #undef MAX_LEVELS
 #undef M_SMALL
 
-void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
-{
-  dimension = at::maybe_wrap_dim(dimension, t);
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "invalid dimension %d",
-      dimension);
-
-  THTensor_(resizeAs)(rt_, t);
-  at::Tensor rt__wrap = THTensor_wrap(rt_);
-  at::Tensor t_wrap = THTensor_wrap(t);
-  at::native::copy_(rt__wrap, t_wrap);
-  THLongTensor_resize(ri_, t->sizes(), {});
-
-  if(descendingOrder)
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortdescend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-  else
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortascend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-}
-
 #endif
 
 #if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_HALF)
@@ -326,74 +251,6 @@ void THTensor_(preserveReduceDimSemantics)(
 }
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
-
-void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
-{
-  int64_t batch;
-
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch1));
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch2));
-  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
-             "equal number of batches expected, got %d, %d",
-             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
-  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
-             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
-             THTensor_(size)(batch1, 1), THTensor_(size)(batch1, 2),
-             THTensor_(size)(batch2, 1), THTensor_(size)(batch2, 2));
-
-  int64_t bs = THTensor_(size)(batch1, 0);
-  int64_t dim1 = THTensor_(size)(batch1, 1);
-  int64_t dim2 = THTensor_(size)(batch2, 2);
-  THArgCheck(THTensor_(size)(t, 0) == bs, 1,   "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 1) == dim1, 1, "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 2) == dim2, 1, "output tensor of incorrect size");
-
-  if (t != result) {
-    THTensor_(resizeAs)(result, t);
-    if (beta != 0.0) {
-      at::Tensor result_wrap = THTensor_wrap(result);
-      at::Tensor t_wrap = THTensor_wrap(t);
-      at::native::copy_(result_wrap, t_wrap);
-    }
-  }
-
-  THTensor *matrix1 = THTensor_(new)();
-  THTensor *matrix2 = THTensor_(new)();
-  THTensor *result_matrix = THTensor_(new)();
-
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
-    THTensor_(select)(matrix1, batch1, 0, batch);
-    THTensor_(select)(matrix2, batch2, 0, batch);
-    THTensor_(select)(result_matrix, result, 0, batch);
-
-    THTensor_(addmm)(result_matrix, result_matrix, matrix1, matrix2, beta, alpha);
-  }
-
-  c10::raw::intrusive_ptr::decref(matrix1);
-  c10::raw::intrusive_ptr::decref(matrix2);
-  c10::raw::intrusive_ptr::decref(result_matrix);
-}
-
-accreal THTensor_(trace)(THTensor *t)
-{
-  scalar_t *t_data = t->data<scalar_t>();
-  accreal sum = 0;
-  int64_t i = 0;
-  int64_t t_stride_0, t_stride_1, t_diag_size;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  t_diag_size = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1));
-  while(i < t_diag_size)
-  {
-    sum += t_data[i*(t_stride_0+t_stride_1)];
-    i++;
-  }
-
-  return sum;
-}
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/
@@ -710,14 +567,9 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
   c10::raw::intrusive_ptr::decref(rowS);
 }
 
-accreal THTensor_(meanall)(THTensor *tensor)
-{
-  return THTensor_wrap(tensor).sum().item<accreal>()/THTensor_(nElement)(tensor);
-}
-
 accreal THTensor_(var_all)(THTensor *tensor, bool unbiased)
 {
-  accreal mean = THTensor_(meanall)(tensor);
+  accreal mean = THTensor_wrap(tensor).mean().item<accreal>();
   accreal sum = 0;
   TH_TENSOR_APPLY(scalar_t, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
   sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (unbiased ? 1 : 0));
@@ -739,7 +591,7 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
   scalar_t *h_data;
 
   THTensor_(resize1d)(hist, nbins);
-  THTensor_(zero)(hist);
+  THTensor_wrap(hist).zero_();
   minval = minvalue;
   maxval = maxvalue;
   if (minval == maxval)

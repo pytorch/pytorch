@@ -1,7 +1,5 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <ATen/record_function.h>
-#include <torch/csrc/distributed/autograd/context/container.h>
-#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -17,17 +15,22 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-constexpr auto kDistAutogradBackwardProfilingKey =
-    "torch::distributed::autograd::backward";
-
-PyObject* dist_autograd_init(PyObject* /* unused */) {
+PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
   auto autograd_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.autograd"));
   if (!autograd_module) {
     throw python_error();
   }
 
-  auto module = py::handle(autograd_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule("_distributed_autograd", "distributed autograd bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   auto distAutogradContext =
       shared_ptr_class_<DistAutogradContext>(module, "DistAutogradContext")
@@ -117,22 +120,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "backward",
-      [](int64_t contextId,
-         const std::vector<torch::Tensor>& roots,
-         bool retainGraph = false) {
-        RECORD_FUNCTION(
-            kDistAutogradBackwardProfilingKey, std::vector<c10::IValue>());
-        torch::autograd::variable_list variables;
-        for (const auto& root : roots) {
-          variables.emplace_back(root);
-        }
-        try {
-          DistEngine::getInstance().execute(contextId, variables, retainGraph);
-        } catch (python_error& e) {
-          // FIXME: crashes if exception type is not RuntimeError
-          throw std::runtime_error(e.what());
-        }
-      },
+      backward,
       R"(
 backward(context_id: int, roots: List[Tensor], retain_graph = False) -> None
 
@@ -166,9 +154,9 @@ Arguments:
 Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
-    >>>      pred = model.forward()
-    >>>      loss = loss_func(pred, loss)
-    >>>      dist_autograd.backward(context_id, loss)
+    >>>     pred = model.forward()
+    >>>     loss = loss_func(pred, loss)
+    >>>     dist_autograd.backward(context_id, loss)
 )",
       py::arg("contextId"),
       py::arg("roots"),
@@ -200,13 +188,13 @@ Returns:
 Example::
     >>> import torch.distributed.autograd as dist_autograd
     >>> with dist_autograd.context() as context_id:
-    >>>      t1 = torch.rand((3, 3), requires_grad=True)
-    >>>      t2 = torch.rand((3, 3), requires_grad=True)
-    >>>      loss = t1 + t2
-    >>>      dist_autograd.backward(context_id, [loss.sum()])
-    >>>      grads = dist_autograd.get_gradients(context_id)
-    >>>      print(grads[t1])
-    >>>      print(grads[t2])
+    >>>     t1 = torch.rand((3, 3), requires_grad=True)
+    >>>     t2 = torch.rand((3, 3), requires_grad=True)
+    >>>     loss = t1 + t2
+    >>>     dist_autograd.backward(context_id, [loss.sum()])
+    >>>     grads = dist_autograd.get_gradients(context_id)
+    >>>     print(grads[t1])
+    >>>     print(grads[t2])
 )",
       py::arg("context_id"));
 
@@ -216,7 +204,7 @@ Example::
 
 static PyMethodDef methods[] = { // NOLINT
     {"_dist_autograd_init",
-     (PyCFunction)dist_autograd_init,
+     dist_autograd_init,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};

@@ -40,33 +40,35 @@ using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
 using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
 using MKLDNNTensor = Tensor;
 
-Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options) {
+Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   auto dims = it.get_dims();
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
+  caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
+  Device device_ = device_or_default(device);
   return detail::make_tensor<MKLDNNTensorImpl>(
     DispatchKeySet(DispatchKey::MkldnnCPU),
-    options.dtype(), options.device(), handle,
+    dtype_, device_, handle,
     std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
-  AT_ASSERTM(mkldnn_tensor.is_mkldnn(),
-             "mkldnn_to_dense expects MKL-DNN tensor input");
+  TORCH_CHECK(mkldnn_tensor.is_mkldnn(),
+             "itensor_from_mkldnn expects MKL-DNN tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
 ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
-  AT_ASSERTM(
+  TORCH_CHECK(
       tensor.device().type() == DeviceType::CPU,
       "itensor_view_from_dense expects CPU tensor input");
-  AT_ASSERTM(
+  TORCH_CHECK(
       tensor.layout() == Layout::Strided,
       "itensor_view_from_dense expects dense tensor input");
-  AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
+  TORCH_CHECK(tensor.scalar_type() == ScalarType::Float,
              "itensor_view_from_dense expects float tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},

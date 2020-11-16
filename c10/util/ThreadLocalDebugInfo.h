@@ -46,6 +46,9 @@ class C10_API ThreadLocalDebugInfo {
   // Pop debug info, throws in case the last pushed
   // debug info is not of a given kind
   static std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
+  // Peek debug info, throws in case the last pushed debug info is not of the
+  // given kind
+  static std::shared_ptr<DebugInfoBase> _peek(DebugInfoKind kind);
 
  private:
   std::shared_ptr<DebugInfoBase> info_;

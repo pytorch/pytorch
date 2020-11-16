@@ -149,7 +149,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
     case '-':
       str = "-";
       L.next();
-      L.expect(TK_NUMBER);
+      if (L.cur().kind != TK_NUMBER) {
+        throw ErrorReport(token.range)
+            << "Expected a number after '-' but got:" << token.text();
+      }
       // Fallthrough
     case TK_NUMBER:
       str += L.cur().text();
@@ -188,9 +191,9 @@ void IRParser::parseAttr(Node* n) {
   if (L.cur().kind == '[') {
     // list
     AttributeKind k = AttributeKind::ts;
-    std::vector<int64_t> is;
-    std::vector<std::string> ss;
-    std::vector<double> fs;
+    c10::List<int64_t> is;
+    c10::List<std::string> ss;
+    c10::List<double> fs;
     int elem_num = 0;
     parseList('[', ',', ']', [&] {
       ParsedLiteral r = parseScalarLiteral(n);
@@ -216,16 +219,16 @@ void IRParser::parseAttr(Node* n) {
     });
     switch (k) {
       case AttributeKind::ts:
-        n->ts_(Symbol::attr(attrname), {});
+        n->ival_(Symbol::attr(attrname), IValue());
         break;
       case AttributeKind::ss:
-        n->ss_(Symbol::attr(attrname), ss);
+        n->ival_(Symbol::attr(attrname), IValue(ss));
         break;
       case AttributeKind::fs:
-        n->fs_(Symbol::attr(attrname), fs);
+        n->ival_(Symbol::attr(attrname), IValue(fs));
         break;
       case AttributeKind::is:
-        n->is_(Symbol::attr(attrname), is);
+        n->ival_(Symbol::attr(attrname), IValue(is));
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -368,10 +371,9 @@ void IRParser::parseOperator(Block* b) {
         if (!schema_return_type->hasFreeVariables() &&
             !v.type->isSubtypeOf(schema_return_type)) {
           throw ErrorReport(source_range)
-              << "Annotated type " << v.type->python_str()
+              << "Annotated type " << v.type->repr_str()
               << " does not match schema type "
-              << schema_return_type->python_str() << " for operator "
-              << *schema;
+              << schema_return_type->repr_str() << " for operator " << *schema;
         }
         vmap[v.name]->setType(v.type);
       }

@@ -180,5 +180,5 @@ class Rowwise8BitQuantizedToFloatOp : public Operator<Context> {
   INPUT_TAGS(DATA_UINT8, SCALE_BIAS);
   OUTPUT_TAGS(DATA_FLOAT);
 };
-}
+} // namespace caffe2
 #endif // CAFFE2_OPERATORS_LENGTHS_REDUCER_ROWWISE_8bits_H_

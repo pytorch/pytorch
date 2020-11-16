@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
 /*
@@ -31,16 +32,49 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
-struct PredicateCompute {
-  // Return if there are any predicates
-  static bool hasPredicates(const TensorIndex*);
-
+class PredicateCompute {
+ public:
   // Return the series of predicates, if an axis doesn't have a predicate
   // reutrns 1
-  static std::vector<Bool*> computePredicates(const TensorIndex*);
+  static std::vector<kir::Bool*> computePredicates(
+      const TensorView* tv,
+      const std::vector<Val*>& indices,
+      bool use_rfactor);
+
+  static kir::Bool* getInlinePredicate(
+      Expr* expr,
+      const std::vector<kir::ForLoop*>& loops,
+      kir::Bool* thread_pred,
+      bool ignore_block_grid_reductions = true);
 };
 
+class TORCH_CUDA_API UnrollPredicate {
+ public:
+  static kir::Bool* get(
+      const std::vector<kir::ForLoop*>& outer_loops,
+      kir::ForLoop* unrolled_loop,
+      const std::unordered_map<IterDomain*, IterDomain*>& p2c_root_map);
+
+ private:
+  UnrollPredicate(
+      std::vector<kir::ForLoop*> outer_loops,
+      kir::ForLoop* unrolled_loop,
+      const std::unordered_map<IterDomain*, IterDomain*>& _p2c_root_map);
+
+  void predicateOn(Expr*);
+
+  void openLoop(kir::ForLoop*);
+
+ private:
+  std::unordered_map<IterDomain*, kir::Bool*> predicates_;
+  std::vector<kir::ForLoop*> for_loops_;
+
+  const std::unordered_map<IterDomain*, IterDomain*>& p2c_root_map_;
+};
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

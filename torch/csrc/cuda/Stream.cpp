@@ -69,7 +69,7 @@ static PyObject * THCPStream_get_priority(THCPStream *self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_priority_range() {
+static PyObject * THCPStream_priority_range(PyObject *_unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   int least_priority, greatest_priority;
   std::tie(least_priority, greatest_priority) =
@@ -78,36 +78,37 @@ static PyObject * THCPStream_priority_range() {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_query(THCPStream *self, PyObject *noargs) {
+static PyObject * THCPStream_query(PyObject *_self, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  auto self = (THCPStream*)_self;
   return PyBool_FromLong(self->cuda_stream.query());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_synchronize(THCPStream *self, PyObject *noargs) {
+static PyObject * THCPStream_synchronize(PyObject *_self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   {
     pybind11::gil_scoped_release no_gil;
+    auto self = (THCPStream*)_self;
     self->cuda_stream.synchronize();
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_eq(THCPStream *self, THCPStream *other) {
+static PyObject * THCPStream_eq(PyObject *_self, PyObject *_other) {
   HANDLE_TH_ERRORS
+  auto self = (THCPStream*)_self;
+  auto other = (THCPStream*)_other;
   return PyBool_FromLong(self->cuda_stream == other->cuda_stream);
   END_HANDLE_TH_ERRORS
 }
 
 static struct PyMemberDef THCPStream_members[] = {
-  {(char*)"_cdata",
-    T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
   {nullptr}
 };
 
 static struct PyGetSetDef THCPStream_properties[] = {
-  {"device", (getter)THCPStream_get_device, nullptr, nullptr, nullptr},
   {"cuda_stream",
     (getter)THCPStream_get_cuda_stream, nullptr, nullptr, nullptr},
   {"priority", (getter)THCPStream_get_priority, nullptr, nullptr, nullptr},
@@ -115,12 +116,12 @@ static struct PyGetSetDef THCPStream_properties[] = {
 };
 
 static PyMethodDef THCPStream_methods[] = {
-  {(char*)"query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
+  {(char*)"query", THCPStream_query, METH_NOARGS, nullptr},
   {(char*)"synchronize",
-    (PyCFunction)THCPStream_synchronize, METH_NOARGS, nullptr},
+    THCPStream_synchronize, METH_NOARGS, nullptr},
   {(char*)"priority_range",
-    (PyCFunction)(void(*)(void))THCPStream_priority_range, METH_STATIC | METH_NOARGS, nullptr},
-  {(char*)"__eq__", (PyCFunction)THCPStream_eq, METH_O, nullptr},
+    THCPStream_priority_range, METH_STATIC | METH_NOARGS, nullptr},
+  {(char*)"__eq__", THCPStream_eq, METH_O, nullptr},
   {nullptr}
 };
 
@@ -154,7 +155,7 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_iternext */
   THCPStream_methods,                    /* tp_methods */
   THCPStream_members,                    /* tp_members */
-  THCPStream_properties,                /* tp_getset */
+  THCPStream_properties,                 /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -168,6 +169,8 @@ PyTypeObject THCPStreamType = {
 
 void THCPStream_init(PyObject *module)
 {
+  Py_INCREF(THPStreamClass);
+  THCPStreamType.tp_base = THPStreamClass;
   THCPStreamClass = (PyObject*)&THCPStreamType;
   if (PyType_Ready(&THCPStreamType) < 0) {
     throw python_error();

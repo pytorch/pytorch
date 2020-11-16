@@ -1,3 +1,4 @@
+#include <ATen/Config.h>
 #if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
 

@@ -48,6 +48,8 @@ DECLARE_DISPATCH(leaky_relu_fn, leaky_relu_stub);
 DECLARE_DISPATCH(leaky_relu_backward_fn, leaky_relu_backward_stub);
 DECLARE_DISPATCH(activation_fn, glu_stub);
 DECLARE_DISPATCH(activation_backward_fn, glu_backward_stub);
+DECLARE_DISPATCH(activation_fn, silu_stub);
+DECLARE_DISPATCH(activation_backward_fn, silu_backward_stub);
 
 } // namespace native
 

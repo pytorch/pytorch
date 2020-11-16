@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import hypothesis.strategies as st
@@ -19,7 +19,7 @@ class LRNTest(hu.HypothesisTestCase):
            im_size=st.integers(1, 10),
            order=st.sampled_from(["NCHW"]),
            **mu.gcs)
-
+    @settings(deadline=10000)
     def test_LRN(self, input_channels,
                             batch_size, im_size, order,
                              gc, dc):

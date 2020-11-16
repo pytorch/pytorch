@@ -1,9 +1,9 @@
 ## @package resnet
 # Module caffe2.python.models.resnet
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 from caffe2.python import brew
 import logging

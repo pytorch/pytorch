@@ -113,17 +113,19 @@ class _server_process_global_profile(profile):
             else torch.autograd.ProfilerState.CPU
         )
         profiler_config = torch.autograd.ProfilerConfig(
-            profiler_kind, self.record_shapes, self.profile_memory
-        )
+            profiler_kind,
+            self.record_shapes,
+            self.profile_memory,
+            False)
         _enable_server_process_global_profiler(profiler_config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
         Turn off server-side process-global profiling.
-        Aggregrate all profiling events recorded by RPC threads.
+        Aggregate all profiling events recorded by RPC threads.
 
-        These attribuets are assigned on exiting context.
+        These attributes are assigned on exiting context.
 
         Attributes:
             function_events (torch.autograd.profiler.EventList).  It's a list that has helper
@@ -143,7 +145,7 @@ class _server_process_global_profile(profile):
         process_global_function_events = []
         for thread_local_events in process_global_events:
             # Parse from ``Event``s to ``FunctionEvent``s.
-            thread_local_function_events = torch.autograd.profiler.parse_cpu_trace(
+            thread_local_function_events = torch.autograd.profiler.parse_event_records(
                 thread_local_events
             )
             thread_local_function_events.sort(

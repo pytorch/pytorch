@@ -10,7 +10,7 @@ namespace at { namespace native {
 Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
                 bool inverse, IntArrayRef checked_signal_sizes,
-                bool normalized, bool onesided,
+                int64_t normalization, bool onesided,
                 IntArrayRef output_sizes) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
@@ -148,7 +148,7 @@ static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
                 bool inverse, IntArrayRef checked_signal_sizes,
-                bool normalized, bool onesided,
+                int64_t normalization, bool onesided,
                 IntArrayRef output_sizes) {
   int64_t batch = self.size(0);
   Tensor input = self;
@@ -243,11 +243,12 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   if (!complex_input || !complex_output) {
     MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_CONJUGATE_EVEN_STORAGE, DFTI_COMPLEX_COMPLEX));
   }
-  // rescale if needed by normalized flag or inverse transform
-  if (normalized || inverse) {
+  // rescale if requested
+  const auto norm = static_cast<fft_norm_mode>(normalization);
+  if (norm != fft_norm_mode::none) {
     auto signal_numel = at::prod_intlist(checked_signal_sizes);
     double double_scale;
-    if (normalized) {
+    if (norm == fft_norm_mode::by_root_n) {
       double_scale = 1.0 / std::sqrt(static_cast<double>(signal_numel));
     } else {
       double_scale = 1.0 / static_cast<double>(signal_numel);

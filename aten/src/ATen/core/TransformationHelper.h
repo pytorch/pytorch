@@ -131,4 +131,13 @@ C10_HOST_DEVICE inline T log_normal(T val) {
   return at::exp(val);
 }
 
+/**
+ * Transforms uniformly distributed `val` between 0.0 and 1.0 to
+ * bernoulli distributed with success probability `p`.
+ */
+template <typename T>
+C10_HOST_DEVICE inline T bernoulli(T val, T p) {
+  return val < p;
+}
+
 }} // namespace at::transformation

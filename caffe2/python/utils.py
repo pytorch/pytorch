@@ -1,9 +1,9 @@
 # @package utils
 # Module caffe2.python.utils
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python.compatibility import container_abcs
@@ -41,7 +41,7 @@ def OpAlmostEqual(op_a, op_b, ignore_fields=None):
 
     op_a = clean_op(op_a)
     op_b = clean_op(op_b)
-    return op_a == op_b
+    return op_a == op_b or str(op_a) == str(op_b)
 
 
 def CaffeBlobToNumpyArray(blob):

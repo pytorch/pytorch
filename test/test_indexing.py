@@ -401,7 +401,7 @@ class TestIndexing(TestCase):
         c = torch.tensor([1., 2.], device="cpu")
 
         for accumulate in [True, False]:
-            self.assertRaisesRegex(RuntimeError, 'expected device', lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
+            self.assertRaises(RuntimeError, lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to

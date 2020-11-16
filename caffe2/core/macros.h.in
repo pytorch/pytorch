@@ -79,5 +79,4 @@ static_assert(
   {"USE_MKLDNN", "${CAFFE2_USE_MKLDNN}"}, \
   {"USE_NVTX", "${CAFFE2_USE_NVTX}"}, \
   {"USE_TRT", "${CAFFE2_USE_TRT}"}, \
-  {"USE_STATIC_DISPATCH", "${USE_STATIC_DISPATCH}"},   \
 }

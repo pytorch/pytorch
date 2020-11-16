@@ -11,9 +11,11 @@ import platform
 import re
 import gc
 import types
+import math
 from functools import partial
 import inspect
 import io
+import operator
 import argparse
 import unittest
 import warnings
@@ -31,12 +33,14 @@ from numbers import Number
 import tempfile
 import json
 from urllib.request import urlopen
-import __main__
+import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Iterable, Optional
+from typing import cast, Any, Dict, Iterable, Optional
 
 from torch.testing._internal import expecttest
-from torch.testing import _compare_tensors_internal, _compare_scalars_internal, _compare_return_type
+from torch.testing import \
+    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
+     floating_types_and, integral_types, complex_types)
 
 import torch
 import torch.cuda
@@ -50,7 +54,13 @@ from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
 
+FILE_SCHEMA = "file://"
+if sys.platform == 'win32':
+    FILE_SCHEMA = "file:///"
+
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
+IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -120,8 +130,9 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-torch._C.ScriptFunction.__call__ = prof_func_call
-torch._C.ScriptMethod.__call__ = prof_meth_call
+# TODO fix when https://github.com/python/mypy/issues/2427 is address
+torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
+torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this
@@ -137,22 +148,22 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--ge_config', type=str)
+parser.add_argument('--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CI')) else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 
 args, remaining = parser.parse_known_args()
-if args.ge_config == 'legacy':
+if args.jit_executor == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.ge_config == 'profiling':
+elif args.jit_executor == 'profiling':
     GRAPH_EXECUTOR = ProfilingMode.PROFILING
-elif args.ge_config == 'simple':
+elif args.jit_executor == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 else:
     # infer flags based on the default settings
@@ -212,10 +223,7 @@ def repeat_test_for_types(dtypes):
         @wraps(f)
         def call_helper(self, *args):
             for dtype in dtypes:
-                if PY34:
-                    with TestCase.subTest(self, dtype=dtype):
-                        f(self, *args, dtype=dtype)
-                else:
+                with TestCase.subTest(self, dtype=dtype):
                     f(self, *args, dtype=dtype)
 
         return call_helper
@@ -224,8 +232,6 @@ def repeat_test_for_types(dtypes):
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
 
-PY3 = sys.version_info > (3, 0)
-PY34 = sys.version_info >= (3, 4)
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
@@ -240,7 +246,6 @@ def get_test_names(test_cases):
 
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
-
 
 
 def run_tests(argv=UNITTEST_ARGS):
@@ -275,7 +280,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
-        import xmlrunner
+        import xmlrunner  # type: ignore[import]
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         os.makedirs(test_report_path, exist_ok=True)
         verbose = '--verbose' in argv or '-v' in argv
@@ -319,15 +324,10 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    if not PY34:  # Python [3, 3.4)
-        import importlib
-        loader = importlib.find_loader(name)
-        return loader is not None
-    else:  # Python >= 3.4
-        import importlib
-        import importlib.util
-        spec = importlib.util.find_spec(name)
-        return spec is not None
+    import importlib
+    import importlib.util
+    spec = importlib.util.find_spec(name)
+    return spec is not None
 
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
@@ -398,6 +398,44 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+# This decorator can be used for API tests that call torch.set_deterministic().
+# When the test is finished, it will restore the previous deterministic flag
+# setting. Also, if CUDA >= 10.2, this will set the environment variable
+# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
+# is not thrown during the test unless the test changes that variable on purpose.
+# The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
+# test is finished.
+def wrapDeterministicFlagAPITest(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        deterministic_restore = torch.is_deterministic()
+
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+
+        if is_cuda10_2_or_higher:
+            cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
+            cublas_config_restore = os.environ.get(cublas_var_name)
+            os.environ[cublas_var_name] = ':4096:8'
+
+        def restore():
+            torch.set_deterministic(deterministic_restore)
+            if is_cuda10_2_or_higher:
+                cur_cublas_config = os.environ.get(cublas_var_name)
+                if cublas_config_restore is None:
+                    if cur_cublas_config is not None:
+                        del os.environ[cublas_var_name]
+                else:
+                    os.environ[cublas_var_name] = cublas_config_restore
+        try:
+            fn(*args, **kwargs)
+        except RuntimeError:
+            restore()
+            raise
+        else:
+            restore()
+    return wrapper
 
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
@@ -474,6 +512,11 @@ def slowTest(fn):
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
     return wrapper
+
+
+def slowAwareTest(fn):
+    fn.__dict__['slow_test'] = True
+    return fn
 
 
 def skipCUDAMemoryLeakCheckIf(condition):
@@ -647,7 +690,7 @@ try:
             derandomize=True,
             suppress_health_check=[hypothesis.HealthCheck.too_slow],
             database=None,
-            max_examples=100,
+            max_examples=50,
             verbosity=hypothesis.Verbosity.normal))
     hypothesis.settings.register_profile(
         "dev",
@@ -671,11 +714,11 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-disabled_test_from_issues = None
+disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
     global disabled_test_from_issues
     if disabled_test_from_issues is None:
-        disabled_test_from_issues = {}
+        _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
             url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
@@ -686,18 +729,21 @@ def check_disabled(test_name):
                 key = 'DISABLED '
                 if title.startswith(key):
                     test_name = title[len(key):].strip()
-                    disabled_test_from_issues[test_name] = item['html_url']
+                    _disabled_test_from_issues[test_name] = item['html_url']
 
         if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
             try:
                 read_and_process()
+                disabled_test_from_issues = _disabled_test_from_issues
             except Exception:
                 print("Couldn't download test skip set, leaving all tests enabled...")
+                disabled_test_from_issues = {}
 
-    if test_name in disabled_test_from_issues:
-        raise unittest.SkipTest(
-            "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
-            " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+    if disabled_test_from_issues is not None:
+        if test_name in disabled_test_from_issues:
+            raise unittest.SkipTest(
+                "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
+                " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
@@ -729,7 +775,15 @@ class TestCase(expecttest.TestCase):
     # atol values when comparing tensors. Used by @precisionOverride, for
     # example.
     # TODO: provide a better mechanism for generated tests to set rtol/atol.
-    precision = 0
+    _precision: float = 0
+
+    @property
+    def precision(self) -> float:
+        return self._precision
+
+    @precision.setter
+    def precision(self, prec: float) -> None:
+        self._precision = prec
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
@@ -737,17 +791,18 @@ class TestCase(expecttest.TestCase):
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
 
-        test_method = getattr(self, method_name)
-        # Wraps the tested method if we should do CUDA memory check.
-        self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-        # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-            self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+        test_method = getattr(self, method_name, None)
+        if test_method is not None:
+            # Wraps the tested method if we should do CUDA memory check.
+            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+            # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+                self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
-        # Wraps the tested method if we should enforce non default CUDA stream.
-        self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
-            self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
+            # Wraps the tested method if we should enforce non default CUDA stream.
+            self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
+            if self._do_cuda_non_default_stream and not IS_WINDOWS and not TEST_WITH_ROCM:
+                self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
@@ -806,7 +861,6 @@ class TestCase(expecttest.TestCase):
         if is_uncoalesced:
             v = torch.cat([v, torch.randn_like(v)], 0)
             i = torch.cat([i, i], 1)
-
         x = torch.sparse_coo_tensor(i, v, torch.Size(size))
 
         if not is_uncoalesced:
@@ -822,47 +876,7 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        r = self.safeCoalesce(t)
-        return r.to_dense()
-
-    def safeCoalesce(self, t):
-        tc = t.coalesce()
-        self.assertEqual(tc.to_dense(), t.to_dense())
-        self.assertTrue(tc.is_coalesced())
-
-        # Our code below doesn't work when nnz is 0, because
-        # then it's a 0D tensor, not a 2D tensor.
-        if t._nnz() == 0:
-            self.assertEqual(t._indices(), tc._indices())
-            self.assertEqual(t._values(), tc._values())
-            return tc
-
-        value_map = {}
-        for idx, val in zip(t._indices().t(), t._values()):
-            idx_tup = tuple(idx.tolist())
-            if idx_tup in value_map:
-                value_map[idx_tup] += val
-            else:
-                value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
-
-        new_indices = sorted(list(value_map.keys()))
-        new_values = [value_map[idx] for idx in new_indices]
-        if t._values().ndimension() < 2:
-            new_values = t._values().new(new_values)
-        else:
-            new_values = torch.stack(new_values)
-
-        new_indices = t._indices().new(new_indices).t()
-        tg = t.new(new_indices, new_values, t.size())
-
-        self.assertEqual(tc._indices(), tg._indices())
-        self.assertEqual(tc._values(), tg._values())
-
-        if t.is_coalesced():
-            self.assertEqual(tc._indices(), t._indices())
-            self.assertEqual(tc._values(), t._values())
-
-        return tg
+        return t.coalesce().to_dense()
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -870,11 +884,14 @@ class TestCase(expecttest.TestCase):
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device, dtype):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like,
+                           device=None, dtype=None, **kwargs):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
         if isinstance(tensor_like, torch.Tensor):
+            assert device is None
+            assert dtype is None
             a = tensor_like.detach().cpu().numpy()
             t = tensor_like
         else:
@@ -893,7 +910,7 @@ class TestCase(expecttest.TestCase):
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
 
-        self.assertEqual(np_result, torch_result)
+        self.assertEqual(np_result, torch_result, **kwargs)
 
     # Some analysis of tolerance by logging tests from test_torch.py can be found
     # in https://github.com/pytorch/pytorch/pull/32538.
@@ -985,9 +1002,12 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = self._getDefaultRtolAndAtol(torch.float32, torch.float32)
             else:
                 rtol, atol = 0, 0
+        rtol = cast(float, rtol)
+        atol = cast(float, atol)
+        assert atol is not None
         atol = max(atol, self.precision)
 
-        return _compare_scalars_internal(a, b, rtol=cast(float, rtol), atol=cast(float, atol), equal_nan=equal_nan)
+        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
@@ -1020,8 +1040,15 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x.is_sparse, y.is_sparse, msg=msg)
             super().assertEqual(x.is_quantized, y.is_quantized, msg=msg)
             if x.is_sparse:
-                x = self.safeCoalesce(x)
-                y = self.safeCoalesce(y)
+                if x.size() != y.size():
+                    debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes. "
+                                        f"Got sizes {x.size()} and {y.size()}.")
+                    if msg is None:
+                        msg = debug_msg_sparse
+                    self.assertTrue(False, msg=msg)
+
+                x = x.coalesce()
+                y = y.coalesce()
                 indices_result, debug_msg = self._compareTensors(x._indices(), y._indices(),
                                                                  rtol=rtol, atol=atol,
                                                                  equal_nan=equal_nan, exact_dtype=exact_dtype,
@@ -1101,6 +1128,9 @@ class TestCase(expecttest.TestCase):
                                  [y[k] for k in key_list],
                                  atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device)
+        elif isinstance(x, type) and isinstance(y, type):
+            # See TestTorch.test_assert_equal_generic_meta
+            super().assertEqual(x, y, msg=msg)
         elif is_iterable(x) and is_iterable(y):
             super().assertEqual(len(x), len(y), msg=msg)
             for x_, y_ in zip(x, y):
@@ -1120,17 +1150,10 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertAlmostEqual(self, x, y, *, places=None, msg=None, delta=None):
-        prec = delta
-        if places:
-            prec = 10**(-places)
-        rtol = None if prec is None else 0
-        self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
-
-    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
-                       atol: Optional[float] = None, rtol: Optional[float] = None) -> None:
+    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
         with self.assertRaises(AssertionError, msg=msg):
-            self.assertEqual(x, y, atol=atol, rtol=rtol)
+            self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() == y.type()
@@ -1187,7 +1210,7 @@ class TestCase(expecttest.TestCase):
                     msg = 'Caught unexpected warnings:\n'
                     for w in ws:
                         msg += warnings.formatwarning(
-                            w.message, w.category, w.filename, w.lineno, w.line)
+                            str(w.message), w.category, w.filename, w.lineno, w.line)
                         msg += '\n'
                     self.fail(msg)
 
@@ -1231,7 +1254,10 @@ class TestCase(expecttest.TestCase):
         def accept_output(update_type):
             print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
             with open(expected_file, 'w') as f:
-                f.write(s)
+                # Adjust for producer_version, leave s unmodified
+                s_tag = re.sub(r'(producer_version): "[0-9.]*"',
+                               r'\1producer_version: "CURRENT_VERSION"', s)
+                f.write(s_tag)
 
         try:
             with open(expected_file) as f:
@@ -1245,7 +1271,7 @@ class TestCase(expecttest.TestCase):
                 raise RuntimeError(
                     ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id)) from None
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -1254,7 +1280,7 @@ class TestCase(expecttest.TestCase):
 
         # Adjust for producer_version
         expected = expected.replace(
-            'producer_version: "XXX"',
+            'producer_version: "CURRENT_VERSION"',
             'producer_version: "{}"'.format(torch.onnx.producer_version)
         )
         if expecttest.ACCEPT:
@@ -1286,16 +1312,6 @@ class TestCase(expecttest.TestCase):
             env=env)
         return pipes.communicate()[1].decode('ascii')
 
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
-
 
 def download_file(url, binary=True):
     from urllib.parse import urlsplit
@@ -1312,10 +1328,10 @@ def download_file(url, binary=True):
         with open(path, 'wb' if binary else 'w') as f:
             f.write(data)
         return path
-    except error.URLError:
+    except error.URLError as e:
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
-        raise unittest.SkipTest(msg)
+        raise unittest.SkipTest(msg) from e
 
 
 def find_free_port():
@@ -1376,8 +1392,57 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
-# Methods for matrix generation
+# Methods for matrix and tensor generation
+
 # Used in test_autograd.py and test_torch.py
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
+                low, high, requires_grad: bool = False) -> torch.Tensor:
+    """Returns a tensor of the specified size on the given device and dtype.
+       The tensors values are between -9 and 9, inclusive, for most dtypes,
+       unless low (high) is not None in which case the values are between
+       max(-9, low) and min(9, high).
+       For unsigned types the values are between 0 and 9, and for complex
+       dtypes the real and imaginary parts are each between -9 and 9,
+       independently."""
+
+    assert low is None or low < 9, "low value too high!"
+    assert high is None or high > -9, "high value too low!"
+
+    if dtype is torch.bool:
+        return torch.randint(0, 2, size, device=device, dtype=dtype)
+
+    if dtype is torch.uint8:
+        low = math.floor(0 if low is None else max(low, 0))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in integral_types():
+        low = math.floor(-9 if low is None else max(low, -9))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in floating_types_and(torch.half, torch.bfloat16):
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        # Windows doesn't support torch.rand(bfloat16) on CUDA
+        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
+            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
+        else:
+            t = torch.rand(size, device=device, dtype=dtype) * span + low
+        t.requires_grad = requires_grad
+        return t
+    else:
+        assert dtype in complex_types()
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        float_dtype = torch.float if dtype is torch.cfloat else torch.double
+        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        c = torch.complex(real, imag)
+        c.requires_grad = requires_grad
+        return c
+
+
 def prod_single_zero(dim_size):
     result = torch.randn(dim_size, dim_size)
     result[0, 1] = 0
@@ -1404,6 +1469,14 @@ def random_symmetric_matrix(l, *batches, **kwargs):
     return A
 
 
+def random_hermitian_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
+    A = (A + A.transpose(-2, -1).conj()).div_(2)
+    return A
+
+
 def random_symmetric_psd_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
@@ -1418,6 +1491,19 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
                     dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1)) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
+
+
+def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
+    """
+    Returns a batch of random Hermitian positive-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_hermitian_pd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
+                    dtype=dtype, device=device)
+    return torch.matmul(A, A.transpose(-2, -1).conj())
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -1448,8 +1534,9 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
     A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
     u, _, v = A.svd()
-    s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
-    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
+    real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
+    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).to(A.dtype).matmul(v.transpose(-2, -1)))
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
@@ -1514,7 +1601,8 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     values = torch.randn(nonzero_elements, dtype=dtype, device=device)
     # ensure that the diagonal dominates
     values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
-    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    indices_tensor = torch.tensor(indices)
+    A = torch.sparse_coo_tensor(indices_tensor, values, (rows, columns), device=device)
     return A.coalesce()
 
 
@@ -1571,8 +1659,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
         icoords.append(i)
         jcoords.append(j)
         values.append(v)
-    indices = [icoords, jcoords]
-    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
+    indices_tensor = torch.tensor([icoords, jcoords])
+    return torch.sparse_coo_tensor(indices_tensor, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
@@ -1606,7 +1694,7 @@ def do_test_empty_full(self, dtypes, layout, device):
 
     default_dtype = torch.get_default_dtype()
     check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
-    check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
+    check_value(torch.full(shape, -5.), default_dtype, torch.strided, -1, None, False)
     for dtype in dtypes:
         for rg in {dtype.is_floating_point, False}:
             int64_dtype = get_int64_dtype(dtype)

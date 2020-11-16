@@ -1,6 +1,6 @@
-#include <test/cpp/jit/test_base.h>
-#include <test/cpp/jit/test_utils.h>
+#include <gtest/gtest.h>
 
+#include <test/cpp/jit/test_utils.h>
 #include <sstream>
 
 #include <torch/csrc/jit/serialization/export.h>
@@ -8,55 +8,86 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
+#include "caffe2/serialize/istream_adapter.h"
+
 namespace torch {
 namespace jit {
 
-void testSaveExtraFilesHook() {
+TEST(SerializationTest, ExtraFilesHookPreference) {
+  // Tests that an extra file written explicitly has precedence over
+  //   extra files written by a hook
+  // TODO: test for the warning, too
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  SetExportModuleExtraFilesHook([](const Module&) -> ExtraFilesMap {
+    return {{"metadata.json", "def"}};
+  });
+  module->save(oss, extra_files);
+  SetExportModuleExtraFilesHook(nullptr);
+
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+  loaded_extra_files["metadata.json"] = "";
+  auto loaded_module = torch::jit::load(iss, torch::kCPU, loaded_extra_files);
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+}
+
+TEST(SerializationTest, ExtraFileHooksNoSecret) {
   // no secrets
+  std::stringstream ss;
   {
-    std::stringstream ss;
-    {
-      Module m("__torch__.m");
-      ExtraFilesMap extra;
-      extra["metadata.json"] = "abc";
-      m.save(ss, extra);
-    }
-    ss.seekg(0);
-    {
-      ExtraFilesMap extra;
-      extra["metadata.json"] = "";
-      extra["secret.json"] = "";
-      jit::load(ss, c10::nullopt, extra);
-      ASSERT_EQ(extra["metadata.json"], "abc");
-      ASSERT_EQ(extra["secret.json"], "");
-    }
+    Module m("__torch__.m");
+    ExtraFilesMap extra;
+    extra["metadata.json"] = "abc";
+    m.save(ss, extra);
   }
-  // some secret
+  ss.seekg(0);
   {
-    std::stringstream ss;
-    {
-      SetExportModuleExtraFilesHook([](const Module&) -> ExtraFilesMap {
-        return {{"secret.json", "topsecret"}};
-      });
-      Module m("__torch__.m");
-      ExtraFilesMap extra;
-      extra["metadata.json"] = "abc";
-      m.save(ss, extra);
-      SetExportModuleExtraFilesHook(nullptr);
-    }
-    ss.seekg(0);
-    {
-      ExtraFilesMap extra;
-      extra["metadata.json"] = "";
-      extra["secret.json"] = "";
-      jit::load(ss, c10::nullopt, extra);
-      ASSERT_EQ(extra["metadata.json"], "abc");
-      ASSERT_EQ(extra["secret.json"], "topsecret");
-    }
+    ExtraFilesMap extra;
+    extra["metadata.json"] = "";
+    extra["secret.json"] = "";
+    jit::load(ss, c10::nullopt, extra);
+    ASSERT_EQ(extra["metadata.json"], "abc");
+    ASSERT_EQ(extra["secret.json"], "");
   }
 }
 
-void testTypeTags() {
+TEST(SerializationTest, ExtraFileHooksWithSecret) {
+  std::stringstream ss;
+  {
+    SetExportModuleExtraFilesHook([](const Module&) -> ExtraFilesMap {
+      return {{"secret.json", "topsecret"}};
+    });
+    Module m("__torch__.m");
+    ExtraFilesMap extra;
+    extra["metadata.json"] = "abc";
+    m.save(ss, extra);
+    SetExportModuleExtraFilesHook(nullptr);
+  }
+  ss.seekg(0);
+  {
+    ExtraFilesMap extra;
+    extra["metadata.json"] = "";
+    extra["secret.json"] = "";
+    jit::load(ss, c10::nullopt, extra);
+    ASSERT_EQ(extra["metadata.json"], "abc");
+    ASSERT_EQ(extra["secret.json"], "topsecret");
+  }
+}
+
+TEST(SerializationTest, TypeTags) {
   auto list = c10::List<c10::List<int64_t>>();
   list.push_back(c10::List<int64_t>({1, 2, 3}));
   list.push_back(c10::List<int64_t>({4, 5, 6}));

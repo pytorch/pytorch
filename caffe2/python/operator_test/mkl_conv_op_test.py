@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import hypothesis.strategies as st
@@ -23,7 +23,7 @@ class MKLConvTest(hu.HypothesisTestCase):
            output_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            **mu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, deadline=100)
     def test_mkl_convolution(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, gc, dc):

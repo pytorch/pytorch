@@ -113,6 +113,10 @@ def _strong_wolfe(obj_func,
     # find high and low points in bracket
     low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)
     while not done and ls_iter < max_ls:
+        # line-search bracket is so small
+        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
+            break
+
         # compute new trial value
         t = _cubic_interpolate(bracket[0], bracket_f[0], bracket_gtd[0],
                                bracket[1], bracket_f[1], bracket_gtd[1])
@@ -168,10 +172,6 @@ def _strong_wolfe(obj_func,
             bracket_f[low_pos] = f_new
             bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
             bracket_gtd[low_pos] = gtd_new
-
-        # line-search bracket is so small
-        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
-            break
 
     # return stuff
     t = bracket[low_pos]

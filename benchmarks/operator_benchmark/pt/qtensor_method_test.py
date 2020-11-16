@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 import torch
 
@@ -27,16 +22,9 @@ qmethods_configs_long = op_bench.cross_product_configs(
     tags=['long']
 )
 
-qmethods_tensor_input_list = op_bench.op_list(
-    attr_names=['op_name', 'op_func'],
-    attrs=[
-        ['q_copy', 'copy_'],
-    ],
-)
-
 
 class _QMethodBenchmarkBase(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, dtype, contig, op_func):
+    def init(self, M, N, dtype, contig):
         f_input = torch.rand(M, N)
         scale = 1.0
         zero_point = 0
@@ -46,23 +34,20 @@ class _QMethodBenchmarkBase(op_bench.TorchBenchmarkBase):
         if not contig:
             permute_dims = list(range(self.q_input.ndim))[::-1]
             self.q_input = self.q_input.permute(permute_dims)
-        self.op_func = op_func
+
+        self.inputs = {
+            "q_input": self.q_input,
+        }
 
 
-class QMethodTensorInputBenchmark(_QMethodBenchmarkBase):
-    def forward(self):
-        getattr(self.q_input, self.op_func)(self.q_input)
+class QMethodTensorInputCopyBenchmark(_QMethodBenchmarkBase):
+    def forward(self, q_input):
+        return q_input.copy_(q_input)
 
 
-class QMethodNoInputBenchmark(_QMethodBenchmarkBase):
-    def forward(self):
-        getattr(self.q_input, self.op_func)()
-
-
-op_bench.generate_pt_tests_from_op_list(
-    qmethods_tensor_input_list,
+op_bench.generate_pt_test(
     qmethods_configs_short + qmethods_configs_long,
-    QMethodTensorInputBenchmark
+    QMethodTensorInputCopyBenchmark
 )
 
 if __name__ == "__main__":

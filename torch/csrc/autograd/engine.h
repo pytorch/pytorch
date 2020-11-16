@@ -4,13 +4,13 @@
 // to "root" variables (variables created by the user with requires_grad=True).
 
 #include <ATen/Tensor.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
-#include <torch/csrc/utils/future.h>
 
 #include <deque>
 #include <exception>
@@ -27,8 +27,6 @@ struct ReadyQueue;
 }} // namespace torch::autograd
 
 namespace torch { namespace autograd {
-
-using FutureVariableList = torch::utils::Future<variable_list>;
 
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
@@ -111,7 +109,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
-  void init_to_execute(Node& graph_root, const edge_list& outputs);
+  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -131,7 +129,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function.
-  void set_exception(std::exception& e, const std::shared_ptr<Node>& fn);
+  void set_exception(std::exception_ptr eptr, const std::shared_ptr<Node>& fn);
 
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function. But doesn't signal completion on
@@ -153,7 +151,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // Future representing the completion of the graph task. Notified when all
   // tasks are done.
-  std::shared_ptr<FutureVariableList> future_result_;
+  std::shared_ptr<at::ivalue::Future> future_result_;
 
   // Final callbacks installed during execution of this GraphTask
   std::vector<std::function<void()>> final_callbacks_;
@@ -173,10 +171,22 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(std::make_shared<FutureVariableList>()) {}
+        future_result_(std::make_shared<at::ivalue::Future>(c10::ListType::create(c10::TensorType::get()))) {}
  private:
   // run GraphTask post processing
   void exec_post_processing();
+};
+
+// The guard that sets and restores current_graph_task.
+class GraphTaskGuard {
+ public:
+  explicit GraphTaskGuard(std::shared_ptr<GraphTask> graph_task);
+  ~GraphTaskGuard();
+
+  void restore_current_graph_task();
+
+ private:
+  std::shared_ptr<GraphTask> last_graph_task_;
 };
 
 struct NodeTask {
@@ -234,8 +244,8 @@ struct ReadyQueue {
  public:
   // incrementOutstandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
-  // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
-  // might set this to false.
+  // always be true and is only set false in certain cases (see docs for
+  // DistEngine.execute_graph_task_until_ready_queue_empty)
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
@@ -262,6 +272,7 @@ struct TORCH_API Engine {
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
+      bool accumulate_grad,
       const edge_list& outputs = {});
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
@@ -269,12 +280,12 @@ struct TORCH_API Engine {
   //
   // NB: This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
+  virtual std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
-    return nullptr;
+    return std::make_unique<AnomalyMetadata>();
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows
@@ -300,6 +311,12 @@ struct TORCH_API Engine {
   // Should be called after fork to notify that worker threads are gone
   void release_workers();
 
+  // Initializes a device thread for the autograd engine.
+  virtual void thread_init(
+      int device,
+      const std::shared_ptr<ReadyQueue>& ready_queue,
+      bool should_increment = true);
+
  protected:
   Engine();
   void compute_dependencies(Node* root, GraphTask& task);
@@ -319,13 +336,8 @@ struct TORCH_API Engine {
   // note that it does NOT start CPU thread.
   void start_device_threads();
   void increment_non_reentrant_thread_count();
-  virtual void thread_init(
-      int device,
-      const std::shared_ptr<ReadyQueue>& ready_queue,
-      bool should_increment = true);
-  virtual void thread_main(
-      const std::shared_ptr<GraphTask>& task,
-      bool reentrant_thread);
+  void decrement_non_reentrant_thread_count();
+  virtual void thread_main(const std::shared_ptr<GraphTask>& task);
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
 

@@ -17,7 +17,7 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* faulty_agent_init(PyObject* /* unused */) {
+PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Add the FaultyProcessGroupAgent and its backend options object to the
   // python module torch.distributed.rpc._testing
   auto faulty_agent_module =
@@ -66,7 +66,7 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
       .def(
           py::init<
               std::string,
-              std::shared_ptr<::c10d::ProcessGroup>,
+              c10::intrusive_ptr<::c10d::ProcessGroup>,
               int,
               std::chrono::milliseconds,
               const std::vector<std::string>&,
@@ -110,7 +110,7 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
 
 static PyMethodDef methods[] = { // NOLINT
     {"_faulty_agent_init",
-     (PyCFunction)faulty_agent_init,
+     faulty_agent_init,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};

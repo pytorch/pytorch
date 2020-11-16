@@ -6,11 +6,16 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.quantization
 
+from torch.quantization import (
+    default_float_qparams_observer,
+    PerChannelMinMaxObserver
+)
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
     _make_conv_test_input,
     skipIfNoFBGEMM,
+    lengths_to_offsets
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
@@ -148,28 +153,16 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on save.
-        # <start code>
-        # b = io.BytesIO()
-        # torch.save(qlinear, b)
-        # b.seek(0)
-        # loaded = torch.load(b)
-        # self.assertEqual(qlinear.weight(), loaded.weight())
-        # self.assertEqual(qlinear.scale, loaded.scale)
-        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
-        # <end code>
-        #
-        # Currently disabled after TorchBind PR
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.scale, loaded.scale)
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, list(zip([X_q], [Z_ref])), check_save_load=True)
+        self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
 
         # Test from_float.
         float_linear = torch.nn.Linear(in_features, out_features).float()
@@ -295,32 +288,19 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         np.testing.assert_array_almost_equal(
             Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on
-        # save.
-        # <start code>
-        # b = io.BytesIO()
-        # torch.save(conv_under_test, b)
-        # b.seek(0)
-        # loaded_conv = torch.load(b)
-        #
-        # self.assertEqual(loaded_qconv_module.bias(), qconv_module.bias())
-        # self.assertEqual(loaded_qconv_module.scale, qconv_module.scale)
-        # self.assertEqual(loaded_qconv_module.zero_point,
-        #                  qconv_module.zero_point)
-        # <end code>
-        with self.assertRaisesRegex(
-            RuntimeError, r'torch.save\(\) is not currently supported'
-        ):
-            bytes_io = io.BytesIO()
-            torch.save(qconv_module, bytes_io)
+        b = io.BytesIO()
+        torch.save(qconv_module, b)
+        b.seek(0)
+        loaded_conv = torch.load(b)
+
+        self.assertEqual(loaded_conv.bias(), qconv_module.bias())
+        self.assertEqual(loaded_conv.scale, qconv_module.scale)
+        self.assertEqual(loaded_conv.zero_point,
+                         qconv_module.zero_point)
 
         # JIT testing
         self.checkScriptable(
-            qconv_module, list(zip([X_q], [Y_exp])),
+            qconv_module, [[X_q]],
             check_save_load=True)
 
         # Test from_float
@@ -558,7 +538,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qX_expect, qX_hat)
 
         # JIT Testing
-        self.checkScriptable(pool_under_test, list(zip([X], [qX_expect])))
+        self.checkScriptable(pool_under_test, [[X]])
 
     def test_batch_norm2d(self):
         """Tests the correctness of the batchnorm2d module.
@@ -681,7 +661,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 X, x_scale, x_zero_point, dtype=torch.quint8)
             dqX = qX.dequantize()
 
-            float_mod = float_cls(dims[1], affine=True).float()
+            float_mod = float_cls(dims[1]).float()
             float_mod.weight = torch.nn.Parameter(torch.rand(dims[1]))
             float_mod.bias = torch.nn.Parameter(torch.rand(dims[1]))
 
@@ -699,8 +679,149 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
                 .format(qY_ref, qY))
 
-class TestDynamicQuantizedModule(QuantizationTestCase):
+    def _test_activation_module_impl(self, name, float_module_class, quantized_module_class, extra_kwargs):
+        """Tests the correctness of the ELU module.
+        The correctness is defined against the functional implementation.
+        """
+        x_scale = 10.0 / 256
+        x_zero_point = 0
+        y_scale = 5.0 / 256
+        y_zero_point = 127
+        alpha = 1.5
+
+        dims = (1, 4, 8)
+
+        X = (torch.randn(dims, dtype=torch.float) - 0.5) * 10
+        qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
+        dqX = qX.dequantize()
+
+        float_mod = float_module_class(**extra_kwargs).float()
+
+        dqY_ref = float_mod(dqX)
+        qY_ref = torch.quantize_per_tensor(
+            dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
+
+        quant_mod = quantized_module_class(y_scale, y_zero_point, **extra_kwargs)
+        qY = quant_mod(qX)
+        self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
+                         msg="{} module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(name, qY_ref, qY))
+
+    def _test_leaky_relu_serialization(self):
+        scale_original = 10.0 / 256
+        zero_point_original = 1.0
+
+        quant_mod_original = nnq.LeakyReLU(scale_original, zero_point_original)
+        state_dict = quant_mod_original.state_dict()
+
+        scale_new = 5.0 / 256
+        zero_point_new = 2.0
+        quant_mod_new = nnq.LeakyReLU(scale_new, zero_point_new)
+        quant_mod_new.load_state_dict(state_dict)
+
+        self.assertEqual(quant_mod_original.scale, quant_mod_new.scale)
+        self.assertEqual(quant_mod_original.zero_point, quant_mod_new.zero_point)
+
+    def test_elu(self):
+        """Tests the correctness of the ELU module.
+        The correctness is defined against the functional implementation.
+        """
+        self._test_activation_module_impl("ELU", nn.ELU, nnq.ELU, {"alpha": 1.5})
+
+    def test_leaky_relu(self):
+        self._test_activation_module_impl("LeakyReLU", nn.LeakyReLU, nnq.LeakyReLU, {"negative_slope": 0.2})
+        self._test_leaky_relu_serialization()
+
+    def test_sigmoid(self):
+        self._test_activation_module_impl("Sigmoid", nn.Sigmoid, nnq.Sigmoid, {})
+
+    @given(
+        num_embeddings=st.integers(10, 50),
+        embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+        set_qconfig=st.booleans(),
+    )
     @skipIfNoFBGEMM
+    def test_embedding_api(self, num_embeddings, embedding_dim, set_qconfig):
+        num_lengths = np.random.randint(1, 6)
+        lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+        indices = torch.from_numpy(np.random.randint(low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+        weights = torch.from_numpy((np.random.random_sample((num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        obs = default_float_qparams_observer()
+        obs(weights)
+        qparams = obs.calculate_qparams()
+        # Quantize the weights to 8bits
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+        qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+        qemb.set_weight(qweight)
+        qemb(indices)
+
+        # Ensure the module has the correct weights
+        self.assertEqual(qweight, qemb.weight())
+
+        w_packed = qemb._packed_params._packed_weight
+        module_out = qemb(indices)
+
+        # Call the qembedding operator directly
+        ref = torch.ops.quantized.embedding_byte(w_packed, indices, pruned_weights=False)
+        self.assertEqual(module_out, ref)
+        self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, None, set_qconfig=False, is_emb_bag=False)
+
+
+    @given(
+        num_embeddings=st.integers(10, 50),
+        embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+        num_offsets=st.integers(1, 20),
+        set_qconfig=st.booleans(),
+    )
+    @skipIfNoFBGEMM
+    def test_embedding_bag_api(self, num_embeddings, embedding_dim, num_offsets, set_qconfig):
+        r"""Test execution and serialization for dynamic quantized embedding_bag modules on int8
+        """
+
+        num_lengths = np.random.randint(1, 6)
+        lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+        indices = torch.from_numpy(np.random.randint(low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+        offsets = lengths_to_offsets(lengths)
+        # include the last offset
+        offsets = torch.cat((offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0)
+        weights = torch.from_numpy((np.random.random_sample((num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        for qdtype in [torch.quint8, torch.quint4x2]:
+            obs = PerChannelMinMaxObserver(dtype=qdtype, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            obs(weights)
+            # Get the scale and zero point for the weight tensor
+            qparams = obs.calculate_qparams()
+            # Quantize the weights to 8bits
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=qdtype)
+            qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                    include_last_offset=True, mode='sum', _weight=qweight, dtype=qdtype)
+            qemb(indices, offsets)
+
+            # Ensure the module has the correct weights
+            self.assertEqual(qweight, qemb.weight())
+
+            w_packed = qemb._packed_params._packed_weight
+            module_out = qemb(indices, offsets)
+
+            # Call the qembedding_bag operator directly
+            if qdtype == torch.quint8:
+                ref = torch.ops.quantized.embedding_bag_byte(w_packed, indices, offsets, mode=0,
+                                                             per_sample_weights=None,
+                                                             include_last_offset=True)
+            else:
+                ref = torch.ops.quantized.embedding_bag_4bit(w_packed, indices, offsets, mode=0,
+                                                             per_sample_weights=None,
+                                                             include_last_offset=True)
+
+            self.assertEqual(module_out, ref)
+            self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices,
+                                             offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
+
+class TestDynamicQuantizedModule(QuantizationTestCase):
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -766,25 +887,15 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
-        # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on save.
-        # <start code>
-        # b = io.BytesIO()
-        # torch.save(qlinear, b)
-        # b.seek(0)
-        # loaded = torch.load(b)
-        # self.assertEqual(qlinear.weight(), loaded.weight())
-        # self.assertEqual(qlinear.zero_point, loaded.zero_point)
-        # <end code>
-        # with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-        #     b = io.BytesIO()
-        #     torch.save(qlinear, b)
+        b = io.BytesIO()
+        torch.save(qlinear, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, list(zip([X], [Z_ref])), check_save_load=True)
+        self.checkScriptable(qlinear, [[X]], check_save_load=True)
 
         # Test from_float
         float_linear = torch.nn.Linear(in_features, out_features).float()
@@ -799,3 +910,129 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # Smoke test extra_repr
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
+
+    @given(
+        dtype=st.sampled_from([torch.qint8, torch.float16]),
+        bidirectional=st.booleans(),
+    )
+    @override_qengines
+    def test_lstm_api(self, dtype, bidirectional):
+        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
+        """
+        # Check that module matches the numerics of the op and ensure that module can be
+        # instantiated for all engines and dtypes
+        seq_len = 4
+        batch = 2
+        input_size = 3
+        hidden_size = 7
+        num_layers = 2
+        bias = True
+        weight_keys = []
+        bias_keys = []
+        num_directions = 2 if bidirectional else 1
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                suffix = '_reverse' if direction == 1 else ''
+                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                weight_keys.append(key_name1)
+                weight_keys.append(key_name2)
+                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                bias_keys.append(key_name1)
+                bias_keys.append(key_name2)
+
+        if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
+            # fp16 dynamic quant is not supported for qnnpack
+            x = torch.randn(seq_len, batch, input_size)
+            h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+            c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+            cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                      hidden_size=hidden_size,
+                                                      num_layers=num_layers,
+                                                      bias=bias,
+                                                      batch_first=False,
+                                                      dropout=0.0,
+                                                      bidirectional=bidirectional,
+                                                      dtype=dtype)
+            ref_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                     hidden_size=hidden_size,
+                                                     num_layers=num_layers,
+                                                     bias=bias,
+                                                     batch_first=False,
+                                                     dropout=0.0,
+                                                     bidirectional=bidirectional,
+                                                     dtype=dtype)
+
+            _all_params = ([m.param for m in cell_dq._all_weight_values])
+            result = torch.quantized_lstm(x, (h, c),
+                                          _all_params,
+                                          cell_dq.bias,
+                                          cell_dq.num_layers,
+                                          float(cell_dq.dropout),
+                                          False,
+                                          bidirectional,
+                                          False,
+                                          dtype=dtype,
+                                          use_dynamic=True)
+
+
+            y, (h, c) = cell_dq(x, (h, c))
+            self.assertEqual(result[0], y)
+            self.assertEqual(result[1], h)
+            self.assertEqual(result[2], c)
+            x = torch.randn(10, 20, 3)
+            self.check_eager_serialization(cell_dq, ref_dq, [x])
+            self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
+
+    @given(
+        dtype=st.sampled_from([torch.qint8, torch.float16]),
+    )
+    @override_qengines
+    def test_cell_api(self, dtype):
+        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
+        """
+        # Check that module matches the numerics of the op and ensure that module can be
+        # instantiated for all engines and dtypes
+        batch = 7
+        input_size = 3
+        hidden_size = 7
+        bias = True
+
+        x = torch.rand(batch, input_size)
+        h = torch.rand(batch, hidden_size)
+        cell_dict = {'LSTMCell': torch.nn.quantized.dynamic.LSTMCell,
+                     'GRUCell': torch.nn.quantized.dynamic.GRUCell,
+                     'RNNTanh': torch.nn.quantized.dynamic.RNNCell,
+                     'RNNReLU': torch.nn.quantized.dynamic.RNNCell
+                     }
+        state = {'LSTMCell': (h, h),
+                 'GRUCell': h,
+                 'RNNTanh': h,
+                 'RNNReLU': h}
+
+        qfn_dict = {'LSTMCell': torch.ops.quantized.quantized_lstm_cell_dynamic,
+                    'GRUCell': torch.ops.quantized.quantized_gru_cell_dynamic,
+                    'RNNTanh': torch.ops.quantized.quantized_rnn_tanh_cell_dynamic,
+                    'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
+
+        for rnn_type in cell_dict.keys():
+            if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
+                # fp16 dynamic quant is not supported for qnnpack
+                kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
+                if rnn_type == 'RNNReLU':
+                    kwargs['nonlinearity'] = "relu"
+                elif rnn_type == 'RNNTanh':
+                    kwargs['nonlinearity'] = "tanh"
+
+                cell_dq = cell_dict[rnn_type](**kwargs)
+                result = qfn_dict[rnn_type](x, state[rnn_type],
+                                            cell_dq._packed_weight_ih, cell_dq._packed_weight_hh,
+                                            cell_dq.bias_ih, cell_dq.bias_hh)
+                result_module = cell_dq(x, state[rnn_type])
+                self.assertEqual(result[0], result_module[0], msg="RNNCell module API failed")
+                self.assertEqual(result[1], result_module[1], msg="RNNCell module API failed")
+                weight_keys = ['weight_ih', 'weight_hh']
+                bias_keys = ['bias_ih', 'bias_hh']
+                self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), [x])
+                self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)

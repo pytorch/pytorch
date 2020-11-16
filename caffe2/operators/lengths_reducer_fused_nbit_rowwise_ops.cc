@@ -1,5 +1,6 @@
 #include "caffe2/operators/lengths_reducer_fused_nbit_rowwise_ops.h"
 #include "c10/util/Registry.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 
 namespace caffe2 {
 
@@ -611,3 +612,12 @@ fp16 scale and bias), and where rows are pruned.
 NO_GRADIENT(SparseLengthsMean2BitRowwiseSparse);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    SparseLengthsSum8BitRowwiseSparse,
+    "_caffe2::SparseLengthsSum8BitRowwiseSparse("
+    "Tensor data, "
+    "Tensor indices, "
+    "Tensor lengths, "
+    "Tensor compressed_indices_mapping) -> Tensor output",
+    caffe2::SparseLengthsNBitRowwiseSparseOp<8>);

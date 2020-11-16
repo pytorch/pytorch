@@ -7,6 +7,71 @@
 namespace caffe2 {
 
 template <class Context>
+class MergeDenseFeatureTensorsOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  template <class... Args>
+  explicit MergeDenseFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
+  }
+  virtual ~MergeDenseFeatureTensorsOp() noexcept {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<
+        TensorTypes<bool, int32_t, int64_t, float, double, std::string>>::
+        call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto& dense_data = Input(0);
+    int numExamples = dense_data.size(0);
+    int numFeatures = dense_data.size(1);
+
+    const bool* inPresenceData = Input(1).template data<bool>();
+    int totalNumFeatures = 0;
+    for (int exampleIndex = 0; exampleIndex < numExamples; ++exampleIndex) {
+      for (int inputIndex = 0; inputIndex < numFeatures; ++inputIndex) {
+        if (inPresenceData[exampleIndex * numFeatures + inputIndex]) {
+          ++totalNumFeatures;
+        }
+      }
+    }
+
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValues = Output(2, {totalNumFeatures}, at::dtype<T>());
+
+    int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
+    int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
+    T* outValuesData = outValues->template mutable_data<T>();
+    const T* inData =
+      Input(0).template data<T>();
+
+    int keysOffset = 0;
+    for (int exampleIndex = 0; exampleIndex < numExamples; ++exampleIndex) {
+      outLengthsData[exampleIndex] = 0;
+      auto offset = exampleIndex * numFeatures;
+      for (int inputIndex = 0; inputIndex < numFeatures; ++inputIndex) {
+        if (inPresenceData[offset]) {
+          ++outLengthsData[exampleIndex];
+          outKeysData[keysOffset] = featureIDs_[inputIndex];
+          outValuesData[keysOffset] = inData[offset];
+          ++keysOffset;
+        }
+        offset++;
+      }
+    }
+    return true;
+  }
+
+ private:
+  std::vector<int64_t> featureIDs_;
+};
+
+template <class Context>
 class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;

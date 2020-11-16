@@ -49,15 +49,21 @@ class Int8MaxPoolOp final : public ConvPoolOpBase<CPUContext> {
 
     if (this->qnnpackOperator_ == nullptr) {
       const qnnp_status createStatus = qnnp_create_max_pooling2d_nhwc_u8(
-        pad_t(), pad_r(), pad_b(), pad_l(),
-        kernel_h(), kernel_w(),
-        stride_h(), stride_w(),
-        1 /* dilation height */, 1 /* dilation width */,
-        channels,
-        activationLimits(Y->scale, Y->zero_point, Ac).first,
-        activationLimits(Y->scale, Y->zero_point, Ac).second,
-        0 /* flags */,
-        &this->qnnpackOperator_);
+          pad_t(),
+          pad_r(),
+          pad_b(),
+          pad_l(),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          1 /* dilation height */,
+          1 /* dilation width */,
+          channels,
+          activationLimits(Y->scale, Y->zero_point, Ac).first,
+          activationLimits(Y->scale, Y->zero_point, Ac).second,
+          0 /* flags */,
+          &this->qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,
           "failed to create QNNPACK Max Pooling operator");
@@ -66,15 +72,19 @@ class Int8MaxPoolOp final : public ConvPoolOpBase<CPUContext> {
 
     const qnnp_status setupStatus = qnnp_setup_max_pooling2d_nhwc_u8(
         this->qnnpackOperator_,
-        X.t.dim32(0), X.t.dim32(1), X.t.dim32(2),
-        X.t.template data<uint8_t>(), channels,
-        Y->t.template mutable_data<uint8_t>(), channels,
+        X.t.dim32(0),
+        X.t.dim32(1),
+        X.t.dim32(2),
+        X.t.template data<uint8_t>(),
+        channels,
+        Y->t.template mutable_data<uint8_t>(),
+        channels,
         nullptr /* thread pool */);
     CAFFE_ENFORCE(
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK Max Pooling operator");
 
-#ifdef FBCODE_CAFFE2
+#if defined(FBCODE_CAFFE2) || !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
     const qnnp_status runStatus =
         qnnp_run_operator(this->qnnpackOperator_, nullptr /* thread pool */);
 #else
