@@ -5,7 +5,12 @@
 #include <unordered_map>
 
 #include <c10d/Store.hpp>
+
+#ifdef _WIN32
+#include <c10d/WinSockUtils.hpp>
+#else
 #include <c10d/Utils.hpp>
+#endif
 
 #ifdef _WIN32
 #define CONNECT_SOCKET_OFFSET 1

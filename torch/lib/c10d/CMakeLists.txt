@@ -133,6 +133,8 @@ if(USE_GLOO)
 endif()
 if(NOT WIN32)
   copy_header(HashStore.hpp)
+else()
+  copy_header(WinSockUtils.hpp)
 endif()
 
 if(USE_C10D_NCCL)

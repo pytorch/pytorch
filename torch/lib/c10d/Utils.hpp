@@ -18,6 +18,7 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
 typedef SSIZE_T ssize_t;
 #pragma comment(lib, "Ws2_32.lib")
 #else
@@ -536,6 +537,7 @@ class ResourceGuard {
 namespace tcputil {
 
 constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
+const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 // Send and receive
 template <typename T>
@@ -646,23 +648,82 @@ inline std::string recvString(int socket) {
   return std::string(value.data(), value.size());
 }
 
+#ifndef _WIN32
 inline void closeSocket(int socket) {
-#ifdef _WIN32
-  ::closesocket(socket);
-#else
   ::close(socket);
-#endif
 }
 
-inline void socketInitialize() {
-#ifdef _WIN32
-  static std::once_flag init_flag;
-  std::call_once(init_flag, []() {
-      WSADATA wsa_data;
-      SYSCHECK_ERR_RETURN_NEG1(WSAStartup(MAKEWORD(2, 2), &wsa_data))
-  });
-#endif
+inline int setSocketAddrReUse(int socket) {
+  int optval = 1;
+  return ::setsockopt(
+    socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int));
 }
+
+inline int poll(struct pollfd *fds, unsigned long nfds, int timeout) {
+  return ::poll(fds, nfds, timeout);
+}
+
+inline void addPollfd(std::vector<struct pollfd>& fds, int socket, short events) {
+  fds.push_back({.fd = socket, .events = events});
+}
+
+inline void waitSocketConnected(
+    int socket,
+    struct ::addrinfo* nextAddr,
+    std::chrono::milliseconds timeout,
+    std::chrono::time_point<std::chrono::high_resolution_clock> startTime) {
+  SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, O_NONBLOCK));
+
+  int ret = ::connect(socket, nextAddr->ai_addr, nextAddr->ai_addrlen);
+
+  if (ret != 0 && errno != EINPROGRESS) {
+    throw std::system_error(errno, std::system_category());
+  }
+
+  struct ::pollfd pfd;
+  pfd.fd = socket;
+  pfd.events = POLLOUT;
+
+  int64_t pollTimeout = -1;
+  if (timeout != kNoTimeout) {
+    // calculate remaining time and use that as timeout for poll()
+    const auto elapsed = std::chrono::high_resolution_clock::now() - startTime;
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+    pollTimeout = std::max(
+        static_cast<int64_t>(0), static_cast<int64_t>(remaining.count()));
+  }
+  int numReady = ::poll(&pfd, 1, pollTimeout);
+  if (numReady < 0) {
+    throw std::system_error(errno, std::system_category());
+  } else if (numReady == 0) {
+    errno = 0;
+    throw std::runtime_error(kConnectTimeoutMsg);
+  }
+
+  socklen_t errLen = sizeof(errno);
+  errno = 0;
+  ::getsockopt(socket, SOL_SOCKET, SO_ERROR, &errno, &errLen);
+
+  // `errno` is set when:
+  //  1. `getsockopt` has failed
+  //  2. there is awaiting error in the socket
+  //  (the error is saved to the `errno` variable)
+  if (errno != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+
+  // Disable non-blocking mode
+  int flags;
+  SYSCHECK_ERR_RETURN_NEG1(flags = ::fcntl(socket, F_GETFL));
+  SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
+}
+
+// Linux socket does not need init libs first
+inline void socketInitialize() {
+}
+#endif
 
 // Other helpers
 std::string sockaddrToString(struct sockaddr* addr);

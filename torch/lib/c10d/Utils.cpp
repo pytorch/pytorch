@@ -1,8 +1,7 @@
 #include <c10d/Utils.hpp>
 
 #ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include <c10d/WinSockUtils.hpp>
 #else
 #include <netdb.h>
 #include <sys/poll.h>
@@ -25,25 +24,6 @@ namespace tcputil {
 namespace {
 
 constexpr int LISTEN_QUEUE_SIZE = 2048;
-const std::string kConnectTimeoutMsg = "connect() timed out.";
-
-void checkSocketError(int socket) {
-  socklen_t errLen = sizeof(errno);
-  errno = 0;
-#ifdef _WIN32
-  ::getsockopt(socket, SOL_SOCKET, SO_ERROR, (char*)&errno, &errLen);
-#else
-  ::getsockopt(socket, SOL_SOCKET, SO_ERROR, &errno, &errLen);
-#endif
-
-  // `errno` is set when:
-  //  1. `getsockopt` has failed
-  //  2. there is awaiting error in the socket
-  //  (the error is saved to the `errno` variable)
-  if (errno != 0) {
-    throw std::system_error(errno, std::system_category());
-  }
-}
 
 void setSocketNoDelay(int socket) {
   int flag = 1;
@@ -126,17 +106,7 @@ std::pair<int, PortType> listen(PortType port) {
               nextAddr->ai_family,
               nextAddr->ai_socktype,
               nextAddr->ai_protocol))
-
-#ifdef _WIN32
-      bool optval = false;
-      SYSCHECK_ERR_RETURN_NEG1(
-          ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, (char*)&optval, sizeof(bool)))
-#else
-      int optval = 1;
-      SYSCHECK_ERR_RETURN_NEG1(
-          ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
-#endif
-
+      SYSCHECK_ERR_RETURN_NEG1(tcputil::setSocketAddrReUse(socket))
       SYSCHECK_ERR_RETURN_NEG1(
           ::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
       SYSCHECK_ERR_RETURN_NEG1(::listen(socket, LISTEN_QUEUE_SIZE))
@@ -265,75 +235,7 @@ int connect(
       ResourceGuard socketGuard([socket]() { tcputil::closeSocket(socket); });
 
       // We need to connect in non-blocking mode, so we can use a timeout
-#ifdef _WIN32
-      unsigned long block_mode = 1;
-      SYSCHECK_ERR_RETURN_NEG1(ioctlsocket(socket, FIONBIO, &block_mode));
-
-      int ret;
-      do {
-          ret = connect(socket, nextAddr->ai_addr, nextAddr->ai_addrlen);
-          if (ret == SOCKET_ERROR) {
-              int err = WSAGetLastError();
-              if (err == WSAEISCONN) {
-                  break;
-              }
-              else if (err == WSAEALREADY || err == WSAEWOULDBLOCK) {
-                if (timeout != kNoTimeout) {
-                  const auto elapsed = std::chrono::high_resolution_clock::now() - start;
-                  if (elapsed > timeout) {
-                    errno = 0;
-                    throw std::runtime_error(kConnectTimeoutMsg);
-                  }
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
-              }
-              throw std::system_error(errno, std::system_category());
-          }
-      } while (ret == SOCKET_ERROR);
-
-      checkSocketError(socket);
-
-      block_mode = 0;
-      SYSCHECK_ERR_RETURN_NEG1(ioctlsocket(socket, FIONBIO, &block_mode));
-#else
-      SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, O_NONBLOCK));
-
-      int ret = ::connect(socket, nextAddr->ai_addr, nextAddr->ai_addrlen);
-
-      if (ret != 0 && errno != EINPROGRESS) {
-        throw std::system_error(errno, std::system_category());
-      }
-
-      struct ::pollfd pfd;
-      pfd.fd = socket;
-      pfd.events = POLLOUT;
-
-      int64_t pollTimeout = -1;
-      if (timeout != kNoTimeout) {
-        // calculate remaining time and use that as timeout for poll()
-        const auto elapsed = std::chrono::high_resolution_clock::now() - start;
-        const auto remaining =
-            std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
-            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
-        pollTimeout = std::max(
-            static_cast<int64_t>(0), static_cast<int64_t>(remaining.count()));
-      }
-      int numReady = ::poll(&pfd, 1, pollTimeout);
-      if (numReady < 0) {
-        throw std::system_error(errno, std::system_category());
-      } else if (numReady == 0) {
-        errno = 0;
-        throw std::runtime_error(kConnectTimeoutMsg);
-      }
-
-      checkSocketError(socket);
-
-      // Disable non-blocking mode
-      int flags;
-      SYSCHECK_ERR_RETURN_NEG1(flags = ::fcntl(socket, F_GETFL));
-      SYSCHECK_ERR_RETURN_NEG1(::fcntl(socket, F_SETFL, flags & (~O_NONBLOCK)));
-#endif
+      waitSocketConnected(socket, nextAddr, timeout, start);
 
       socketGuard.release();
       break;
@@ -378,11 +280,7 @@ std::tuple<int, std::string> accept(
 #endif
 
   while (true) {
-#ifdef _WIN32
-    int res = WSAPoll(events.get(), 1, timeout.count());
-#else
-    int res = ::poll(events.get(), 1, timeout.count());
-#endif
+    int res = tcputil::poll(events.get(), 1, timeout.count());
     if (res == 0) {
       throw std::runtime_error(
           "waiting for processes to "

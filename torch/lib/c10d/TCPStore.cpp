@@ -22,14 +22,6 @@ enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
 enum class WaitResponseType : uint8_t { STOP_WAITING };
 
-void addPollfd(std::vector<struct pollfd>& fds, int socket, short events) {
-#ifdef _WIN32
-  fds.push_back({(SOCKET)socket, events});
-#else
-  fds.push_back({.fd = socket, .events = events});
-#endif
-}
-
 } // anonymous namespace
 
 // TCPStoreDaemon class methods
@@ -84,10 +76,10 @@ void TCPStoreDaemon::join() {
 
 void TCPStoreDaemon::run() {
   std::vector<struct pollfd> fds;
-  addPollfd(fds, storeListenSocket_, POLLIN);
+  tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 #ifndef _WIN32
   // Push the read end of the pipe to signal the stopping of the daemon run
-  addPollfd(fds, controlPipeFd_[0], POLLHUP);
+  tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
 #endif
 
   // receive the queries
@@ -129,7 +121,7 @@ void TCPStoreDaemon::run() {
       }
       int sockFd = std::get<0>(tcputil::accept(storeListenSocket_));
       sockets_.push_back(sockFd);
-      addPollfd(fds, sockFd, POLLIN);
+      tcputil::addPollfd(fds, sockFd, POLLIN);
     }
 
 #ifndef _WIN32
