@@ -140,6 +140,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif isinstance(child, _FusedModule):
+            # activation_post_process are now added directly to nn.Sequentail/_FusedModule
             if needs_observation(child):
                 insert_activation_post_process(child)
         elif _has_special_act_post_process(child):
