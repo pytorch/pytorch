@@ -129,6 +129,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
