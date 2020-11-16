@@ -1,74 +1,12 @@
 """Microbenchmarks for the torch.fft module"""
 from argparse import ArgumentParser
-import math
 from collections import namedtuple
 from collections.abc import Iterable
 
 import torch
 import torch.fft
 from torch.utils import benchmark
-from torch.utils.benchmark import FuzzedParameter, FuzzedTensor
-
-
-MIN_DIM_SIZE = 16
-MAX_DIM_SIZE = 16 * 1024
-
-def power_range(upper_bound, base):
-    return (base ** i for i in range(int(math.log(upper_bound, base)) + 1))
-
-# List of regular numbers from MIN_DIM_SIZE to MAX_DIM_SIZE
-# These numbers factorize into multiples of prime factors 2, 3, and 5 only
-# and are usually the fastest in FFT implementations.
-REGULAR_SIZES = []
-for i in power_range(MAX_DIM_SIZE, 2):
-    for j in power_range(MAX_DIM_SIZE // i, 3):
-        ij = i * j
-        for k in power_range(MAX_DIM_SIZE // ij, 5):
-            ijk = ij * k
-            if ijk > MIN_DIM_SIZE:
-                REGULAR_SIZES.append(ijk)
-REGULAR_SIZES.sort()
-
-class SpectralOpFuzzer(benchmark.Fuzzer):
-    def __init__(self, *, seed, dtype, cuda):
-
-        super().__init__(
-            parameters=[
-                # Dimensionality of x. (e.g. 1D, 2D, or 3D.)
-                FuzzedParameter("ndim", distribution={1: 0.3, 2: 0.4, 3: 0.3}, strict=True),
-
-                # Shapes for `x`.
-                [
-                    FuzzedParameter(
-                        name=f"k{i}",
-                        distribution={size: 1. / len(REGULAR_SIZES) for size in REGULAR_SIZES}
-                    ) for i in range(3)
-                ],
-
-                # Steps for `x`. (Benchmarks strided memory access.)
-                [
-                    FuzzedParameter(
-                        name=f"step_{i}",
-                        distribution={1: 0.8, 2: 0.06, 4: 0.06, 8: 0.04, 16: 0.04},
-                    ) for i in range(3)
-                ],
-            ],
-            tensors=[
-                FuzzedTensor(
-                    name="x",
-                    size=("k0", "k1", "k2"),
-                    steps=("step_0", "step_1", "step_2"),
-                    probability_contiguous=0.75,
-                    min_elements=4 * 1024,
-                    max_elements=32 * 1024 ** 2,
-                    max_allocation_bytes=2 * 1024**3,  # 2 GB
-                    dim_parameter="ndim",
-                    dtype=dtype,
-                    cuda=cuda,
-                ),
-            ],
-            seed=seed,
-        )
+from torch.utils.benchmark.op_fuzzers.spectral import SpectralOpFuzzer
 
 
 def _dim_options(ndim):
@@ -123,7 +61,7 @@ BENCHMARK_MAP = {b.name: b for b in BENCHMARKS}
 BENCHMARK_NAMES = [b.name for b in BENCHMARKS]
 DEVICE_NAMES = ['cpu', 'cuda']
 
-def _output_csv(file):
+def _output_csv(file, results):
     file.write('benchmark,device,num_threads,numel,shape,contiguous,dim,mean (us),median (us),iqr (us)\n')
     for measurement in results:
         metadata = measurement.metadata
@@ -164,9 +102,9 @@ if __name__ == '__main__':
 
     if args.output is not None:
         with open(args.output, 'w') as f:
-            _output_csv(f)
-    else:
-        compare = benchmark.Compare(results)
-        compare.trim_significant_figures()
-        compare.colorize()
-        compare.print()
+            _output_csv(f, results)
+
+    compare = benchmark.Compare(results)
+    compare.trim_significant_figures()
+    compare.colorize()
+    compare.print()
