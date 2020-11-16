@@ -2596,30 +2596,6 @@ class TestAutograd(TestCase):
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
-    def test_cholesky(self):
-        def func(root, upper):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.cholesky(x, upper)
-
-        def run_test(upper, dims, dtype):
-            root = torch.rand(*dims, dtype=dtype, requires_grad=True)
-            root = root + torch.eye(dims[-1])
-
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
-
-            root = torch.rand(*dims, dtype=dtype)
-            root = torch.matmul(root, root.transpose(-1, -2).conj())
-            root.requires_grad_()
-            chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
-
-        for upper, dims, dtype in product([True, False],
-                                          [(3, 3), (4, 3, 2, 2)],
-                                          [torch.double, torch.cdouble]):
-            run_test(upper, dims, dtype)
-
-    @skipIfNoLapack
     def test_cholesky_solve(self):
         def _test_with_size(A_dims, B_dims, upper):
             root = torch.rand(*A_dims).requires_grad_()
@@ -4335,26 +4311,27 @@ for shape in [(1,), ()]:
         # Tensor being written does require grad
         b = torch.rand(1, requires_grad=True)
 
-        # Take an invalid view on a that should raise an error
+        # Take an invalid view on 'a' that should raise an error (warns during deprecation)
         view_a = MyFn.apply(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+        with self.assertWarnsRegex(UserWarning, "This view was created inside a custom Function"):
             view_a += b
 
         # Extra test for copy_ that is a manual implementation and could be easily
-        # forgotten when the codegen is updated
+        # forgotten when the codegen is updated (warns during deprecation)
         a = torch.rand(1, 2)
         b = torch.rand(1, requires_grad=True)
         view_a = MyFn.apply(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+        with self.assertWarnsRegex(UserWarning, "This view was created inside a custom Function"):
             view_a.copy_(b)
 
         # Functions that should throw must properly throw
         a = torch.rand(1, 2)
         b = torch.rand(1, requires_grad=True)
         view_a = a.unbind()[0]
-        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+        with self.assertRaisesRegex(RuntimeError, "This view is the output of a function that returns "
+                                                  "multiple views."):
             view_a.copy_(b)
 
         # Sanity check that views that should work still work
@@ -4879,11 +4856,59 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
-        bins = torch.linspace(0, 1.0, requires_grad=True)
+        bins = torch.linspace(0, 1.0, steps=100, requires_grad=True)
         vals = torch.rand(5, 5, requires_grad=True)
         out = torch.bucketize(vals, bins)
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
+
+        def assert_only_first_requires_grad(res):
+            if not isinstance(res, tuple):
+                res = (res,)
+            self.assertTrue(res[0].requires_grad)
+            for out in res[1:]:
+                if out is not None:
+                    self.assertFalse(out.requires_grad)
+
+        for sort in [True, False]:
+            for return_inverse in [True, False]:
+                for return_counts in [True, False]:
+                    res = torch.unique(inp, sorted=sort, return_inverse=return_inverse,
+                                       return_counts=return_counts)
+                    assert_only_first_requires_grad(res)
+
+                    res = torch.unique(inp, sorted=sort, return_inverse=return_inverse,
+                                       return_counts=return_counts, dim=0)
+                    assert_only_first_requires_grad(res)
+
+                    res = torch.unique_consecutive(inp, return_inverse=return_inverse,
+                                                   return_counts=return_counts)
+                    assert_only_first_requires_grad(res)
+
+                    res = torch.unique_consecutive(inp, return_inverse=return_inverse,
+                                                   return_counts=return_counts, dim=0)
+                    assert_only_first_requires_grad(res)
+
+                    # Here we test the internal functions to make sure all of them are
+                    # covered on top of the public API
+                    res = torch._unique(inp, sorted=sort, return_inverse=return_inverse)
+                    assert_only_first_requires_grad(res)
+
+                    # This looks public but is actually manually deleted from the
+                    # torch namespace in torch/functional.py
+                    res = torch._VF.unique_dim(inp, dim=0, sorted=sort, return_inverse=return_inverse,
+                                               return_counts=return_counts)
+                    assert_only_first_requires_grad(res)
+
+                    # We don't test `unique_dim_consecutive` here.
+                    # It looks public but the python binding is actually manually disabled in
+                    # tools/autograd/gen_python_functions.py
+
+                    res = torch._unique2(inp, sorted=sort, return_inverse=return_inverse,
+                                         return_counts=return_counts)
+                    assert_only_first_requires_grad(res)
+
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -4987,7 +5012,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'mean', 'inverse', 'triangular_solve', 'solve'] + separate_complex_tests
+                'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
+                'addcdiv'] + separate_complex_tests
 
 def add_test(
         name,
