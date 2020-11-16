@@ -685,10 +685,6 @@ struct CAFFE2_API IValue final {
     return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag)) + ")";
   }
 
-  uint32_t tagAsInt() const {
-    return static_cast<uint32_t>(tag);
-  }
-
   // generic v.to<at::Tensor>() implementations
   // that can be used in special functions like pop/push
   // that use template meta-programming.

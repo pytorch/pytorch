@@ -45,33 +45,10 @@ c10::intrusive_ptr<c10::ivalue::Future> GraphFunction::runAsync(
   return get_executor().runAsync(stack, std::move(taskLauncher));
 }
 
-size_t GraphFunction::computeInputTypesHash(
-    const std::vector<IValue>& stack) const {
-  // Use an algorithm similar to boost::hash_combine to compute the vector hash
-  size_t r = 0;
-  const size_t magic_number = 0x9e3779b9;
-  for (const IValue& iv : stack) {
-    r ^= std::hash<uint32_t>{}(iv.tagAsInt()) + magic_number + (r << 6) +
-        (r >> 2);
-  }
-  return r;
-}
-
 IValue GraphFunction::operator()(
     std::vector<IValue> stack,
     const Kwargs& kwargs) {
-  bool need_schema_check = true;
-  if (!kwargs.size()) { // Fast path
-    size_t input_types_hash = computeInputTypesHash(stack);
-    if (!schema_checks_cache_.count(input_types_hash)) {
-      getSchema().checkAndNormalizeInputs(stack, kwargs);
-      schema_checks_cache_.insert(input_types_hash);
-    }
-    need_schema_check = false;
-  }
-  if (need_schema_check) {
-    getSchema().checkAndNormalizeInputs(stack, kwargs);
-  }
+  getSchema().checkAndNormalizeInputs(stack, kwargs);
   run(stack);
   return stack.front();
 }

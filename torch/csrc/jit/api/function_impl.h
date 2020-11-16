@@ -141,14 +141,6 @@ struct TORCH_API GraphFunction : public Function {
   // mutable because getSchema caches the default schema if one is requested
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
-
-  // If we're seeing inputs of the same types over and over again (a frequent
-  // use case when a model is run in inference), and all of the inputs are
-  // positional, we can shortcut expensive schema checks. We do this by
-  // computing a hash of types of the inputs and if that combination of types
-  // has been seen before, we skip the schema check.
-  mutable std::unordered_set<size_t> schema_checks_cache_;
-  size_t computeInputTypesHash(const std::vector<IValue>& stack) const;
 };
 } // namespace jit
 } // namespace torch
