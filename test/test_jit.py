@@ -1792,7 +1792,7 @@ graph(%Ra, %Rb):
 
         @torch.jit.script
         def fn():
-            if True:
+            if 1 == 1:
                 return 1
             else:
                 return 2
@@ -1870,7 +1870,7 @@ graph(%Ra, %Rb):
             c2 = 1
             if bool(a):  # -> c0, c1
                 if bool(b):  # -> c0
-                    if True:  # -> c0
+                    if 1 == 1:  # -> c0
                         c0 = c0 + 1
                         if False:
                             c1 = c1 + 1
@@ -1878,7 +1878,7 @@ graph(%Ra, %Rb):
             else:  # -> c0, c1
                 c1 = c1 + 1
 
-            if True:  # inlined
+            if 1 == 1:  # inlined
                 c0 = c0 + 1  # dynamic
                 c2 = c2 + 4  # set to 5
             return a + c0 + c1 + c2
@@ -3065,7 +3065,7 @@ def foo(x):
                 return MyTuple(1)
 
             def forward(self, x):
-                if True:
+                if 1 == 1:
                     return MyTuple(torch.rand(2, 3))
                 else:
                     return self.fn()
@@ -7626,8 +7626,8 @@ dedent """
             self.checkScript(foo_continue, (i,))
             self.checkScript(foo_break, (i,))
 
-        def test_refine_outside_loop():
-            if True:
+        def test_refine_outside_loop(cond):
+            if 1 == 1:
                 x = None
             else:
                 x = 1
@@ -9646,7 +9646,7 @@ dedent """
                 c = a
                 # some nonsense with if-statements and loops to check
                 # that tuple lowering doesn't fail
-                if True:
+                if 1 == 1:
                     c = (i * 9, i + 1)
                 t0, t1 = c
                 while False:
@@ -9663,7 +9663,7 @@ dedent """
                 @torch.jit.script
                 def mixtypes(x):
                     a = (x, x)
-                    if True:
+                    if 1 == 1:
                         a = 4
 
     def test_if_tuple_sizes(self):
@@ -9698,7 +9698,7 @@ dedent """
 
         @torch.jit.script
         def diff_type_unused():
-            if True:
+            if 1 == 1:
                 c0 = 1
                 print(c0)
             else:
@@ -9710,13 +9710,13 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "c0 is not defined in the false branch"):
             @torch.jit.script
             def test():
-                if True:
+                if 1 == 1:
                     c0 = 1
                 return c0
         with self.assertRaisesRegex(RuntimeError, "c0 is not defined in the true branch"):
             @torch.jit.script
             def test2():
-                if True:
+                if 1 == 1:
                     pass
                 else:
                     c0 = 1
@@ -10468,7 +10468,7 @@ dedent """
 
         def t2(a):
             # mix const/non-const attributes
-            if True:
+            if 1 == 1:
                 b = 1
             else:
                 b = 0
@@ -12614,10 +12614,10 @@ dedent """
         # a escapes scope
         @torch.jit.script
         def foo():
-            if True:
+            if 1 == 1:
                 a = 1
             else:
-                if True:
+                if 1 == 1:
                     raise Exception("Hi")
                 else:
                     raise Exception("Hi")
@@ -13359,7 +13359,7 @@ dedent """
             def tanh(self):
                 output = torch.tanh(self)
                 def backward(grad_output):
-                    if True:
+                    if 1 == 1:
                         return 1
                     else:
                         return 1.
@@ -13782,7 +13782,7 @@ dedent """
 
     def test_boolean_literal_constant_metacompile(self):
         class Mod(torch.nn.Module):
-            val: torch.jit.Final[bool]
+            __constants__ = ['val']
 
             def __init__(self, val):
                 super(Mod, self).__init__()
@@ -13799,7 +13799,7 @@ dedent """
 
         @torch.jit.script
         def foo():
-            if True:
+            if 1 == 1:
                 return 1
             else:
                 return "2"
