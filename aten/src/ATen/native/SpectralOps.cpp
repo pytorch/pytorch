@@ -409,6 +409,26 @@ Tensor fft_irfftn(const Tensor& self, c10::optional<IntArrayRef> s,
   return native::fft_irfft(x, last_shape, last_dim, norm);
 }
 
+Tensor fft_fft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_fftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_ifft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_ifftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_rfft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_rfftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_irfft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                  IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_irfftn(self, s, dim, std::move(norm));
+}
+
 Tensor fft_fftfreq(int64_t n, double d, const TensorOptions& options) {
   ScalarType dtype = typeMetaToScalarType(options.dtype());
   TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),

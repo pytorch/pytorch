@@ -189,7 +189,8 @@ def embedding(input: Tensor, weight: Tensor, padding_idx: Optional[int] = ..., m
 
 def embedding_bag(input: Tensor, weight: Tensor, offsets: Optional[Tensor] = ..., max_norm: Optional[float] = ...,
                   norm_type: float = ..., scale_grad_by_freq: bool = ..., mode: str = ...,
-                  sparse: bool = ...) -> Tensor: ...
+                  sparse: bool = ..., per_sample_weights: Optional[Tensor] = ...,
+                  include_last_offset: bool = ...) -> Tensor: ...
 
 def batch_norm(input: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor],
                weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ..., training: bool = ...,

@@ -71,8 +71,8 @@ def create_derivative(arguments, returns, name, formula, var_names):
         return r
 
     returns = [transform_return(r) for r in returns]
-    formula, saved_inputs = saved_variables(formula, arguments)
-    formula, saved_outputs = saved_variables(formula, returns)
+    formula, saved_inputs = saved_variables(formula, arguments, var_names)
+    formula, saved_outputs = saved_variables(formula, returns, var_names)
 
     # Check that the referenced derivatives in the formula are in bounds
     for i in used_gradient_indices(formula):
@@ -269,15 +269,26 @@ def used_gradient_indices(formula):
     return [int(i) for i in re.findall(GRAD_INDEX_REGEX, formula)]
 
 
-def saved_variables(formula, args):
+def saved_variables(formula, args, var_names):
     # find which arguments need to be saved
     saved = []
+
+    def stride_expr(name):
+        assert var_names == [name], (
+            'Replacement for ".strides()" is currently only supported for single derivatives of the same tensor '
+            'that ".strides()" is being called on.')
+        return f'strides_or_error({name}, "{name}")'
 
     REPLACEMENTS = [
         # replace self.sizes() with self_sizes
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
             'type': 'IntArrayRef',
+        }),
+        # replace self.options() with self_options
+        (r'{}.options\(\)', {
+            'suffix': '_options',
+            'type': 'at::TensorOptions',
         }),
         # replace zeros_like(self) with self_info
         (r'zeros_like\({}\)', {
@@ -314,6 +325,12 @@ def saved_variables(formula, args):
         (r'{}.dim\(\)', {
             'suffix': '_dim',
             'type': 'int64_t',
+        }),
+        # replace self.strides() with self_strides
+        (r'{}.strides\(\)', {
+            'suffix': '_strides',
+            'type': 'IntArrayRef',
+            'expr': stride_expr,
         }),
     ]
 
@@ -390,5 +407,17 @@ def match_declarations_with_differentiability_info(declarations, differentiabili
     for declaration in declarations:
         info = find_info(declaration)
         declaration['derivative'] = info['autograd_fn'] if info else None
+
+        # Currently, the '.strides()' to 'strides_or_error' replacement does not support
+        # 'self' derivatives of an inplace function, so we must check for this case.
+        if declaration['inplace'] and (declaration.get('derivative') is not None):
+            for derivative in declaration['derivative']['derivatives']:
+                if 'self' in derivative['var_names']:
+                    for saved_input in derivative['saved_inputs']:
+                        if 'expr' in saved_input.keys():
+                            assert 'strides_or_error' not in saved_input['expr'], (
+                                "Calling '.strides()' in the 'self' derivative formula of an "
+                                f"in-place function is not supported: {declaration['name']}")
+
         declaration['non_differentiable_arg_names'] = info['non_differentiable_arg_names'] if info else []
         declaration['output_differentiability'] = info['output_differentiability'] if info else None

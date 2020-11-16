@@ -290,6 +290,25 @@ public:
     auto o2 = _mm256_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> igamma(const Vec256<BFloat16> &x) const {
+    __m256 lo, hi;
+    __m256 xlo, xhi;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(x.values, xlo, xhi);
+    __at_align32__ float tmp1[size() / 2], tmp2[size() / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+    __at_align32__ float tmpx1[size() / 2], tmpx2[size() / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmpx1), xlo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmpx2), xhi);
+    for (int64_t i = 0; i < size() / 2; ++i) {
+      tmp1[i] = calc_igamma(tmp1[i], tmpx1[i]);
+      tmp2[i] = calc_igamma(tmp2[i], tmpx2[i]);
+    }
+    auto o1 = _mm256_loadu_ps(tmp1);
+    auto o2 = _mm256_loadu_ps(tmp2);
+    return cvtfp32_bf16(o1, o2);
+  }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
   }
@@ -446,7 +465,7 @@ Vec256<BFloat16> inline Vec256<BFloat16>::operator==(const Vec256<BFloat16>& oth
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator!=(const Vec256<BFloat16>& other) const {
   return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_NEQ_OQ);
+    return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ);
   });
 }
 

@@ -51,7 +51,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Returns the meta info of the blob.
    */
-  const TypeMeta& meta() const noexcept {
+  const TypeMeta meta() const noexcept {
     return meta_;
   }
 
@@ -155,7 +155,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
         TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 
-  void* ShareExternal(void* allocated, const TypeMeta& meta) {
+  void* ShareExternal(void* allocated, const TypeMeta meta) {
     free_();
     meta_ = meta;
     pointer_ = allocated;

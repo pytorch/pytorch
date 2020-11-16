@@ -46,8 +46,10 @@ DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
+DEFINE_DISPATCH(igamma_stub);
 DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
+DEFINE_DISPATCH(copysign_stub);
 
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
@@ -119,6 +121,31 @@ Tensor add_relu(const Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
   return add_relu_impl(self, self, other, alpha);
+}
+
+Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  copysign_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor copysign(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  copysign_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& copysign_(Tensor& self, const Tensor& other) {
+  return native::copysign_out(self, self, other);
+}
+
+Tensor copysign(const Tensor& self, Scalar other) {
+  return native::copysign(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& copysign_(Tensor& self, Scalar other) {
+  return native::copysign_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -966,6 +993,23 @@ Tensor hypot(const Tensor& self, const Tensor& other) {
 
 Tensor& hypot_(Tensor& self, const Tensor& other) {
   return at::hypot_out(self, self, other);
+}
+
+Tensor& igamma_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igamma_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor igamma(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igamma_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& igamma_(Tensor& self, const Tensor& other) {
+  return at::igamma_out(self, self, other);
 }
 
 Tensor& nextafter_out(Tensor& result, const Tensor& self, const Tensor& other) {

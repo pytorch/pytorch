@@ -117,6 +117,34 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
       }
+    } else if (ins.op == RET) {
+      auto node = code.instructions_source()[i];
+      for (const auto& input : node->inputs()) {
+        const auto& input_type = input->type();
+        if (input_type->kind() == TypeKind::TupleType) {
+          if (const auto& name_typed_input =
+                  input_type->cast<at::NamedType>()) {
+            TORCH_CHECK(
+                !name_typed_input->name(),
+                "A named tuple type is not supported in mobile module. ",
+                "Workaround: instead of using a named tuple type's fields, ",
+                "use a dictionary type's key-value pair itmes or ",
+                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
+          }
+        } else if (
+            input_type->kind() == TypeKind::ListType ||
+            input_type->kind() == TypeKind::DictType) {
+          for (const TypePtr& element_type : input_type->containedTypes()) {
+            TORCH_CHECK(
+                element_type->kind() != TypeKind::ClassType,
+                "Returining a list or dictionary with pytorch class type ",
+                "is not supported in mobile module "
+                "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
+                "Workaround: instead of using pytorch class as their element type, ",
+                "use a combination of list, dictionary, and single types.");
+          }
+        }
+      }
     } else {
       TORCH_CHECK(
           ins.op != CREATE_OBJECT,

@@ -155,6 +155,16 @@ public:
   Vec256<double> i0() const {
     return map(calc_i0);
   }
+  Vec256<double> igamma(const Vec256<double> &x) const {
+    __at_align32__ double tmp[size()];
+    __at_align32__ double tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<double> log() const {
     return Vec256<double>(Sleef_logd4_u10(values));
   }
@@ -227,7 +237,7 @@ public:
   }
 
   Vec256<double> operator!=(const Vec256<double>& other) const {
-    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
 
   Vec256<double> operator<(const Vec256<double>& other) const {

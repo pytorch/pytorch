@@ -213,9 +213,8 @@ static void upsample_bilinear2d_out_cuda_template(
                0,
                stream>>>(
                 num_kernels, rheight, rwidth, align_corners, idata, odata);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_bilinear2d_backward_out_cuda_template(
@@ -306,9 +305,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
                 align_corners,
                 idata,
                 odata);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace

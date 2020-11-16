@@ -204,9 +204,8 @@ static void upsample_nearest2d_out_cuda_template(
                 output_width,
                 height_scale,
                 width_scale);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_nearest2d_backward_out_cuda_template(
@@ -287,8 +286,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
                 idata,
                 height_scale,
                 width_scale);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       });
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace

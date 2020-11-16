@@ -6,9 +6,10 @@
 
 #include <random>
 
-static PyObject * THPStorage_(sharedDecref)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(sharedDecref)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
 #ifndef THC_GENERIC_FILE
   THWStorage *storage = self->cdata;
   THManagedMapAllocator *ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
@@ -21,9 +22,10 @@ static PyObject * THPStorage_(sharedDecref)(THPStorage *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(sharedIncref)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(sharedIncref)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
 #ifndef THC_GENERIC_FILE
   THWStorage *storage = self->cdata;
   THManagedMapAllocator *ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
@@ -69,9 +71,10 @@ static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(shareFilename)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(shareFilename)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THWStorage *storage = self->cdata;
   THManagedMapAllocator *ctx;
   // Storage is already in shared memory, just return a handle
@@ -151,9 +154,10 @@ static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(shareFd)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(shareFd)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THWStorage *storage = self->cdata;
   THMapAllocator *ctx;
   // Storage is already in shared memory, just return a handle
@@ -214,9 +218,10 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
 
 #else // THC_GENERIC_FILE
 
-static PyObject * THPStorage_(shareCuda)(THPStorage *self, PyObject *noargs)
+static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THWStorage *storage = self->cdata;
 
   if (storage->received_cuda()) {
@@ -454,8 +459,9 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 // pointer.
 //
 // NB: This does NOT preserve object identity when you call it multiple times
-static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *args) {
+static PyObject * THPStorage_(weakRef)(PyObject *_self, PyObject *args) {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THStorage* storage = self->cdata;
   return PyLong_FromVoidPtr(c10::raw::intrusive_ptr::make_weak(storage));
   END_HANDLE_TH_ERRORS
@@ -498,9 +504,10 @@ PyObject * THPStorage_(expired)(PyObject *_unused, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_(sharedFd)(THPStorage *self, PyObject *noargs)
+PyObject * THPStorage_(sharedFd)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPStorage*)_self;
   THMapAllocator *ctx = nullptr;
 #ifndef THC_GENERIC_FILE
   THWStorage *storage = self->cdata;
@@ -512,8 +519,9 @@ PyObject * THPStorage_(sharedFd)(THPStorage *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_(isShared)(THPStorage *self, PyObject *noargs)
+PyObject * THPStorage_(isShared)(PyObject *_self, PyObject *noargs)
 {
+  auto self = (THPStorage*)_self;
 #ifdef THC_GENERIC_FILE
   Py_RETURN_TRUE;
 #else
@@ -527,25 +535,25 @@ PyObject * THPStorage_(isShared)(THPStorage *self, PyObject *noargs)
 }
 
 static PyMethodDef THPStorage_(sharingMethods)[] = {
-  {"_new_with_weak_ptr", (PyCFunction)(void(*)(void))THPStorage_(newWithWeakPtr), METH_O | METH_CLASS, nullptr},
+  {"_new_with_weak_ptr", THPStorage_(newWithWeakPtr), METH_O | METH_CLASS, nullptr},
 #ifdef THC_GENERIC_FILE
-  {"_share_cuda_", (PyCFunction)THPStorage_(shareCuda), METH_NOARGS, nullptr},
-  {"_new_shared_cuda", (PyCFunction)(void(*)(void))THPStorage_(newSharedCuda), METH_VARARGS | METH_STATIC, nullptr},
-  {"_release_ipc_counter", (PyCFunction)(void(*)(void))THPStorage_(releaseIPCCounter), METH_VARARGS | METH_STATIC, nullptr},
+  {"_share_cuda_", THPStorage_(shareCuda), METH_NOARGS, nullptr},
+  {"_new_shared_cuda", THPStorage_(newSharedCuda), METH_VARARGS | METH_STATIC, nullptr},
+  {"_release_ipc_counter", THPStorage_(releaseIPCCounter), METH_VARARGS | METH_STATIC, nullptr},
 #else
-  {"_share_fd_", (PyCFunction)THPStorage_(shareFd), METH_NOARGS, nullptr},
-  {"_new_shared_fd", (PyCFunction)(void(*)(void))THPStorage_(newSharedFd), METH_VARARGS | METH_STATIC, nullptr},
-  {"_new_using_fd", (PyCFunction)(void(*)(void))THPStorage_(pyNewFdStorage), METH_VARARGS | METH_STATIC, nullptr},
-  {"_share_filename_", (PyCFunction)THPStorage_(shareFilename), METH_NOARGS, nullptr},
-  {"_new_shared_filename", (PyCFunction)(void(*)(void))THPStorage_(newSharedFilename), METH_VARARGS | METH_STATIC, nullptr},
-  {"_new_using_filename", (PyCFunction)(void(*)(void))THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, nullptr},
+  {"_share_fd_", THPStorage_(shareFd), METH_NOARGS, nullptr},
+  {"_new_shared_fd", THPStorage_(newSharedFd), METH_VARARGS | METH_STATIC, nullptr},
+  {"_new_using_fd", THPStorage_(pyNewFdStorage), METH_VARARGS | METH_STATIC, nullptr},
+  {"_share_filename_", THPStorage_(shareFilename), METH_NOARGS, nullptr},
+  {"_new_shared_filename", THPStorage_(newSharedFilename), METH_VARARGS | METH_STATIC, nullptr},
+  {"_new_using_filename", THPStorage_(pyNewFilenameStorage), METH_VARARGS | METH_STATIC, nullptr},
 #endif
-  {"_weak_ref", (PyCFunction)THPStorage_(weakRef), METH_NOARGS, nullptr},
-  {"_free_weak_ref", (PyCFunction)(void(*)(void))THPStorage_(freeWeakRef), METH_O | METH_STATIC, nullptr},
-  {"_expired", (PyCFunction)(void(*)(void))THPStorage_(expired), METH_O | METH_STATIC, nullptr},
-  {"_shared_decref", (PyCFunction)THPStorage_(sharedDecref), METH_NOARGS, nullptr},
-  {"_shared_incref", (PyCFunction)THPStorage_(sharedIncref), METH_NOARGS, nullptr},
-  {"_get_shared_fd", (PyCFunction)THPStorage_(sharedFd), METH_NOARGS, nullptr},
-  {"is_shared", (PyCFunction)THPStorage_(isShared), METH_NOARGS, nullptr},
+  {"_weak_ref", THPStorage_(weakRef), METH_NOARGS, nullptr},
+  {"_free_weak_ref", THPStorage_(freeWeakRef), METH_O | METH_STATIC, nullptr},
+  {"_expired", THPStorage_(expired), METH_O | METH_STATIC, nullptr},
+  {"_shared_decref", THPStorage_(sharedDecref), METH_NOARGS, nullptr},
+  {"_shared_incref", THPStorage_(sharedIncref), METH_NOARGS, nullptr},
+  {"_get_shared_fd", THPStorage_(sharedFd), METH_NOARGS, nullptr},
+  {"is_shared", THPStorage_(isShared), METH_NOARGS, nullptr},
   {nullptr}
 };

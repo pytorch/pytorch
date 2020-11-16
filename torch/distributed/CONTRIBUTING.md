@@ -28,7 +28,7 @@ Processes discover each other through a rendezvous process on a common Store (Se
 
 ### Distributed Data Parallel
 
-DDP is implemented as a module in [distributed.py](../nn/parallel/distributed.py) with some of the core functions implemented in [reducer.cpp](../csrc/distributed/c10d/reducer.cpp) and [comm.cpp](../csrc/distributed/c10d/reducer.cpp). Gradients synchronizations occur in backward pass, triggered as autograd hooks.
+DDP is implemented as a module in [distributed.py](../nn/parallel/distributed.py) with some of the core functions implemented in [reducer.cpp](../lib/c10d/reducer.cpp) and [comm.cpp](../lib/c10d/reducer.cpp). Gradients synchronizations occur in backward pass, triggered as autograd hooks.
 
 ### Onboarding Tasks
 

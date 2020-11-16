@@ -4594,7 +4594,7 @@ static IterT VmaBinaryFindFirstNotLess(IterT beg, IterT end, const KeyT &key, co
     size_t down = 0, up = (end - beg);
     while(down < up)
     {
-        const size_t mid = (down + up) / 2;
+        const size_t mid = down + (up - down) / 2; //Overflow-safe midpoint calculation
         if(cmp(*(beg+mid), key))
         {
             down = mid + 1;

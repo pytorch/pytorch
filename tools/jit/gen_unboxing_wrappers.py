@@ -21,9 +21,11 @@ torch/csrc/jit/generated/
 import argparse
 import re
 from itertools import groupby
+from functools import reduce
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
-from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_without_overload
+from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_with_overload
+from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # JIT has a type system of
 # Scalar = int | float | bool # int is the largest int (int64_t),
@@ -279,8 +281,8 @@ def gen_unboxing_wrappers(
     declarations,
     out,
     template_path,
+    operator_selector: SelectiveBuilder,
     disable_autograd=False,
-    selected_op_list=None,
     force_schema_registration=False,
 ):
     GENERATED_UNBOXING_WRAPPERS_CPP = CodeTemplate.from_file(template_path + '/generated_unboxing_wrappers.cpp')
@@ -385,18 +387,19 @@ def gen_unboxing_wrappers(
 
         return constructor
 
-    def filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration):
+    def filter_decls(jit_decls, disable_autograd, operator_selector: SelectiveBuilder, force_schema_registration):
         result = []
         for decl in jit_decls:
             if disable_autograd and is_backward_op(decl):
                 continue
-            op_name = op_name_without_overload(decl)
-            if selected_op_list is not None and op_name not in selected_op_list:
+            op_name = op_name_with_overload(decl)
+            if operator_selector.is_root_operator(op_name):
+                result.append(decl)
+            else:
                 if force_schema_registration:
                     decl['emit_dummy_placeholder'] = True
-                else:
-                    continue
-            result.append(decl)
+                    result.append(decl)
+
         return result
 
     # This function declares an order on declarations. This is necessary because
@@ -466,7 +469,7 @@ def gen_unboxing_wrappers(
             reorder_out_args(decl)
 
     jit_decls.extend(additional_jit_decls)
-    jit_decls = filter_decls(jit_decls, disable_autograd, selected_op_list, force_schema_registration)
+    jit_decls = filter_decls(jit_decls, disable_autograd, operator_selector, force_schema_registration)
 
     # generation is deterministic
     jit_decl_groups = sort_decls(jit_decls)
@@ -496,6 +499,15 @@ def gen_unboxing_wrappers(
         }
         write(out, 'generated_unboxing_wrappers_%d.cpp' % i, GENERATED_UNBOXING_WRAPPERS_CPP, env)
 
+    all_shards = reduce(
+        lambda lhs, rhs: lhs + rhs,
+        shards,
+    )
+    env = {
+        'constructors': all_shards,
+    }
+    write(out, 'generated_unboxing_wrappers_everything.cpp', GENERATED_UNBOXING_WRAPPERS_CPP, env)
+
 
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
 
@@ -523,7 +535,8 @@ def main():
     parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
-    gen_unboxing_wrappers(args.declarations, args.out, args.template_path)
+    gen_unboxing_wrappers(args.declarations, args.out, args.template_path,
+                          SelectiveBuilder.get_nop_selector())
 
 
 if __name__ == '__main__':

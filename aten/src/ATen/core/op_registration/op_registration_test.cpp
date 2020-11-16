@@ -308,9 +308,9 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegis
   testing::internal::CaptureStderr();
   c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::DispatchKey::CPU));
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("_test::dummy"));
-  EXPECT_THAT(output, testing::HasSubstr("CPU"));
-  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel with the same dispatch key for the same operator"));
+  EXPECT_THAT(output, testing::HasSubstr("Overriding a previously registered kernel for the same operator and the same dispatch key"));
+  EXPECT_THAT(output, testing::HasSubstr("operator: _test::dummy(Tensor dummy) -> ()"));
+  EXPECT_THAT(output, testing::HasSubstr("dispatch key: CPU"));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegisteringInSameOpCall_thenFails) {
@@ -346,9 +346,9 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegistering_then
   testing::internal::CaptureStderr();
   c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<DummyKernel>());
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("_test::dummy"));
-  EXPECT_THAT(output, testing::HasSubstr("catch all"));
-  EXPECT_THAT(output, testing::HasSubstr("overwrote a previously registered kernel with the same dispatch key for the same operator"));
+  EXPECT_THAT(output, testing::HasSubstr("Overriding a previously registered kernel for the same operator and the same dispatch key"));
+  EXPECT_THAT(output, testing::HasSubstr("operator: _test::dummy(Tensor dummy) -> ()"));
+  EXPECT_THAT(output, testing::HasSubstr("dispatch key: (catch all)"));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegisteringInSameOpCall_thenFails) {
@@ -701,7 +701,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<DummyKernelWithIntParam>(c10::DispatchKey::CPU)
       .kernel<MockKernel>(c10::DispatchKey::CUDA, &called_kernel));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "Mismatch in kernel C++ signatures");
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
@@ -777,22 +777,6 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
-
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
-      .catchAllKernel([] (Tensor, std::string) {
-        called = true;
-      }));
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-  ASSERT_TRUE(op.has_value());
-
-  called = false;
-  auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
-  EXPECT_FALSE(called);
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
-}
-
 bool called_autograd = false;
 bool called_nonautograd = false;
 
@@ -835,20 +819,6 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   EXPECT_TRUE(called_autograd);
 }
 
-TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallRegularKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel<decltype(nonautograd_kernel), nonautograd_kernel>(DispatchKey::CPU)
-    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
-
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-  ASSERT_TRUE(op.has_value());
-
-  called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));
-  EXPECT_TRUE(called_nonautograd);
-  EXPECT_FALSE(called_autograd);
-}
-
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
     .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
@@ -857,10 +827,11 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
 
+  // catchAll now maps to Math which has higher precedence than Autograd
   called_nonautograd = called_autograd = false;
   op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
-  EXPECT_FALSE(called_nonautograd);
-  EXPECT_TRUE(called_autograd);
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallCatchallKernel) {
@@ -973,7 +944,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingC
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "Mismatch in kernel C++ signatures");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBackendWithMismatchingCppSignatures_thenFails) {
@@ -982,7 +953,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBacke
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "Mismatch in kernel C++ signatures");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchAllWithMismatchingCppSignatures_thenFails) {
@@ -991,7 +962,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchA
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .catchAllKernel([] (const int64_t&) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "Mismatch in kernel C++ signatures");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCppSignatures_thenFails) {
@@ -1000,7 +971,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCpp
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int _0) -> ()");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
@@ -1009,7 +980,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingCatchAllWithMismat
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int _0) -> ()");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingCppSignatures_thenFails) {
@@ -1018,7 +989,7 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingC
   m.impl("dummy", DispatchKey::CPU, [] (int64_t) {});
   expectThrows<c10::Error>([&] {
     m.impl("dummy", DispatchKey::CUDA, [] (const int64_t&) {});
-  }, "mismatched with a previous kernel that had the signature");
+  }, "Mismatch in kernel C++ signatures");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCppSignatures_thenFails) {
@@ -1028,7 +999,7 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCpp
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int a) -> ()");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismatchingCppSignatures_thenFails) {
@@ -1037,7 +1008,7 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingCatchAllWithMismat
   expectThrows<c10::Error>([] {
     c10::Dispatcher::singleton().findSchemaOrThrow("_test::dummy", "")
       .typed<void(const int64_t&)>();
-  }, "Tried to access operator _test::dummy with a wrong signature");
+  }, "Tried to access or call an operator with a wrong signature.\n  operator: _test::dummy(int a) -> ()");
 }
 
 /**
@@ -1627,6 +1598,39 @@ TEST(NewOperatorRegistrationTest, schema) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def4", ""})->schema().isDefaultAliasAnalysisKind());
 }
 
+TEST(NewOperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
+  auto m1 = MAKE_TORCH_LIBRARY_IMPL(_, CPU);
+  m1.fallback(CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  bool called = false;
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor t, str input) -> ()");
+  m.impl("fn", [&] (Tensor, std::string) { called = true; });
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
+  // CatchAll now maps to Math and has higher precedence than backend fallback.
+  EXPECT_TRUE(called);
+}
+
+TEST(NewOperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallRegularKernel) {
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> ()");
+  m.impl("fn", c10::DispatchKey::CPU, nonautograd_kernel);
+  m.impl("fn", c10::DispatchKey::Autograd, autograd_kernel);
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  callOp(*op, dummyTensor(DispatchKey::CPU));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
+}
+
 TEST(NewOperatorRegistrationTest, dispatchWithMathKernel) {
   bool math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
@@ -1708,18 +1712,20 @@ TEST(NewOperatorRegistrationTest, dispatchWithMathAndCatchAllKernel) {
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
 
+  // catchAll now maps to Math, which means we have two registrations to Math key.
+  // The last registration is used.
   {
     catchall_called = math_called = false;
     callOp(*op, dummyTensor(c10::DispatchKey::CPU));
-    ASSERT_TRUE(math_called);
-    ASSERT_FALSE(catchall_called);
+    ASSERT_FALSE(math_called);
+    ASSERT_TRUE(catchall_called);
   }
 
   {
     catchall_called = math_called = false;
     callOp(*op, dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
-    ASSERT_TRUE(math_called);
-    ASSERT_FALSE(catchall_called);
+    ASSERT_FALSE(math_called);
+    ASSERT_TRUE(catchall_called);
   }
 }
 
@@ -2055,6 +2061,10 @@ TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther
 TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   bool privateuse1_called = false;
   bool catchall_called = false;
+  // Similar to in-tree AutogradCPU/AutogradCUDA etc, out-of-tree backends usually register
+  // a fallthrough kernel for AutogradPrivateUse1.
+  auto m1 = MAKE_TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1);
+  m1.fallback(CppFunction::makeFallthrough());
 
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn", torch::dispatch(c10::DispatchKey::PrivateUse1, [&](const Tensor& x, const Tensor& y) { privateuse1_called = true; return x; }));
@@ -2239,6 +2249,22 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
     EXPECT_EQ(initial_num_registers + 1, listener_ptr->num_registers_);
   }
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
+}
+
+TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
+  auto danglingImpls = Dispatcher::singleton().findDanglingImpls();
+  std::string error_str = "Discovered operators that have been registered through the dispatcher"
+                          " without explicitly specifying their schemas. Please do so using"
+                          " the TORCH_LIBRARY macro. Suspect operators:\n";
+  for (auto& op : danglingImpls) {
+      auto& op_name = op.operator_name();
+      error_str += "\t" + op_name.name;
+      if (op_name.overload_name != "") {
+          error_str += "." + op_name.overload_name;
+      }
+      error_str += "\n";
+  }
+  ASSERT_EQ(danglingImpls.size(), 0) << error_str;
 }
 
 }

@@ -133,8 +133,6 @@ _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_forward) \
-_(aten, _th_baddbmm) \
-_(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_mode) \
@@ -239,6 +237,7 @@ _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
 _(aten, complex) \
+_(aten, copysign) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
@@ -371,6 +370,8 @@ _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
 _(aten, i0_) \
+_(aten, igamma) \
+_(aten, igamma_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -666,7 +667,6 @@ _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
-_(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
 _(aten, th_pow) \
@@ -736,7 +736,6 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
-_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
@@ -781,6 +780,7 @@ _(attr, ceil_mode) \
 _(attr, checked_signal_sizes) \
 _(attr, chunks) \
 _(attr, columns) \
+_(attr, column_stack) \
 _(attr, complex_input) \
 _(attr, complex_output) \
 _(attr, condition) \

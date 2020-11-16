@@ -69,7 +69,7 @@ class _ConvNd(Module):
                  transposed: bool,
                  output_padding: _size_1_t,
                  groups: int,
-                 bias: Optional[Tensor],
+                 bias: bool,
                  padding_mode: str) -> None:
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
@@ -245,13 +245,16 @@ class Conv1d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
-    def forward(self, input: Tensor) -> Tensor:
+    def _conv_forward(self, input, weight):
         if self.padding_mode != 'zeros':
             return F.conv1d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
-                            self.weight, self.bias, self.stride,
+                            weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
-        return F.conv1d(input, self.weight, self.bias, self.stride,
+        return F.conv1d(input, weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return self._conv_forward(input, self.weight)
 
 
 class Conv2d(_ConvNd):

@@ -1,6 +1,5 @@
 #import <ATen/native/metal/MetalPrepackOpContext.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNOp.h>
+
 #include <torch/script.h>
 
 namespace at {
@@ -48,8 +47,6 @@ struct Conv2DParams final {
 };
 
 NeuronType neuronType(const Conv2dOpContext& context);
-
-Tensor conv2d_prepack_run_impl(Conv2dOpContext& context, const Tensor& input);
 
 } // namespace metal
 } // namespace native

@@ -1,4 +1,6 @@
 #include <c10d/ProcessGroup.hpp>
+#include <ATen/ThreadLocalState.h>
+
 
 #include <c10/util/Logging.h>
 
@@ -51,10 +53,20 @@ bool isP2POp(OpType opType) {
       opType == OpType::RECVANYSOURCE;
 }
 
-ProcessGroup::Work::Work() : rank_(-1), opType_(OpType::UNKNOWN) {}
 
-ProcessGroup::Work::Work(int rank, OpType opType)
-    : rank_(rank), opType_(opType) {}
+ProcessGroup::Work::Work(int rank, OpType opType, const char* profilingTitle)
+    : rank_(rank), opType_(opType) {
+  if (profilingTitle != nullptr) {
+    auto recordingFunction = std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    if (recordingFunction->active) {
+        recordingFunction->before(profilingTitle, {});
+        std::function<void()> end_handler = [this, recordingFunction]() {
+          recordingFunction->end();
+        };
+        recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
+    }
+  }
+}
 
 OpType ProcessGroup::Work::retrieveOpType() {
   return opType_;
@@ -123,6 +135,10 @@ void ProcessGroup::Work::finish(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
   exception_ = exception;
+  if (recordFunctionEndCallback_) {
+    recordFunctionEndCallback_();
+    recordFunctionEndCallback_ = nullptr;
+  }
   lock.unlock();
   cv_.notify_all();
 }
@@ -131,6 +147,10 @@ void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
   exception_ = exception;
+  if (recordFunctionEndCallback_) {
+    recordFunctionEndCallback_();
+    recordFunctionEndCallback_ = nullptr;
+  }
   if (exception_) {
     std::rethrow_exception(exception_);
   }
@@ -144,7 +164,7 @@ ProcessGroup::~ProcessGroup() {}
 
 // This is introduced so that implementors of ProcessGroup would not need to
 // have this implmentation.
-std::shared_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* usused */,
     std::vector<at::Tensor>& /* usused */,
     const AllgatherOptions& /* usused */) {

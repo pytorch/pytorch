@@ -106,8 +106,16 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   float* output_data = output.data_ptr<float>();
 
 #ifdef USE_FBGEMM
-  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
-      input, input_rows, input_columns, output_data);
+    at::parallel_for(
+      0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+        for (int64_t row = start_idx; row < end_idx; ++row) {
+          fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+            input + row * input_columns,
+            1,
+            input_columns,
+            output_data + row * output_columns);
+        }
+      });
 #else
   for (std::size_t row = 0; row < input_rows; ++row) {
     const std::uint8_t* input_row = input + row * input_columns;
@@ -145,8 +153,16 @@ Tensor _qembeddingbag_nbit_unpack_helper(
       packed_weight.suggest_memory_format());
   float* output_data = output.data_ptr<float>();
 #ifdef USE_FBGEMM
-  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(
-      BIT_RATE, input_data, input_rows, input_columns, output_data);
+    at::parallel_for(
+      0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+        for (int64_t row = start_idx; row < end_idx; ++row) {
+          fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(BIT_RATE,
+            input_data + row * input_columns,
+            1,
+            input_columns,
+            output_data + row * output_dimensions[1]);
+        }
+      });
 #else
   auto output_columns = output_dimensions[1];
   for (size_t row = 0; row < input_rows; ++row) {

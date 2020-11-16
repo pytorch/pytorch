@@ -121,11 +121,10 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeSum(const torch::jit::Value* v);
 
-  Tensor* computeSoftmax(const torch::jit::Value* v);
+  Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
   Tensor* computeValue(const torch::jit::Value* v);
 
-  void flattenTensors(BackendType backendType);
   Stmt* generateStmt(BackendType backendType);
   std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
@@ -191,7 +190,6 @@ class TORCH_API TensorExprKernel {
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
   std::vector<Tensor*> tensorOutputs_;
-  std::vector<Tensor*> flatTensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
   std::unique_ptr<CodeGen> codegen_;
@@ -211,6 +209,7 @@ TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
 TORCH_API bool& getTEGenerateBlockCode();
+TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
 

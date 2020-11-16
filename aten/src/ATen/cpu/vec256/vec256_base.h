@@ -394,6 +394,13 @@ public:
   Vec256<T> i0() const {
     return map(calc_i0);
   }
+  Vec256<T> igamma(const Vec256<T> &x) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = calc_igamma(values[i], x[i]);
+    }
+    return ret;
+  }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
     // return value back to T in the case of unary operator- incuring a

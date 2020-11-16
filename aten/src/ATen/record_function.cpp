@@ -1,4 +1,5 @@
 #include <ATen/record_function.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -376,6 +377,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   name_ = StringView(name);
   sequence_nr_ = sequence_nr;
   thread_id_ = currentThreadId();
+  operator_name_.reset();
 
   manager().runStartCallbacks(*this);
 }
@@ -387,6 +389,21 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   name_ = StringView(std::move(name));
   sequence_nr_ = sequence_nr;
   thread_id_ = currentThreadId();
+  operator_name_.reset();
+
+  manager().runStartCallbacks(*this);
+}
+
+void RecordFunction::before(
+    c10::OperatorHandle const& op,
+    int64_t sequence_nr) {
+  if (!active) {
+    return;
+  }
+  sequence_nr_ = sequence_nr;
+  thread_id_ = currentThreadId();
+  operator_name_ = op.operator_name();
+  name_ = StringView(op.schema().name());
 
   manager().runStartCallbacks(*this);
 }

@@ -1,15 +1,15 @@
-import collections
-import io
-import tempfile
-from typing import NamedTuple
-import unittest
-import sys
 from itertools import repeat, chain, product
-import os
+from typing import NamedTuple
+import collections
 import gc
-import threading
-import queue
+import io
+import os
 import pickle
+import queue
+import sys
+import tempfile
+import threading
+import unittest
 
 import torch
 import torch.cuda
@@ -23,7 +23,7 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -287,10 +287,10 @@ class TestCuda(TestCase):
         self.assertFalse(t.is_pinned())
         cudart = torch.cuda.cudart()
         r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
-        self.assertEquals(r, 0)
+        self.assertEqual(r, 0)
         self.assertTrue(t.is_pinned())
         r = cudart.cudaHostUnregister(t.data_ptr())
-        self.assertEquals(r, 0)
+        self.assertEqual(r, 0)
         self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
@@ -492,7 +492,6 @@ class TestCuda(TestCase):
             event = torch.cuda.Event()
             a.copy_(b, non_blocking=True)
             event.record()
-            self.assertFalse(event.query())
             event.synchronize()
             self.assertEqual(a, b)
 
@@ -505,22 +504,35 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
-    @unittest.skip("skipped because test could be flaky, see #35144")
     def test_to_non_blocking(self):
-        def _test_to_non_blocking(a, non_blocking):
-            stream = torch.cuda.current_stream()
-            with torch.cuda.stream(stream):
-                b = a.to('cuda', non_blocking=non_blocking)
-                self.assertEqual(stream.query(), not non_blocking)
-                stream.synchronize()
-                self.assertEqual(a, b)
+        stream = torch.cuda.current_stream()
 
-        # 10MB copies
-        x = torch.ones(10000000, dtype=torch.uint8)
-        _test_to_non_blocking(x, True)
+        def _test_to_non_blocking(a, non_blocking, dst):
+            torch.cuda.synchronize()
+            # Pushes an 0.1 second spin to stream so if the copy is non blocking,
+            # stream will almost surely be active when we query().
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            b = a.to(device=dst, non_blocking=non_blocking)
+            self.assertEqual(stream.query(), not non_blocking)
+            stream.synchronize()
+            self.assertEqual(a, b)
+            self.assertTrue(b.is_pinned() == (non_blocking and dst == "cpu"))
 
-        y = torch.ones(10000000, dtype=torch.uint8)
-        _test_to_non_blocking(y, False)
+        for dst, try_non_blocking in product(("cuda", "cpu"), (True, False)):
+            # Creates source on the opposite device from destination.
+            src = torch.randn(1000000,
+                              device="cuda" if dst == "cpu" else "cpu",
+                              pin_memory=True if dst == "cuda" else False)
+            _test_to_non_blocking(src, try_non_blocking, dst)
+
+    def test_to_cpu_blocking_by_default(self):
+        src = torch.randn(1000000, device="cuda")
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        dst = src.to(device="cpu")
+        self.assertEqual(torch.cuda.current_stream().query(), True)
+        self.assertEqual(src, dst)
+        self.assertFalse(dst.is_pinned())
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
@@ -966,7 +978,6 @@ class TestCuda(TestCase):
         self.assertNotEqual(hash(s0), hash(s3))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_streams_priority(self):
         low, high = torch.cuda.Stream.priority_range()
         s0 = torch.cuda.Stream(device=0, priority=low)
@@ -1545,7 +1556,6 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
-    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -2152,6 +2162,7 @@ t2.start()
 
         self._run_scaling_case(run, unskipped=3, skipped=1)
 
+    @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
@@ -2959,9 +2970,9 @@ class TestCudaComm(TestCase):
         self.assertEqual(result.cpu(), x + y)
 
     def _test_reduce_add_coalesced(self, tensors, buffer_size):
-        dup_tensors = [tensors, list(map(lambda t: t.cuda(1), tensors))]
+        dup_tensors = [tensors, [t.cuda(1) for t in tensors]]
 
-        r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
+        r_tensors = [comm.reduce_add(t) for t in zip(*dup_tensors)]
         for r, t in zip(r_tensors, tensors):
             self.assertEqualTypeString(r, t)
             self.assertEqual(r, t * 2)

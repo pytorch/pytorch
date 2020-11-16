@@ -2904,6 +2904,296 @@ void testNormalizeAndSplitWithTail() {
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
 
+void testFlattenSimpleLoopNest2D() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 0; j < 5; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for = For::make(j, 0, 5, for_body);
+  auto outer_for = For::make(i, 0, 10, inner_for);
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 50; i_flat++) {
+        # CHECK:   A[i_flat / 5, i_flat % 5] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], a_buf);
+    PaddedBuffer<int> inp1(10, 5);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, a_buf);
+    PaddedBuffer<int> inp2(10, 5);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
+void testFlattenSimpleLoopNest3D() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 0; j < 5; j++) {
+  //       for (int k = 0; k < 7; k++) {
+  //         A[i,j,k] = i + j * k;
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5, 7}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j, k}, i + j * k, 1)});
+  auto for1 = For::make(k, 0, 7, for_body);
+  auto for2 = For::make(j, 0, 5, for1);
+  auto for3 = For::make(i, 0, 10, for2);
+  Block::make({for3});
+
+  std::vector<For*> loops = {for3, for2, for1};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 350; i_flat++) {
+        # CHECK:   A[i_flat / 35, (i_flat / 7) % 5, i_flat % 7] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], a_buf);
+    PaddedBuffer<int> inp1(10, 5, 7);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, a_buf);
+    PaddedBuffer<int> inp2(10, 5, 7);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
+void testFlattenLoopNestAfterNormalize() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 2; i < 10; i++) {
+  //     for (int j = 3; j < 15; j++) {
+  //       A[i - 2,j - 3] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {8, 12}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j, 1)});
+  auto inner_for = For::make(j, 3, 15, for_body);
+  auto outer_for = For::make(i, 2, 10, inner_for);
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 96; i_flat++) {
+        # CHECK:   A[i_flat / 12, i_flat % 12] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], a_buf);
+    PaddedBuffer<int> inp1(8, 12);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, a_buf);
+    PaddedBuffer<int> inp2(8, 12);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
+void testFlattenImperfectLoopNest() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     A[i, i] = 0;
+  //     for (int j = 0; j < 15; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  // Do not flatten.
+
+  BufHandle a_buf("A", {10, 15}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for = For::make(j, 0, 15, for_body);
+  auto outer_for = For::make(
+      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0, 1), inner_for}));
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i = 0; i < 10; i++) {
+        # CHECK-NEXT:   A[i, i] =
+        # CHECK-NEXT:   for (int j = 0; j < 15; j++) {
+        # CHECK-NEXT:     A[i, j] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testFlattenReductionLoopNest() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     S[i] = 0;
+  //     for (int j = 0; j < 15; j++) {
+  //       S[i] = S[i] + A[i,j];
+  //     }
+  //   }
+  // Do not flatten.
+
+  BufHandle a_buf("A", {10, 15}, kInt);
+  BufHandle s_buf("S", {10}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(
+      s_buf,
+      {i},
+      Load::make(s_buf, {i}, 1) + Load::make(a_buf, {i, j}, 1),
+      1)});
+  auto inner_for = For::make(j, 0, 15, for_body);
+  auto outer_for = For::make(
+      i, 0, 10, Block::make({Store::make(s_buf, {i}, 0, 1), inner_for}));
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i = 0; i < 10; i++) {
+        # CHECK-NEXT:   S[i] =
+        # CHECK-NEXT:   for (int j = 0; j < 15; j++) {
+        # CHECK-NEXT:     S[i] = (S[i]) + (A[i, j])
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testFlattenReductionLoopNestFromTensor() {
+  KernelScope kernel_scope;
+  const int M = 3;
+  const int N = 7;
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  Placeholder b(BufHandle("b", {m, n}, kFloat));
+  Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
+  LoopNest loop({c});
+  auto loops = loop.getLoopStmtsFor(c);
+  For* flattened;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int m = 0; m < 3; m++) {
+        # CHECK-NEXT:   sum[m] =
+        # CHECK-NEXT:   for (int n = 0; n < 7; n++) {
+        # CHECK-NEXT:     sum[m] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testFlattenIncorrectLoopsAsInput() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 0; j < 5; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  //   for (int x = 0; x < 10; x++) {
+  //     for (int y = 0; y < 5; y++) {
+  //       A[x,y] = A[x,y] + x + y;
+  //     }
+  //   }
+  // Flatten({For_i, For_y}) => should not succeed
+
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for1 = For::make(j, 0, 5, for_body1);
+  auto outer_for1 = For::make(i, 0, 10, inner_for1);
+  auto for_body2 = Block::make(
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+  auto inner_for2 = For::make(y, 0, 5, for_body2);
+  auto outer_for2 = For::make(x, 0, 10, inner_for2);
+  Block::make({outer_for1, outer_for2});
+
+  std::vector<For*> loops = {outer_for1, inner_for2};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i = 0; i < 10; i++) {
+        # CHECK-NEXT:   for (int j = 0; j < 5; j++) {
+        # CHECK-NEXT:     A[i, j] = i * j
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
 void testDetectInlineRankMismatch() {
   KernelScope kernel_scope;
   const int kTotalSize = 8;

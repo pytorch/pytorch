@@ -89,41 +89,35 @@ class TestGradients(TestCase):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     # Tests that gradients are computed correctly
-    # TODO(@anjali411) enable this for torch.cdouble.
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_fn_grad(self, device, dtype, op):
         self._grad_test_helper(device, dtype, op, op.get_op())
 
-    # TODO(@anjali411) enable this for torch.cdouble.
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_method_grad(self, device, dtype, op):
         self._grad_test_helper(device, dtype, op, op.get_method())
 
-    # TODO(@anjali411) enable this for torch.cdouble.
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
         if not op.test_inplace_grad:
             self.skipTest("Skipped! Inplace gradcheck marked to skip.")
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
-    # TODO(@anjali411) enable this for torch.cdouble.
     # Test that gradients of gradients are computed correctly
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
-    # TODO(@anjali411) enable this for torch.cdouble.
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_method_gradgrad(self, device, dtype, op):
         self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
-    # TODO(@anjali411) enable this for torch.cdouble.
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
         if not op.test_inplace_grad:

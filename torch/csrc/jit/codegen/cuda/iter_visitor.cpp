@@ -7,6 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /* ITER VISITOR */
 
@@ -540,6 +541,7 @@ std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
   return io.inputs;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

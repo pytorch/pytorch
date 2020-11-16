@@ -189,7 +189,7 @@ class LayerNormFakeFp16Op final : public Operator<CPUContext> {
       int Nout = X.numel();
 
       std::vector<float> inv_scalev(Nout, inv_scale);
-      std::vector<float> offsetv(Nout, Y_offset - 128.0);
+      std::vector<float> offsetv(Nout, Y_offset);
       uint8_t* Y_uint8_data = Y_int8->t.template mutable_data<uint8_t>();
 
       fake_fp16::fma_fp16(Nout, Y_fp16.data(), inv_scalev.data(), offsetv.data());
@@ -200,7 +200,6 @@ class LayerNormFakeFp16Op final : public Operator<CPUContext> {
       for (int i = 0; i < Nout; i++) {
         float halfRes = offsetv[i];
         halfRes = round(halfRes);
-        halfRes = halfRes + 128.0;
         if (std::isinf(halfRes)) {
           if (halfRes > 0) {
             halfRes = qmax;

@@ -130,6 +130,25 @@ class TestList(JitTestCase):
                 del x[1:3]
                 return x
 
+    def test_list_keyword(self):
+        def foo():
+            return list([1, 2, 3]), list(("a", "b")), list(range(5)), list("abcdefg")  # noqa: C410
+
+        self.checkScript(foo, ())
+
+        def foo2():
+            x: List[int] = list()
+            x.append(1)
+            return x,
+
+        self.checkScript(foo2, ())
+
+        def foo3():
+            return list(list("abc"))
+
+        self.checkScript(foo3, ())
+        FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
+
     def test_min_bool_list(self):
         def jit_min_list(a, b):
             # type: (List[bool], List[bool]) -> List[bool]
@@ -948,11 +967,11 @@ class TestList(JitTestCase):
             check_list(min_intlist, int_list)
             check_list(max_intlist, int_list)
 
-            bool_li = list(map(lambda x: bool(x), int_list))
+            bool_li = [bool(x) for x in int_list]
             check_list(min_boollist, bool_li)
             check_list(max_boollist, bool_li)
 
-            float_li = list(map(lambda x: float(x), int_list))
+            float_li = [float(x) for x in int_list]
             check_list(min_floatlist, float_li)
             check_list(max_floatlist, float_li)
 

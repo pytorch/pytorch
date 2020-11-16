@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -13,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace inst {
 
 Trace::Trace() {
@@ -51,7 +51,7 @@ void Trace::logEvent(char ph, const char* name, char sep) {
   const unsigned int tid = GetCurrentThreadId();
 #else
   const unsigned int pid = getpid();
-  const unsigned int tid = pthread_self();
+  const unsigned int tid = std::hash<pthread_t>{}(pthread_self());
 #endif // _WIN32
 
   fprintf(
@@ -66,6 +66,7 @@ void Trace::logEvent(char ph, const char* name, char sep) {
 }
 
 } // namespace inst
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -16,6 +16,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * IterVisitor starts from leaf nodes, fusion outputs, or the provided values.
@@ -263,6 +264,7 @@ class InputsOf : public IterVisitor {
   static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
