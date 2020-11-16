@@ -78,11 +78,7 @@ std::vector<IValue> getParamAttributes(
       for (Block* sub_block : n->blocks()) {
         blocks.emplace_back(sub_block);
       }
-      if (n->kind() == prim::SetAttr) {
-        if (!(n->outputs().size())) {
-          n->destroy();
-        }
-      } else if (n->kind() == prim::GetAttr) {
+      if (n->kind() == prim::GetAttr) {
         auto name = n->s(attr::name);
         auto attrModule = module_;
         auto input = n->inputs()[0];
