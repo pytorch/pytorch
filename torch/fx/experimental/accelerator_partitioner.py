@@ -207,6 +207,20 @@ def get_device_to_partitions_mapping(partitions: List[Partition], devices: List[
             break
     return found_device
 
+def check_dependency(partition):
+    visited: Set[Partition] = set([partition])
+    queue: List[Partition] = [partition]
+    while queue:
+        p = queue.pop(0)
+        for child in p.children:
+            if child == partition:
+                return True
+            else:
+                if child not in visited:
+                    visited.add(child)
+                    queue.append(child)
+    return False
+
 class Partitioner:
     """A graph module may not fit into one device.
     Partitioner class helps cut one graph into subgraphs (partitions),
@@ -237,7 +251,6 @@ class Partitioner:
         self.devices = partitioner_config.devices
         if len(self.devices) == 0:
             raise RuntimeError('No devices')
-        available_mem_bytes = self.devices[0].available_mem_bytes
         # Check if there are op nodes in the graph
         nodes = self.graph_module.graph.nodes
         if all(node.op in {'placeholder', 'get_attr', 'output'} for node in nodes):
@@ -255,6 +268,7 @@ class Partitioner:
             raise RuntimeError('Devices have no enough memory for the module')
         else:
             if partitioner_config.is_sparse_nn:
+                available_mem_bytes = self.devices[0].available_mem_bytes
                 if not all(device.available_mem_bytes == available_mem_bytes for device in self.devices):
                     raise RuntimeError('All devices must have same memory size!')
                 # sparse_nn_partition only support same memory size
@@ -266,7 +280,7 @@ class Partitioner:
                     partitioner_config.node_to_latency_mapping
                 )
             else:
-                self.size_based_partition(available_mem_bytes)
+                self.size_based_partition()
         module_with_submodules = self.do_partition()
         # The DAG contains DAGNodes with info of each partition's input nodes, output nodes
         # and how partitions are connected.
@@ -287,7 +301,7 @@ class Partitioner:
         self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return
 
-    def size_based_partition(self, available_mem_bytes: int) -> None:
+    def size_based_partition(self) -> None:
         """This method is to partition the graph based on memory size.
            It uses greedy approach. The result may not be the best.
            The basic idea is:
@@ -593,7 +607,6 @@ class Partitioner:
                Choose the pair that shows the minimum cost and then combine them
            #3. Repeat #2 until the cost cannot be reduced.
         """
-
         def try_combining_partitions(
             p0_index,
             p1_index,
@@ -609,6 +622,9 @@ class Partitioner:
             """
             if (abs(p0.bfs_level - p1.bfs_level) <= 1) or (p0 in p1.parents) or p0 in (p1.children):
                 combine_two_partitions(p0, p1, partitions)
+                # Check if a circular dependency exists after combining
+                if check_dependency(partitions[-1]):
+                    return float('inf')
                 # Check if the modified partition list can be mapped to devices after combination
                 found_deivce = get_device_to_partitions_mapping(partitions, self.devices)
                 if not found_deivce:
@@ -667,6 +683,7 @@ class Partitioner:
         set_parents_and_children(self.partitions)
         # Get bfs level for each partition
         get_bfs_level_partition(self.partitions)
+
         find_combination = True
         while find_combination:
             # Search for a pair partition to generate the minimum new cost,
