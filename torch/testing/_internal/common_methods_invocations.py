@@ -433,8 +433,10 @@ op_db = [
                    dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-                   skips=(SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                   dtypes=[torch.bfloat16]),)),
+                   skips=(
+                       # BFloat16 Skip Reference: https://github.com/pytorch/pytorch/pull/48014#issuecomment-728087423
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.bfloat16]),)),
     UnaryUfuncInfo('exp2',
                    ref=np.exp2,
                    dtypes=floating_types_and(torch.half),
