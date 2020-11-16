@@ -19,16 +19,17 @@ def _dim_options(ndim):
     raise ValueError(f"Expected ndim in range 1-3, got {ndim}")
 
 
-def run_benchmark(name: str, function: object, dtype: torch.dtype, seed: int, device: str, samples: int):
+def run_benchmark(name: str, function: object, dtype: torch.dtype, seed: int, device: str, samples: int,
+                  probability_regular: float):
     cuda = device == 'cuda'
-    spectral_fuzzer = SpectralOpFuzzer(seed=seed, dtype=dtype, cuda=cuda)
+    spectral_fuzzer = SpectralOpFuzzer(seed=seed, dtype=dtype, cuda=cuda,
+                                       probability_regular=probability_regular)
     results = []
     for tensors, tensor_params, params in spectral_fuzzer.take(samples):
         shape = [params['k0'], params['k1'], params['k2']][:params['ndim']]
         str_shape = ' x '.join(["{:<4}".format(s) for s in shape])
         sub_label = f"{str_shape} {'' if tensor_params['x']['is_contiguous'] else '(discontiguous)'}"
         for dim in _dim_options(params['ndim']):
-            # dim = _select_dim(params)
             for nthreads in (1, 4, 16) if not cuda else (1,):
                 measurement = benchmark.Timer(
                     stmt='func(x, dim=dim)',
@@ -86,6 +87,7 @@ if __name__ == '__main__':
     parser.add_argument('--bench', type=str, choices=BENCHMARK_NAMES, nargs='+', default=BENCHMARK_NAMES)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--samples', type=int, default=10)
+    parser.add_argument('--probability_regular', type=float, default=1.0)
     parser.add_argument('-o', '--output', type=str)
     args = parser.parse_args()
 
@@ -96,7 +98,8 @@ if __name__ == '__main__':
         for bench in (BENCHMARK_MAP[b] for b in args.bench):
             results += run_benchmark(
                 name=bench.name, function=bench.function, dtype=bench.dtype,
-                seed=args.seed, device=device, samples=args.samples)
+                seed=args.seed, device=device, samples=args.samples,
+                probability_regular=args.probability_regular)
             i += 1
             print(f'Completed {bench.name} benchmark on {device} ({i} of {num_benchmarks})')
 

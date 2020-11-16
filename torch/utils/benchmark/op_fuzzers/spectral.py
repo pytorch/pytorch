@@ -1,7 +1,8 @@
 import math
 
+import torch
 from torch.utils import benchmark
-from torch.utils.benchmark import FuzzedParameter, FuzzedTensor
+from torch.utils.benchmark import FuzzedParameter, FuzzedTensor, ParameterAlias
 
 
 __all__ = ['SpectralOpFuzzer']
@@ -26,17 +27,43 @@ for i in power_range(MAX_DIM_SIZE, 2):
 REGULAR_SIZES.sort()
 
 class SpectralOpFuzzer(benchmark.Fuzzer):
-    def __init__(self, *, seed, dtype, cuda):
+    def __init__(self, *, seed: int, dtype=torch.float64,
+                 cuda: bool = False, probability_regular: float = 1.0):
         super().__init__(
             parameters=[
                 # Dimensionality of x. (e.g. 1D, 2D, or 3D.)
                 FuzzedParameter("ndim", distribution={1: 0.3, 2: 0.4, 3: 0.3}, strict=True),
 
                 # Shapes for `x`.
+                #   It is important to test all shapes, however
+                #   regular sizes are especially important to the FFT and therefore
+                #   warrant special attention. This is done by generating
+                #   both a value drawn from all integers between the min and
+                #   max allowed values, and another from only the regular numbers
+                #   (both distributions are loguniform) and then randomly
+                #   selecting between the two.
+                [
+                    FuzzedParameter(
+                        name=f"k_any_{i}",
+                        minval=MIN_DIM_SIZE,
+                        maxval=MAX_DIM_SIZE,
+                        distribution="loguniform",
+                    ) for i in range(3)
+                ],
+                [
+                    FuzzedParameter(
+                        name=f"k_regular_{i}",
+                        distribution={size: 1. / len(REGULAR_SIZES) for size in REGULAR_SIZES}
+                    ) for i in range(3)
+                ],
                 [
                     FuzzedParameter(
                         name=f"k{i}",
-                        distribution={size: 1. / len(REGULAR_SIZES) for size in REGULAR_SIZES}
+                        distribution={
+                            ParameterAlias(f"k_regular_{i}"): probability_regular,
+                            ParameterAlias(f"k_any_{i}"): 1 - probability_regular,
+                        },
+                        strict=True,
                     ) for i in range(3)
                 ],
 
