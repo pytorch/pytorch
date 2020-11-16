@@ -656,17 +656,8 @@ class QuantizationTestCase(TestCase):
             prepared = prepare(model, qconfig_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
-            print('graph:', prepared)
-            for name, child in prepared.named_modules():
-                if isinstance(child, torch.quantization.HistogramObserver):
-                    self.assertTrue(child.min_val.item() != float('inf'),
-                                    "observer not receiving data")
-                    self.assertTrue(child.max_val.item() != float('-inf'),
-                                    "observer not receiving data")
-
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
-            print('scale:', qgraph._scale_0)
             qgraph_debug = convert_fx(prepared_copy, debug=True)
             result = qgraph(*inputs)
             result_debug = qgraph_debug(*inputs)

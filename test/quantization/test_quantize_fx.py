@@ -352,7 +352,6 @@ class TestQuantizeFx(QuantizationTestCase):
 
         options = itertools.product([1, 2], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
-            print('dim{}, has_relu{}, quant_type{}'.format(dim, has_relu, quant_type))
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
                 else quantized_convs[dim])
@@ -363,7 +362,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.img_data_dict[dim],
                 quant_type,
                 expected_node=expected_node,
-                print_debug_info=True,
             )
 
             # check numerics
@@ -384,9 +382,7 @@ class TestQuantizeFx(QuantizationTestCase):
             m_eager.qconfig = qconfig
             m_eager = prepare_fn(m_eager)
             m_eager(*self.img_data_dict[dim][0])
-            print('eager observed:', m_eager)
             m_eager = convert(m_eager)
-            print(m_eager)
             result_eager = m_eager(*self.img_data_dict[dim][0])
             self.assertEqual(result, result_eager)
 

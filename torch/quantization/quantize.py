@@ -136,7 +136,6 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             m._forward_hooks.move_to_end(handle.id, last=False)
 
     for name, child in module.named_children():
-        print('type child:', type(child), ' is fused:', isinstance(child, _FusedModule))
         if type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
