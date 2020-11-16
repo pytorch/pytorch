@@ -26,8 +26,8 @@
 #endif
 
 #include <windows.h>
+#include <dbghelp.h>
 
-#undef VOID
 #undef DELETE
 #undef IN
 #undef THIS

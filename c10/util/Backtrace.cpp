@@ -11,7 +11,6 @@
 #ifdef _MSC_VER
 #include <c10/util/win32-headers.h>
 #include <iomanip>
-#include <dbghelp.h>
 #pragma comment(lib, "Dbghelp.lib")
 #endif
 
