@@ -85,7 +85,7 @@ namespace at {
  */
 
 
-// Stores state values.  See Note [Non-divergent use...] above.
+// Stores state values. Passed as a kernel argument. See "Usage:" above.
 struct PhiloxCudaState {
   PhiloxCudaState() = default;
   PhiloxCudaState(const PhiloxCudaState&) = default;
@@ -134,9 +134,6 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   void graph_prologue(int64_t* offset_extragraph_);
   uint64_t graph_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
-  void set_is_default(bool is_default) {
-    is_default_ = is_default;
-  }
 
   // Temporarily accommodates call sites that use philox_engine_inputs.
   // Allows incremental refactor of call sites to use philox_cuda_state.
@@ -150,7 +147,6 @@ private:
   uint64_t philox_offset_per_thread_ = 0;
   int64_t* offset_extragraph_;
   uint32_t offset_intragraph_ = 0;
-  bool is_default_ = false;
 };
 
 namespace cuda {

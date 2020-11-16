@@ -6,8 +6,8 @@
 #include <ATen/Utils.h>
 
 namespace at {
-
-namespace cuda { namespace detail {
+namespace cuda {
+namespace detail {
 
 namespace {
 
@@ -54,8 +54,6 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
   std::call_once(cuda_gens_init_flag[idx], [&] {
     default_gens_cuda[idx] = make_generator<CUDAGeneratorImpl>(idx);
     default_gens_cuda[idx].seed();
-    // chooses minor ugliness over adding an arg to make_generator
-    reinterpret_cast<CUDAGeneratorImpl*>(&default_gens_cuda[idx])->set_is_default(true);
   });
   return default_gens_cuda[idx];
 }
@@ -102,11 +100,21 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
   philox_offset_per_thread_ = 0;
 }
 
+#define CAPTURE_DEFAULT_GENS_MSG \
+"Non-default (user-constructed) CUDA RNG generators cannot be used " \
+"in regions captured by CUDA graphs. " \
+"If you need a non-default CUDA generator in a captured region, " \
+"please file an issue."
+
 /**
  * Gets the current seed of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::current_seed() const {
-  TORCH_INTERNAL_ASSERT((at::cuda::currentStreamCaptureStatus() == 0) || is_default_);
+  TORCH_CHECK((at::cuda::currentStreamCaptureStatus() ==
+               at::cuda::CaptureStatus::None) ||
+              ((void*)this ==
+               (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index())),
+              CAPTURE_DEFAULT_GENS_MSG);
   return seed_;
 }
 
@@ -148,7 +156,9 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
  * offset_intragraph tracks the offset in the graphed region.
  */
 void CUDAGeneratorImpl::graph_prologue(int64_t* offset_extragraph) {
-  TORCH_INTERNAL_ASSERT(is_default_);
+  TORCH_CHECK((void*)this ==
+              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
+              CAPTURE_DEFAULT_GENS_MSG);
   offset_extragraph_ = offset_extragraph;
   offset_intragraph_ = 0;
 }
@@ -157,7 +167,9 @@ void CUDAGeneratorImpl::graph_prologue(int64_t* offset_extragraph) {
  * Finalizes a cuda graph capture region for this instance.
  */
 uint64_t CUDAGeneratorImpl::graph_epilogue() {
-  TORCH_INTERNAL_ASSERT(is_default_);
+  TORCH_CHECK((void*)this ==
+              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
+              CAPTURE_DEFAULT_GENS_MSG);
   return offset_intragraph_;
 }
 
@@ -183,8 +195,10 @@ uint64_t CUDAGeneratorImpl::graph_epilogue() {
  * See Note [Acquire lock when using random generators]
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
-  if (at::cuda::currentStreamCaptureStatus()) {
-    TORCH_INTERNAL_ASSERT(is_default_);
+  if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+    TORCH_CHECK((void*)this ==
+                (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
+                CAPTURE_DEFAULT_GENS_MSG);
     uint32_t offset = this->offset_intragraph_;
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
                           std::numeric_limits<uint32_t>::max() - increment); 

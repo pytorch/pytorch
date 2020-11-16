@@ -24,7 +24,7 @@ unpack(at::PhiloxCudaState arg) {
 
 } // namespace philox
 
-inline int currentStreamCaptureStatus() {
+enum class CaptureStatus: int {
   #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
   // protects against enum cudaStreamCaptureStatus implementation changes
   // some compilers seem not to like static_assert without the messages.
@@ -34,20 +34,53 @@ inline int currentStreamCaptureStatus() {
                 "unexpected int(cudaStreamCaptureStatusActive) value");
   static_assert(int(cudaStreamCaptureStatusInvalidated) == 2,
                 "unexpected int(cudaStreamCaptureStatusInvalidated) value");
+
+  None = int(cudaStreamCaptureStatusNone),
+  Active = int(cudaStreamCaptureStatusActive),
+  Invalidated = int(cudaStreamCaptureStatusInvalidated)
+  #else
+  None = 0
+  #endif
+};
+
+inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
+  switch(status) {
+    case CaptureStatus::None:
+      os << "cudaStreamCaptureStatusNone";
+      break;
+    #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
+    case CaptureStatus::Active:
+      os << "cudaStreamCaptureStatusActive";
+      break;
+    case CaptureStatus::Invalidated:
+      os << "cudaStreamCaptureStatusInvalidated";
+      break;
+    #endif
+    default:
+      TORCH_INTERNAL_ASSERT(false,
+                            "Unknown CUDA graph CaptureStatus",
+                            int(status));
+  }
+  return os;
+}
+
+inline CaptureStatus currentStreamCaptureStatus() {
+  #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
   cudaStreamCaptureStatus is_capturing;
   AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
                                       &is_capturing));
   return int(is_capturing);
   #else
-  return 0;
+  return CaptureStatus::None;
   #endif
 }
 
 inline void assertNotCapturing(std::string attempt) {
   auto status = currentStreamCaptureStatus();
-  TORCH_CHECK(status == 0,
+  TORCH_CHECK(status == CaptureStatus::None,
               attempt,
-              " during graph capture. ",
+              " during CUDA graph capture. If you need this call to be captured, "
+              "please file an issue. "
               "Current cudaStreamCaptureStatus: ",
               status);
 }
