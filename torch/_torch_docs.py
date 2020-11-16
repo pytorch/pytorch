@@ -6788,6 +6788,10 @@ numbers. The remainder has the same sign as the divisor :attr:`other`.
 When :attr:`other` is a tensor, the shapes of :attr:`input` and
 :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
 
+Note:
+    Complex inputs are not supported. In some cases, it is not mathematically
+    possible to satisfy the definition of a modulo operation with complex numbers.
+
 Args:
     input (Tensor): the dividend
     other (Tensor or float): the divisor that may be either a number or a
