@@ -40,7 +40,7 @@ struct C10_API Device final {
 
   /// Note: no validation is required in this constructor, since the DeviceIndex
   /// is set to -1.
-  /* implicit */ Device(DeviceType type) : type_(type) {}
+  /* implicit */ Device(DeviceType type) : type_(type), index_(-1) {}
 
   /// Device specific constructors
   /// They don't require validating the corresponding DeviceType/DeviceIndex
@@ -112,7 +112,7 @@ struct C10_API Device final {
 
  private:
   DeviceType type_;
-  DeviceIndex index_ = -1;
+  DeviceIndex index_;
   void validate() {
     TORCH_CHECK(index_ == -1 || index_ >= 0,
         "Device index must be -1 or non-negative, got ", index_);
