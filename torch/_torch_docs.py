@@ -619,6 +619,105 @@ Example::
     True
 """)
 
+add_docstr(torch.all,
+           r"""
+all() -> BoolTensor
+
+Returns True if all elements in the tensor are True, False otherwise.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.all(a)
+    tensor(False, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.all(a)
+    tensor(False)
+
+.. function:: all(input, dim, keepdim=False, out=None) -> Tensor
+
+Returns True if all elements in each row of the tensor in the given
+dimension :attr:`dim` are True, False otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.rand(4, 2).bool()
+    >>> a
+    tensor([[True, True],
+            [True, False],
+            [True, True],
+            [True, True]], dtype=torch.bool)
+    >>> torch.all(a, dim=1)
+    tensor([ True, False,  True,  True], dtype=torch.bool)
+    >>> torch.all(a, dim=0)
+    tensor([ True, False], dtype=torch.bool)
+""".format(**single_dim_common))
+
+add_docstr(torch.any,
+           r"""
+any(input) -> BoolTensor
+
+Args:
+    {input}
+
+Returns True if any elements in the tensor are True, False otherwise.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.any(a)
+    tensor(True, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.any(a)
+    tensor(True)
+
+.. function:: any(input, dim, keepdim=False, out=None) -> BoolTensor
+
+Returns True if any elements in each row of the tensor in the given
+dimension :attr:`dim` are True, False otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4, 2) < 0
+    >>> a
+    tensor([[ True,  True],
+            [False,  True],
+            [ True,  True],
+            [False, False]])
+    >>> torch.any(a, 1)
+    tensor([ True,  True,  True, False])
+    >>> torch.any(a, 0)
+    tensor([True, True])
+""".format(**single_dim_common))
+
 add_docstr(torch.angle,
            r"""
 angle(input, *, out=None) -> Tensor
