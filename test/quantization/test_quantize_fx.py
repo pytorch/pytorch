@@ -1914,7 +1914,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         quantized_node = ns.call_module(nnq.Embedding)
         configs = [
             (float_qparams_dynamic_qconfig, ns.call_module(nnq.Embedding)),
-            (None, ns.call_module(nn.Embedding))
+            (None, ns.call_module(nn.Embedding)),
+            (default_qconfig, ns.call_module(nn.Embedding)),
         ]
 
         for qconfig, node in configs:
@@ -1958,16 +1959,17 @@ class TestQuantizeFxOps(QuantizationTestCase):
             )
 
         # check it works in None qconfig
-        qconfig_dict = {"": None}
-        m = M().eval()
-        m = prepare_fx(model, qconfig_dict)
-        self.checkGraphModuleNodes(m, expected_node_occurrence={
-            ns.call_module(torch.quantization.MinMaxObserver): 0
-        })
-        m = convert_fx(m)
-        self.checkGraphModuleNodes(m, expected_node=ns.call_module(nn.EmbeddingBag))
-        # make sure it runs
-        m(*inputs)
+        for qconfig in [None, default_qconfig]:
+            qconfig_dict = {"": qconfig}
+            m = M().eval()
+            m = prepare_fx(model, qconfig_dict)
+            self.checkGraphModuleNodes(m, expected_node_occurrence={
+                ns.call_module(torch.quantization.MinMaxObserver): 0
+            })
+            m = convert_fx(m)
+            self.checkGraphModuleNodes(m, expected_node=ns.call_module(nn.EmbeddingBag))
+            # make sure it runs
+            m(*inputs)
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
