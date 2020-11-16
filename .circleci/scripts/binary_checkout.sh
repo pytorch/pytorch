@@ -34,8 +34,8 @@ else
 fi
 
 # Try to extract PR number from branch if not already set
-if [[ ! -n "${CIRCLE_PR_NUMBER:-}" ]]; then
-  CIRCLE_PR_NUMBER=`echo ${CIRCLE_BRANCH} | sed -E -n 's/pull\/([0-9]*).*/\1/p'`
+if [[ -z "${CIRCLE_PR_NUMBER:-}" ]]; then
+  CIRCLE_PR_NUMBER="$(echo ${CIRCLE_BRANCH} | sed -E -n 's/pull\/([0-9]*).*/\1/p')"
 fi
 
 # Clone the Pytorch branch
