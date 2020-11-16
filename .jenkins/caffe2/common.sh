@@ -34,3 +34,22 @@ INSTALL_PREFIX="/usr/local/caffe2"
 mkdir -p "$gtest_reports_dir" || true
 mkdir -p "$pytest_reports_dir" || true
 mkdir -p "$INSTALL_PREFIX" || true
+
+# Use conda cmake in some CI build. Conda cmake will be newer than our supported
+# min version (3.5 for xenial and 3.10 for bionic),
+# so we only do it in four builds that we know should use conda.
+# Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
+# Alternatively we could point cmake to the right place
+# export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
+  if ! which conda; then
+    echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
+    exit 1
+  else
+    conda install -q -y cmake
+  fi
+fi
