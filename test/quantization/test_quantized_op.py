@@ -4116,7 +4116,7 @@ class TestPadding(TestCase):
            height=st.integers(16, 128),
            width=st.integers(16, 128),
            qtype=st.sampled_from(hu._ALL_QINT_TYPES))
-    def test_reflection_pad2d(self, batch_size, channels, width, qtype):
+    def test_reflection_pad2d(self, batch_size, channels, height, width, qtype):
         padding = width // 4
 
         x = torch.arange(batch_size * channels * height * width).to(torch.float)
