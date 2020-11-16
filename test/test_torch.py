@@ -19254,28 +19254,44 @@ else:
             shape = self._rand_shape(ndim, 1, 5)
             x = self._generate_input(shape, dtype, device, with_extremal=False)
             _test_all_any(x)
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
 
             x = self._generate_input(shape, dtype, device, with_extremal=True)
             _test_all_any(x)
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
 
             x = torch.zeros_like(x)
             _test_all_any(x)
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
 
             x = torch.ones_like(x)
             _test_all_any(x)
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
 
             for dim in range(ndim):
                 x = self._generate_input(shape, dtype, device, with_extremal=False)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
 
                 x = self._generate_input(shape, dtype, device, with_extremal=True)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
 
                 x = torch.zeros_like(x)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
 
                 x = torch.ones_like(x)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
 
     @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):

@@ -621,9 +621,9 @@ Example::
 
 add_docstr(torch.all,
            r"""
-all() -> BoolTensor
+all(input) -> Tensor
 
-Returns True if all elements in the tensor are True, False otherwise.
+Returns `True` if all elements in :attr:`input` evaluate to `True`, `False` otherwise.
 
 Example::
 
@@ -640,8 +640,8 @@ Example::
 
 .. function:: all(input, dim, keepdim=False, out=None) -> Tensor
 
-Returns True if all elements in each row of the tensor in the given
-dimension :attr:`dim` are True, False otherwise.
+Reduces each row of :attr:`input` in the given dimension :attr:`dim`
+to True if all elements in the row evaluate to `True`, evaluates to `False` otherwise.
 
 {keepdim_details}
 
@@ -669,12 +669,12 @@ Example::
 
 add_docstr(torch.any,
            r"""
-any(input) -> BoolTensor
+any(input) -> Tensor
 
 Args:
     {input}
 
-Returns True if any elements in the tensor are True, False otherwise.
+Returns `True` if any of the element in :attr:`input` evaluates to `True`, `False` otherwise.
 
 Example::
 
@@ -689,10 +689,10 @@ Example::
     >>> torch.any(a)
     tensor(True)
 
-.. function:: any(input, dim, keepdim=False, out=None) -> BoolTensor
+.. function:: any(input, dim, keepdim=False, out=None) -> Tensor
 
-Returns True if any elements in each row of the tensor in the given
-dimension :attr:`dim` are True, False otherwise.
+Reduces each row of :attr:`input` in the given dimension :attr:`dim`
+to True if any of the element in the row evaluates to `True`, evaluates to `False` otherwise.
 
 {keepdim_details}
 
