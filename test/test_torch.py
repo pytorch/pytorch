@@ -5832,21 +5832,17 @@ class TestTorchDeviceType(TestCase):
         self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_keepdim=True, dim_as_int=True)
 
     @onlyOnCPUAndCUDA
+    @dtypesIfCPU(*tuple(combinations(list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)), 2)))
+    @dtypes(*tuple(combinations(list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False)), 2)))
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_nanprod_out_dtype(self, device):
-        if device == "cuda":
-            dtypes = list(torch.testing.get_all_int_dtypes() +
-                    torch.testing.get_all_fp_dtypes(include_bfloat16=False))
-        else:
-            dtypes = list(torch.testing.get_all_int_dtypes() +
-                    torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
-        for inp_dtype, out_dtype in combinations(dtypes, 2):
-            shape = self._rand_shape(random.randint(2, 5), min_size=5, max_size=10)
-            x = self._generate_input(shape, inp_dtype, device, with_extremal=False)
-            torch_fn = partial(torch.nanprod, dtype=out_dtype)
-            np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
-            np_fn = partial(np.nanprod, dtype=np_out_dtype)
-            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+    def test_nanprod_out_dtype(self, device, dtypes):
+        inp_dtype, out_dtype = dtypes
+        shape = self._rand_shape(random.randint(2, 5), min_size=5, max_size=10)
+        x = self._generate_input(shape, inp_dtype, device, with_extremal=False)
+        torch_fn = partial(torch.nanprod, dtype=out_dtype)
+        np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
+        np_fn = partial(np.nanprod, dtype=np_out_dtype)
+        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
@@ -18831,19 +18827,22 @@ else:
                                             exact_dtype=True, with_keepdim=False, dim_as_int=False):
         # Test 0-d to 3-d tensors.
         for ndims in range(0, 4):
-            shape = self._rand_shape(ndims, min_size=5, max_size=10)
-            if dim_as_int:
-                x = self._generate_input(shape, dtype, device, with_extremal)
+            for n in range(ndims + 1):
+                shape = self._rand_shape(ndims, min_size=5, max_size=10)
+                if dim_as_int:
+                    x = self._generate_input(shape, dtype, device, with_extremal)
 
-                if with_keepdim:
-                    torch_func_partial = partial(torch_func, keepdim=True, dim=ndims)
-                    np_func_partial = partial(np_func, keepdims=True, axis=ndims)
-                else:
-                    torch_func_partial = partial(torch_func, dim=ndims)
-                    np_func_partial = partial(np_func, axis=ndims)
-                self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
-                        atol=atol, rtol=rtol, exact_dtype=exact_dtype)
-                continue
+                    if with_keepdim:
+                        torch_func_partial = partial(torch_func, keepdim=True, dim=n-1)
+                        np_func_partial = partial(np_func, keepdims=True, axis=n-1)
+                    else:
+                        torch_func_partial = partial(torch_func, dim=n-1)
+                        np_func_partial = partial(np_func, axis=n-1)
+                    print("x: ", x)
+                    print("axis: ", n)
+                    self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
+                            atol=atol, rtol=rtol, exact_dtype=exact_dtype)
+            continue
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
                     for count_dim in permutations(c):
