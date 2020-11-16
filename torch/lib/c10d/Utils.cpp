@@ -82,7 +82,11 @@ std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
+#ifdef _WIN32
+  hints.ai_family = AF_INET;
+#else
   hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+#endif
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -199,7 +203,11 @@ int connect(
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
+#ifdef _WIN32
+  hints.ai_family = AF_INET;
+#else
   hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
+#endif
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
