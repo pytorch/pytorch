@@ -2,6 +2,7 @@
 #include "caffe2/utils/threadpool/pthreadpool-cpp.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
+#ifndef USE_INTERNAL_PTHREADPOOL_IMPL
 namespace caffe2 {
 namespace {
 static thread_local bool using_new_threadpool{false};
@@ -14,6 +15,7 @@ WithCastToNewThreadPool::~WithCastToNewThreadPool() {
   using_new_threadpool = use_new_threadpool_;
 }
 }
+#endif
 
 //
 // External API
@@ -32,6 +34,7 @@ void legacy_pthreadpool_compute_1d(
     }
     return;
   }
+#ifndef USE_INTERNAL_PTHREADPOOL_IMPL
   if (caffe2::using_new_threadpool) {
     pthreadpool_parallelize_1d(threadpool, function, argument, range, 0u);
   } else {
@@ -42,6 +45,14 @@ void legacy_pthreadpool_compute_1d(
             },
             range);
   }
+#else
+  reinterpret_cast<caffe2::ThreadPool*>(threadpool)
+      ->run(
+          [function, argument](int threadId, size_t workId) {
+            function(argument, workId);
+          },
+          range);
+#endif
 }
 
 void legacy_pthreadpool_parallelize_1d(

@@ -8,6 +8,7 @@
 #include <stddef.h> // for size_t
 #include <stdint.h> // for uint32_t
 
+#ifndef USE_INTERNAL_PTHREADPOOL_IMPL
 // This is a hack.
 // Mainly introduced here because
 // 1. NNPACK can be compiled to use internal legacy threadpool implementation because much of C2 depends on that.
@@ -24,6 +25,7 @@ class WithCastToNewThreadPool {
     bool use_new_threadpool_;
 };
 }
+#endif
 
 typedef struct pthreadpool* legacy_pthreadpool_t;
 
