@@ -59,14 +59,15 @@ install_centos() {
   # Note: protobuf-c-{compiler,devel} on CentOS are too old to be used
   # for Caffe2. That said, we still install them to make sure the build
   # system opts to build/use protoc and libprotobuf from third-party.
+
+  # cmake and cmake3 packages are intentionally left out.
+  # cmake will be installed later as a conda package.
   yum install -y \
     $ccache_deps \
     $numpy_deps \
     autoconf \
     automake \
     bzip2 \
-    cmake \
-    cmake3 \
     curl \
     gcc \
     gcc-c++ \
