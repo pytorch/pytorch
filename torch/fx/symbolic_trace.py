@@ -94,7 +94,7 @@ class Tracer(TracerBase):
             if not qualname:
                 i = 0
                 while True:
-                    qualname = f'__tensor_constant{i}'
+                    qualname = f'_tensor_constant{i}'
                     if not hasattr(self.root, qualname):
                         break
                     i += 1
