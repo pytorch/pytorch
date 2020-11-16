@@ -27,32 +27,7 @@ from .utils import CodeTemplate, nested_dict, write
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
-
-# Note [Manual Backend kernels]
-# For these ops, we want to manually register to dispatch key Backend and
-# skip codegen-ed registeration to all keys before Backend.
-# For codegen this means:
-#   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
-#     where we skip codegen backend kernels
-#   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
-#   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
-# Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_BACKEND = set([
-    'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
-    '_backward', 'requires_grad_',
-])
-
-# For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD_AND_TRACER = set([
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
-])
-
-# Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
-#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
-# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
+from .gen_trace_type import MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_AUTOGRAD
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -94,7 +69,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'cholesky_solve'
+    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
+    'cholesky_solve',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -201,9 +177,19 @@ DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
 
+SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
+auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+""")
+
 SETUP_DERIVATIVE = CodeTemplate("""\
-if (compute_requires_grad( ${args_with_derivatives} )) {
+if (_any_requires_grad) {
   ${setup}
+}
+""")
+
+SETUP_NONE_REQUIRES_GRAD = CodeTemplate("""\
+if (compute_requires_grad( ${args_to_check} )) {
+  throw_error_out_requires_grad("${base_name}");
 }
 """)
 
@@ -557,22 +543,21 @@ def emit_body(declaration):
         return setup
 
     def setup_derivative(differentiable_inputs):
-
         env = {}
         env['args_with_derivatives'] = [arg['name'] for arg in args_with_derivatives]
         env['op'] = func['op'] if func is not None else 'NotImplemented'
         env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
-            setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
+            # For out functions, ensure that no input or output requires grad
             body = []
             body.append(DECLARE_GRAD_FN.substitute(op='Node'))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_outputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_inputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_outputs]))
             return body
 
         setup = []
@@ -582,7 +567,7 @@ def emit_body(declaration):
         body = []
         body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
         body.append(DECLARE_GRAD_FN.substitute(env))
-        body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
+        body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
 
     def emit_check_if_in_complex_autograd_allowlist():
@@ -811,10 +796,14 @@ def emit_body(declaration):
             return CONDITIONAL.substitute(cond='grad_fn', statements=stmts)
         return ''
 
+    def emit_any_requires_grad():
+        return [SETUP_ANY_REQUIRES_GRAD.substitute(
+            args_with_derivatives=[arg['name'] for arg in args_with_derivatives]), ]
+
     def emit_check_inplace():
         if not inplace:
             return []
-        return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
+        return ['check_inplace({}, _any_requires_grad);'.format(arg['name']) for arg in differentiable_outputs]
 
     def emit_increment_version():
         if not modifies_arguments:
@@ -830,6 +819,7 @@ def emit_body(declaration):
 
     body.extend(unpack_args(env, declaration))
     if requires_derivative:
+        body.extend(emit_any_requires_grad())
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables)

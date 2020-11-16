@@ -9,7 +9,6 @@ import functools
 import contextlib
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
-from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
@@ -656,24 +655,6 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
-    def test_replace_target_nodes_with(self):
-        class testModule(torch.nn.Module):
-            def forward(self, a, b):
-                return a + b
-        m = testModule()
-        traced = symbolic_trace(m)
-        input1 = torch.randn(1)
-        input2 = torch.randn(1)
-        assert (input1 + input2) == traced(input1, input2)
-        GraphManipulation.replace_target_nodes_with(
-            fx_module=traced,
-            old_op="call_function",
-            old_target=operator.add,
-            new_op="call_function",
-            new_target=operator.mul,
-        )
-        assert (input1 * input2) == traced(input1, input2)
-
     def test_pretty_print(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -746,10 +727,11 @@ class TestFX(JitTestCase):
         self.assertEqual(out, ref_out)
 
     def test_symbolic_trace_assert(self):
+        message = "assert_foobar"
 
         class AssertsTensorShape(torch.nn.Module):
             def forward(self, x):
-                torch._assert(x.shape[1] > 4, "assert_foobar")
+                torch.Assert(x.shape[1] > 4, message)
                 return x
 
         m = AssertsTensorShape()
@@ -757,13 +739,8 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(m)
         # verify assertion on traced model works correctly at runtime
         traced(torch.rand(4, 5))
-        with self.assertRaisesRegex(AssertionError, "assert_foobar"):
+        with self.assertRaisesRegex(AssertionError, message):
             traced(torch.rand(4, 3))
-        # verify the symbolically traced module is scriptable
-        ms = torch.jit.script(m)
-        with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
-            ms(torch.rand(4, 3))
-
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())

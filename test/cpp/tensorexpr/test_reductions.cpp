@@ -1845,5 +1845,127 @@ void testReductionRfactorCacheTempInner() {
   ASSERT_EQ(out[0], 499500);
 }
 
+void testReductionVectorize() {
+  KernelScope kernel_scope;
+
+  std::vector<float> in_(8 * 8);
+  for (int i = 0; i < 8; ++i) {
+    for (int j = 0; j < 8; ++j) {
+      in_[i * 8 + j] = i;
+    }
+  }
+  std::vector<float> out_before(8, -1.f);
+  std::vector<float> out_after(8, -1.f);
+
+  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+
+  Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
+  LoopNest l_before({tensor});
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
+  cg_before.call({in_, out_before});
+
+  LoopNest l({tensor});
+  l.vectorize(l.getLoopStmtsFor(tensor)[0]);
+
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: sum[Ramp(0, 1, 8)] = Broadcast(0.f, 8);
+#CHECK: for (int n = 0; n < 8; n++) {
+#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(n, 8, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={n});
+#CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Vectorizing should not change result.
+  l.prepareForCodegen();
+  s = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(s, {in, tensor});
+  cg_after.call({in_, out_after});
+  for (int i = 0; i < 8; ++i) {
+    ASSERT_EQ(out_before[i], out_after[i]);
+  }
+}
+
+void testReductionVectorizeInner() {
+  KernelScope kernel_scope;
+
+  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+
+  Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
+  LoopNest l({tensor});
+
+  ASSERT_THROWS_WITH(
+      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+}
+
+void testReductionVectorizeRfactor() {
+  KernelScope kernel_scope;
+
+  std::vector<float> in_(8 * 8);
+  for (int i = 0; i < 8; ++i) {
+    for (int j = 0; j < 8; ++j) {
+      in_[i * 8 + j] = i;
+    }
+  }
+  std::vector<float> out_before(1, -1.f);
+  std::vector<float> out_after(1, -1.f);
+
+  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+
+  Tensor* tensor = Reduce("sum", {}, Sum(), in, {{8, "m"}, {8, "n"}});
+
+  LoopNest l_before({tensor});
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
+  cg_before.call({in_, out_before});
+
+  LoopNest l({tensor});
+  ASSERT_THROWS_WITH(
+      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+
+  // But if we rfactor this so it's not a reduce axis we can vectorize that
+  // loop.
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  auto v = loops.at(1)->var();
+  l.rfactor(tensor->body(), v);
+
+  loops = NodeFinder<For>::find(l.root_stmt());
+  l.vectorize(loops[2]);
+
+  Stmt* s = l.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: sum = 0.f;
+#CHECK: for (int n = 0; n < 8; n++) {
+#CHECK:   tmp_buf[n] = 0.f;
+#CHECK: }
+#CHECK: for (int m = 0; m < 8; m++) {
+#CHECK:   tmp_buf[Ramp(0, 1, 8)] = ReduceOp((tmp_buf[Ramp(0, 1, 8)]) + (in[Ramp(8 * m, 1, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={m});
+#CHECK: }
+#CHECK: for (int n = 0; n < 8; n++) {
+#CHECK:   sum = ReduceOp((sum) + (tmp_buf[n]), out_args={}, reduce_args={n});
+#CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Vectorizing should not change result.
+  l.prepareForCodegen();
+  s = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(s, {in, tensor});
+  cg_after.call({in_, out_after});
+
+  ASSERT_EQ(out_before[0], out_after[0]);
+}
+
 } // namespace jit
 } // namespace torch

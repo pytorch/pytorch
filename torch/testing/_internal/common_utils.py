@@ -1312,16 +1312,6 @@ class TestCase(expecttest.TestCase):
             env=env)
         return pipes.communicate()[1].decode('ascii')
 
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
-
 
 def download_file(url, binary=True):
     from urllib.parse import urlsplit
@@ -1512,13 +1502,8 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
     """
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
-    # TODO(@ivanyashchuk): remove this once batched matmul is available on CUDA for complex dtypes
-    if torch.device(device).type == 'cuda' and dtype.is_complex:
-        A_cpu = A.cpu()
-        result = torch.matmul(A_cpu, A_cpu.transpose(-2, -1).conj()).to(device)
-    else:
-        result = torch.matmul(A, A.transpose(-2, -1).conj())
-    return result + torch.eye(matrix_size, dtype=dtype, device=device)
+    return torch.matmul(A, A.transpose(-2, -1).conj()) \
+        + torch.eye(matrix_size, dtype=dtype, device=device)
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
