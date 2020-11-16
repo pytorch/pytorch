@@ -196,8 +196,9 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     }
 
     if (type_name == "torch.classes.cuda.Stream") {
-        auto custom_class_type = getCustomClass(std::string("__torch__.torch.classes.cuda.Stream"));
-        return custom_class_type;
+      auto custom_class_type =
+          getCustomClass(std::string("__torch__.torch.classes.cuda.Stream"));
+      return custom_class_type;
     }
 
     throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";

@@ -301,7 +301,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
 
 def get_current_device_index():
     if torch.cuda._cuda_getDeviceCount() > 0:
-        return torch.cuda._cuda_getDevice()
+        return torch.cuda.current_device()
     return -1
 
 def get_device_index(device: Optional[_device] = None, optional: bool = False, allow_cpu: bool = False) -> int:
@@ -342,7 +342,7 @@ class device_jit(object):
     def __enter__(self):
         if self.idx == -1:
             return
-        self.prev_idx = torch.cuda._cuda_getDevice()
+        self.prev_idx = torch.cuda.current_device()
         if self.prev_idx != self.idx:
             torch.cuda._cuda_setDevice(self.idx)
 
@@ -350,7 +350,7 @@ class device_jit(object):
         if self.prev_idx != self.idx:
             torch.cuda._cuda_setDevice(self.prev_idx)
 
-class get_current_stream(object):
+class StreamContext(object):
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
@@ -374,18 +374,18 @@ class get_current_stream(object):
     def __enter__(self):
         if self.idx == -1:
             return
-        self.src_prev_stream = torch.cuda._cuda_getStream(self.idx)
-        if self.idx != self.cur_stream.device_index():
+        self.src_prev_stream = torch.cuda.current_stream(self.idx)
+        """if self.idx != self.cur_stream.device_index():
             with device_jit(self.cur_stream.device()):
-                self.dst_prev_stream = torch.cuda._cuda_getStream(self.idx)
+                self.dst_prev_stream = torch.cuda.current_stream(self.idx)"""
         torch.cuda._cuda_setStream(self.cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
-            torch.cuda._cuda_setStream(self.dst_prev_stream)
+        """if self.src_prev_stream.device_index() != self.cur_stream.device_index():
+            torch.cuda._cuda_setStream(self.dst_prev_stream)"""
         torch.cuda._cuda_setStream(self.src_prev_stream)
 
-def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.get_current_stream':
+def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.StreamContext':
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
@@ -401,7 +401,7 @@ def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.get_current_strea
     """
     if stream is None:
         return
-    return get_current_stream(stream)
+    return StreamContext(stream)
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""

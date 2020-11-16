@@ -91,7 +91,8 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 };
 
 struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
-  explicit CUDAPythonModuleValue(py::object mod) : PythonValue(std::move(mod)) {}
+  explicit CUDAPythonModuleValue(py::object mod)
+      : PythonValue(std::move(mod)) {}
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
