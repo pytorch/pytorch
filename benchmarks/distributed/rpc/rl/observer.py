@@ -31,14 +31,17 @@ class ObserverBase:
         state, ep_reward = self.reset(), None
         rewards = torch.zeros(n_steps)
         observer_latencies = []
+        agent_latencies = []
 
         for st in range(n_steps):
             ob_latency_start = time.time()
             # action = agent_rref.rpc_sync().select_action(self.id, state)
             action = rpc_sync(agent_rref.owner(), self.select_action, args=(
                 agent_rref, self.id, state))
+
             observer_latencies.append(time.time() - ob_latency_start)
+
             state, reward = self.step(action)
             rewards[st] = reward
 
-        return [rewards, ep_reward]
+        return [rewards, ep_reward, observer_latencies]

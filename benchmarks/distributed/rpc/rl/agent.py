@@ -45,6 +45,10 @@ class AgentBase:
         self.future_actions = torch.futures.Future()
         self.lock = threading.Lock()
 
+        self.agent_latency_start = None
+        self.agent_latency_end = None
+        self.agent_latency = []
+
     def set_world(self, world_size, state_size, nlayers, out_features, batch=True):
         from observer import ObserverBase
 
@@ -73,7 +77,7 @@ class AgentBase:
         observer_id -= 2
 
         if self.pending_states == self.world_size - 2:
-            agent_latency_start = time.time()
+            self.agent_latency_start = time.time()
 
         self.states[observer_id].copy_(state)
         future_action = self.future_actions.then(
@@ -92,13 +96,23 @@ class AgentBase:
                 self.future_actions = torch.futures.Future()
                 future_actions.set_result(actions)
 
+                self.agent_latency_end = time.time()
+                self.agent_latency.append(
+                    self.agent_latency_end - self.agent_latency_start)
+
+        # if self.agent_latency_start and self.agent_latency_end:
+        #     print(self.agent_latency_start, self.agent_latency_end)
+        #     self.agent_latency.append(
+        #         self.agent_latency_end - self.agent_latency_start)
+
         return future_action
 
     @staticmethod
     def select_action_non_batch(agent_rref, observer_id, state):
         self = agent_rref.local_value()
         observer_id -= 2
-        # self.rewards[observer_id].append(reward)
+
+        self.agent_latency_start = time.time()
 
         state = state.float().unsqueeze(0)
         probs = self.policy(state)
@@ -106,30 +120,34 @@ class AgentBase:
         action = m.sample()
 
         self.saved_log_probs[observer_id].append(m.log_prob(action))
+
+        self.agent_latency_end = time.time()
+        self.agent_latency.append(
+            self.agent_latency_end - self.agent_latency_start)
         return action.item()
 
     def finish_episode(self, rets):
         rewards = torch.stack([ret[0] for ret in rets]).t()
         # ep_rewards = sum([ret[1] for ret in rets]) / len(rets)
 
+        """
         if self.batch:
             probs = torch.stack(self.saved_log_probs)
         else:
             probs = [torch.stack(self.saved_log_probs[i])
                      for i in range(len(rets))]
             probs = torch.stack(probs)
-
         policy_loss = -probs * rewards / len(rets)
         policy_loss.sum().backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
-
         # reset variables
         self.saved_log_probs = [] if self.batch else {
             k: [] for k in range(self.world_size - 2)}
         self.states = torch.zeros(self.world_size - 2, *self.state_size)
+        """
 
-        return None
+        return self.agent_latency
 
         # calculate running rewards
         # self.running_reward = 0.5 * ep_rewards + 0.5 * self.running_reward
