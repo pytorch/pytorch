@@ -348,7 +348,7 @@ RegisterOperators reg(
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
            drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
+           push(stack, IValue(size));
          },
          aliasAnalysisSpecialCase()),
      Operator(

@@ -131,7 +131,7 @@ struct CaptureList {
       auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         captureTensor(tensor, is_output);
       }
     } else {
@@ -269,7 +269,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (const at::Tensor& tensor : v.toTensorList()) {
+        for (at::Tensor tensor : v.toTensorList()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -295,7 +295,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
-      for (const at::Tensor& tensor : value.toTensorList()) {
+      for (const at::Tensor tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
     } else {
@@ -319,7 +319,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     if (v.isTensorList()) {
       auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
-      for (const at::Tensor& tensor : tensors) {
+      for (const at::Tensor tensor : tensors) {
         addInputVariable(tensor);
       }
     } else if (v.isTensor()) {
@@ -719,7 +719,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 };
 
 GraphExecutor::GraphExecutor(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::string function_name)
     : pImpl(
           IsNewExecutorEnabled()

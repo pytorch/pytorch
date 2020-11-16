@@ -706,7 +706,7 @@ struct CodeImpl {
   void emitCall(Function* func, at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
-    function_table_.emplace_back(std::move(func));
+    function_table_.emplace_back(func);
   }
 
   void emitNodeAtBlockLevel(Node* node) {
