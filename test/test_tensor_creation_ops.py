@@ -680,6 +680,25 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(empty_strided.shape, as_strided.shape)
                 self.assertEqual(empty_strided.stride(), as_strided.stride())
 
+    def test_new_empty_strided(self, device):
+        def _test(sizes, strides, dtype):
+            x = torch.zeros(5, 5, dtype=dtype, device=device)
+            result = x.new_empty_strided(sizes, strides)
+            expected = torch.empty_strided(sizes, strides, dtype=x.dtype, device=x.device)
+            self.assertEqual(result.shape, expected.shape)
+            self.assertEqual(result.stride(), expected.stride())
+            self.assertEqual(result.dtype, expected.dtype)
+            self.assertEqual(result.device, expected.device)
+
+        _test([2, 3], [3, 1], torch.float)
+        _test([5, 3], [0, 1], torch.int)
+        _test([], [], torch.float)
+
+        # Some really weird cases
+        for shape in [(2, 3, 4), (0, 2, 0)]:
+            for strides in [(12, 4, 1), (2, 4, 6), (0, 0, 0)]:
+                _test(shape, strides, torch.float)
+
     def test_strided_mismatched_stride_shape(self, device):
         for shape, strides in [((1, ), ()), ((1, 2), (1, ))]:
             with self.assertRaisesRegex(RuntimeError, "mismatch in length of strides and shape"):
@@ -1146,6 +1165,15 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.full(o.shape, 1., out=o).dtype, o.dtype)
         self.assertEqual(torch.full(size, 1, out=o).dtype, o.dtype)
 
+    # check that warning for numpy being not writable is suppressed
+    # when a copy of it is being created.
+    # see issue #47160
+    def test_tensor_from_non_writable_numpy(self, device):
+        with warnings.catch_warnings(record=True) as w:
+            a = np.arange(5.)
+            a.flags.writeable = False
+            t = torch.tensor(a)
+            self.assertEqual(len(w), 0)
 
 
 # Class for testing random tensor creation ops, like torch.randint

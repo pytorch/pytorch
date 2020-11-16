@@ -66,7 +66,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       .def(
           py::init<
               std::string,
-              std::shared_ptr<::c10d::ProcessGroup>,
+              c10::intrusive_ptr<::c10d::ProcessGroup>,
               int,
               std::chrono::milliseconds,
               const std::vector<std::string>&,

@@ -241,7 +241,14 @@ Resource::Pool::~Pool() {
   try {
     purge();
   }
+  catch (const std::exception& e) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an exception!  Error: "
+        << e.what();
+  }
   catch (...) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an unknown exception!";
   }
 }
 
