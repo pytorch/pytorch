@@ -367,7 +367,7 @@ void reflection_pad2d_out_template(
     /* resize output */
     output.resize_({nbatch, nplane, output_h, output_w});
     if (input.is_quantized()) {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
+      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
         reflection_pad2d_out_loop(
           input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           nbatch, nplane,
