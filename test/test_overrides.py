@@ -831,5 +831,12 @@ class TestNamedTuple(TestCase):
         self.assertEqual(type(r), type(rs))
         self.assertEqual(r, rs)
 
+class TestGradNewOnesOverride(TestCase):
+    """ Regression test for gh-47069 """
+    def test_newones(self):
+        t = torch.tensor([1, 2]).as_subclass(SubTensor2)
+        n = t.new_ones((1, 2))
+        self.assertEqual(type(n), SubTensor2)
+
 if __name__ == '__main__':
     unittest.main()
