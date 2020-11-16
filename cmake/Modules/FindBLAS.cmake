@@ -135,15 +135,23 @@ endif()
 
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
-  check_fortran_libraries(
-  BLAS_LIBRARIES
-  BLAS
-  sgemm
-  ""
-  "openblas")
-  if(BLAS_LIBRARIES)
-    set(BLAS_INFO "open")
-  endif(BLAS_LIBRARIES)
+  FIND_PACKAGE(OpenBLAS_FOUND)
+  if(OpenBLAS_FOUND)
+    SET(BLAS_INFO "open")
+    SET(BLAS_LIBRARIES ${OpenBLAS_LIB})
+    SET(BLAS_INCLUDE_DIR ${OpenBLAS_INCLUDE_DIR})
+    SET(BLAS_VERSION ${OpenBLAS_VERSION})
+  else()
+    check_fortran_libraries(
+    BLAS_LIBRARIES
+    BLAS
+    sgemm
+    ""
+    "openblas")
+    if(BLAS_LIBRARIES)
+      set(BLAS_INFO "open")
+    endif()
+  endif()
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -320,7 +328,7 @@ IF (NOT BLAS_FOUND AND BLAS_FIND_REQUIRED)
 ENDIF (NOT BLAS_FOUND AND BLAS_FIND_REQUIRED)
 IF(NOT BLAS_FIND_QUIETLY)
   IF(BLAS_FOUND)
-    MESSAGE(STATUS "Found a library with BLAS API (${BLAS_INFO}).")
+    MESSAGE(STATUS "Found a library with BLAS API (${BLAS_INFO}). Full path: (${BLAS_LIBRARIES})")
   ELSE(BLAS_FOUND)
     MESSAGE(STATUS "Cannot find a library with BLAS API. Not using BLAS.")
   ENDIF(BLAS_FOUND)
