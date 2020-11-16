@@ -56,8 +56,12 @@ class QuantizePerTensorBenchmark(op_bench.TorchBenchmarkBase):
             self.op = nnq.DeQuantize()
             self.set_module_name('DequantizePerTensor')
 
-    def forward(self):
-        return self.op(self.input)
+        self.inputs = {
+            "input": self.input
+        }
+
+    def forward(self, input):
+        return self.op(input)
 
 
 op_bench.generate_pt_test(
@@ -98,12 +102,22 @@ class QuantizePerChannelBenchmark(op_bench.TorchBenchmarkBase):
 
         if mode == 'D':
             self.input = self.op(self.input, **self.kwargs)
-            # Dequantize doesn't take any arguments
-            self.op = lambda x, **kwargs: x.dequantize()
+
+            def dequant(input, scales, zero_points, axis: int, dtype: int):
+                return input.dequantize()
+            self.op = dequant
             self.set_module_name('DequantizePerChannel')
 
-    def forward(self):
-        return self.op(self.input, **self.kwargs)
+        self.inputs = {
+            "input": self.input,
+            'scales': torch.tensor([1.0] * channel_len),
+            'zero_points': torch.tensor([0] * channel_len),
+            'axis': axis,
+            'dtype': dtype
+        }
+
+    def forward(self, input, scales, zero_points, axis: int, dtype: int):
+        return self.op(input, scales=scales, zero_points=zero_points, axis=axis, dtype=dtype)
 
 
 op_bench.generate_pt_test(
@@ -141,12 +155,14 @@ fake_quantize_configs_long = op_bench.cross_product_configs(
 class FakeQuantizeBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks fake quantization with default parameters."""
     def init(self, N, C, H, W):
-        self.input = torch.rand(N, C, H, W)
+        self.inputs = {
+            "input": torch.rand(N, C, H, W)
+        }
         self.op = tq.FakeQuantize()
         self.set_module_name('FakeQuantize')
 
-    def forward(self):
-        return self.op(self.input)
+    def forward(self, input):
+        return self.op(input)
 
 
 op_bench.generate_pt_test(
@@ -160,11 +176,37 @@ op_bench.generate_pt_test(
 # scale and zero point.
 # original_kernel represents the original fake quantize c++ kernel.
 
+def fakeQuantizePerTensorPyModule(
+    input, scale, zero_point,
+    quant_min: int, quant_max: int
+):
+    return _LearnableFakeQuantizePerTensorOp.apply(input, scale, zero_point, quant_min, quant_max, 1.0)
+
+def fakeQuantizePerTensorLearnableKernel(
+    input, scale, zero_point,
+    quant_min: int, quant_max: int
+):
+    return torch._fake_quantize_learnable_per_tensor_affine(input, scale, zero_point, quant_min, quant_max)
+
+def fakeQuantizePerTensorOriginalKernel(
+    input, scale, zero_point,
+    quant_min: int, quant_max: int
+):
+    return torch.fake_quantize_per_tensor_affine(input, 1.0, 0, quant_min, quant_max)
+
+fake_quantize_per_tensor_ops = op_bench.op_list(
+    attrs=(
+        ('py_module', fakeQuantizePerTensorPyModule),
+        ('learnable_kernel', fakeQuantizePerTensorLearnableKernel),
+        ('original_kernel', fakeQuantizePerTensorOriginalKernel)
+    ),
+    attr_names=('op_name', 'op_func'),
+)
+
 fake_quantize_operator_configs_short = op_bench.config_list(
     cross_product_configs={
         'nbits': (4, 8),
         'device': ('cpu', 'cuda'),
-        'op_type': ('py_module', 'learnable_kernel', 'original_kernel')
     },
     **fake_quantize_configs_short_dict
 )
@@ -172,87 +214,114 @@ fake_quantize_operator_configs_short = op_bench.config_list(
 fake_quantize_operator_configs_long = op_bench.cross_product_configs(
     nbits=(4, 8),
     device=('cpu', 'cuda'),
-    op_type=('py_module', 'learnable_kernel', 'original_kernel'),
     **fake_quantize_configs_long_dict
 )
 
-class FakeQuantizePerTensorOpBenchmark(op_bench.TorchBenchmarkBase):
+class FakeQuantizePerTensorBaseOpBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks 3 different fake quantize per tensor operators."""
-    def init(self, N, C, H, W, nbits, device, op_type):
+    def init(self, N, C, H, W, nbits, device, op_func):
         self.quant_min = 0
         self.quant_max = 2 ** nbits - 1
         self.quant_range = 2 ** nbits
-        self.input = torch.rand(N, C, H, W, dtype=torch.float, device=device)
-        self.scale = torch.tensor([1.]).to(device)
-        self.zero_point = torch.tensor([0.]).to(device)
-        self.input.requires_grad_()
-        self.scale.requires_grad_()
-        self.zero_point.requires_grad_()
-        self.args = [
-            self.input, self.scale, self.zero_point,
-            self.quant_min, self.quant_max
-        ]
-        if op_type == 'py_module':
-            self.op = _LearnableFakeQuantizePerTensorOp.apply
-            self.args.append(1.)
-        elif op_type == 'learnable_kernel':
-            self.op = torch._fake_quantize_learnable_per_tensor_affine
-        else:
-            # Replace tensors with float and long types for original per tensor
-            # fake quantize kernel.
-            self.args[1], self.args[2] = 1., 0
-            self.op = torch.fake_quantize_per_tensor_affine
+        self.input = torch.rand(N, C, H, W, dtype=torch.float, device=device, requires_grad=self.auto_set())
+        self.scale = torch.tensor([1.], requires_grad=self.auto_set()).to(device)
+        self.zero_point = torch.tensor([0.], requires_grad=self.auto_set()).to(device)
 
-    def forward(self):
-        return self.op(*self.args)
+        self.inputs = {
+            "input": self.input,
+            "scale": self.scale,
+            "zero_point": self.zero_point,
+            "quant_min": self.quant_min,
+            "quant_max": self.quant_max,
+        }
+        self.op_func = op_func
 
-op_bench.generate_pt_test(
+    def forward(
+        self, input, scale, zero_point,
+        quant_min: int, quant_max: int
+    ):
+        return self.op_func(input, scale, zero_point, quant_min, quant_max)
+
+op_bench.generate_pt_tests_from_op_list(
+    fake_quantize_per_tensor_ops,
     fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
-    FakeQuantizePerTensorOpBenchmark
+    FakeQuantizePerTensorBaseOpBenchmark
+)
+op_bench.generate_pt_gradient_tests_from_op_list(
+    fake_quantize_per_tensor_ops,
+    fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
+    FakeQuantizePerTensorBaseOpBenchmark
 )
 
-op_bench.generate_pt_gradient_test(
-    fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
-    FakeQuantizePerTensorOpBenchmark
+def fakeQuantizePerChannelPyModule(
+    input, scale, zero_point, axis: int,
+    quant_min: int, quant_max: int
+):
+    return _LearnableFakeQuantizePerChannelOp.apply(input, scale, zero_point, axis, quant_min, quant_max, 1.0)
+
+def fakeQuantizePerChannelLearnableKernel(
+    input, scale, zero_point, axis: int,
+    quant_min: int, quant_max: int
+):
+    return torch._fake_quantize_learnable_per_channel_affine(input, scale, zero_point, axis, quant_min, quant_max)
+
+def fakeQuantizePerChannelOriginalKernel(
+    input, scale, zero_point, axis: int,
+    quant_min: int, quant_max: int
+):
+    return torch.fake_quantize_per_channel_affine(input, scale, zero_point, axis, quant_min, quant_max)
+
+fake_quantize_per_channel_ops = op_bench.op_list(
+    attrs=(
+        ('py_module', fakeQuantizePerChannelPyModule),
+        ('learnable_kernel', fakeQuantizePerChannelLearnableKernel),
+        ('original_kernel', fakeQuantizePerChannelOriginalKernel)
+    ),
+    attr_names=('op_name', 'op_func'),
 )
 
 class FakeQuantizePerChannelOpBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks 3 different fake quantize per channel operators."""
-    def init(self, N, C, H, W, nbits, device, op_type):
+    def init(self, N, C, H, W, nbits, device, op_func):
         self.quant_min = 0
         self.quant_max = 2 ** nbits - 1
         self.quant_range = 2 ** nbits
         # Axis is chosen with respect to the number of channels: C.
         self.axis = 1
-        self.input = torch.rand(N, C, H, W, dtype=torch.float, device=device)
-        self.scale = torch.ones(C, device=device, dtype=torch.float32)
-        self.zero_point = torch.zeros(C, device=device, dtype=torch.float32)
-        self.input.requires_grad_()
-        self.scale.requires_grad_()
-        self.zero_point.requires_grad_()
-        self.args = [
-            self.input, self.scale, self.zero_point,
-            self.axis, self.quant_min, self.quant_max
-        ]
-        if op_type == 'py_module':
-            self.op = _LearnableFakeQuantizePerChannelOp.apply
-            self.args.append(1.)
-        elif op_type == 'learnable_kernel':
-            self.op = torch._fake_quantize_learnable_per_channel_affine
+        self.input = torch.rand(N, C, H, W, dtype=torch.float, device=device, requires_grad=self.auto_set())
+
+        if op_func.__name__ == 'fakeQuantizePerChannelOriginalKernel':
+            self.scale = torch.ones(C, device=device, dtype=torch.float32, requires_grad=False)
+            self.zero_point = torch.zeros(C, device=device, dtype=torch.int64, requires_grad=False)
         else:
-            self.args[1] = torch.ones(C, device=device, dtype=torch.float32)
-            self.args[2] = torch.zeros(C, device=device, dtype=torch.int64)
-            self.op = torch.fake_quantize_per_channel_affine
+            self.scale = torch.ones(C, device=device, dtype=torch.float32, requires_grad=self.auto_set())
+            self.zero_point = torch.zeros(C, device=device, dtype=torch.float32, requires_grad=self.auto_set())
 
-    def forward(self):
-        return self.op(*self.args)
+        self.inputs = {
+            "input": self.input,
+            "scale": self.scale,
+            "zero_point": self.zero_point,
+            "axis": self.axis,
+            "quant_min": self.quant_min,
+            "quant_max": self.quant_max,
+        }
 
-op_bench.generate_pt_test(
+        self.op_func = op_func
+
+    def forward(
+        self, input, scale, zero_point,
+        axis: int, quant_min: int, quant_max: int
+    ):
+        return self.op_func(input, scale, zero_point, axis, quant_min, quant_max)
+
+op_bench.generate_pt_tests_from_op_list(
+    fake_quantize_per_channel_ops,
     fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
     FakeQuantizePerChannelOpBenchmark
 )
 
-op_bench.generate_pt_gradient_test(
+op_bench.generate_pt_gradient_tests_from_op_list(
+    fake_quantize_per_channel_ops,
     fake_quantize_operator_configs_short + fake_quantize_operator_configs_long,
     FakeQuantizePerChannelOpBenchmark
 )
