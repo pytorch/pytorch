@@ -23,6 +23,8 @@ typedef SSIZE_T ssize_t;
 #pragma comment(lib, "Ws2_32.lib")
 #else
 #include <sys/socket.h>
+#include <sys/poll.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #endif
