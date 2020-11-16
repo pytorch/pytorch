@@ -349,8 +349,7 @@ void IRPrinter::visit(const MinTerm* v) {
 
 void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
-  os() << *v->accumulator() << ", ";
-  os() << v->complete() << ", ";
+  os() << *v->body() << ", ";
 
   bool first = true;
   os() << "out_args={";
