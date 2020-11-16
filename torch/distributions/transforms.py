@@ -554,9 +554,11 @@ class CorrCholeskyTransform(Transform):
     """
     domain = constraints.real_vector
     codomain = constraints.corr_cholesky
-    event_dim = 2
+    bijective = True
+    # Note that since we add a dim in _call this should actually be 2 for the inverse transform.
+    event_dim = 1
 
-    def __call__(self, x):
+    def _call(self, x):
         x = torch.tanh(x)
         eps = torch.finfo(x.dtype).eps
         x = x.clamp(min=-1+eps, max=1-eps)
@@ -566,6 +568,8 @@ class CorrCholeskyTransform(Transform):
                              f'(D * (D-1)) / 2, i.e. the lower triangular part of a square D x D matrix.')
         n = round(n)
         r = torch.zeros(x.shape[:-1] + (n, n))
+        # TODO: Explore a JIT friendly way to convert a tensor to
+        # a lower triangular matrix.
         tril_idx = torch.tril_indices(n, n, -1, device=x.device)
         r[..., tril_idx[0], tril_idx[1]] = x
         # apply stick-breaking on the squared values
@@ -578,19 +582,19 @@ class CorrCholeskyTransform(Transform):
         y = r * pad(z1m_cumprod_sqrt[..., :-1], [1, 0], value=1)
         return y
 
-    def inv(self, y):
+    def _inverse(self, y):
         # inverse stick-breaking
-        z1m_cumprod = 1 - torch.cumsum(y * y, dim=-1)
-        z1m_cumprod_shifted = pad(z1m_cumprod[..., :-1], [1, 0])
+        # See: https://mc-stan.org/docs/2_18/reference-manual/cholesky-factors-of-correlation-matrices-1.html
+        y_cumsum = 1 - torch.cumsum(y * y, dim=-1)
+        y_cumsum_shifted = pad(y_cumsum[..., :-1], [1, 0], value=1)
         n = y.shape[-1]
-        tril_idx = torch.tril_indices(n, n, -1)
+        tril_idx = torch.tril_indices(n, n, offset=-1)
         y_vec = y[..., tril_idx[0], tril_idx[1]]
-        z1m_cumprod_vec = z1m_cumprod_shifted[..., tril_idx[0], tril_idx[1]]
-        t = y_vec / (z1m_cumprod_vec).sqrt()
+        y_cumsum_vec = y_cumsum_shifted[..., tril_idx[0], tril_idx[1]]
+        t = y_vec / (y_cumsum_vec).sqrt()
         # inverse of tanh
         x = ((1 + t) / (1 - t)).log() / 2
         return x
-
 
     def log_abs_det_jacobian(self, x, y, intermediates=None):
         # Because domain and codomain are two spaces with different dimensions, determinant of

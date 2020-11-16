@@ -215,6 +215,11 @@ def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
 
 
+@biject_to.register(constraints.corr_cholesky)
+def _transform_to_corr_cholesky(constraint):
+    return transforms.CorrCholeskyTransform()
+
+
 @biject_to.register(constraints.cat)
 def _biject_to_cat(constraint):
     return transforms.CatTransform([biject_to(c)
