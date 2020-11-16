@@ -48,9 +48,7 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
 
 namespace native {
 
-$ {
-  native_function_declarations
-}
+${native_function_declarations}
 
 } // namespace native
 } // namespace at
