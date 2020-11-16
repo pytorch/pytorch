@@ -2666,3 +2666,13 @@ def as_strided(g, self, sizes, strides, offset=None):
         if offset:
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
         return g.op("Gather", self_1d, ind)
+
+
+def __derive_index(g, index, start, step):
+    return g.op("Add", start, g.op("Mul", index, step))
+
+
+def __range_length(g, lo, hi, step):
+    sub = g.op("Sub", hi, lo)
+    div = g.op("Ceil", true_divide(g, sub, step))
+    return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])
