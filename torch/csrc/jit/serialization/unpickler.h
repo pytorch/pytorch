@@ -31,7 +31,7 @@ class TORCH_API Unpickler {
       std::function<size_t(char*, size_t)> reader,
       TypeResolver type_resolver,
       const std::vector<at::Tensor>* tensor_table)
-      : reader_(reader),
+      : reader_(std::move(reader)),
         tensor_table_(tensor_table),
         type_resolver_(std::move(type_resolver)),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
@@ -44,12 +44,12 @@ class TORCH_API Unpickler {
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device)
-      : reader_(reader),
+      : reader_(std::move(reader)),
         tensor_table_(nullptr),
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
-        device_(std::move(device)),
+        device_(device),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
 
   // consume the pickle stream, producing an IValue from the contents.
