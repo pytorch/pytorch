@@ -456,14 +456,22 @@ RegisterOperators reg({
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
+<<<<<<< HEAD
     Operator(
+=======
+        Operator(
+>>>>>>> 2be5dc214cd7352503f0695b977b65ae1748301d
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
     Operator(
         "aten::getCudaStream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
+<<<<<<< HEAD
           int64_t idx = -1;
+=======
+          int64_t idx;
+>>>>>>> 2be5dc214cd7352503f0695b977b65ae1748301d
           pop(stack, idx);
           auto v = make_custom_class<torch::jit::CUDAStream>(idx);
           push(stack, v);
@@ -479,7 +487,11 @@ RegisterOperators reg({
     Operator(
         "aten::set_device(int64_t val) -> ()",
         [](Stack* stack) {
+<<<<<<< HEAD
           int64_t idx = -1;
+=======
+          int64_t idx;
+>>>>>>> 2be5dc214cd7352503f0695b977b65ae1748301d
           pop(stack, idx);
           c10::cuda::set_device(idx);
         },
@@ -507,7 +519,11 @@ RegisterOperators reg({
           auto unpacked = c10::cuda::CUDAStream::unpack(packed);
           c10::cuda::setCurrentCUDAStream(unpacked);
         },
+<<<<<<< HEAD
         aliasAnalysisFromSchema()),
+=======
+        aliasAnalysisConservative()),
+>>>>>>> 2be5dc214cd7352503f0695b977b65ae1748301d
 });
 } // namespace
 } // namespace jit
