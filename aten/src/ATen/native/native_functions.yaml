@@ -8064,7 +8064,7 @@
 - func: reflection_pad1d.out(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: reflection_pad1d_out_cpu
+    CPU, QuantizedCPU: reflection_pad1d_out_cpu
     CUDA: reflection_pad1d_out_cuda
 
 - func: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
@@ -8090,7 +8090,7 @@
 - func: reflection_pad2d.out(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: reflection_pad2d_out_cpu
+    CPU, QuantizedCPU: reflection_pad2d_out_cpu
     CUDA: reflection_pad2d_out_cuda
 
 - func: reflection_pad2d(Tensor self, int[4] padding) -> Tensor
