@@ -312,6 +312,10 @@ namespace jit {
   _(BoundsInferenceMultipleTopLoopStore)            \
   _(BoundsInferenceCacheReads)                      \
   _(BoundsInferenceFlattened)                       \
+  _(GetPotentialHazards)                            \
+  _(GetPotentialHazardsLoopNoHazard)                \
+  _(GetPotentialHazardsLoopCall)                    \
+  _(GetPotentialHazardsLoopSplit)                   \
   _(BoundOverlap)                                   \
   _(BoundOverlapSymbolic)                           \
   _(BoundOverlapMultiDim)                           \
@@ -403,6 +407,7 @@ namespace jit {
   _(FuserPass_UnfusibleDevice)                      \
   _(FuserPass_UnknownShapes)                        \
   _(FuserPass_UnknownShapesIgnored)                 \
+  _(FuserPass_IgnoreUnknownShapeAtStart)            \
   _(FuserPass_Multidevice)                          \
   _(FuserPass_MergeGroups)                          \
   _(TrainBasic)                                     \
