@@ -92,13 +92,6 @@ CONFIG_TREE_DATA = [
                 ]),
             ]),
         ]),
-        ("rocm", [
-            ("3.7", [
-                ("3.6", [
-                    ('build_only', [XImportant(True)]),
-                ]),
-            ]),
-        ]),
     ]),
 ]
 
