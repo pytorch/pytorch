@@ -2,7 +2,6 @@
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/custom_class.h>
-#define PRIORITY_INDEX 50
 
 namespace torch {
 namespace jit {
@@ -11,6 +10,7 @@ class CUDAEvent;
 class CUDAStream final : public CustomClassHolder {
 public:
   CUDAStream(int64_t device=-1, int64_t priority=0) {
+    constexpr int64_t PRIORITY_INDEX = 50;
     stream_ = std::make_unique<c10::cuda::CUDAStream>(c10::cuda::getStreamFromPool(priority > PRIORITY_INDEX, device));
   }
 
