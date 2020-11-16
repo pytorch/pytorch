@@ -8,7 +8,15 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.fx.experimental.partitioner_utils import NodeLatency, \
     get_partition_to_latency_mapping, get_latency_of_partitioned_graph
+from torch.fx.experimental.fuser import fuse
 from typing import Union, Callable
+
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
     return GraphModule(root if isinstance(root, torch.nn.Module) else torch.nn.Module(), RewritingTracer().trace(root))
@@ -226,6 +234,20 @@ class TestFXExperimental(JitTestCase):
             transfer_rate_bytes_per_sec
         )
         assert critical_path_latency_sec == 208.
+
+    @skipIfNoTorchVision
+    def test_conv_bn_fusion(self):
+        rn18 = resnet18().eval()
+        traced = symbolic_trace(rn18)
+        fused = fuse(traced)
+
+        self.assertTrue(all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules()))
+
+        N, C, H, W = 20, 3, 224, 224
+        inp = torch.randn(N, C, H, W)
+
+        self.assertEqual(fused(inp), rn18(inp))
+
 
     def test_call_to_assert_no_msg(self):
 
