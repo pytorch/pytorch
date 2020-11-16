@@ -562,16 +562,15 @@ class CorrCholeskyTransform(Transform):
         x = torch.tanh(x)
         eps = torch.finfo(x.dtype).eps
         x = x.clamp(min=-1 + eps, max=1 - eps)
-        n = (1 + math.sqrt(1 + 8 * x.shape[-1])) / 2
-        if round(n) - n > eps:
-            raise ValueError(f'The size of last dimension is {y.shape[-1]} which cannot be expressed ' +
+        n = (1 + torch.sqrt(1 + x.new_full((), 8 * x.shape[-1]))) / 2
+        if not torch._C._get_tracing_state() and (torch.round(n) - n > eps):
+            raise ValueError(f'The size of last dimension is {x.shape[-1]} which cannot be expressed as ' +
                              '(D * (D-1)) / 2, i.e. the lower triangular part of a square D x D matrix.')
-        n = round(n)
-        r = torch.zeros(x.shape[:-1] + (n, n))
-        # TODO: Explore a JIT friendly way to convert a tensor to
-        # a lower triangular matrix.
-        tril_idx = torch.tril_indices(n, n, -1, device=x.device)
-        r[..., tril_idx[0], tril_idx[1]] = x
+        n = torch.round(n).long()
+        r = x.new_zeros(x.shape[:-1] + torch.Size((n, n)))
+        arange = torch.arange(n)
+        tril_mask = arange < arange.view(-1, 1)
+        r[..., tril_mask] = x
         # apply stick-breaking on the squared values
         # Note that y = sign(r) * sqrt(z * z1m_cumprod)
         #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
@@ -588,9 +587,10 @@ class CorrCholeskyTransform(Transform):
         y_cumsum = 1 - torch.cumsum(y * y, dim=-1)
         y_cumsum_shifted = pad(y_cumsum[..., :-1], [1, 0], value=1)
         n = y.shape[-1]
-        tril_idx = torch.tril_indices(n, n, offset=-1)
-        y_vec = y[..., tril_idx[0], tril_idx[1]]
-        y_cumsum_vec = y_cumsum_shifted[..., tril_idx[0], tril_idx[1]]
+        arange = torch.arange(n)
+        tril_mask = arange < arange.view(-1, 1)
+        y_vec = y[..., tril_mask]
+        y_cumsum_vec = y_cumsum_shifted[..., tril_mask]
         t = y_vec / (y_cumsum_vec).sqrt()
         # inverse of tanh
         x = ((1 + t) / (1 - t)).log() / 2
@@ -606,8 +606,9 @@ class CorrCholeskyTransform(Transform):
         # by taking diagonal=-2, we don't need to shift z_cumprod to the right
         # also works for 2 x 2 matrix
         n = y.shape[-1]
-        tril_idx = torch.tril_indices(n, n, -2)
-        y1m_cumsum_tril = y1m_cumsum[..., tril_idx[0], tril_idx[1]]
+        arange = torch.arange(n)
+        tril_mask = arange < arange.view(-1, 1)
+        y1m_cumsum_tril = y1m_cumsum[..., tril_mask]
         stick_breaking_logdet = 0.5 * (y1m_cumsum_tril).log().sum(-1)
         tanh_logdet = -2 * (x + softplus(-2 * x) - math.log(2.)).sum(dim=-1)
         return stick_breaking_logdet + tanh_logdet
