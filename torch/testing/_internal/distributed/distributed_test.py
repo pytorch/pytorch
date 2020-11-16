@@ -989,7 +989,6 @@ class DistributedTest:
             "Only Gloo and Nccl backend supports CUDA allReduce",
         )
         @skip_if_no_gpu
-        @skip_if_rocm
         def test_broadcast_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -1240,7 +1239,6 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @require_backend({"gloo", "nccl"})
-        @skip_if_rocm
         def test_all_reduce_result_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -1385,7 +1383,6 @@ class DistributedTest:
             "Only Gloo and NCCL backends will have CUDA allReduce tested",
         )
         @skip_if_no_gpu
-        @skip_if_rocm
         def test_all_reduce_sum_cuda_async(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -2342,7 +2339,6 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-        @skip_if_rocm
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
