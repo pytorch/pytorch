@@ -3,7 +3,6 @@
 import argparse
 import copy
 from datetime import datetime
-import importlib
 import modulefinder
 import os
 import shutil

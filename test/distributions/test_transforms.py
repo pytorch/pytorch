@@ -3,12 +3,11 @@ import pytest
 import torch
 from torch.autograd import grad
 from torch.distributions import Dirichlet, Normal, TransformedDistribution, constraints
-from torch.distributions.transforms import (AbsTransform, AffineTransform, CatTransform,
-                                            ComposeTransform, CorrCholeskyTransform,
-                                            ExpTransform, LowerCholeskyTransform,
-                                            PowerTransform, SigmoidTransform, TanhTransform,
-                                            SoftmaxTransform, StickBreakingTransform,
-                                            identity_transform, StackTransform, Transform,
+from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
+                                            CorrCholeskyTransform, ExpTransform,
+                                            LowerCholeskyTransform, PowerTransform,
+                                            SigmoidTransform, TanhTransform, SoftmaxTransform,
+                                            StickBreakingTransform, identity_transform, Transform,
                                             _InverseTransform)
 
 
