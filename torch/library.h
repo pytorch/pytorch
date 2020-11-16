@@ -653,9 +653,12 @@ public:
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
-/// is only one library (it is a "fragment").  This should ONLY be used
-/// inside the PerOpRegistration.cpp file (as its name suggests).
-#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
+/// is only one library (it is a "fragment").  This is used inside the
+/// PerOpRegistration.cpp file, as well as in places where all op registrations
+/// within the same namespace cannot be easily put into one macro block
+/// (this is mostly the case for custom ops in fbcode that were ported from
+/// the old API)
+#define TORCH_LIBRARY_FRAGMENT(ns, m) \
   static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
     torch::Library::FRAGMENT, \
