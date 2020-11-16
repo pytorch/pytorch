@@ -58,7 +58,7 @@ Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
 
 std::vector<IValue> getParamAttributes(
     std::shared_ptr<Graph>& graph,
-    Module module_,
+    const Module& module_,
     Function* function_) {
   std::vector<IValue> attrValues;
   auto isEval = !module_.hasattr("training") || !module_.is_training();
