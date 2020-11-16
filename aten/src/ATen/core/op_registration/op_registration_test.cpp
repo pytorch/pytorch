@@ -595,51 +595,50 @@ TEST(OperatorRegistrationTest, AutogradXLAOverridesAutogradKernel) {
 }
 
 TEST(OperatorRegistrationTest, whenRegisterWithXLAKernelAndCatchAll_AutogradXLAIsNotFilled) {
-  {
-    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
 
-    auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-    ASSERT_TRUE(op.has_value());
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
 
-    called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA, /*requires_grad=*/true));
-    EXPECT_TRUE(called_nonautograd);
-    EXPECT_FALSE(called_autograd);
+  called_nonautograd = called_autograd = false;
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA, /*requires_grad=*/true));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
 
-    called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA));
-    EXPECT_FALSE(called_autograd);
-    EXPECT_TRUE(called_nonautograd);
-  }
-  {
-    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::XLA)
-      .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
+  called_nonautograd = called_autograd = false;
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA));
+  EXPECT_FALSE(called_autograd);
+  EXPECT_TRUE(called_nonautograd);
 
-    auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-    ASSERT_TRUE(op.has_value());
+  registrar = c10::RegisterOperators(); // destruct
 
-    // When there's direct registration to XLA backend, AutogradXLA doesn't pick up catchAll
-    // kernel in precompute but just keep fallthrough kernel from backend fallback.
-    // Thus it falls through AutogradXLA and reaches the kernel at XLA key.
-    called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA, /*requires_grad=*/true));
-    EXPECT_FALSE(called_nonautograd);
-    EXPECT_TRUE(called_autograd);
+  registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::XLA)
+    .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>());
 
-    called_nonautograd = called_autograd = false;
-    op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA));
-    EXPECT_TRUE(called_autograd);
-    EXPECT_FALSE(called_nonautograd);
-  }
+  op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  // When there's direct registration to XLA backend, AutogradXLA doesn't pick up catchAll
+  // kernel in precompute but just keep fallthrough kernel from backend fallback.
+  // Thus it falls through AutogradXLA and reaches the kernel at XLA key.
+  called_nonautograd = called_autograd = false;
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA, /*requires_grad=*/true));
+  EXPECT_FALSE(called_nonautograd);
+  EXPECT_TRUE(called_autograd);
+
+  called_nonautograd = called_autograd = false;
+  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::XLA));
+  EXPECT_TRUE(called_autograd);
+  EXPECT_FALSE(called_nonautograd);
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingCppSignatures_thenFails) {
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {})
-      .kernel(DispatchKey::CUDA, [] (int64_t&) {}));
+      .kernel(DispatchKey::CUDA, [] (int64_t) {}));
   }, "Mismatch in kernel C++ signatures");
 }
 
@@ -654,8 +653,8 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBacke
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchAllWithMismatchingCppSignatures_thenFails) {
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
-      .catchAllKernel([] (const int64_t&) {})
-      .kernel(DispatchKey::CPU, [] (int64_t) {}));
+      .kernel(DispatchKey::CPU, [] (int64_t) {})
+      .catchAllKernel([] (const int64_t&) {}));
   }, "Mismatch in kernel C++ signatures");
 }
 
