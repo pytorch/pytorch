@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase
@@ -365,7 +366,8 @@ class QuantizationTestCase(TestCase):
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_default_qat_module_mappings().values() and \
-           type(module) not in float_to_observed_module_class_mapping.values():
+           type(module) not in float_to_observed_module_class_mapping.values() and \
+           not isinstance(module, _FusedModule):
             for child in module.children():
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
@@ -654,8 +656,17 @@ class QuantizationTestCase(TestCase):
             prepared = prepare(model, qconfig_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
+            print('graph:', prepared)
+            for name, child in prepared.named_modules():
+                if isinstance(child, torch.quantization.HistogramObserver):
+                    self.assertTrue(child.min_val.item() != float('inf'),
+                                    "observer not receiving data")
+                    self.assertTrue(child.max_val.item() != float('-inf'),
+                                    "observer not receiving data")
+
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
+            print('scale:', qgraph._scale_0)
             qgraph_debug = convert_fx(prepared_copy, debug=True)
             result = qgraph(*inputs)
             result_debug = qgraph_debug(*inputs)
@@ -671,6 +682,7 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
+            return result
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,

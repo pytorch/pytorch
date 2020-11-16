@@ -52,6 +52,7 @@ def fuse_conv_bn_relu(conv, bn, relu):
         >>> b1 = nn.BatchNorm2d(20)
         >>> m2 = fuse_conv_bn(m1, b1)
     """
+    print('in fuse_conv_bn_relu')
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
     fused_module : Optional[Type[nn.Sequential]] = None
