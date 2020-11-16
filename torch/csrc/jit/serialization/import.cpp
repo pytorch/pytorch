@@ -263,9 +263,11 @@ Module ScriptModuleDeserializer::deserialize(
     AT_ERROR("Legacy model format is not supported on mobile.");
 #endif
   }
-  auto tuple = readArchive("constants").toTuple();
-  for (auto constant : tuple->elements()) {
-    constants_table_.push_back(constant.toIValue());
+  if (reader_->hasRecord("constants")) {
+    auto tuple = readArchive("constants").toTuple();
+    for (auto constant : tuple->elements()) {
+      constants_table_.push_back(constant.toIValue());
+    }
   }
   auto m = Module(readArchive("data").toObject());
   rewriteQuantizedConvForBC(m);
