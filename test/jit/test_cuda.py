@@ -85,7 +85,11 @@ class TestCUDA(JitTestCase):
         @torch.jit.script
         def fn():
             device_index = torch.cuda._cuda_getDevice()
+<<<<<<< HEAD
             user_stream = torch.classes.cuda.Stream(0, 0)
+=======
+            user_stream = torch.classes.cuda.Stream(0,0)
+>>>>>>> Adding cuda jit stream support
             value = True
             with torch.cuda.stream(user_stream):
                 value = torch.cuda._cuda_getStream(device_index).device_index() == user_stream.device_index()
