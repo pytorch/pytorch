@@ -106,7 +106,8 @@ class C10_API intrusive_ptr_target {
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        weakcount_.load() == 0,
+        // See ~intrusive_ptr for optimization that will frequently result in 1 at destruction time.
+        weakcount_.load() == 1 || weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(pop)
@@ -219,7 +220,8 @@ class intrusive_ptr final {
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
-      if (--target_->weakcount_ == 0) {
+      if (target_->weakcount_.load(std::memory_order_acquire) == 1 ||
+          --target_->weakcount_ == 0) {
         delete target_;
       }
     }
