@@ -6,10 +6,7 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #else
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 namespace at {
