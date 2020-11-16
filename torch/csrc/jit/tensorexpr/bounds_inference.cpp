@@ -12,8 +12,9 @@ namespace tensorexpr {
 
 using namespace analysis;
 
+template <typename Container>
 BoundsInfo mergeTensorAccesses(
-    const std::deque<std::shared_ptr<AccessInfo>>& accesses,
+    const Container& accesses,
     const std::unordered_map<const Var*, const Buf*>& varToBuf,
     bool distinctAccessKinds) {
   BoundsInfo ret;
@@ -90,6 +91,14 @@ BoundsInfo inferBounds(Stmt* s, bool distinctAccessKinds) {
       checker.getHistory(), varToBuf, distinctAccessKinds);
 }
 
+BoundsInfo getInferredBounds(
+    MemDependencyChecker& analyzer,
+    Stmt* s,
+    bool distinctAccessKinds) {
+  return mergeTensorAccesses(
+      analyzer.accessesWithin(s), getAllBufs(s), distinctAccessKinds);
+}
+
 void printBoundsInfo(const BoundsInfo& v) {
   std::cerr << "Access vector {\n";
   for (auto& pair : v) {
@@ -164,6 +173,87 @@ std::vector<const Expr*> getBoundExtents(
   }
 
   return extents;
+}
+
+using BoundSet = std::unordered_set<Bound, BoundHash>;
+
+BoundSet convertBounds(
+    const std::vector<TensorAccessBoundsInfo>& bounds,
+    TensorAccessKind filter = kMutate) {
+  BoundSet ret;
+  for (auto& TABI : bounds) {
+    if (filter == kMutate || TABI.kind == filter) {
+      for (size_t i = 0; i < TABI.start.size(); ++i) {
+        ret.insert(Bound(TABI.start[i], TABI.stop[i]));
+      }
+    }
+  }
+  return ret;
+}
+
+BoundSet convertBounds(
+    BoundsInfo& bounds,
+    const Buf* buf,
+    TensorAccessKind filter = kMutate) {
+  auto it = bounds.find(buf);
+  if (it == bounds.end()) {
+    return BoundSet();
+  }
+
+  return convertBounds(it->second, filter);
+}
+
+HazardKind getPotentialHazards(
+    MemDependencyChecker& analyzer,
+    Stmt* A,
+    Stmt* B) {
+  BoundsInfo aBounds = getInferredBounds(analyzer, A, true);
+  BoundsInfo bBounds = getInferredBounds(analyzer, B, true);
+
+  BoundSet aWrites;
+  BoundSet aReads;
+
+  for (auto& pair : bBounds) {
+    const Buf* buf = pair.first;
+    if (aBounds.find(buf) == aBounds.end()) {
+      continue;
+    }
+
+    auto aWrites = convertBounds(aBounds, buf, kStore);
+    auto aReads = convertBounds(aBounds, buf, kLoad);
+
+    auto bWrites = convertBounds(pair.second, kStore);
+    auto bReads = convertBounds(pair.second, kLoad);
+
+    // First, RAW.
+    for (auto& bR : bReads) {
+      for (auto& aW : aWrites) {
+        if (boundOverlap(bR, aW) != NoOverlap) {
+          return HazardKind::ReadAfterWrite;
+        }
+      }
+    }
+
+    // Then WAR.
+    for (auto& bW : bWrites) {
+      for (auto& aR : aReads) {
+        if (boundOverlap(bW, aR) != NoOverlap) {
+          return HazardKind::WriteAfterRead;
+        }
+      }
+    }
+
+    // Then WAW.
+    for (auto& bW : bWrites) {
+      for (auto& aW : aWrites) {
+        if (boundOverlap(bW, aW) != NoOverlap) {
+          return HazardKind::WriteAfterWrite;
+        }
+      }
+    }
+  }
+
+  return HazardKind::NoDependency;
 }
 
 } // namespace tensorexpr
