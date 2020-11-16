@@ -4114,7 +4114,7 @@ class TestPadding(TestCase):
         qy_hat = torch._C._nn.reflection_pad1d(qx, padding, out=qy_hat)
         self.assertEqual(qy_ref, qy_hat)
 
-     @given(batch_size=st.integers(1, 64),
+    @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
            height=st.integers(16, 128),
            width=st.integers(16, 128),
