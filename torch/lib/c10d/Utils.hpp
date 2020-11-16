@@ -24,6 +24,7 @@ typedef SSIZE_T ssize_t;
 #else
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 
 namespace c10d {
