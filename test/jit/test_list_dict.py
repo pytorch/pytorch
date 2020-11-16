@@ -46,7 +46,7 @@ class TestList(JitTestCase):
     def test_list_literal(self):
         def reassign():
             x = [1]
-            if True:
+            if 1 == 1:
                 x = [2, 3]
             return
         self.checkScript(reassign, (), optimize=False)
