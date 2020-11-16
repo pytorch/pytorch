@@ -2715,7 +2715,7 @@ class TestOperators(hu.HypothesisTestCase):
             Y[X >= upper_bound] = num_buckets + 1
             Y[(X >= lower_bound) & (X < upper_bound)] = \
                 ((X[(X >= lower_bound) & (X < upper_bound)] - lower_bound) /
-                        segment + 1).astype(np.int32)
+                    segment + 1).astype(np.int32)
 
             for i in range(Y.shape[0]):
                 for j in range(Y.shape[1]):

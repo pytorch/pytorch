@@ -258,9 +258,9 @@ class _ObserverBase(ObserverBase):
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
         max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
-        scale = torch.ones(min_val_neg.size(), dtype=torch.float32)
-        zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64)
-        device = 'cuda' if min_val_neg.is_cuda else 'cpu'
+        device = min_val_neg.device
+        scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
+        zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
             max_val_pos = torch.max(-min_val_neg, max_val_pos)
@@ -296,7 +296,6 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype, device=device)
             if self.qscheme == torch.per_channel_affine_float_qparams:
                 zero_point = torch.tensor([float(zero_point)], dtype=zero_point.dtype, device=device)
-
 
         return scale, zero_point
 
