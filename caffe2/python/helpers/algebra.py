@@ -39,3 +39,7 @@ def batch_mat_mul(model, blob_in, blob_out,
         kwargs['engine'] = 'TENSORCORE'
 
     return model.net.BatchMatMul(blob_in, blob_out, **kwargs)
+
+
+def sparse_lengths_sum_8bit_rowwise_sparse(model, blob_in, blob_out, **kwargs):
+    model.net.SparseLengthsSum8BitRowwiseSparse(blob_in, blob_out, **kwargs)

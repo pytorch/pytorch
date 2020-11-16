@@ -72,6 +72,7 @@ class HelperWrapper(object):
         'cond' : cond,
         'loop' : loop,
         'db_input' : db_input,
+        'sparse_lengths_sum_8bit_rowwise_sparse': sparse_lengths_sum_8bit_rowwise_sparse,
     }
 
     def __init__(self, wrapped):
