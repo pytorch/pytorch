@@ -19,6 +19,11 @@ class DistAutogradTest : public ::testing::Test {
   static void SetUpTestCase() {
     autogradContainer_ = &DistAutogradContainer::init(0);
   }
+
+  virtual void TearDown() {
+    autogradContainer_->releaseContext(autogradContainer_->currentContext()->contextId());
+  }
+  
   static DistAutogradContainer* autogradContainer_;
 };
 

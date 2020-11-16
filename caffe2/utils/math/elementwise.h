@@ -63,13 +63,17 @@ CAFFE2_API void Set(std::int64_t N, T alpha, T* X, Context* context);
 
 template <typename TAlpha, typename TData, class Context>
 CAFFE2_API void
-Scale(int N, TAlpha alpha, const TData* X, TData* Y, Context* context);
+Scale(std::int64_t N, TAlpha alpha, const TData* X, TData* Y, Context* context);
 
 // Different from the Scale function above, if alpha is passed in as a pointer,
 // we will assume that it lives on the Context device, for example on GPU.
 template <typename TAlpha, typename TData, class Context>
-CAFFE2_API void
-Scale(int N, const TAlpha* alpha, const TData* X, TData* Y, Context* context);
+CAFFE2_API void Scale(
+    std::int64_t N,
+    const TAlpha* alpha,
+    const TData* X,
+    TData* Y,
+    Context* context);
 
 template <typename T, class Context>
 CAFFE2_API void Add(int N, const T* A, const T* B, T* C, Context* context);

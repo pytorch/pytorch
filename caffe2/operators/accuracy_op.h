@@ -18,7 +18,7 @@ class AccuracyOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  int top_k_; 
+  int top_k_;
   INPUT_TAGS(PREDICTION, LABEL);
 };
 

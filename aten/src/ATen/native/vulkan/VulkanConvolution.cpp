@@ -11,6 +11,7 @@ namespace detail {
 namespace convolution2d {
 
 namespace {
+// TODO: This function is not used.
 bool available(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
@@ -28,14 +29,14 @@ bool available(
 } // namespace
 
 c10::intrusive_ptr<vulkan::Conv2dOpContext> createConv2dClampPrePackOpContext(
-    Tensor weight,
-    c10::optional<Tensor> bias,
-    std::vector<int64_t> stride,
-    std::vector<int64_t> padding,
-    std::vector<int64_t> dilation,
-    int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar> output_min,
+    const c10::optional<Scalar> output_max) {
   return vulkan::VulkanConv2dOpContext::create_context(
       std::move(weight),
       std::move(bias),
@@ -47,9 +48,9 @@ c10::intrusive_ptr<vulkan::Conv2dOpContext> createConv2dClampPrePackOpContext(
       output_max);
 }
 
-Tensor Conv2dClampRun::operator()(
+Tensor conv2d_clamp_run(
     const Tensor& input,
-    const c10::intrusive_ptr<vulkan::Conv2dOpContext>& op_context) {
+    const c10::intrusive_ptr<at::native::vulkan::Conv2dOpContext>& op_context) {
   return op_context->run(input);
 }
 
@@ -67,21 +68,25 @@ ContextConv2D create(
   const auto dilation_expanded =
       expand_param_if_needed(dilation, "dilation", 2);
   const Tensor weight_nchw = weight.contiguous();
+  const auto ws = weight_nchw.sizes();
   return ContextConv2D{
-      at::native::vulkan_convolution_prepack_weights(weight),
+      groups == 1 ? at::native::vulkan::convolution_prepack_weights(weight_nchw)
+                  : weight_nchw.vulkan(),
       bias.has_value() ? c10::make_optional((*bias).vulkan()) : c10::nullopt,
-      {weight_nchw.sizes()[0],
-       weight_nchw.sizes()[1],
-       weight_nchw.sizes()[2],
-       weight_nchw.sizes()[3]},
+      // TODO: Are we sure these tensors will always come into this fucntion with the
+      // the dimensions expected below? What if they don't?  This may trigger a segfault.
+      // TODO: If we need TORCH_CHECK(available()) calls here as a sanity check, add it.
+      {{ws[0], ws[1], ws[2], ws[3]}},
       {padding_expanded[0], padding_expanded[1]},
       {stride_expanded[0], stride_expanded[1]},
       {dilation_expanded[0], dilation_expanded[1]},
-      groups};
+      groups,
+      output_min,
+      output_max};
 }
 
 Tensor run(const ContextConv2D& context, const Tensor& input) {
-  return at::native::vulkan_convolution_prepacked(
+  return at::native::vulkan::convolution_prepacked(
       input,
       context.weight_size_,
       context.weight_prepacked_vulkan_,
@@ -89,7 +94,9 @@ Tensor run(const ContextConv2D& context, const Tensor& input) {
       context.padding_,
       context.stride_,
       context.dilation_,
-      context.groups_);
+      context.groups_,
+      context.output_min_,
+      context.output_max_);
 }
 
 } // namespace convolution2d

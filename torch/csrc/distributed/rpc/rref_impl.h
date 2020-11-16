@@ -207,6 +207,11 @@ class TORCH_API RRef : public RRefInterface {
     return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_;
   }
 
+  // returns the worker info of the owner
+  inline WorkerInfo ownerWorkerInfo() const {
+    return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_);
+  }
+
   // Returns the globally unique RRefId of this RRef
   inline const RRefId& rrefId() const {
     return rrefId_;
@@ -379,7 +384,7 @@ class TORCH_API OwnerRRef final : public RRef {
   // does not create any new py::object.
   void setValue(IValue&& value);
   // Sets the value of this ``OwnerRRef`` to contain an exception.
-  void setError(const std::string& err);
+  void setError(std::exception_ptr eptr);
 
   // Has a value or error been set?
   bool hasValue() const;
@@ -391,6 +396,8 @@ class TORCH_API OwnerRRef final : public RRef {
 
   std::shared_ptr<JitFuture> future_;
 };
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);
 
 } // namespace rpc
 } // namespace distributed

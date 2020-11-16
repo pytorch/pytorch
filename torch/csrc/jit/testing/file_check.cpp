@@ -34,6 +34,7 @@ enum CheckType {
   CHECK_NOT,
   CHECK_COUNT,
   CHECK_DAG,
+  CHECK_SOURCE_HIGHLIGHTED,
 };
 
 struct Check {
@@ -71,6 +72,9 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
       break;
     case CHECK_COUNT:
       out << "CHECK-COUNT-" << *c.count_;
+      break;
+    case CHECK_SOURCE_HIGHLIGHTED:
+      out << "CHECK-SOURCE-HIGHLIGHTED";
       break;
   }
   out << ": " << c.search_str_;
@@ -198,6 +202,7 @@ struct FileCheckImpl {
         {CHECK_NOT, "-NOT: "},
         {CHECK_DAG, "-DAG: "},
         {CHECK_COUNT, "-COUNT-"}, // needs special parsing
+        {CHECK_SOURCE_HIGHLIGHTED, "-SOURCE-HIGHLIGHTED: "},
     };
 
     for (const auto& check_pair : check_pairs) {
@@ -293,6 +298,83 @@ struct FileCheckImpl {
     }
   }
 
+  // Checks that source token is highlighted, does not advance search range.
+  void doCheckSourceHighlighted(
+      const Check& check,
+      const std::shared_ptr<Source>& source,
+      size_t start_offset) {
+    auto construct_error_and_throw = [&](size_t error_start_pos) {
+      SourceRange error_range(
+          source, error_start_pos, check.search_str_.size());
+      std::stringstream ss;
+      ss << "Expected to find ";
+      c10::printQuotedString(ss, check.search_str_);
+      ss << "highlighted but it is not." << std::endl;
+      error_range.highlight(ss);
+      throw std::runtime_error(ss.str());
+    };
+
+    size_t search_start_offset = start_offset;
+    bool found_token_at_least_once = false;
+    size_t pos = search_start_offset;
+    while (pos < source->text().size()) {
+      pos = source->text().find(check.search_str_, search_start_offset);
+      if (pos == std::string::npos) {
+        break;
+      }
+
+      found_token_at_least_once = true;
+
+      auto lineno = source->lineno_for_offset(pos);
+      auto col = pos - source->offset_for_line(lineno);
+      auto highlight_lineno = lineno + 1;
+
+      if (highlight_lineno >= source->num_lines()) {
+        construct_error_and_throw(pos);
+      }
+
+      auto highlight_start_offset =
+          source->offset_for_line(highlight_lineno) + col;
+      auto highlight_end_offset = std::min(
+          highlight_start_offset + check.search_str_.size(),
+          source->text().size());
+
+      if (highlight_end_offset >= source->text().size()) {
+        construct_error_and_throw(pos);
+      }
+
+      bool found_highlight = true;
+      for (auto pos = highlight_start_offset; pos < highlight_end_offset;
+           ++pos) {
+        if (source->text()[pos] != '~') {
+          found_highlight = false;
+        }
+      }
+
+      if (found_highlight) {
+        assertNotFind(
+            SourceRange(
+                source, highlight_start_offset - 1, highlight_start_offset),
+            "~",
+            check);
+        assertNotFind(
+            SourceRange(source, highlight_end_offset, highlight_end_offset + 1),
+            "~",
+            check);
+        return;
+      }
+
+      search_start_offset = pos + 1;
+    }
+
+    if (!found_token_at_least_once) {
+      // Guaranteed to fail to generate error message.
+      assertFind(source, check.search_str_, start_offset, check);
+    }
+
+    construct_error_and_throw(start_offset);
+  }
+
   SourceRange matchDagGroup(
       const std::vector<Check>& group,
       const std::shared_ptr<Source>& source,
@@ -358,6 +440,10 @@ struct FileCheckImpl {
         }
         start_range = group_start_range;
       } break;
+      case CHECK_SOURCE_HIGHLIGHTED: {
+        doCheckSourceHighlighted(check, source, start_range);
+        break;
+      }
       case CHECK_DAG: {
         AT_ERROR();
       } break;
@@ -473,6 +559,12 @@ FileCheck* FileCheck::check_dag(const std::string& str) {
   fcImpl->addCheck(CHECK_DAG, str);
   return this;
 }
+
+FileCheck* FileCheck::check_source_highlighted(const std::string& str) {
+  fcImpl->addCheck(CHECK_SOURCE_HIGHLIGHTED, str);
+  return this;
+}
+
 } // namespace testing
 } // namespace jit
 } // namespace torch

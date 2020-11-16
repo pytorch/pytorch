@@ -3,6 +3,25 @@
 
 namespace caffe2 {
 
+OpSchema::OpSchema(const string& type, const string& file, const int line)
+   : type_(type), file_(file), line_(line), tensor_inference_function_(
+      [](const OperatorDef& def, const vector<TensorShape>&) {
+        vector<TensorShape> out;
+        for (int i = 0; i < def.output_size(); i++) {
+          TensorShape ts;
+          ts.set_unknown_shape(true);
+          out.push_back(ts);
+        }
+        return out;
+      }), device_inference_function_(
+      [](const OperatorDef& def) {
+        auto op_device =
+            def.has_device_option() ? def.device_option() : DeviceOption();
+        vector<DeviceOption> in_dev(def.input_size(), op_device);
+        vector<DeviceOption> out_dev(def.output_size(), op_device);
+        return std::make_pair(in_dev, out_dev);
+      }) {}
+
 bool OpSchema::Verify(const OperatorDef& def) const {
   // Check the number of inputs.
   if (def.input_size() < min_input_ || def.input_size() > max_input_) {

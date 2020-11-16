@@ -8,7 +8,6 @@
 #include <complex>
 #include <type_traits>
 #include <c10/util/BFloat16.h>
-#include <c10/util/LegacyComplex.h>
 #include <c10/util/Half.h>
 #include <c10/macros/Macros.h>
 
@@ -35,7 +34,7 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 }
 
 template <typename T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 inline bool _isnan(T val) {
   return std::isnan(val.real()) || std::isnan(val.imag());
 }
@@ -43,12 +42,18 @@ inline bool _isnan(T val) {
 template <typename T,
          typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
 }
 
 
+template <typename T,
+         typename std::enable_if<std::is_same<T, at::BFloat16>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
+}
+
+inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
+  return at::_isnan(static_cast<float>(val));
 }
 
 template <typename T>

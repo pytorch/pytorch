@@ -27,6 +27,21 @@ detail::types<void, Types...> init() {
   return detail::types<void, Types...>{};
 }
 
+template <typename Func, typename... ParameterTypeList>
+struct InitLambda {
+  Func f;
+};
+
+template <typename Func>
+decltype(auto) init(Func&& f) {
+  using InitTraits =
+      c10::guts::infer_function_traits_t<std::decay_t<Func>>;
+  using ParameterTypeList = typename InitTraits::parameter_types;
+
+  InitLambda<Func, ParameterTypeList> init{std::forward<Func>(f)};
+  return init;
+}
+
 /// Entry point for custom C++ class registration. To register a C++ class
 /// in PyTorch, instantiate `torch::class_` with the desired class as the
 /// template parameter. Typically, this instantiation should be done in
@@ -58,20 +73,22 @@ class class_ {
   /// see this class exposed as in Python and TorchScript. For example, if
   /// you pass `foo` as the namespace name and `Bar` as the className, the
   /// class will appear as `torch.classes.foo.Bar` in Python and TorchScript
-  explicit class_(const std::string& namespaceName, const std::string& className) {
+  explicit class_(const std::string& namespaceName, const std::string& className, std::string doc_string = "") {
     detail::checkValidIdent(namespaceName, "Namespace name");
     detail::checkValidIdent(className, "Class name");
     qualClassName = std::string("__torch__.torch.classes.") + namespaceName + "." + className;
 
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
-        std::weak_ptr<jit::CompilationUnit>());
+        std::weak_ptr<jit::CompilationUnit>(),
+        /*is_module=*/false,
+        std::move(doc_string));
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::intrusive_ptr<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::intrusive_ptr<CurClass>)), classTypePtr});
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::tagged_capsule<CurClass>).name(), classTypePtr});
+        {std::type_index(typeid(c10::tagged_capsule<CurClass>)), classTypePtr});
 
     registerCustomClass(classTypePtr);
   }
@@ -81,7 +98,7 @@ class class_ {
   /// `torch::init<int, std::string>()` would register a two-argument constructor
   /// taking an `int` and a `std::string` as argument.
   template <typename... Types>
-  class_& def(detail::types<void, Types...>) { // Used in combination with
+  class_& def(detail::types<void, Types...>, std::string doc_string = "") { // Used in combination with
                                                // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
@@ -89,7 +106,25 @@ class class_ {
       object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
 
-    defineMethod("__init__", std::move(func));
+    defineMethod("__init__", std::move(func), std::move(doc_string));
+    return *this;
+  }
+
+  // Used in combination with torch::init([]lambda(){......})
+  template <typename Func, typename... ParameterTypes>
+  class_& def(
+      InitLambda<Func, c10::guts::typelist::typelist<ParameterTypes...>> init,
+      std::string doc_string = "") {
+    auto init_lambda_wrapper = [func = std::move(init.f)](
+                                   c10::tagged_capsule<CurClass> self,
+                                   ParameterTypes... arg) {
+      c10::intrusive_ptr<CurClass> classObj =
+          at::guts::invoke(func, std::forward<ParameterTypes>(arg)...);
+      auto object = self.ivalue.toObject();
+      object->setSlot(0, c10::IValue::make_capsule(classObj));
+    };
+    defineMethod("__init__", std::move(init_lambda_wrapper), std::move(doc_string));
+
     return *this;
   }
 
@@ -112,18 +147,18 @@ class class_ {
   ///       // do something
   ///     })
   template <typename Func>
-  class_& def(std::string name, Func f) {
+  class_& def(std::string name, Func f, std::string doc_string = "") {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
-    defineMethod(std::move(name), std::move(wrapped_f));
+    defineMethod(std::move(name), std::move(wrapped_f), std::move(doc_string));
     return *this;
   }
 
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
-  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema) {
+  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(func));
+        qualMethodName, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
     return *this;
@@ -137,14 +172,18 @@ class class_ {
   ///
   /// Currently, both the `get_state` and `set_state` callables must be
   /// C++ lambda expressions. They should have the following signatures,
-  /// where `CurClass` is the class you're registering and `T` is some object
+  /// where `CurClass` is the class you're registering and `T1` is some object
   /// that encapsulates the state of the object.
   ///
-  ///     __getstate__(intrusive_ptr<CurClass>) -> T
-  ///     __setstate__(T) -> intrusive_ptr<CurClass>
+  ///     __getstate__(intrusive_ptr<CurClass>) -> T1
+  ///     __setstate__(T2) -> intrusive_ptr<CurClass>
   ///
-  /// `T` must be an object that is convertable to IValue by the same rules
+  /// `T1` must be an object that is convertable to IValue by the same rules
   /// for custom op/method registration.
+  ///
+  /// For the common case, T1 == T2. T1 can also be a subtype of T2. An
+  /// example where it makes sense for T1 and T2 to differ is if __setstate__
+  /// handles legacy formats in a backwards compatible way.
   ///
   /// Example:
   ///
@@ -202,28 +241,29 @@ class class_ {
     TORCH_CHECK(
         *first_arg_type == *classTypePtr,
         "self argument of __getstate__ must be the custom class type. Got ",
-        first_arg_type->python_str());
+        first_arg_type->repr_str());
     TORCH_CHECK(
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
+
     auto ser_type = getstate_schema.returns().at(0).type();
     auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
-        (*arg_type == *ser_type),
-        "__setstate__'s argument should be the same type as the "
-        "return value of __getstate__. Got ",
-        arg_type->python_str(),
+        ser_type->isSubtypeOf(arg_type),
+        "__getstate__'s return type should be a subtype of "
+        "input argument of __setstate__. Got ",
+        ser_type->repr_str(),
         " but expected ",
-        ser_type->python_str());
+        arg_type->repr_str());
 
     return *this;
   }
 
  private:
   template <typename Func>
-  void defineMethod(std::string name, Func func) {
+  void defineMethod(std::string name, Func func, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
@@ -236,7 +276,7 @@ class class_ {
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(wrapped_func));
+        qualMethodName, std::move(schema), std::move(wrapped_func), std::move(doc_string));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it
@@ -261,11 +301,6 @@ class class_ {
 ///     IValue custom_class_iv = torch::make_custom_class<MyClass>(3, "foobarbaz");
 template <typename CurClass, typename... CtorArgs>
 c10::IValue make_custom_class(CtorArgs&&... args) {
-  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
-    throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class.",
-        "");
-  }
   auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
   return c10::IValue(std::move(userClassInstance));
 }

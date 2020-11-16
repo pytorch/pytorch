@@ -567,6 +567,27 @@ class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
 /// module storage semantics.
 TORCH_MODULE(GELU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SiLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies silu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.SiLU to learn
+/// about the exact behavior of this module.
+class TORCH_API SiLUImpl : public torch::nn::Cloneable<SiLUImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `SiLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+/// A `ModuleHolder` subclass for `SiLUImpl`.
+/// See the documentation for `SiLUImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(SiLU);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies sigmoid over a given input.

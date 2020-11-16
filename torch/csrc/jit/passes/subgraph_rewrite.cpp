@@ -37,20 +37,16 @@ Module SubgraphRewriter::runOnModule(const Module& module) {
 
 void SubgraphRewriter::runOnGraph(
     std::shared_ptr<Graph>& graph,
-    const std::function<
-        bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-        filter) {
+    const std::vector<MatchFilter>& filters) {
   for (const RewritePatternDescr& pattern : patterns_) {
-    rewriteSinglePatternOnGraph(graph, pattern, filter);
+    rewriteSinglePatternOnGraph(graph, pattern, filters);
   }
 }
 
 void SubgraphRewriter::rewriteSinglePatternOnGraph(
     std::shared_ptr<Graph>& graph,
     const RewritePatternDescr& pattern,
-    const std::function<
-        bool(const Match&, const std::unordered_map<std::string, Value*>&)>&
-        filter) {
+    const std::vector<MatchFilter>& filters) {
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 
@@ -63,7 +59,9 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
   for (const Match& match : matches) {
-    if (!filter(match, vmap)) {
+    if (!std::all_of(filters.begin(), filters.end(), [&](const MatchFilter& f) {
+          return f(match, vmap);
+        })) {
       continue;
     }
     // Matches might overlap with each other, in that case some of the nodes in

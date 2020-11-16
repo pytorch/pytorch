@@ -1,10 +1,10 @@
 #ifndef QUANT_DECODE_OP_H_
 #define QUANT_DECODE_OP_H_
 
+#include <c10/util/typeid.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
 
 namespace caffe2 {
 

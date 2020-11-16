@@ -2,7 +2,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
-
+from typing import Dict
 
 class Independent(Distribution):
     r"""
@@ -31,7 +31,7 @@ class Independent(Distribution):
         reinterpreted_batch_ndims (int): the number of batch dims to
             reinterpret as event dims
     """
-    arg_constraints = {}
+    arg_constraints: Dict[str, constraints.Constraint] = {}
 
     def __init__(self, base_distribution, reinterpreted_batch_ndims, validate_args=None):
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):

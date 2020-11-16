@@ -255,7 +255,7 @@ void Module::zero_grad() {
     child.value()->zero_grad();
   }
   for (auto& parameter : named_parameters(/*recurse=*/false)) {
-    auto& grad = parameter->grad();
+    auto& grad = parameter->mutable_grad();
     if (grad.defined()) {
       grad = grad.detach();
       grad.zero_();

@@ -15,16 +15,22 @@
 
 namespace torch { namespace autograd {
 
-/// Monotonically incrementing (thread local!) counter to supply sequence
-/// numbers.
-thread_local uint64_t Function_next_sequence_nr_ = 0;
+// The current evaluating node. This is useful to assign the current node as a
+// parent of new nodes created during the evaluation of this node in anomaly
+// mode.
+static thread_local std::shared_ptr<Node> current_evaluating_node = nullptr;
 
-uint64_t Node::peek_at_next_sequence_nr() {
-  return Function_next_sequence_nr_;
+NodeGuard::NodeGuard(std::shared_ptr<Node> node) {
+  last_evaluating_node_ = std::move(current_evaluating_node);
+  current_evaluating_node = std::move(node);
+}
+NodeGuard::~NodeGuard() {
+  // restore the previous evaluating node
+  current_evaluating_node = std::move(last_evaluating_node_);
 }
 
-uint64_t& Node::get_next_sequence_nr() {
-  return Function_next_sequence_nr_;
+void Node::assign_parent() {
+  metadata()->assign_parent(current_evaluating_node);
 }
 
 auto Node::name() const -> std::string {

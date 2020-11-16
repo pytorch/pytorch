@@ -6,6 +6,8 @@
 #include "caffe2/core/context.h"
 #include "caffe2/utils/math.h"
 
+C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
+
 namespace caffe2 {
 
 // dimA(before transpose) = M x N, dimA (after transpose) = N x M.
@@ -26,12 +28,6 @@ void custom_fp16_gemm_with_trans(
     float* C,
     const bool use_acc_fp16,
     const bool use_temp_accumulator) {
-  if (!use_acc_fp16 && !use_temp_accumulator) {
-    math::Gemm<float, CPUContext>(
-        trans_A, trans_B, m, n, k, 1.0f, A, B, beta, C, nullptr);
-    return;
-  }
-
   switch (trans_A) {
     case CblasNoTrans: {
       switch (trans_B) {
@@ -126,22 +122,6 @@ void custom_fp16_gemm(
     float* C,
     const bool use_acc_fp16,
     const bool use_temp_accumulator) {
-  if (!use_acc_fp16 && !use_temp_accumulator) {
-    math::Gemm<float, CPUContext>(
-        CblasNoTrans,
-        CblasNoTrans,
-        m,
-        n,
-        k,
-        1.0f,
-        A_fp16,
-        B_fp16,
-        beta,
-        C,
-        nullptr);
-    return;
-  }
-
 #ifdef LOG_LEVEL_FOR_FBFCPACkEDACC16_PERFORmAnCE_LOG
   clock_t begin = clock();
 #endif
@@ -300,6 +280,29 @@ void custom_fp16_gemm(
       }
     }
   }
+
+  if (!use_acc_fp16) {
+    constexpr int kSize=8;
+    int i = 0;
+    for (; i + kSize <= C_size; i+= kSize) {
+      __m256 mC = _mm256_loadu_ps(C + i);
+      mC = _mm256_cvtph_ps(_mm256_cvtps_ph(mC, 0));
+      _mm256_storeu_ps(C + i, mC);
+    }
+    if (i < C_size){
+      vector<float> tmp(8);
+      for (int kk =0; kk + i < C_size; kk++) {
+        tmp[kk] = C[i + kk];
+      }
+      __m256 mC = _mm256_loadu_ps(tmp.data());
+      mC = _mm256_cvtph_ps(_mm256_cvtps_ph(mC, 0));
+      _mm256_storeu_ps(tmp.data(), mC);
+      for (int kk =0; kk + i < C_size; kk++) {
+        C[i + kk] = tmp[kk];
+      }
+    }
+  }
+
 #ifdef LOG_LEVEL_FOR_FBFCPACkEDACC16_PERFORmAnCE_LOG
   clock_t end = clock();
   double elapsed_secs = double(end - begin) / CLOCkS_PER_SEC;
@@ -425,26 +428,6 @@ void custom_fp16_gemm_strided_batched(
     float* C,
     const int C_stride,
     CPUContext* context) {
-  if (!use_acc_fp16 && (!use_custom_acc32 || !use_temp_accumulator)) {
-    math::GemmStridedBatched<float, CPUContext>(
-        trans_A,
-        trans_B,
-        batch_size,
-        M,
-        N,
-        K,
-        alpha,
-        A,
-        A_stride,
-        B,
-        B_stride,
-        beta,
-        C,
-        C_stride,
-        context);
-    return;
-  }
-
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     if (use_acc_fp16) {
@@ -462,7 +445,6 @@ void custom_fp16_gemm_strided_batched(
           use_temp_accumulator);
 
     } else {
-      CAFFE_ENFORCE(use_custom_acc32 && use_temp_accumulator);
       custom_fp16_gemm_with_trans(
           trans_A,
           trans_B,

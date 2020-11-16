@@ -1,9 +1,9 @@
 #include <torch/extension.h>
+#include <torch/library.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <memory>
 
 using namespace at;
@@ -53,21 +53,13 @@ size_t getInstanceCount() {
   return instance_count;
 }
 
-void registerOps() {
-  static auto registry = torch::RegisterOperators()
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_to), &random_to>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId));
+TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
+  m.impl_UNBOXED("aten::random_.from",                 random_from_to);
+  m.impl_UNBOXED("aten::random_.to",                   random_to);
+  m.impl_UNBOXED("aten::random_",                      random_);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("registerOps", &registerOps);
   m.def("createTestCPUGenerator", &createTestCPUGenerator);
   m.def("getInstanceCount", &getInstanceCount);
   m.def("identity", &identity);

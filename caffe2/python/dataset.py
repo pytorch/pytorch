@@ -10,10 +10,10 @@ Iterating through entries of this dataset is very fast since the dataset
 is stored as a set of native Caffe2 tensors, thus no type conversion or
 deserialization is necessary.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace
 from caffe2.python.dataio import Reader, Writer

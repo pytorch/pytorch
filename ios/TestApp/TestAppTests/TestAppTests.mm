@@ -28,6 +28,7 @@
   std::vector<c10::IValue> inputs;
   inputs.push_back(torch::ones({1, 3, 224, 224}, at::ScalarType::Float));
   torch::autograd::AutoGradMode guard(false);
+  at::AutoNonVariableTypeMode nonVarTypeModeGuard(true);
   auto outputTensor = _module.forward(inputs).toTensor();
   float* outputBuffer = outputTensor.data_ptr<float>();
   XCTAssertTrue(outputBuffer != nullptr, @"");

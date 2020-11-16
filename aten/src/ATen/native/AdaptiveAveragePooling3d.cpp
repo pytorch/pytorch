@@ -82,6 +82,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     Tensor& output,
     Tensor const& input,
     IntArrayRef output_size) {
+  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
   for (int64_t i = 0; i < input.ndimension(); i++) {
     TORCH_CHECK(
         input.size(i) > 0,
@@ -138,7 +139,7 @@ void adaptive_avg_pool3d_out_cpu_template(
   } else {
     output.resize_({input.size(-5), sizeD, osizeT, osizeH, osizeW});
     at::internal::lazy_init_num_threads();
-    int64_t b;
+    int64_t b = 0;
 #pragma omp parallel for private(b)
     for (b = 0; b < input.size(0); b++) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -256,7 +257,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
         });
   } else {
     at::internal::lazy_init_num_threads();
-    int64_t b;
+    int64_t b = 0;
 #pragma omp parallel for private(b)
     for (b = 0; b < input.size(0); b++) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(

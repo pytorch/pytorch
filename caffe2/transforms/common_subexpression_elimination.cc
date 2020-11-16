@@ -58,7 +58,7 @@ bool CommonSubexpressionEliminationTransform::PatternRule(
     const std::vector<int>& subgraph,
     int idx) {
   if (subgraph.size() == 0) {
-    if (IsWhitelisted(g.node(idx).op.type()))
+    if (IsAllowed(g.node(idx).op.type()))
       return true;
     return false;
   }

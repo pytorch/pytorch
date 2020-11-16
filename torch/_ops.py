@@ -61,7 +61,7 @@ class _OpNamespace(types.ModuleType):
         op = torch._C._jit_get_operation(qualified_op_name)
         # let the script frontend know that op is identical to the builtin op
         # with qualified_op_name
-        torch.jit._register_builtin(op, qualified_op_name)
+        torch.jit._builtins._register_builtin(op, qualified_op_name)
         setattr(self, op_name, op)
         op.__module__ = self.__module__ + "." + self.name
         return op

@@ -35,7 +35,7 @@ jobs:
           HEAD_SHA=${{ github.event.pull_request.head.sha }}
           MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
 
-          # only run clang-format on whitelisted files
+          # only run clang-format on allowlisted files
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
           echo "| clang-format failures found! Run: "
           echo "|    tools/clang_format_ci.sh ${MERGE_BASE} "

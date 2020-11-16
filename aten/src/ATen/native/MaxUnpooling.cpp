@@ -136,13 +136,7 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
     const Tensor& indices,
     int64_t oT,
     int64_t oH,
-    int64_t oW,
-    int64_t dT,
-    int64_t dH,
-    int64_t dW,
-    int64_t pT,
-    int64_t pH,
-    int64_t pW) {
+    int64_t oW) {
   int64_t nBatch = 1;
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -322,13 +316,7 @@ Tensor& max_unpooling3d_forward_out_cpu(
             indices,
             oT,
             oH,
-            oW,
-            stride[0],
-            stride[1],
-            stride[2],
-            padding[0],
-            padding[1],
-            padding[2]);
+            oW);
       }));
   return output;
 }

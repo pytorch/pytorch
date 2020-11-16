@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import unittest
 import torch
 import torch.nn as nn
@@ -11,12 +6,14 @@ from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests
+from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
+    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
 from textwrap import dedent
 from itertools import product, permutations
+from torch.testing._internal.common_cuda import with_tf32_off
 
-from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
-    backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
-    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
+from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
+    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_profiling_executor(True)
@@ -26,19 +23,6 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
-
-
-def warmup_backward(f, *args):
-    profiling_count = 2
-    results = []
-    for i in range(profiling_count):
-        if len(args) > 0:
-            r = torch.autograd.grad(f, *args)
-            results.append(r)
-        else:
-            f.backward(retain_graph=True)
-
-    return results
 
 
 def warmup_forward(f, *args):
@@ -292,6 +276,24 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_minmax(self):
+        def tmax(a, b):
+            return torch.max(2 * a, b)
+
+        def tmin(a, b):
+            return torch.min(2 * a, b)
+
+        a = torch.randn(4, 4, dtype=torch.float, device="cuda")
+        b = torch.randn(4, 4, dtype=torch.float, device="cuda")
+        nan = torch.tensor(float('nan'), dtype=torch.float, device="cuda")
+
+        for f, inputs in product(
+                (tmax, tmin),
+                ([a, b], [a, nan], [b, nan])):
+            s = self.checkScript(f, inputs)
+            self.assertAllFused(s.graph_for(*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -473,7 +475,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
-    @torch.jit._disable_emit_hooks_decorator
+    @torch._jit_internal._disable_emit_hooks_decorator
     @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
@@ -709,6 +711,9 @@ class TestFuser(JitTestCase):
                                                   "aten::_grad_sum_to_size"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    # By default, on Ampere or later GPUs, LSTM computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
+    @with_tf32_off
     def test_lstm_concat_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellC, inputs)
@@ -739,6 +744,9 @@ class TestFuser(JitTestCase):
 
     # TODO: Fuser doesn't work at all when inputs require grad. Fix that
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    # By default, on Ampere or later GPUs, LSTM computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
+    @with_tf32_off
     def test_lstm_traced_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellF, inputs)
@@ -762,7 +770,7 @@ class TestFuser(JitTestCase):
                 warnings.warn('CPU fuser test has failed! This is not a hard failure, '
                               'because the kernels sometimes trigger bugs in compilers '
                               '(most notably GCC 7.2).')
-                raise unittest.SkipTest('Failed to compile')
+                raise unittest.SkipTest('Failed to compile') from e
             else:
                 raise
 

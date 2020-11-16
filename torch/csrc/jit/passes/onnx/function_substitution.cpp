@@ -20,7 +20,12 @@ void functionCallSubstitution(Block* block) {
                  "torch.nn.functional") != std::string::npos) &&
             (fun_type->function()->qualname().qualifiedName().find(
                  "interpolate") != std::string::npos)) {
+          // Remove input[0] and the node that feeds into it
+          auto input_node_0 = cur->input(0)->node();
           cur->removeInput(0);
+          if (!input_node_0->hasUses()) {
+            input_node_0->destroy();
+          }
           Node* interpolate_node = block->owningGraph()->create(
               Symbol::fromQualString("aten::__interpolate"),
               {cur->inputs()},
@@ -38,7 +43,12 @@ void functionCallSubstitution(Block* block) {
               "Function in ONNX function call substitution body: ",
               *fun_type->function()->optimized_graph());
         } else {
+          // Remove input[0] and the node that feeds into it
+          auto input_node_0 = cur->input(0)->node();
           cur->removeInput(0);
+          if (!input_node_0->hasUses()) {
+            input_node_0->destroy();
+          }
           functionCallSubstitution(fun_type->function()->graph()->block());
           inlineCallTo(cur, fun_type->function(), false);
         }

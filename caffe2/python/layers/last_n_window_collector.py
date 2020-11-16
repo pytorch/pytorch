@@ -1,9 +1,5 @@
 ## @package last_n_window_collector
 # Module caffe2.python.layers.last_n_window_collector
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
@@ -41,7 +37,7 @@ class LastNWindowCollector(ModelLayer):
 
         self.mutex = self.create_param(
             param_name='mutex',
-            shape=None,
+            shape=[],
             initializer=('CreateMutex',),
             optimizer=model.NoOptim,
         )

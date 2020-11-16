@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/library.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 
@@ -56,6 +57,19 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
 
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<decltype(incrementKernel), &incrementKernel>(DispatchKey::CPU));
+  expectCallsIncrement(DispatchKey::CPU);
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredWithTorchLibraryAndTorchFn_thenCanBeCalled) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("my_op(Tensor dummy, int input) -> int");
+  m.impl("my_op", DispatchKey::CPU, TORCH_FN(incrementKernel));
+  expectCallsIncrement(DispatchKey::CPU);
+}
+
+TEST(OperatorRegistrationTest_FunctionBasedKernel, givenCatchAllKernel_whenRegisteredWithTorchLibraryAndTorchFn_thenCanBeCalled) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("my_op(Tensor dummy, int input) -> int", TORCH_FN(incrementKernel));
   expectCallsIncrement(DispatchKey::CPU);
 }
 
@@ -658,16 +672,6 @@ void expectCannotCallConcatBoxed(DispatchKey dispatch_key) {
 TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().kernel<decltype(concatKernel), &concatKernel>(DispatchKey::CPU));
   expectCallsConcatUnboxed(DispatchKey::CPU);
-}
-
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCanBeCalledUnboxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(DispatchKey::CPU));
-  expectCallsConcatUnboxed(DispatchKey::CPU);
-}
-
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCannotBeCalledBoxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(DispatchKey::CPU));
-  expectCannotCallConcatBoxed(DispatchKey::CPU);
 }
 
 std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const c10::List<Tensor>& arg3) {

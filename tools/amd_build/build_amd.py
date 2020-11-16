@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from __future__ import absolute_import, division, print_function
+
 import os
 import argparse
 import sys
@@ -115,6 +115,21 @@ def is_hip_clang():
         return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()
     except IOError:
         return False
+
+# TODO Remove once gloo submodule is recent enough to contain upstream fix.
+if is_hip_clang():
+    gloo_cmake_file = "third_party/gloo/cmake/Hip.cmake"
+    do_write = False
+    with open(gloo_cmake_file, "r") as sources:
+        lines = sources.readlines()
+    newlines = [line.replace(' hip_hcc ', ' amdhip64 ') for line in lines]
+    if lines == newlines:
+        print("%s skipped" % gloo_cmake_file)
+    else:
+        with open(gloo_cmake_file, "w") as sources:
+            for line in newlines:
+                sources.write(line)
+        print("%s updated" % gloo_cmake_file)
 
 hipify_python.hipify(
     project_directory=proj_dir,

@@ -161,6 +161,11 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  if [[ -n "$IN_CI" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
+      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+  fi
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
@@ -248,6 +253,8 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
+  pip install --user dataclasses
+
   $PYTHON setup.py install --user
 
   report_compile_cache_stats
@@ -259,10 +266,5 @@ fi
 
 # Install ONNX into a local directory
 pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
-
-if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
-  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-  bash tools/amd_build/unwrap_clang.sh
-fi
 
 report_compile_cache_stats

@@ -39,11 +39,13 @@ TEST(Caffe2ToPytorch, ExternalData) {
   for (int64_t i = 0; i < 16; i++) {
     buf[i] = i;
   }
-  c2_tensor.ShareExternalPointer(buf, 16);
+  c2_tensor.ShareExternalPointer(buf, 16 * sizeof(int64_t));
 
   // If the buffer is allocated externally, we can still pass tensor around,
   // but we can't resize its storage using PT APIs
   at::Tensor at_tensor(c2_tensor);
+  at_tensor.permute({1, 0});
+  at_tensor.permute({1, 0});
   auto it = at_tensor.data_ptr<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);

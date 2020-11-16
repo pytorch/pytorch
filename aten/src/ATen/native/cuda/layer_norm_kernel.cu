@@ -278,9 +278,10 @@ void LayerNormKernelImplInternal(
   RowwiseMomentsCUDAKernel<T>
       <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           N, eps, X_data, mean_data, rstd_data);
+  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
   LayerNormForwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
-  AT_CUDA_CHECK(cudaGetLastError());
+  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void LayerNormKernelImpl(
@@ -295,10 +296,8 @@ void LayerNormKernelImpl(
     Tensor* rstd) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormKernelImpl", [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormKernelImpl", [&] {
-          LayerNormKernelImplInternal<scalar_t>(
-              X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
-        });
+        LayerNormKernelImplInternal<scalar_t>(
+            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
 }
 
@@ -341,6 +340,7 @@ void LayerNormBackwardKernelImplInternal(
     ComputeInternalGradientsCUDAKernel<T>
         <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
             N, dY_data, X_data, gamma_data, ds_data, db_data);
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     const int64_t B = (M + kCUDANumThreads - 1) / kCUDANumThreads;
     ComputeGradientFusedParamsCUDAKernel<T>
         <<<B, kCUDANumThreads, 0, cuda_stream>>>(
@@ -352,6 +352,7 @@ void LayerNormBackwardKernelImplInternal(
             db_data,
             scale_data,
             bias_data);
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     LayerNormBackwardCUDAKenrel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
         N,
         dY_data,
@@ -361,6 +362,7 @@ void LayerNormBackwardKernelImplInternal(
         scale_data,
         bias_data,
         dX_data);
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
   }
   if (dgamma->defined() || dbeta->defined()) {
     T* dgamma_data =
@@ -379,6 +381,7 @@ void LayerNormBackwardKernelImplInternal(
               rstd_data,
               dgamma_data,
               dbeta_data);
+      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       const int64_t B =
           (N + kColwiseReduceTileSize - 1) / kColwiseReduceTileSize;
@@ -394,6 +397,7 @@ void LayerNormBackwardKernelImplInternal(
               rstd_data,
               dgamma_data,
               dbeta_data);
+      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 }
@@ -411,10 +415,8 @@ void LayerNormBackwardKernelImpl(
     Tensor* dbeta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "LayerNormBackwardKernelImpl", [&] {
-          LayerNormBackwardKernelImplInternal<scalar_t>(
-              dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-        });
+        LayerNormBackwardKernelImplInternal<scalar_t>(
+            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 

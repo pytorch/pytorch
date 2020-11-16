@@ -7,6 +7,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/fc_inference.h"
+#include "caffe2/quantization/server/int8_gen_quant_params.h"
 #include "caffe2/utils/cpuid.h"
 #include "fbgemm_pack_matrix_cache.h"
 #include "fbgemm_pack_op.h"
@@ -189,6 +190,9 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 
     if (!dequantize_output_) {
       Y_int32_.resize(Y->size());
+      if (Y_int32_.size() < Y_int32_.capacity() / 2) {
+        Y_int32_.shrink_to_fit();
+      }
       DoNothing<> doNothingObj{};
 
       if (quantize_channelwise_ || filter_qparams_[0].zero_point) {
@@ -442,6 +446,9 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #endif
 
     Y_int32_.resize(Y->size());
+    if (Y_int32_.size() < Y_int32_.capacity() / 2) {
+      Y_int32_.shrink_to_fit();
+    }
     for (int i = 0; i < M; ++i) {
       for (int j = 0; j < N; ++j) {
         int32_t sum = 0;
@@ -871,7 +878,25 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 #endif
 
   if (!dequantize_output_ && !requantization_param_selected_) {
-    GetOutputQuantizationParams_();
+    CAFFE_ENFORCE(InputSize() <= 4);
+    if (InputSize() == 4) {
+      const auto* input_qparam_blob =
+          this->template Input<caffe2::unique_ptr<caffe2::Int8QuantParamsBlob>>(
+                  3)
+              .get();
+      CAFFE_ENFORCE(input_qparam_blob);
+
+      float in_scale = input_qparam_blob->qparam.scale;
+      int in_zero_point = input_qparam_blob->qparam.zero_point;
+
+      dnnlowp::TensorQuantizationParams out_qparams_overwrite;
+      out_qparams_overwrite.scale = in_scale;
+      out_qparams_overwrite.zero_point = in_zero_point;
+      out_qparams_overwrite.precision = qfactory_->GetActivationPrecision();
+      GetOutputQuantizationParams_(&out_qparams_overwrite);
+    } else {
+      GetOutputQuantizationParams_();
+    }
 
     for (int i = 0; i < filter_qparams_.size(); ++i) {
       float real_multiplier =
@@ -945,7 +970,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FCRelu)
-    .NumInputs(3)
+    .NumInputs(3, 4)
     .NumOutputs(1)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false));

@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/utils/hash.h>
 
 #include <algorithm>
 #include <iostream>
@@ -79,7 +79,7 @@ struct TORCH_API TensorDesc {
   }
 
   static size_t hash(const TensorDesc& spec) {
-    return torch::get_hash(
+    return c10::get_hash(
         spec.scalar_type,
         spec.nDim_,
         std::hash<std::vector<bool>>{}(spec.contiguity));

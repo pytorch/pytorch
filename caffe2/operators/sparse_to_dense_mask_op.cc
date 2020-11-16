@@ -45,21 +45,21 @@ Convert sparse representations to dense with given indices.
 
 Transforms a sparse representation of map<id, value> represented as `indices`
 vector and `values` tensor into a compacted tensor where the first dimension
-corresponds to each id provided in mask argument. Missing values are filled with
-the value of `default_value`. After running this op:
+corresponds to each id provided in the mask argument. Missing values are filled
+with the value of `default_value`. After running this op:
 
   output[j, :] = values[i] // where mask[j] == indices[i]
   output[j, ...] = default_value // when mask[j] doesn't appear in indices
 
-If `lengths` is provided and not empty, and extra "batch" dimension is prepended
+If `lengths` is provided and not empty, an extra "batch" dimension is prepended
 to the output.
 
-`values` and `default_value` can have additional matching dimensions, operation
-is performed on the entire subtensor in thise case.
+`values` and `default_value` can have additional matching dimensions
+(the operation is performed on the entire subtensor in this case).
 
-For example, if `lengths` is supplied and `values` is 1-D vector of floats and
-`default_value` is a float scalar, the output is going to be a float matrix
-of size `len(lengths) X len(mask)`
+For example, if `lengths` is supplied and `values` is a 1-D vector of floats
+and `default_value` is a float scalar, the output is going to be a float
+matrix of size `len(lengths) X len(mask)`.
 )DOC")
     .Arg(
         "mask",
@@ -67,6 +67,10 @@ of size `len(lengths) X len(mask)`
     .Arg(
         "return_presence_mask",
         "bool whether to return presence mask, false by default")
+    .Arg(
+        "max_skipped_indices",
+        "int argument representing the maximum number of invalid row ids that "
+        "can be skipped before returning an error. 50 by default")
     .Input(0, "indices", "1-D int32/int64 tensor of concatenated ids of data")
     .Input(1, "values", "Data tensor, first dimension has to match `indices`")
     .Input(
@@ -117,3 +121,18 @@ class GetSparseToDenseMaskGradient : public GradientMakerBase {
 REGISTER_GRADIENT(SparseToDenseMask, GetSparseToDenseMaskGradient);
 } // namespace
 } // namespace caffe2
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    SparseToDenseMask,
+    "_caffe2::SparseToDenseMask("
+      "Tensor indices, "
+      "Tensor values, "
+      "Tensor default_value, "
+      "Tensor? lengths, "
+      "int[] mask, "
+      "bool? return_presence_mask = False, "
+      "int? max_skipped_indices = 50"
+    ") -> (Tensor output, Tensor presence_mask)",
+    caffe2::SparseToDenseMaskOp<caffe2::CPUContext>);
+// clang-format on

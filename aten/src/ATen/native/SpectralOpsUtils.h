@@ -6,6 +6,13 @@
 
 namespace at { namespace native {
 
+// Normalization types used in _fft_with_size
+enum class fft_norm_mode {
+  none,       // No normalization
+  by_root_n,  // Divide by sqrt(signal_size)
+  by_n,       // Divide by signal_size
+};
+
 // NOTE [ Fourier Transform Conjugate Symmetry ]
 //
 // Real-to-complex Fourier transform satisfies the conjugate symmetry. That is,

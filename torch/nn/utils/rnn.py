@@ -215,7 +215,8 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
 
     Arguments:
         input (Tensor): padded batch of variable length sequences.
-        lengths (Tensor): list of sequences lengths of each batch element.
+        lengths (Tensor or list(int)): list of sequence lengths of each batch
+            element (must be on the CPU if provided as a tensor).
         batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
         enforce_sorted (bool, optional): if ``True``, the input is expected to
@@ -315,7 +316,8 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     return padded_output, lengths
 
 
-def pad_sequence(sequences, batch_first=False, padding_value=0):
+def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+    # type: (List[Tensor], bool, float) -> Tensor
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
@@ -362,7 +364,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     else:
         out_dims = (max_len, len(sequences)) + trailing_dims
 
-    out_tensor = sequences[0].data.new(*out_dims).fill_(padding_value)
+    out_tensor = sequences[0].new_full(out_dims, padding_value)
     for i, tensor in enumerate(sequences):
         length = tensor.size(0)
         # use index notation to prevent duplicate references to the tensor
@@ -405,5 +407,5 @@ def pack_sequence(sequences, enforce_sorted=True):
     Returns:
         a :class:`PackedSequence` object
     """
-    lengths = [v.size(0) for v in sequences]
+    lengths = torch.as_tensor([v.size(0) for v in sequences])
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)

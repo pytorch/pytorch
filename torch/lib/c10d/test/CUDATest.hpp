@@ -5,9 +5,15 @@
 namespace c10d {
 namespace test {
 
-void cudaSleep(at::cuda::CUDAStream& stream, uint64_t clocks);
+#ifdef _WIN32
+#define EXPORT_TEST_API __declspec(dllexport)
+#else
+#define EXPORT_TEST_API
+#endif
 
-int cudaNumDevices();
+EXPORT_TEST_API void cudaSleep(at::cuda::CUDAStream& stream, uint64_t clocks);
+
+EXPORT_TEST_API int cudaNumDevices();
 
 } // namespace test
 } // namespace c10d

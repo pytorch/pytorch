@@ -50,6 +50,26 @@ static inline void gemm_batched(const CBLAS_TRANSPOSE trans_A, const CBLAS_TRANS
     A, &lda, B, &ldb, &beta, C, &ldc, 1, &batch_size);
 }
 
+static inline void gemm_batched(const CBLAS_TRANSPOSE trans_A, const CBLAS_TRANSPOSE trans_B,
+  const int batch_size, const int M, const int N, const int K, const c10::complex<float> alpha,
+  const c10::complex<float>** A, const int lda, const c10::complex<float>** B, const int ldb,
+  const c10::complex<float> beta, c10::complex<float>** C, const int ldc) {
+
+  cblas_cgemm_batch(CblasRowMajor, &trans_A, &trans_B, &M, &N, &K, reinterpret_cast<const void*>(&alpha),
+    reinterpret_cast<const void**>(A), &lda, reinterpret_cast<const void**>(B), &ldb,
+    reinterpret_cast<const void*>(&beta), reinterpret_cast<void**>(C), &ldc, 1, &batch_size);
+}
+
+static inline void gemm_batched(const CBLAS_TRANSPOSE trans_A, const CBLAS_TRANSPOSE trans_B,
+  const int batch_size, const int M, const int N, const int K, const c10::complex<double> alpha,
+  const c10::complex<double>** A, const int lda, const c10::complex<double>** B, const int ldb,
+  const c10::complex<double> beta, c10::complex<double>** C, const int ldc) {
+
+  cblas_zgemm_batch(CblasRowMajor, &trans_A, &trans_B, &M, &N, &K, reinterpret_cast<const void*>(&alpha),
+    reinterpret_cast<const void**>(A), &lda, reinterpret_cast<const void**>(B), &ldb,
+    reinterpret_cast<const void*>(&beta), reinterpret_cast<void**>(C), &ldc, 1, &batch_size);
+}
+
 template <typename scalar_t>
 static inline void baddbmm_mkl_template(const Tensor& res, const Tensor& mat1, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   auto is_transposed = [&](const TensorAccessor<scalar_t, 2>& t) {
@@ -89,7 +109,7 @@ static inline void baddbmm_mkl_template(const Tensor& res, const Tensor& mat1, c
 
 Tensor& _baddbmm_mkl_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   // checks are done in native/LinearAlgebra.cpp
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "baddbmm__mkl", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "baddbmm__mkl", [&] {
       baddbmm_mkl_template<scalar_t>(self, batch1, batch2, beta, alpha);
     });
 

@@ -5,8 +5,9 @@
 namespace caffe2 {
 
 template <>
-bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
-  const auto& tscores = Input(0);
+template <typename T>
+bool BoxWithNMSLimitOp<CPUContext>::DoRunWithType() {
+const auto& tscores = Input(0);
   const auto& tboxes = Input(1);
 
   const int box_dim = rotated_ ? 5 : 4;
@@ -35,18 +36,19 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   int num_boxes_classes = get_box_cls_index(num_classes - 1) + 1;
   CAFFE_ENFORCE_EQ(num_boxes_classes * box_dim, tboxes.size(1));
 
+  // Default value for batch_size and batch_splits
   int batch_size = 1;
-  vector<float> batch_splits_default(1, tscores.size(0));
-  const float* batch_splits_data = batch_splits_default.data();
+  vector<T> batch_splits_default(1, tscores.size(0));
+  const T* batch_splits_data = batch_splits_default.data();
   if (InputSize() > 2) {
     // tscores and tboxes have items from multiple images in a batch. Get the
     // corresponding batch splits from input.
     const auto& tbatch_splits = Input(2);
     CAFFE_ENFORCE_EQ(tbatch_splits.dim(), 1);
     batch_size = tbatch_splits.size(0);
-    batch_splits_data = tbatch_splits.data<float>();
+    batch_splits_data = tbatch_splits.data<T>();
   }
-  Eigen::Map<const EArrXf> batch_splits(batch_splits_data, batch_size);
+  Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1>> batch_splits(batch_splits_data, batch_size);
   CAFFE_ENFORCE_EQ(batch_splits.sum(), N);
 
   auto* out_scores = Output(0, {0}, at::dtype<float>());
@@ -65,7 +67,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   vector<int> total_keep_per_batch(batch_size);
   int offset = 0;
   for (int b = 0; b < batch_splits.size(); ++b) {
-    int num_boxes = batch_splits(b);
+    int num_boxes = batch_splits[b];
     Eigen::Map<const ERArrXXf> scores(
         tscores.data<float>() + offset * tscores.size(1),
         num_boxes,

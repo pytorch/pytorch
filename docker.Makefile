@@ -9,7 +9,7 @@ DOCKER_ORG       = $(shell whoami)
 endif
 
 BASE_RUNTIME     = ubuntu:18.04
-BASE_DEVEL       = nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
+BASE_DEVEL       = nvidia/cuda:11.0-cudnn8-devel-ubuntu18.04
 
 # The conda channel to use to install pytorch / torchvision
 INSTALL_CHANNEL  = pytorch

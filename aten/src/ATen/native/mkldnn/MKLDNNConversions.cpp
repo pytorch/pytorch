@@ -22,17 +22,19 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
-  AT_ASSERTM(cpu_tensor.device().type() == DeviceType::CPU,
+  TORCH_CHECK(cpu_tensor.device().type() == DeviceType::CPU,
              "dense_to_mkldnn expects CPU tensor input");
-  AT_ASSERTM(cpu_tensor.layout() == Layout::Strided,
+  TORCH_CHECK(cpu_tensor.layout() == Layout::Strided,
              "dense_to_mkldnn expects strided tensor input");
-  AT_ASSERTM(cpu_tensor.scalar_type() == ScalarType::Float,
+  TORCH_CHECK(cpu_tensor.scalar_type() == ScalarType::Float,
              "dense_to_mkldnn expects float tensor input");
-  AT_ASSERTM(cpu_tensor.dim() <= 5,
+  TORCH_CHECK(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
   // TODO: consider to convert non-contiguous tensor to `ideep::tensor` directly.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
-  Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), cpu_tensor_cont.options());
+  Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), optTypeMetaToScalarType(cpu_tensor_cont.options().dtype_opt()),
+                                      cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
+                                      cpu_tensor_cont.options().pinned_memory_opt());
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
   dtensor.feed_from(dtensor.get_dims(),
                     ideep::tensor::data_type::f32,
@@ -53,10 +55,6 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef dilation,
     int64_t groups) {
 
-  auto stride_vec = expand_param_if_needed(stride, "stride", 2);
-  auto padding_vec = expand_param_if_needed(padding, "padding", 2);
-  auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
-
   auto w = itensor_from_mkldnn(self);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
@@ -73,27 +71,54 @@ Tensor mkldnn_reorder_conv2d_weight(
       ideep::convolution_forward::expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
-          {stride_vec.cbegin(), stride_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {padding_vec.cbegin(), padding_vec.cend()},
-          {dilation_vec.cbegin(), dilation_vec.cend()},
+          {stride.begin(), stride.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          {dilation.begin(), dilation.end()},
           groups,
           ideep::algorithm::convolution_direct);
   ideep::tensor result;
   result.init(desc);
   result.feed_from(w);
 
-  return new_with_itensor_mkldnn(std::move(result), self.options());
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
+}
+
+Tensor mkldnn_reorder_conv3d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+
+  auto w = itensor_from_mkldnn(self);
+
+  auto desc =
+      ideep::convolution_forward::expected_weights_desc(
+          w.get_dims(),
+          w.get_data_type(),
+          {stride.begin(), stride.end()},
+          {padding.begin(), padding.end()},
+          {padding.begin(), padding.end()},
+          {dilation.begin(), dilation.end()},
+          groups,
+          ideep::algorithm::convolution_direct);
+  ideep::tensor result;
+  result.init(desc);
+  result.feed_from(w);
+
+  return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
-  AT_ERROR("MKL-DNN build is disabled");
+  TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
-  AT_ERROR("MKL-DNN build is disabled");
+  TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
 Tensor mkldnn_reorder_conv2d_weight(
@@ -102,7 +127,16 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
+  TORCH_CHECK(false, "mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
+}
+
+Tensor mkldnn_reorder_conv3d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

@@ -189,6 +189,21 @@ static void slow_conv3d_update_output_frame(
     int64_t output_depth,
     int64_t output_height,
     int64_t output_width) {
+  if ((kernel_depth == 1) && (kernel_height == 1) && (kernel_width == 1) &&
+      (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
+      (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
+    auto output2d = output.reshape(
+        {n_output_plane, output_depth * output_height * output_width});
+    auto weight_new = weight.reshape({n_output_plane, n_input_plane});
+    auto input_new = input.reshape({n_input_plane, output_depth * output_height * output_width});
+    if (bias.defined()) {
+      output.copy_(bias.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1));
+      output2d.addmm_(weight_new, input_new, 1, 1);
+    } else {
+      at::mm_out(output2d, weight_new, input_new);
+    }
+    return;
+  }
   Unfold3dCopyCPU(
       input,
       n_input_plane,
@@ -224,9 +239,7 @@ static void slow_conv3d_update_output_frame(
          output_depth * output_height * output_width});
 
     if (bias.defined()) {
-      for (int64_t i = 0; i < n_output_plane; ++i) {
-        output[i].fill_(bias[i].item());
-      }
+      output.copy_(bias.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1));
       output2d.baddbmm_(weight_g, finput_g, 1, 1);
     } else {
       at::bmm_out(output2d, weight_g, finput_g);
@@ -235,9 +248,7 @@ static void slow_conv3d_update_output_frame(
     auto output2d = output.reshape(
         {n_output_plane, output_depth * output_height * output_width});
     if (bias.defined()) {
-      for (int64_t i = 0; i < n_output_plane; ++i) {
-        output[i].fill_(bias[i].item());
-      }
+      output.copy_(bias.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1));
       output2d.addmm_(weight, finput, 1, 1);
     } else {
       at::mm_out(output2d, weight, finput);
@@ -570,9 +581,15 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
       (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
 
   const int64_t batch_size = input.size(0);
-  finput.resize_({batch_size,
-                  n_input_plane * kernel_depth * kernel_height * kernel_width,
-                  output_depth * output_height * output_width});
+  if ((kernel_depth == 1) && (kernel_height == 1) && (kernel_width == 1) &&
+      (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
+      (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
+    finput = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).detach();
+  } else {
+    finput.resize_({batch_size,
+                    n_input_plane * kernel_depth * kernel_height * kernel_width,
+                    output_depth * output_height * output_width});
+  }
   output.resize_(
       {batch_size, n_output_plane, output_depth, output_height, output_width});
 

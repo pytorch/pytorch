@@ -1,16 +1,16 @@
 #include <TH/THAllocator.h>
 
-/* stuff for mapped files */
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 #include <atomic>
 #if ATOMIC_INT_LOCK_FREE == 2
 #define TH_ATOMIC_IPC_REFCOUNT 1
 #endif
 
 #include <c10/core/CPUAllocator.h>
+
+/* stuff for mapped files */
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #if defined(HAVE_MMAP)
 #include <sys/types.h>
@@ -288,6 +288,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     if (base_ptr_ == MAP_FAILED) {
       base_ptr_ = nullptr; /* let's be sure it is NULL */
+      AT_ERROR("unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
     }
 
     if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {

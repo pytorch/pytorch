@@ -1,4 +1,7 @@
-sphinx>=1.7.5
+sphinx==3.1.2
+breathe==4.19.2
+exhale==0.2.3
 -e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
-breathe
-exhale>=0.2.1
+bs4
+lxml
+six

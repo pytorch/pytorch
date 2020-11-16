@@ -58,7 +58,7 @@ Interest <persons_of_interest>`.
 
 While membership is determined by presence in the "PyTorch core" team in
 the "PyTorch"
-`organization <https://github.com/orgs/pytorch/teams/facebook>`__ on
+`organization <https://github.com/orgs/pytorch/people>`__ on
 GitHub, contribution takes many forms:
 
 -  committing changes to the repository;

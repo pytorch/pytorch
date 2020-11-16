@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -13,23 +14,6 @@ namespace jit {
 namespace tensorexpr {
 
 using VarMapping = std::vector<std::pair<const Var*, const Expr*>>;
-
-// Finds all Vars present in a subexpr.
-class VarFinder : public IRVisitor {
- public:
-  std::set<const Var*> findVars(const Expr* expr) {
-    vars_.clear();
-    expr->accept(this);
-    return vars_;
-  }
-
-  void visit(const Var* v) {
-    vars_.insert(v);
-  }
-
- private:
-  std::set<const Var*> vars_;
-};
 
 class VarSubMutator : public IRMutator {
  public:
@@ -53,7 +37,7 @@ class VarSubMutator : public IRMutator {
   }
 
   const Expr* mutate(const ReduceOp* var) override {
-    auto body = var->body().node()->accept_mutator(this);
+    auto body = var->body()->accept_mutator(this);
     std::vector<const Expr*> new_outer;
     std::vector<const Var*> new_inner;
 
@@ -67,17 +51,18 @@ class VarSubMutator : public IRMutator {
         new_inner.push_back(new_var);
       } else {
         VarFinder varFinder;
-        auto varlist = varFinder.findVars(e);
+        e->accept(&varFinder);
+        auto varlist = varFinder.vars();
         new_inner.insert(new_inner.end(), varlist.begin(), varlist.end());
       }
     }
 
     return new ReduceOp(
         const_cast<Buf*>(var->accumulator()),
-        ExprHandle(body),
-        var->interaction(),
+        body,
         new_outer,
-        new_inner);
+        new_inner,
+        var->reducer());
   }
 
  private:

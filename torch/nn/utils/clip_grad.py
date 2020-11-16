@@ -1,9 +1,12 @@
 import warnings
 import torch
 from torch._six import inf
+from typing import Union, Iterable
+
+_tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
 
 
-def clip_grad_norm_(parameters, max_norm, norm_type=2):
+def clip_grad_norm_(parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.0) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
@@ -21,7 +24,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
-    parameters = list(filter(lambda p: p.grad is not None, parameters))
+    parameters = [p for p in parameters if p.grad is not None]
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if len(parameters) == 0:
@@ -38,7 +41,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     return total_norm
 
 
-def clip_grad_norm(parameters, max_norm, norm_type=2):
+def clip_grad_norm(parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.) -> torch.Tensor:
     r"""Clips gradient norm of an iterable of parameters.
 
     .. warning::
@@ -50,7 +53,7 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
     return clip_grad_norm_(parameters, max_norm, norm_type)
 
 
-def clip_grad_value_(parameters, clip_value):
+def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float) -> None:
     r"""Clips gradient of an iterable of parameters at specified value.
 
     Gradients are modified in-place.

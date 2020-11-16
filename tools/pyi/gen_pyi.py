@@ -1,17 +1,14 @@
-from __future__ import print_function
+
 import os
 import collections
-import glob
+from pprint import pformat
+
 import yaml
 import re
 import argparse
 
-from ..autograd.utils import YamlLoader, CodeTemplate, write
-from ..autograd.gen_python_functions import (
-    get_py_torch_functions,
-    get_py_variable_methods,
-    namedtuple_fieldnames,
-)
+from ..autograd.utils import YamlLoader, CodeTemplate, write, group_declarations_by_op_name, is_tensor_method, is_torch_function
+from ..autograd.gen_python_functions import SKIP_PYTHON_BINDINGS, SKIP_PYTHON_BINDINGS_SIGNATURES
 from ..autograd.gen_autograd import load_aten_declarations
 
 """
@@ -38,6 +35,48 @@ There are a number of type hints which we've special-cased;
 read gen_pyi for the gory details.
 """
 
+# TODO: remove after migrating entire codegen to the new data model.
+def should_generate_python_binding(declaration):
+    name = declaration['name']
+    for pattern in SKIP_PYTHON_BINDINGS:
+        if re.match('^' + pattern + '$', name):
+            return False
+
+    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+    signature = '{}({})'.format(name, ', '.join(simple_types))
+    for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
+        if pattern == signature:
+            return False
+
+    return True
+
+
+def get_py_variable_methods(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as methods on Tensor.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                not declaration.get('python_module') and
+                is_tensor_method(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
+def get_py_torch_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "torch" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                not declaration.get('python_module') and
+                is_torch_function(declaration))
+
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
+
+
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
@@ -49,7 +88,7 @@ FACTORY_PARAMS = f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
 
-blacklist = [
+blocklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
@@ -73,11 +112,7 @@ blacklist = [
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
     # Manually define named tensor type stubs in __init__.pyi.in
-    'rename',
-    'refine_names',
-    'align_to',
     'align_tensors',
-    'unflatten',
     'meshgrid',
     'cartesian_prod',
     'block_diag',
@@ -86,9 +121,11 @@ blacklist = [
     'stft',
     'istft',
     'tensordot',
-    'norm',
     'split',
     'unique_consecutive',
+    'atleast_1d',
+    'atleast_2d',
+    'atleast_3d',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
@@ -147,6 +184,8 @@ def type_to_python(typename, size=None):
         'Dimname': 'Union[str, ellipsis, None]',
         'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
+        'ArrayRef<double>' : 'Sequence[float]',
+        'Stream': 'Stream',
     }[typename]
 
     return typename
@@ -194,11 +233,11 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
-              'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
+              'ior', 'irshift', 'isub', 'ixor',  # inplace ops
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')
-to_py_type_ops = ('bool', 'float', 'long', 'index', 'int', 'nonzero')
+to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
@@ -220,17 +259,42 @@ def sig_for_ops(opname):
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
-        if name in {'bool', 'float'}:
+        if name in {'bool', 'float', 'complex'}:
             tname = name
         elif name == 'nonzero':
             tname = 'bool'
         else:
             tname = 'int'
-        if tname in {'float', 'int', 'bool'}:
+        if tname in {'float', 'int', 'bool', 'complex'}:
             tname = 'builtins.' + tname
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:
         raise Exception("unknown op", opname)
+
+
+# Copied from 'gen_python_functions.py'
+# TODO: consolidate after migrating to the new codegen model in 'tools/codegen'.
+def namedtuple_fieldnames(declaration):
+    returns = declaration['returns']
+    if len(returns) <= 1 or all(['field_name' not in x for x in returns]):
+        return []
+    else:
+        def get_field_name(x):
+            # See Note [field_name versus name]
+            if 'field_name' not in x:
+                # When building on Windows, `PyStructSequence_UnnamedField` could not be
+                # resolved by the linker for some reason, which cause error in building:
+                #
+                # python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol
+                # PyStructSequence_UnnamedField
+                #
+                # Thus, at this point in time, we do not support unnamed
+                # fields in namedtuple; you must either name all fields,
+                # or none of them.
+                raise ValueError("Unnamed field is not supported by codegen")
+            else:
+                return x['field_name']
+        return [get_field_name(x) for x in returns]
 
 
 def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
@@ -247,7 +311,7 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
     This function currently encodes quite a bit about the semantics of
     the translation C++ -> Python.
     """
-    if fname in blacklist:
+    if fname in blocklist:
         return []
 
     type_hints = []
@@ -274,11 +338,15 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
                     print("Error while processing function {}".format(fname))
                     raise
 
-        if is_tensor:
-            if 'self: Tensor' in python_args:
-                python_args.remove('self: Tensor')
+        if 'self: Tensor' in python_args:
+            self_index = python_args.index('self: Tensor')
+            python_args.remove('self: Tensor')
+            if is_tensor:
                 python_args = ['self'] + python_args
             else:
+                python_args.insert(self_index, 'input: Tensor')
+        else:
+            if is_tensor:
                 raise Exception("method without self is unexpected")
 
         if has_out:
@@ -342,26 +410,6 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
 
     return type_hints
 
-def gen_nn_modules(out):
-    def replace_forward(m):
-        # We instruct mypy to not emit errors for the `forward` and `__call__` declarations since mypy
-        # would otherwise correctly point out that Module's descendants' `forward` declarations
-        # conflict with `Module`s. Specifically, `Module` defines `forward(self, *args)` while the
-        # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which
-        # violates Liskov substitutability. The 'mypy' team recommended this solution for now.
-        forward_def = m.group(0) + "  # type: ignore"
-        call_def = re.sub(r'def forward', 'def __call__', forward_def)
-        new_def = "{}\n{}".format(forward_def, call_def)
-        return new_def
-    pattern = re.compile(r'^\s*def forward\(self.*$', re.MULTILINE)
-    for fname in glob.glob("torch/nn/modules/*.pyi.in"):
-        with open(fname, 'r') as f:
-            src = f.read()
-        res = pattern.sub(replace_forward, src)
-        fname_out = fname[:-3]
-        with open(os.path.join(out, fname_out), 'w') as f:
-            f.write(res)
-
 def gen_nn_functional(out):
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
@@ -416,12 +464,19 @@ def gen_nn_functional(out):
     }
     write(out, 'torch/nn/functional.pyi', stubs, env)
 
+    # functional.pyi already contains the definitions for those functions
+    # so, we don't export then to it
+    from_c.extend(['hardtanh', 'leaky_relu', 'hardsigmoid'])
+    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    env = {
+        'imported_hints': import_code,
+        'dispatched_hints': dispatch_code
+    }
     stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
     write(out, 'torch/_C/_nn.pyi', stubs, env)
 
 def gen_nn_pyi(out):
     gen_nn_functional(out)
-    gen_nn_modules(out)
 
 def gen_pyi(declarations_path, out):
     """gen_pyi()
@@ -476,15 +531,19 @@ def gen_pyi(declarations_path, out):
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
-        'randint': ['def randint(low: _int, high: _int, size: _size, *, {}) -> Tensor: ...'
+        'randint': ['def randint(low: _int, high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
-                    'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
+                    'def randint(high: _int, size: _size, *,'
+                    ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
         'full': ['def full(size: _size, fill_value: Number, *,'
-                 ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                 ' out: Optional[Tensor]=None,'
+                 ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS),
                  'def full(size: _size, fill_value: Number, *,'
-                 ' names: List[Union[str, None]], {}) -> Tensor: ...'
+                 ' names: List[Union[str, None]],'
+                 ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
         'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
@@ -547,6 +606,7 @@ def gen_pyi(declarations_path, out):
                      'def __init__(self, other: Tensor) -> None: ...',
                      'def __init__(self, size: {}, *, {}) -> None: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
                      ],
+        'as_subclass': ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
@@ -557,7 +617,9 @@ def gen_pyi(declarations_path, out):
         'tolist': ['def tolist(self) -> List: ...'],
         'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
+        'data_ptr': ['def data_ptr(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
+        'nonzero': ['def nonzero(self, *, as_tuple: _bool=...) -> Tensor: ...'],
         'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
@@ -570,13 +632,15 @@ def gen_pyi(declarations_path, out):
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
                  ],
         'get_device': ['def get_device(self) -> _int: ...'],
-        'contiguous': ['def contiguous(self) -> Tensor: ...'],
-        'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],
+        'contiguous': ['def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ...'],
+        'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
         'is_quantized': ['is_quantized: _bool'],
+        'is_meta': ['is_meta: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
+        'is_vulkan': ['is_vulkan: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
@@ -585,6 +649,10 @@ def gen_pyi(declarations_path, out):
                ],
         'item': ["def item(self) -> Number: ..."],
         'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
+        'set_': ['def set_(self, storage: Storage, offset: _int, size: _size, stride: _size) -> Tensor: ...',
+                 'def set_(self, storage: Storage) -> Tensor: ...'],
+        'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
+                  'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:
@@ -638,11 +706,14 @@ def gen_pyi(declarations_path, out):
 
     # TODO: These are deprecated, maybe we shouldn't type hint them
     legacy_storage_base_hints = []
-    for c in ('Double', 'Float', 'Long', 'Int',
-              'Short', 'Char', 'Byte', 'Bool',
-              'Half', 'BFloat16', 'ComplexDouble',
-              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32'):
+    dt = ('Double', 'Float', 'Long', 'Int',
+          'Short', 'Char', 'Byte', 'Bool',
+          'Half', 'BFloat16', 'ComplexDouble',
+          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
+    for c in dt:
         legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
+    for c in dt:
+        legacy_storage_base_hints.append('class Cuda{}StorageBase(object): ...'.format(c))
 
     legacy_class_hints = []
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
@@ -659,7 +730,17 @@ def gen_pyi(declarations_path, out):
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
-                          'quint8', 'qint8', 'qint32', 'bool']]
+                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2']]
+
+    # Generate __all__ directive
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    # Include only the functions that contain hints, to prevent undefined
+    # symbols to be included in the `__all__` directive.
+    hinted_function_names = [name for name, hint in unsorted_function_hints.items() if hint]
+    all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
+    all_directive = pformat(all_symbols, width=100, compact=True).split('\n')
+    all_directive[0] = '__all__ = {}'.format(all_directive[0])
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
@@ -671,6 +752,7 @@ def gen_pyi(declarations_path, out):
         'legacy_class_hints': legacy_class_hints,
         'legacy_storage_base_hints': legacy_storage_base_hints,
         'dtype_class_hints': dtype_class_hints,
+        'all_directive': all_directive
     }
     TORCH_C_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '_C', '__init__.pyi.in'))
     TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS = \
@@ -678,6 +760,7 @@ def gen_pyi(declarations_path, out):
 
     write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
     write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
+    write(out, 'torch/_VF.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
 

@@ -4,7 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/functional.h>
 #include <ATen/cpu/vec256/vec256.h>
-#include <c10/util/complex_type.h>
+#include <c10/util/complex.h>
 
 // This header implements various unary operations using a MKL VML style
 // interface.
@@ -128,6 +128,7 @@ IMPLEMENT_VML(erfinv)
 IMPLEMENT_VML_BUG(exp)
 IMPLEMENT_VML_BUG(expm1)
 IMPLEMENT_VML_BUG(floor)
+IMPLEMENT_VML(i0)
 IMPLEMENT_VML(reciprocal)
 IMPLEMENT_VML_BUG(log)
 IMPLEMENT_VML_BUG(log10)
@@ -183,8 +184,8 @@ static_assert(
   IMPLEMENT_VML_MKL_STUB(op, mklop, float, s) \
   IMPLEMENT_VML_MKL_STUB(op, mklop, double, d)
 
-// NB: abs, cosh and sinh were temporarily disabled due to issues with Apple clang
-
+// NB: abs, cosh and sinh were temporarily disabled due to issues with Apple
+// NB: expm1 is disabled because on some configs it produces expm1(nan)=-1
 IMPLEMENT_VML_MKL(abs, Abs)
 IMPLEMENT_VML_MKL(acos, Acos)
 IMPLEMENT_VML_MKL(asin, Asin)
@@ -195,7 +196,7 @@ IMPLEMENT_VML_MKL(erf, Erf)
 IMPLEMENT_VML_MKL(erfc, Erfc)
 IMPLEMENT_VML_MKL(erfinv, ErfInv)
 IMPLEMENT_VML_MKL(exp, Exp)
-IMPLEMENT_VML_MKL(expm1, Expm1)
+// IMPLEMENT_VML_MKL(expm1, Expm1)
 IMPLEMENT_VML_MKL(log, Ln)
 IMPLEMENT_VML_MKL(log10, Log10)
 IMPLEMENT_VML_MKL(log1p, Log1p)

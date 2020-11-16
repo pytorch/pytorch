@@ -172,6 +172,10 @@ OPERATOR_SCHEMA(SplitByLengths)
     .Input(1, "legnths", "The tensor `l_i` indicates the logic block of input.")
     .Arg("axis", "Which axis to split on")
     .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
+    .Arg(
+        "use_scaling_lengths",
+        "(*bool*): Enables automatic scaling of the lengths values. When enabled "
+        "will automatically find a value K >= 1, such that sum(lengths) * K == len(input).")
     .DeviceInferenceFunction([](const OperatorDef& def) {
       auto op_device =
           def.has_device_option() ? def.device_option() : DeviceOption();
@@ -185,7 +189,89 @@ OPERATOR_SCHEMA(SplitByLengths)
 Split a tensor into a list of tensors, given a lengths input, along the specified
 'axis'. If `K` outputs are provided, the op assumes `len(lengths) % K == 0`.
 The `input` will be split into `K` parts. Each part of length
-`sum(lengths[i*k:i*k+k))`)DOC");
+`sum(lengths[i*k:i*k+k))`
+
+<details>
+
+<summary> <b>Example 1</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "SplitByLengths",
+    ["input", "lengths"],
+    ["output_0","output_1","output_2"],
+    axis=0
+)
+
+workspace.FeedBlob("input", np.random.randint(10, size=(9)))
+workspace.FeedBlob("lengths", np.array([3,2,4], dtype=np.int32))
+print("input:", workspace.FetchBlob("input"))
+print("lengths:", workspace.FetchBlob("lengths"))
+workspace.RunOperatorOnce(op)
+print("output_0:", workspace.FetchBlob("output_0"))
+print("output_1:", workspace.FetchBlob("output_1"))
+print("output_2:", workspace.FetchBlob("output_2"))
+
+```
+
+**Result**
+
+```
+
+input: [2 2 6 6 6 0 5 7 4]
+lengths: [3 2 4]
+output_0: [2 2 6]
+output_1: [6 6]
+output_2: [0 5 7 4]
+
+```
+
+<summary> <b>Example 2</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "SplitByLengths",
+    ["input", "lengths"],
+    ["output_0","output_1","output_2"],
+    axis=0,
+    use_scaling_lengths=true,
+)
+
+workspace.FeedBlob("input", np.random.randint(10, size=(9)))
+workspace.FeedBlob("lengths", np.array([1,1,1], dtype=np.int32))
+print("input:", workspace.FetchBlob("input"))
+print("lengths:", workspace.FetchBlob("lengths"))
+print("output_0:", workspace.FetchBlob("output_0"))
+print("output_1:", workspace.FetchBlob("output_1"))
+print("output_2:", workspace.FetchBlob("output_2"))
+
+```
+
+**Result**
+
+```
+
+input: [2 2 6 6 6 0 5 7 4]
+lengths: [1 1 1]
+output_0: [2 2 6]
+output_1: [6 6 6]
+output_2: [5 7 4]
+
+```
+
+</details>
+
+)DOC");
 
 OpSchema::Cost CostInferenceForConcat(
     const OperatorDef& def,

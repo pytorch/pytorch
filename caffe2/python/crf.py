@@ -1,6 +1,6 @@
 ## @package crf
 # Module caffe2.python.crf
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import numpy as np
 from caffe2.python import brew, core, model_helper, recurrent

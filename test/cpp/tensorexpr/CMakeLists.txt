@@ -3,16 +3,6 @@ set(TENSOREXPR_TEST_ROOT ${TORCH_ROOT}/test/cpp/tensorexpr)
 file(GLOB TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_ROOT}/test_*.cpp)
 set(TENSOREXPR_TEST_SRCS ${TENSOREXPR_TEST_SRCS} PARENT_SCOPE)
 
-# this is used for running cpp tests from python as part of test_jit.TestJit.test_tensorexpr_cpp
-set(TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_SRCS} ${TENSOREXPR_TEST_ROOT}/padded_buffer.cpp)
-if(NOT USE_CUDA)
-  list(REMOVE_ITEM TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_ROOT}/test_cuda.cpp)
-endif()
-if(NOT USE_LLVM)
-  list(REMOVE_ITEM TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_ROOT}/test_llvm.cpp)
-endif()
-set(TENSOREXPR_TEST_SRCS_WITH_PADDED ${TENSOREXPR_TEST_SRCS_WITH_PADDED} PARENT_SCOPE)
-
 add_executable(test_tensorexpr
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${TENSOREXPR_TEST_ROOT}/gtest.cpp
@@ -22,29 +12,45 @@ add_executable(test_tensorexpr
 target_link_libraries(test_tensorexpr PRIVATE torch gtest)
 target_include_directories(test_tensorexpr PRIVATE ${ATen_CPU_INCLUDE})
 
+add_executable(tutorial_tensorexpr ${TENSOREXPR_TEST_ROOT}/tutorial.cpp)
+target_link_libraries(tutorial_tensorexpr PRIVATE torch)
+target_include_directories(tutorial_tensorexpr PRIVATE ${ATen_CPU_INCLUDE})
+
+
 if(USE_CUDA)
   target_link_libraries(test_tensorexpr PRIVATE
     ${CUDA_LIBRARIES}
     ${CUDA_NVRTC_LIB}
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
-
   target_compile_definitions(test_tensorexpr PRIVATE USE_CUDA)
+
+  target_link_libraries(tutorial_tensorexpr PRIVATE
+    ${CUDA_LIBRARIES}
+    ${CUDA_NVRTC_LIB}
+    ${CUDA_CUDA_LIB}
+    ${TORCH_CUDA_LIBRARIES})
+  target_compile_definitions(tutorial_tensorexpr PRIVATE USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_tensorexpr PRIVATE
     ${ROCM_HIPRTC_LIB}
     ${PYTORCH_HIP_HCC_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
-
-  target_link_libraries(test_tensorexpr PRIVATE caffe2_gpu)
-
   target_compile_definitions(test_tensorexpr PRIVATE USE_ROCM)
+
+  target_link_libraries(tutorial_tensorexpr PRIVATE
+    ${ROCM_HIPRTC_LIB}
+    ${PYTORCH_HIP_HCC_LIBRARIES}
+    ${TORCH_CUDA_LIBRARIES})
+  target_compile_definitions(tutorial_tensorexpr PRIVATE USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
   install(TARGETS test_tensorexpr DESTINATION bin)
+  install(TARGETS tutorial_tensorexpr DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:test_tensorexpr> DESTINATION bin OPTIONAL)
+    install(FILES $<TARGET_PDB_FILE:tutorial_tensorexpr> DESTINATION bin OPTIONAL)
   endif()
 endif()

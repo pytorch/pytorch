@@ -15,16 +15,22 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   , bdims_(std::move(bdims))
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
+  checkInvariants();
 
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
+  const auto value_strides = value_.strides();
   sizes_.clear();
   sizes_.reserve(public_dims);
+  strides_.clear();
+  strides_.reserve(public_dims);
   for (int64_t dim = 0; dim < public_dims; dim++) {
     auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
     sizes_.push_back(value_sizes.at(actual_dim));
+    strides_.push_back(value_strides.at(actual_dim));
   }
   refresh_numel();
+  refresh_contiguous();
 }
 
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
@@ -61,6 +67,14 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   TORCH_INTERNAL_ASSERT(false);
 }
 
+void BatchedTensorImpl::checkInvariants() const {
+  int64_t prev_level = -1;
+  for (const auto& bdim : bdims_) {
+    TORCH_INTERNAL_ASSERT(bdim.level() > prev_level);
+    prev_level = bdim.level();
+  }
+}
+
 // The following are publically exposed as methods of Tensor
 IntArrayRef BatchedTensorImpl::strides() const {
   TORCH_CHECK(false, "NYI: Getting tensor strides inside of vmap");
@@ -68,9 +82,14 @@ IntArrayRef BatchedTensorImpl::strides() const {
 int64_t BatchedTensorImpl::stride(int64_t d) const {
   TORCH_CHECK(false, "NYI: Getting tensor strides inside of vmap");
 }
+
 bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-  TORCH_CHECK(false, "NYI: querying is_contiguous inside of vmap");
+  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+      "NYI: querying is_contiguous inside of vmap for memory_format ",
+      "other than torch.contiguous_format");
+  return is_contiguous_;
 }
+
 const Storage& BatchedTensorImpl::storage() const {
   TORCH_CHECK(false, "Due to limitations, we cannot access the storage() of a tensor from inside of vmap.");
 }
@@ -93,8 +112,22 @@ bool BatchedTensorImpl::has_storage() const {
   TORCH_INTERNAL_ASSERT(false, "Can't query has_storage for BatchedTensorImpl");
 }
 
+Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
+  TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
+  auto tensor_dim = tensor.dim();
+  TORCH_CHECK(
+      tensor_dim <= kVmapMaxTensorDims,
+      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
+      "; got a tensor with dim ", tensor_dim);
+  TORCH_INTERNAL_ASSERT(
+      std::all_of(bdims.begin(), bdims.end(),
+          [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
+      "We only support up to ", kVmapNumLevels, " nested vmaps");
+  return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
+}
+
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
-  const auto* batched = maybeGetBatched(tensor);
+  const auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
     BatchDims bdims;
     bdims.emplace_back(level, dim);

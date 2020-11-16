@@ -18,7 +18,7 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
       fmt::format(
           "Custom C++ class: '{}' does not have an '__init__' method bound. "
           "Did you forget to add '.def(torch::init<...>)' to its registration?",
-          instance.type()->python_str()));
+          instance.type()->repr_str()));
   Method init_method(instance._ivalue(), init_fn);
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
   return py::cast(instance);
@@ -28,7 +28,10 @@ void initPythonCustomClassBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   py::class_<ScriptClass>(m, "ScriptClass")
-      .def("__call__", &ScriptClass::__call__);
+      .def("__call__", &ScriptClass::__call__)
+      .def_property_readonly("__doc__", [](const ScriptClass& self) {
+        return self.class_type_.type_->expect<ClassType>()->doc_string();
+      });
 
   // This function returns a ScriptClass that wraps the constructor
   // of the given class, specified by the qualified name passed in.
@@ -48,7 +51,7 @@ void initPythonCustomClassBindings(PyObject* module) {
             named_type,
             fmt::format(
                 "Tried to instantiate class '{}.{}', but it does not exist! "
-                "Ensure that it is registered via torch::jit::class_",
+                "Ensure that it is registered via torch::class_",
                 ns,
                 qualname));
         c10::ClassTypePtr class_type = named_type->cast<ClassType>();

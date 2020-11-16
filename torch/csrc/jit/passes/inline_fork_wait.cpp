@@ -28,6 +28,9 @@ void InlineForkWait(
   for (auto it = reversed.begin(); it != reversed.end(); it++) {
     auto node = *it;
     if (node->kind() == prim::fork) {
+      // Account for the case where the aten::wait call isn't present in
+      // the current graph.
+      node->output()->replaceAllUsesWith(future_remap.at(node->output()));
       it.destroyCurrent();
     } else if (node->kind() == aten::wait) {
       AT_ASSERT(node->inputs().size() == 1);

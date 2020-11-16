@@ -24,11 +24,12 @@ enum class DeviceType : int16_t {
   MSNPU = 8, // MSNPU
   XLA = 9, // XLA / TPU
   Vulkan = 10, // Vulkan
+  Metal = 11, //Metal
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 11,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 12,
   ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 
@@ -39,6 +40,7 @@ constexpr DeviceType kFPGA = DeviceType::FPGA;
 constexpr DeviceType kMSNPU = DeviceType::MSNPU;
 constexpr DeviceType kXLA = DeviceType::XLA;
 constexpr DeviceType kVulkan = DeviceType::Vulkan;
+constexpr DeviceType kMetal = DeviceType::Metal;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =

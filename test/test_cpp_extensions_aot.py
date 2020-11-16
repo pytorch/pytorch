@@ -12,11 +12,11 @@ try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
     import torch_test_cpp_extension.rng as rng_extension
-except ImportError:
+except ImportError as e:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
         "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
-    )
+    ) from e
 
 
 class TestCppExtensionAOT(common.TestCase):
@@ -141,7 +141,6 @@ class TestRNGExtension(common.TestCase):
 
     def setUp(self):
         super(TestRNGExtension, self).setUp()
-        rng_extension.registerOps()
 
     def test_rng(self):
         fourty_two = torch.full((10,), 42, dtype=torch.int64)

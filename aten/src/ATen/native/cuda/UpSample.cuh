@@ -8,6 +8,27 @@
 namespace at {
 namespace native {
 
+namespace upsample {
+// TODO: Remove duplicate declaration.
+TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
+    c10::IntArrayRef input_size,  // Full input tensor size.
+    c10::optional<c10::IntArrayRef> output_size,
+    c10::optional<c10::ArrayRef<double>> scale_factors);
+} // namespace upsample
+
+namespace upsample_cuda {
+
+// TODO: Remove duplication with Upsample.h (CPU).
+inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+  if (!scales) {
+    return nullopt;
+  }
+  return scales->at(idx);
+}
+
+} // namespace upsample_cuda
+
+
 /* TODO: move this to a common place */
 template <typename scalar_t>
 __device__ inline scalar_t min(scalar_t a, scalar_t b) {

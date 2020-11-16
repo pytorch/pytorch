@@ -66,6 +66,11 @@ static void avg_pool3d_out_frame(
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
 
+            if (tstart >= tend || hstart >= hend || wstart >= wend) {
+              ++op;
+              continue;
+            }
+
             int divide_factor;
             if (divisor_override.has_value()) {
               divide_factor = divisor_override.value();

@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
 
@@ -356,7 +355,7 @@ class TestOperators(TestCase):
 
     def test_full(self):
         x = torch.randn(3, 4, requires_grad=True)
-        self.assertONNX(lambda x: torch.full(x.shape, 2), x)
+        self.assertONNX(lambda x: torch.full(x.shape, 2.), x)
 
     def test_full_like(self):
         x = torch.randn(3, 4, requires_grad=True)

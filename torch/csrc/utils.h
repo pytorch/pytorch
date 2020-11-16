@@ -115,6 +115,9 @@
 #define THPQInt32Utils_checkReal(object)         THPUtils_checkReal_INT(object)
 #define THPQInt32Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
 #define THPQInt32Utils_newReal(value)           THPUtils_newReal_INT(value)
+#define THPQUInt4x2Utils_checkReal(object)      THPUtils_checkReal_INT(object)
+#define THPQUInt4x2Utils_unpackReal(object)     (int)THPUtils_unpackReal_INT(object)
+#define THPQUInt4x2Utils_newReal(value)         THPUtils_newReal_INT(value)
 
 
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)

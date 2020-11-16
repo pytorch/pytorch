@@ -221,11 +221,13 @@ struct TORCH_API Module : public Object {
 
   void _save_for_mobile(
       std::ostream& out,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap(),
+      bool save_mobile_debug_info = false) const;
 
   void _save_for_mobile(
       const std::string& filename,
-      const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
+      const ExtraFilesMap& extra_files = ExtraFilesMap(),
+      bool save_mobile_debug_info = false) const;
 
   Module copy() const;
 
@@ -236,10 +238,6 @@ struct TORCH_API Module : public Object {
   // same data as the current instance but with the new type, shared ClassType
   // will be preserved as well
   Module clone(bool inplace = false) const;
-
-  // Clones the module instance but shares the underlying type with the
-  // the current instance, it doesn't create new `ClassType`
-  Module clone_instance() const;
 
   void clone_method(const Module& orig, const std::string& name);
 
@@ -484,7 +482,7 @@ struct TORCH_API ModulePolicy {
   }
   // are we going to return everything? If so, we can optimize the calculate
   // of the size of the list.
-  static constexpr bool all_slots = false;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
 
 struct TORCH_API ParameterPolicy {
@@ -497,7 +495,7 @@ struct TORCH_API ParameterPolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->is_parameter(i) && v.isTensor();
   }
-  static constexpr bool all_slots = false;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
 
 struct TORCH_API BufferPolicy {
@@ -511,7 +509,7 @@ struct TORCH_API BufferPolicy {
     return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
         !typ->is_parameter(i);
   }
-  static constexpr bool all_slots = false;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };
 
 struct TORCH_API AttributePolicy {
@@ -524,7 +522,7 @@ struct TORCH_API AttributePolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return true;
   }
-  static constexpr bool all_slots = true;
+  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = true;
 };
 
 // take a Policy object, and make a version of it that returns the slot.

@@ -10,28 +10,26 @@
 
 #include "deconvolution-operator-tester.h"
 
-TEST(DECONVOLUTION_OP, zero_batch) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, zero_batch,
   DeconvolutionOperatorTester()
-      .inputSize(5, 5)
-      .kernelSize(1, 1)
-      .groupInputChannels(2)
-      .groupOutputChannels(2)
-      .iterations(1)
-      .batchSize(0)
-      .testQ8();
-}
+    .inputSize(5, 5)
+    .kernelSize(1, 1)
+    .groupInputChannels(2)
+    .groupOutputChannels(2)
+    .iterations(1)
+    .batchSize(0)
+)
 
-TEST(DECONVOLUTION_OP, 1x1) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
       .groupInputChannels(23)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_qmin) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1_with_qmin,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -39,10 +37,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_qmin) {
       .groupOutputChannels(19)
       .qmin(128)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_qmax) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1_with_qmax,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -50,10 +47,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_qmax) {
       .groupOutputChannels(19)
       .qmax(128)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_input_stride) {
+_STATIC_TEST(DECONVOLUTION_OP, 1x1_with_input_stride,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -61,10 +57,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_input_stride) {
       .groupInputChannels(23)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_output_stride) {
+_STATIC_TEST(DECONVOLUTION_OP, 1x1_with_output_stride,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -72,10 +67,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_output_stride) {
       .groupInputChannels(23)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_batch) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1_with_batch,
   DeconvolutionOperatorTester()
       .inputSize(13, 14)
       .kernelSize(1, 1)
@@ -83,10 +77,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_batch) {
       .groupInputChannels(23)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_1x1) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_1x1,
   DeconvolutionOperatorTester()
       .inputSize(24, 25)
       .kernelSize(1, 1)
@@ -94,10 +87,9 @@ TEST(DECONVOLUTION_OP, grouped_1x1) {
       .groupInputChannels(17)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x3) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x3,
   DeconvolutionOperatorTester()
       .inputSize(20, 19)
       .paddingWidth(1)
@@ -105,10 +97,9 @@ TEST(DECONVOLUTION_OP, 1x3) {
       .groupInputChannels(17)
       .groupOutputChannels(15)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_1x3) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_1x3,
   DeconvolutionOperatorTester()
       .inputSize(20, 19)
       .paddingWidth(1)
@@ -117,10 +108,9 @@ TEST(DECONVOLUTION_OP, grouped_1x3) {
       .groupInputChannels(17)
       .groupOutputChannels(15)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x1) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x1,
   DeconvolutionOperatorTester()
       .inputSize(19, 20)
       .paddingHeight(1)
@@ -128,10 +118,9 @@ TEST(DECONVOLUTION_OP, 3x1) {
       .groupInputChannels(17)
       .groupOutputChannels(15)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_3x1) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_3x1,
   DeconvolutionOperatorTester()
       .inputSize(19, 20)
       .paddingHeight(1)
@@ -140,10 +129,9 @@ TEST(DECONVOLUTION_OP, grouped_3x1) {
       .groupInputChannels(17)
       .groupOutputChannels(15)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3,
   DeconvolutionOperatorTester()
       .inputSize(13, 12)
       .padding(1)
@@ -151,10 +139,9 @@ TEST(DECONVOLUTION_OP, 3x3) {
       .groupInputChannels(15)
       .groupOutputChannels(17)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3_with_input_stride) {
+_STATIC_TEST(DECONVOLUTION_OP, 3x3_with_input_stride,
   DeconvolutionOperatorTester()
       .inputSize(13, 12)
       .padding(1)
@@ -163,10 +150,9 @@ TEST(DECONVOLUTION_OP, 3x3_with_input_stride) {
       .groupInputChannels(15)
       .groupOutputChannels(17)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3_with_output_stride) {
+_STATIC_TEST(DECONVOLUTION_OP, 3x3_with_output_stride,
   DeconvolutionOperatorTester()
       .inputSize(13, 12)
       .padding(1)
@@ -175,10 +161,9 @@ TEST(DECONVOLUTION_OP, 3x3_with_output_stride) {
       .groupInputChannels(15)
       .groupOutputChannels(17)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3_with_batch) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3_with_batch,
   DeconvolutionOperatorTester()
       .inputSize(10, 9)
       .padding(1)
@@ -187,10 +172,9 @@ TEST(DECONVOLUTION_OP, 3x3_with_batch) {
       .groupInputChannels(15)
       .groupOutputChannels(17)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_3x3) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_3x3,
   DeconvolutionOperatorTester()
       .inputSize(10, 11)
       .padding(1)
@@ -199,10 +183,9 @@ TEST(DECONVOLUTION_OP, grouped_3x3) {
       .groupInputChannels(14)
       .groupOutputChannels(13)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3s2) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3s2,
   DeconvolutionOperatorTester()
       .inputSize(19, 21)
       .padding(1)
@@ -211,10 +194,9 @@ TEST(DECONVOLUTION_OP, 3x3s2) {
       .groupInputChannels(27)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3s1x2) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3s1x2,
   DeconvolutionOperatorTester()
       .inputSize(13, 13)
       .padding(1)
@@ -223,10 +205,9 @@ TEST(DECONVOLUTION_OP, 3x3s1x2) {
       .groupInputChannels(27)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3s2x1) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3s2x1,
   DeconvolutionOperatorTester()
       .inputSize(13, 13)
       .padding(1)
@@ -235,10 +216,9 @@ TEST(DECONVOLUTION_OP, 3x3s2x1) {
       .groupInputChannels(27)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3d2) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3d2,
   DeconvolutionOperatorTester()
       .inputSize(13, 14)
       .padding(2)
@@ -247,10 +227,9 @@ TEST(DECONVOLUTION_OP, 3x3d2) {
       .groupInputChannels(27)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3d1x2) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3d1x2,
   DeconvolutionOperatorTester()
       .inputSize(14, 15)
       .padding(1, 2)
@@ -259,10 +238,9 @@ TEST(DECONVOLUTION_OP, 3x3d1x2) {
       .groupInputChannels(27)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3d2x1) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3d2x1,
   DeconvolutionOperatorTester()
       .inputSize(15, 14)
       .padding(2, 1)
@@ -271,11 +249,10 @@ TEST(DECONVOLUTION_OP, 3x3d2x1) {
       .groupInputChannels(27)
       .groupOutputChannels(19)
       .iterations(3)
-      .testQ8();
-}
+)
 
 
-TEST(DECONVOLUTION_OP, zero_batch_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, zero_batch_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(5, 5)
       .kernelSize(1, 1)
@@ -284,10 +261,9 @@ TEST(DECONVOLUTION_OP, zero_batch_per_channel) {
       .iterations(1)
       .per_channel(true)
       .batchSize(0)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -295,10 +271,9 @@ TEST(DECONVOLUTION_OP, 1x1_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_qmin_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1_with_qmin_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -307,10 +282,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_qmin_per_channel) {
       .qmin(128)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_qmax_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1_with_qmax_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -319,10 +293,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_qmax_per_channel) {
       .qmax(128)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_input_stride_per_channel) {
+_STATIC_TEST(DECONVOLUTION_OP, 1x1_with_input_stride_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -331,10 +304,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_input_stride_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_output_stride_per_channel) {
+_STATIC_TEST(DECONVOLUTION_OP, 1x1_with_output_stride_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(27, 29)
       .kernelSize(1, 1)
@@ -343,10 +315,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_output_stride_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x1_with_batch_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x1_with_batch_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(13, 14)
       .kernelSize(1, 1)
@@ -355,10 +326,9 @@ TEST(DECONVOLUTION_OP, 1x1_with_batch_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_1x1_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_1x1_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(24, 25)
       .kernelSize(1, 1)
@@ -367,10 +337,9 @@ TEST(DECONVOLUTION_OP, grouped_1x1_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 1x3_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 1x3_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(20, 19)
       .paddingWidth(1)
@@ -379,10 +348,9 @@ TEST(DECONVOLUTION_OP, 1x3_per_channel) {
       .groupOutputChannels(15)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_1x3_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_1x3_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(20, 19)
       .paddingWidth(1)
@@ -392,10 +360,9 @@ TEST(DECONVOLUTION_OP, grouped_1x3_per_channel) {
       .groupOutputChannels(15)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x1_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x1_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(19, 20)
       .paddingHeight(1)
@@ -404,10 +371,9 @@ TEST(DECONVOLUTION_OP, 3x1_per_channel) {
       .groupOutputChannels(15)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_3x1_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_3x1_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(19, 20)
       .paddingHeight(1)
@@ -417,10 +383,9 @@ TEST(DECONVOLUTION_OP, grouped_3x1_per_channel) {
       .groupOutputChannels(15)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(13, 12)
       .padding(1)
@@ -429,10 +394,9 @@ TEST(DECONVOLUTION_OP, 3x3_per_channel) {
       .groupOutputChannels(17)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3_with_input_stride_per_channel) {
+_STATIC_TEST(DECONVOLUTION_OP, 3x3_with_input_stride_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(13, 12)
       .padding(1)
@@ -442,10 +406,9 @@ TEST(DECONVOLUTION_OP, 3x3_with_input_stride_per_channel) {
       .groupOutputChannels(17)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3_with_output_stride_per_channel) {
+_STATIC_TEST(DECONVOLUTION_OP, 3x3_with_output_stride_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(13, 12)
       .padding(1)
@@ -455,10 +418,9 @@ TEST(DECONVOLUTION_OP, 3x3_with_output_stride_per_channel) {
       .groupOutputChannels(17)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3_with_batch_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3_with_batch_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(10, 9)
       .padding(1)
@@ -468,10 +430,9 @@ TEST(DECONVOLUTION_OP, 3x3_with_batch_per_channel) {
       .groupOutputChannels(17)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, grouped_3x3_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, grouped_3x3_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(10, 11)
       .padding(1)
@@ -481,10 +442,9 @@ TEST(DECONVOLUTION_OP, grouped_3x3_per_channel) {
       .groupOutputChannels(13)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3s2_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3s2_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(19, 21)
       .padding(1)
@@ -494,10 +454,9 @@ TEST(DECONVOLUTION_OP, 3x3s2_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3s1x2_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3s1x2_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(13, 13)
       .padding(1)
@@ -507,10 +466,9 @@ TEST(DECONVOLUTION_OP, 3x3s1x2_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3s2x1_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3s2x1_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(13, 13)
       .padding(1)
@@ -520,10 +478,9 @@ TEST(DECONVOLUTION_OP, 3x3s2x1_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3d2_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3d2_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(13, 14)
       .padding(2)
@@ -533,10 +490,9 @@ TEST(DECONVOLUTION_OP, 3x3d2_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3d1x2_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3d1x2_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(14, 15)
       .padding(1, 2)
@@ -546,10 +502,9 @@ TEST(DECONVOLUTION_OP, 3x3d1x2_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)
 
-TEST(DECONVOLUTION_OP, 3x3d2x1_per_channel) {
+_STATIC_AND_RUNTIME_TEST(DECONVOLUTION_OP, 3x3d2x1_per_channel,
   DeconvolutionOperatorTester()
       .inputSize(15, 14)
       .padding(2, 1)
@@ -559,5 +514,4 @@ TEST(DECONVOLUTION_OP, 3x3d2x1_per_channel) {
       .groupOutputChannels(19)
       .iterations(3)
       .per_channel(true)
-      .testQ8();
-}
+)

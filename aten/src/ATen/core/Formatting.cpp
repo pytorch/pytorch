@@ -281,7 +281,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       if (tensor_.qscheme() == c10::kPerTensorAffine) {
         stream << ", scale: " << tensor_.q_scale();
         stream << ", zero_point: " << tensor_.q_zero_point();
-      } else if (tensor_.qscheme() == c10::kPerChannelAffine) {
+      } else if (tensor_.qscheme() == c10::kPerChannelAffine ||
+          tensor_.qscheme() == c10::kPerChannelAffineFloatQParams) {
         stream << ", scales: ";
         Tensor scales = tensor_.q_per_channel_scales();
         print(stream, scales, linesize);

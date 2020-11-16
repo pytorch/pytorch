@@ -71,8 +71,7 @@ class AffineChannelOp final : public Operator<Context> {
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     const int HxW = X.numel() / (N * C);
-    auto* Y =
-        Output(0, X.sizes(), at::dtype<T>());
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     math::AffineChannel<T, Context, StorageOrder::NHWC>(
         N,
         C,
