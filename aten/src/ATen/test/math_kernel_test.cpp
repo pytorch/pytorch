@@ -37,4 +37,16 @@ TEST(MathKernelTest, NativeGroupNorm) {
   }
 }
 
+TEST(MathKernelTest, Addr) {
+  const auto vec1 = arange(1., 4.);
+  const auto vec2 = arange(1., 3.);
+  const auto M = zeros({3, 2});
 
+  const float beta = 1.2;
+  const float alpha = 2.1;
+
+  auto out = at::native::addr(M, vec1, vec2, beta, alpha);
+  auto math_out = at::native::math_addr(M, vec1, vec2, beta, alpha);
+
+  ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
+}

@@ -229,6 +229,51 @@ Tensor& addr_out(Tensor &result,
   return result;
 }
 
+// The math_addr and math_addr_out functions support backends
+// other than CPU and CUDA, such as XLA.
+// They are implemented using the composition of existing ops
+Tensor math_addr(const Tensor& self,
+                 const Tensor& vec1, const Tensor& vec2,
+                 Scalar beta, Scalar alpha) {
+  // when beta==0, values in self should be ignored,
+  // nans and infs in self should not propagate.
+  if (beta.toComplexDouble() == 0.0) {
+    if (alpha.toComplexDouble() == 1.0) {
+      return at::outer(vec1, vec2);
+    }
+    return alpha * at::outer(vec1, vec2);
+  }
+
+  if (beta.toComplexDouble() == 1.0) {
+    if (alpha.toComplexDouble() == 1.0) {
+      return self + at::outer(vec1, vec2);
+    }
+    return self + alpha * at::outer(vec1, vec2);
+  }
+
+  if (alpha.toComplexDouble() == 1.0) {
+    return beta * self + at::outer(vec1, vec2);
+  }
+  return beta * self + alpha * at::outer(vec1, vec2);
+}
+
+Tensor& math_addr_out(Tensor &result,
+                      const Tensor& self,
+                      const Tensor& vec1, const Tensor& vec2,
+                      Scalar beta, Scalar alpha) {
+  auto addr_result = at::addr(self, vec1, vec2, beta, alpha);
+
+  // Validates safe casting
+  const auto result_dtype = addr_result.scalar_type();
+  TORCH_CHECK(canCast(result_dtype, result.scalar_type()),
+              "result type ", result_dtype,
+              " can't be cast to the desired output type ", result.scalar_type());
+
+  at::native::resize_output(result, addr_result.sizes().vec());
+  result.copy_(addr_result);
+  return result;
+}
+
 // torch.ger, alias for torch.outer
 Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
   TORCH_WARN("torch.ger is deprecated and will be removed in a future PyTorch release. "
