@@ -29,10 +29,10 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int):
         %output_min_max : None = prim::Constant()
-        %packed_weight_bias = metal_prepack::conv2d_prepack(
+        %packed_weight_bias = metal_prepack_unet::conv2d_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %output_min_max, %output_min_max)
-        %r = metal_prepack::conv2d_run(%input, %packed_weight_bias)
+        %r = metal_prepack_unet::conv2d_run(%input, %packed_weight_bias)
         return (%r) )";
 
   SubgraphRewriter rewriter;
@@ -47,10 +47,10 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   std::string conv2d_prepack_run_relu = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %dummy_min_max):
-        %packed_weight_bias = metal_prepack::conv2d_prepack(
+        %packed_weight_bias = metal_prepack_unet::conv2d_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %dummy_min_max, %dummy_min_max)
-        %r = metal_prepack::conv2d_run(%input, %packed_weight_bias)
+        %r = metal_prepack_unet::conv2d_run(%input, %packed_weight_bias)
         %r = aten::relu(%r)
         return (%r) )";
 
@@ -59,10 +59,10 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
         %dilation:int[], %groups:int, %dummy_min_max):
       %output_min: float = prim::Constant[value=0.0]()
       %output_max: None = prim::Constant()
-      %packed_weight_bias: __torch__.torch.classes.metal.Conv2dOpContext = metal_prepack::conv2d_prepack(
+      %packed_weight_bias: __torch__.torch.classes.metal_unet.UnetConv2dOpContext = metal_prepack_unet::conv2d_prepack(
           %weight, %bias, %stride, %padding, %dilation, %groups,
           %output_min, %output_max)
-      %r = metal_prepack::conv2d_run(%input, %packed_weight_bias)
+      %r = metal_prepack_unet::conv2d_run(%input, %packed_weight_bias)
       return (%r) )";
 
   rewriter.RegisterRewritePattern(
@@ -144,7 +144,7 @@ void metalInsertPrePackedOps(script::Module& module) {
 void metalFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFilterFn filter_fn = [](const Node* n) -> bool {
     return (
-        n->kind() == Symbol::fromQualString("metal_prepack::conv2d_prepack"));
+        n->kind() == Symbol::fromQualString("metal_prepack_unet::conv2d_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
