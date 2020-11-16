@@ -67,7 +67,7 @@ namespace caffe2 {
 #endif // CAFFE2_FORCE_FALLBACK_CUDA_MPI
 
 // We allow a macro to force using CUDA functions
-#ifdef CAFFE2_FORCE_CUDA_MPI
+#ifdef CAFFE2_USE_CUDA_MPI
 #undef CAFFE2_HAS_CUDA_MPI_BASICS
 #undef CAFFE2_HAS_CUDA_MPI_ALLREDUCE
 #define CAFFE2_HAS_CUDA_MPI_BASICS 1
