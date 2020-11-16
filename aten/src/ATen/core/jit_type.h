@@ -224,7 +224,7 @@ struct CAFFE2_API AnyType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyType;
   // global singleton
-  static const AnyTypePtr get();
+  static const AnyTypePtr& get();
 
  private:
   AnyType() : Type(TypeKind::AnyType) {}
@@ -318,7 +318,7 @@ struct CAFFE2_API OptionalType
     return false;
   }
   // common cast Optional[Tensor] for undefined tensor type
-  static const OptionalTypePtr ofTensor();
+  static const OptionalTypePtr& ofTensor();
 
  private:
   OptionalType(TypePtr elem) : SingleElementType(elem) {}
@@ -804,7 +804,7 @@ struct CAFFE2_API TensorType : public Type {
 
   c10::optional<bool> undefined() const { return undefined_; }
 
-  static const TensorTypePtr get();
+  static const TensorTypePtr& get();
 
   static const TypeKind Kind = TypeKind::TensorType;
 
@@ -885,11 +885,11 @@ struct CAFFE2_API ListType
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   // common cast List[Tensor]
-  static const ListTypePtr ofTensors();
-  static const ListTypePtr ofInts();
-  static const ListTypePtr ofFloats();
-  static const ListTypePtr ofBools();
-  static const ListTypePtr ofStrings();
+  static const ListTypePtr& ofTensors();
+  static const ListTypePtr& ofInts();
+  static const ListTypePtr& ofFloats();
+  static const ListTypePtr& ofBools();
+  static const ListTypePtr& ofStrings();
 
  private:
   ListType(TypePtr elem) : SingleElementType(elem) {}
@@ -1268,7 +1268,7 @@ struct CAFFE2_API AnyEnumType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyEnumType;
   // global singleton
-  static const AnyEnumTypePtr get();
+  static const AnyEnumTypePtr& get();
 private:
   AnyEnumType()
   : Type(TypeKind::AnyEnumType) {}
@@ -1293,7 +1293,7 @@ struct CAFFE2_API NumberType : public Type {
   }
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
-  static const NumberTypePtr get();
+  static const NumberTypePtr& get();
 
  protected:
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
@@ -1323,7 +1323,7 @@ struct CAFFE2_API FloatType : public NumberType {
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
-  static const FloatTypePtr get();
+  static const FloatTypePtr& get();
 
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
@@ -1350,7 +1350,7 @@ struct CAFFE2_API IntType : public NumberType {
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
-  static const IntTypePtr get();
+  static const IntTypePtr& get();
 
  private:
   IntType() : NumberType(TypeKind::IntType) {}
@@ -1374,7 +1374,7 @@ struct CAFFE2_API BoolType : public Type {
   }
   static const TypeKind Kind = TypeKind::BoolType;
   // global singleton
-  static const BoolTypePtr get();
+  static const BoolTypePtr& get();
 
  private:
   BoolType() : Type(TypeKind::BoolType) {}
@@ -1399,7 +1399,7 @@ struct CAFFE2_API StringType : public Type {
   }
   static const TypeKind Kind = TypeKind::StringType;
   // global singleton
-  static const StringTypePtr get();
+  static const StringTypePtr& get();
 
  private:
   StringType() : Type(TypeKind::StringType) {}
@@ -1457,7 +1457,7 @@ struct CAFFE2_API NoneType : public Type {
   }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
-  static const NoneTypePtr get();
+  static const NoneTypePtr& get();
 
  private:
   NoneType() : Type(TypeKind::NoneType) {}
@@ -1479,7 +1479,7 @@ struct CAFFE2_API GeneratorType : public Type {
   }
   static const TypeKind Kind = TypeKind::GeneratorType;
   // global singleton
-  static const GeneratorTypePtr get();
+  static const GeneratorTypePtr& get();
 
  private:
   GeneratorType() : Type(TypeKind::GeneratorType) {}
@@ -1501,7 +1501,7 @@ struct CAFFE2_API QuantizerType : public Type {
   }
   static const TypeKind Kind = TypeKind::QuantizerType;
   // global singleton
-  static const QuantizerTypePtr get();
+  static const QuantizerTypePtr& get();
 
  private:
   QuantizerType() : Type(TypeKind::QuantizerType) {}
@@ -1523,7 +1523,7 @@ struct CAFFE2_API QSchemeType : public Type {
   }
   static const TypeKind Kind = TypeKind::QSchemeType;
   // global singleton
-  static const QSchemeTypePtr get();
+  static const QSchemeTypePtr& get();
 
  private:
   QSchemeType() : Type(TypeKind::QSchemeType) {}
@@ -1545,7 +1545,7 @@ struct CAFFE2_API DeviceObjType : public Type {
   }
   static const TypeKind Kind = TypeKind::DeviceObjType;
   // global singleton
-  static const DeviceObjTypePtr get();
+  static const DeviceObjTypePtr& get();
 
  private:
   DeviceObjType() : Type(TypeKind::DeviceObjType) {}
@@ -1567,7 +1567,7 @@ struct CAFFE2_API StreamObjType : public Type {
   }
   static const TypeKind Kind = TypeKind::StreamObjType;
   // global singleton
-  static const StreamObjTypePtr get();
+  static const StreamObjTypePtr& get();
 
 private:
   StreamObjType() : Type(TypeKind::StreamObjType) {}
@@ -1616,7 +1616,7 @@ struct CAFFE2_API CapsuleType : public Type {
   }
   static const TypeKind Kind = TypeKind::CapsuleType;
   // global singleton
-  static const CapsuleTypePtr get();
+  static const CapsuleTypePtr& get();
 private:
   CapsuleType()
   : Type(TypeKind::CapsuleType) {}
@@ -1637,7 +1637,7 @@ struct CAFFE2_API PyObjectType : public Type {
   }
   static const TypeKind Kind = TypeKind::PyObjectType;
   // global singleton
-  static const PyObjectTypePtr get();
+  static const PyObjectTypePtr& get();
 private:
   PyObjectType()
   : Type(TypeKind::PyObjectType) {}
@@ -2408,7 +2408,7 @@ return "Layout";
 }
 static const TypeKind Kind = TypeKind::LayoutType;
 // global singleton
-static const LayoutTypePtr get();
+static const LayoutTypePtr& get();
 
 private:
 LayoutType() : EnumerationType() {}
@@ -2427,7 +2427,7 @@ return "ScalarType";
 }
 static const TypeKind Kind = TypeKind::ScalarTypeType;
 // global singleton
-static const ScalarTypeTypePtr get();
+static const ScalarTypeTypePtr& get();
 
 private:
 ScalarTypeType() : EnumerationType() {}
@@ -2450,7 +2450,7 @@ struct CAFFE2_API AnyListType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyListType;
   // global singleton
-  static const AnyListTypePtr get();
+  static const AnyListTypePtr& get();
 private:
   AnyListType()
   : Type(TypeKind::AnyListType) {}
@@ -2475,7 +2475,7 @@ struct CAFFE2_API AnyTupleType : public Type {
   static const TypeKind Kind = TypeKind::AnyTupleType;
 
   // global singleton
-  static const AnyTupleTypePtr get();
+  static const AnyTupleTypePtr& get();
 private:
   AnyTupleType()
   : Type(TypeKind::AnyTupleType) {}
@@ -2498,7 +2498,7 @@ struct CAFFE2_API AnyClassType : public Type {
   }
   static const TypeKind Kind = TypeKind::AnyClassType;
   // global singleton
-  static const AnyClassTypePtr get();
+  static const AnyClassTypePtr& get();
 private:
   AnyClassType()
   : Type(TypeKind::AnyClassType) {}
