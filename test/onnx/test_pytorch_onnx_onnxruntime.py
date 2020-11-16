@@ -123,7 +123,7 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     use_new_jit_passes = False  # For testing main code-path
-    onnx_shape_inference = False
+    onnx_shape_inference = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -930,6 +930,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
+    @unittest.skip("If operator rank mismatch between outputs of two branches.")
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
@@ -3441,7 +3442,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_tolist(self):
+        class List(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                cur_shape = torch._shape_as_tensor(input)
+                final_shape: List[int] = cur_shape.tolist()
+                pad_tensor = torch.zeros([1, 2] + final_shape)
+                return pad_tensor
+
+        x = torch.randn(2, 3)
+        self.run_test(List(), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
     def test_list_pass(self):
         class Slice(torch.nn.Module):
             def forward(self, x, y):
@@ -3651,7 +3667,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
-                return x.size(0) * 2 * x
+                return x.size(0) * 2 * x, 2 - x
 
         x = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ArithmeticModel(), x)
@@ -4030,6 +4046,28 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(0)
         model = MyModule()
         self.run_test(model, (x,))
+
+    def test_dtype(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, other):
+                return input.to(dtype=other.dtype) + other
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(MyModel(), (x, y))
+
+    def test_dtype_eq(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, other):
+                if input.dtype == other.dtype:
+                    return input + other
+                return input
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(MyModel(), (x, y))
 
     def test_cast_to(self):
         class MyModule(torch.jit.ScriptModule):

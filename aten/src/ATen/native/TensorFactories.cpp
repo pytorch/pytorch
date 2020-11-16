@@ -1064,14 +1064,6 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-#define TENSOR(T, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    return at::detail::tensor(values, options);                                                                                        \
-  }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
-AT_FORALL_COMPLEX_TYPES(TENSOR)
-#undef TENSOR
-
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
     TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
     int64_t my_size = size.value_or(0);
