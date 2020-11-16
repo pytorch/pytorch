@@ -5,8 +5,6 @@
 namespace torch {
 namespace jit {
 
-std::deque<std::string> names_;
-
 // findSubModuleAttr function chases getAttr chains to locate the submodules.
 // For example:
 // module M {
@@ -20,25 +18,27 @@ std::deque<std::string> names_;
 //   ...
 //   %weight = prim::GetAttr[name="scale"](%B)
 //   ...
-void findSubModuleAttr(
+std::deque<std::string> findSubModuleAttr(
     Value* input,
     std::string& name,
     Module& attrModule,
     std::shared_ptr<Graph>& graph) {
   Node* node = input->node();
-  names_.clear();
+  std::deque<std::string> moduleNames;
+
   while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
     if (node->kind() == prim::GetAttr) {
-      names_.push_front(node->s(attr::name));
+      moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
     } else {
-      return;
+      return moduleNames;
     }
   }
 
-  for (auto& moduleName : names_) {
+  for (auto& moduleName : moduleNames) {
     attrModule = attrModule.attr(moduleName).toModule();
   }
+  return moduleNames;
 }
 
 Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
@@ -78,12 +78,15 @@ std::vector<IValue> getParamAttributes(
       for (Block* sub_block : n->blocks()) {
         blocks.emplace_back(sub_block);
       }
-      if (n->kind() == prim::GetAttr) {
+      if (n->kind() == prim::SetAttr &&
+          n->s(attr::name) == "num_batches_tracked") {
+        n->destroy();
+      } else if (n->kind() == prim::GetAttr) {
         auto name = n->s(attr::name);
         auto attrModule = module_;
         auto input = n->inputs()[0];
 
-        findSubModuleAttr(input, name, attrModule, graph);
+        auto moduleNames = findSubModuleAttr(input, name, attrModule, graph);
 
         if (!attrModule.hasattr(name)) {
           continue;
@@ -93,7 +96,7 @@ std::vector<IValue> getParamAttributes(
         auto attr = attrModule.attr(name);
 
         std::string fullName("self_");
-        for (auto& name : names_) {
+        for (auto& name : moduleNames) {
           fullName += name + '_';
         }
         fullName += name;
@@ -113,7 +116,7 @@ std::vector<IValue> getParamAttributes(
                 tensor_.set_requires_grad(false);
                 attr = IValue(tensor_);
               }
-              attrValues.push_back(attr.toTensor());
+              attrValues.emplace_back(attr.toTensor());
               paramConst = addParamAsArgument(function_, fullName, attr);
             } else if (attr.isNone() || name == "training") {
               auto attrVal = tryInsertConstant(*graph, attr);
@@ -147,7 +150,7 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
     GRAPH_DEBUG("List attributes for function: " + function->name());
     auto graph = function->graph();
     auto attributes = getParamAttributes(graph, moduleClone, function);
-    for (auto attr_ : attributes) {
+    for (auto& attr_ : attributes) {
       modelParams.push_back(attr_);
     }
     GRAPH_DEBUG("Cleaning up module");
