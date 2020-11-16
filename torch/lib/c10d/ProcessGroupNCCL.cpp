@@ -1591,13 +1591,6 @@ void ProcessGroupNCCL::groupEnd() {
   --ncclActiveGroupCounter_;
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
-    const AllToAllOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
-}
-
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
