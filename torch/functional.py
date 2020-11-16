@@ -294,10 +294,10 @@ def einsum(equation, *operands):
         Each input operand may contain at most one ellipsis which will cover the dimensions not covered by subscripts,
         e.g. for an input operand with 5 dimensions, the ellipsis in the equation `'ab...c'` cover the third and fourth
         dimensions. The ellipsis does not need to cover the same number of dimensions across the :attr:`operands` but the
-        'shape' of the ellipsis (the size of the dimensions covered by them) must be broadcastable. In implicit mode,
-        the ellipsis will come first in the output. In explicit mode, if an ellipses covers at least one dimension then
-        it must appear in the output since the dimensions under the ellipsis cannot be summed over. e.g. the following
-        equation implements batch matrix multiplication `'...ij,...jk->...ik'`.
+        'shape' of the ellipsis (the size of the dimensions covered by them) must broadcast together. If the output is not
+        explicitly defined with the arrow ('->') notation, the dimensions covered by the ellipsis will come first in the
+        output, before the dimensions whose subscripts appear exactly once for the input operands. e.g. the following
+        equation implements batch matrix multiplication `'...ij,...jk'`.
 
         A few final notes: the equation may contain whitespaces between the different elements (subscripts, ellipsis,
         arrow and comma) but something like `'. . .'` is not valid. An empty string `''` is valid for scalar operands.
