@@ -4111,7 +4111,7 @@ class TestPadding(TestCase):
 
         self.assertEqual(qy_ref, qy_hat)
 
-     @given(batch_size=st.integers(1, 64),
+    @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
            height=st.integers(16, 128),
            width=st.integers(16, 128),
