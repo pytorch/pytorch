@@ -3631,6 +3631,12 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
     def test_init_rpc_twice(self):
+        import os
+        os.environ["MASTER_PORT"] = "29500"
+        os.environ["MASTER_ADDR"] = "localhost"
+        init_method = f"tcp://{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}"
+        tp_opts = rpc.TensorPipeRpcBackendOptions(init_method=init_method)
+        # Use regular file init, to work around https://github.com/pytorch/pytorch/issues/41614.
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         rpc.init_rpc(
@@ -3638,7 +3644,7 @@ class RpcTest(RpcAgentTestFixture):
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
+            rpc_backend_options=tp_opts,
         )
         rpc.shutdown()
 
@@ -3646,12 +3652,18 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
 
         # Ensure rpc initialization works again.
+
+        # Workaround: uncomment these lines
+        # os.environ["MASTER_ADDR"] = "localhost"
+        # os.environ["MASTER_PORT"] = "29501"
+        # init_method = f"tcp://{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}"
+        # tp_opts = rpc.TensorPipeRpcBackendOptions(init_method=init_method)
         rpc.init_rpc(
             name=worker_name(self.rank),
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
+            rpc_backend_options=tp_opts,
         )
 
         # Verify RPCs work after re-init.
