@@ -4633,6 +4633,18 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
+        
+    def test_derive_index(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                j = []
+                for idx in range(len(x) - 1, -len(x), -2):
+                    y = x[idx]
+                    j += [x * y]
+                return j
+
+        x = torch.randn(5, 13)
+        self.run_test(MyModule(), x)
 
     @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(11)
