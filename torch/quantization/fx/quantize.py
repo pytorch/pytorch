@@ -491,6 +491,22 @@ class Quantizer:
                         new_observer = qconfig.activation()
                         insert_observer(node.args[idx], new_observer)
 
+        def insert_observer_for_input_arg_of_observed_node(arg):
+            """
+               Input:
+                 arg: input arg node for another observed node, e.g.
+                 input activaiton for functional linear node
+            """
+            if node.name not in observed_node_names_set and node.name in quants:
+                if is_standalone_module and node.name in graph_inputs:
+                    # we'll insert observer for input of standalone module
+                    # in parent graph
+                    standalone_module_observed_input_idxs.append(graph_inputs.index(node.name))
+                    return
+                _, activation_post_process_ctr = quants[node.name]
+                if activation_post_process_ctr is not None:
+                    insert_observer(node, activation_post_process_ctr())
+
         result_node : Optional[Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
@@ -512,17 +528,8 @@ class Quantizer:
                         node, obj, qconfig, standalone_module_input_idxs)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
+            insert_observer_for_input_arg_of_observed_node(node)
 
-            # insert observer for output of the node
-            if node.name not in observed_node_names_set and node.name in quants:
-                if is_standalone_module and node.name in graph_inputs:
-                    # we'll insert observer for input of standalone module
-                    # in parent graph
-                    standalone_module_observed_input_idxs.append(graph_inputs.index(node.name))
-                    continue
-                _, activation_post_process_ctr = quants[node.name]
-                if activation_post_process_ctr is not None:
-                    insert_observer(node, activation_post_process_ctr())
 
         model = GraphModule(model, observed_graph)
         self.save_state(model)
@@ -684,6 +691,52 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
+        def is_output_quantized(node):
+            """ Check if output node is quantized or not """
+            if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
+                quantized = self.modules[node.target]._output_is_observed
+            else:
+                quantized = True
+
+            # Need to get correct quantized/non-quantized state for the output of CopyNode
+            if type(obj) in [
+                    CopyNode,
+                    FixedQParamsOpQuantizeHandler
+            ]:
+                assert node.op in [
+                    'call_module',
+                    'call_function',
+                    'call_method'], \
+                    'CopyNode of type ' + node.op + ' is not handled'
+                quantized = is_quantized(node.args[0])
+
+            if not activation_is_statically_quantized(qconfig):
+                quantized = False
+
+            return quantized
+
+        def insert_quantize_node(node):
+            """ Given a activation_post_process module call node, insert a quantize node"""
+            observer_module = self.modules[node.target]
+            prev_node = node.args[0]
+            if observer_module.dtype == torch.float16:
+                # activations are not quantized for
+                # fp16 dynamic quantization
+                # copy the activaiton_post_process node here
+                # since we may need it when we insert prepack
+                # op for weight of linear, this will be removed
+                # later in a separate pass
+                env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
+            elif prev_node.name in quant_env:
+                # if previous node is already quantized, we'll just remove the activation_post_process
+                quant_env[node.name] = quant_env[prev_node.name]
+            else:
+                # replace activation post process with quantization ops
+                root_module = self.modules[""]
+                quant_env[node.name] = quantize_node(
+                    root_module, self.quantized_graph,
+                    load_non_quantized(node.args[0]), observer_module)
+
         for node in model.graph.nodes:
             if node.op == 'output':
                 if is_standalone_module:
@@ -700,25 +753,7 @@ class Quantizer:
                     quantized = False
                 else:
                     result = obj.convert(self, node, load_arg, debug=debug, convert_custom_config_dict=convert_custom_config_dict)
-                    if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
-                        quantized = self.modules[node.target]._output_is_observed
-                    else:
-                        quantized = True
-
-                    # Need to get correct quantized/non-quantized state for the output of CopyNode
-                    if type(obj) in [
-                            CopyNode,
-                            FixedQParamsOpQuantizeHandler
-                    ]:
-                        assert node.op in [
-                            'call_module',
-                            'call_function',
-                            'call_method'], \
-                            'CopyNode of type ' + node.op + ' is not handled'
-                        quantized = is_quantized(node.args[0])
-
-                    if not activation_is_statically_quantized(qconfig):
-                        quantized = False
+                    quantized = is_output_quantized(node)
 
                 if quantized:
                     quant_env[node.name] = result
@@ -729,32 +764,11 @@ class Quantizer:
                 continue
 
             # handle activation post process calls
-            if node.op == 'call_module':
-                if is_activation_post_process(self.modules[node.target]):
-                    observer_module = self.modules[node.target]
-                    prev_node = node.args[0]
-                    if observer_module.dtype == torch.float16:
-                        # activations are not quantized for
-                        # fp16 dynamic quantization
-                        # copy the activaiton_post_process node here
-                        # since we may need it when we insert prepack
-                        # op for weight of linear, this will be removed
-                        # later in a separate pass
-                        env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
-                        continue
-                    if prev_node.name in quant_env:
-                        # if previous node is already quantized, we'll just remove the activation_post_process
-                        quant_env[node.name] = quant_env[prev_node.name]
-                        continue
-                    # replace activation post process with quantization ops
-                    root_module = self.modules['']
-                    quant_env[node.name] = quantize_node(
-                        root_module, self.quantized_graph,
-                        load_non_quantized(node.args[0]), observer_module)
-                    continue
-
-            if is_standalone_module and node.op == 'placeholder' and \
-               graph_inputs.index(node.name) in model._standalone_module_observed_input_idxs:
+            if node.op == 'call_module' and is_activation_post_process(self.modules[node.target]):
+                insert_quantize_node(node)
+            elif (is_standalone_module and node.op == 'placeholder' and
+                  graph_inputs.index(node.name) in
+                  model._standalone_module_observed_input_idxs):
                 # the node is quantized in parent module
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:
