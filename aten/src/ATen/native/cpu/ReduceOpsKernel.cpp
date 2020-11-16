@@ -234,7 +234,7 @@ static void norm_kernel_tensor_iterator_impl(
 static void and_kernel_impl(TensorIterator& iter) {
   binary_kernel_reduce_vec(
       iter,
-      [=](bool a, bool b) -> bool { return (a && b) ? 1 : 0; },
+      [=](bool a, bool b) -> bool { return a && b; },
       [=](Vec256<bool> a, Vec256<bool> b) {
         // Adding the implementation here instead of in vec256_base to avoid
         // return value inconsistency. Other comparison operators in
@@ -248,7 +248,7 @@ static void and_kernel_impl(TensorIterator& iter) {
         // true/false.
         Vec256<bool> c = Vec256<bool>();
         for (int i = 0; i != Vec256<bool>::size(); i++) {
-          c[i] = (a[i] && b[i]) ? 1 : 0;
+          c[i] = a[i] && b[i];
         }
         return c;
       },
@@ -258,11 +258,11 @@ static void and_kernel_impl(TensorIterator& iter) {
 static void or_kernel_impl(TensorIterator& iter) {
   binary_kernel_reduce_vec(
       iter,
-      [=](bool a, bool b) -> bool { return (a || b) ? 1 : 0; },
+      [=](bool a, bool b) -> bool { return a || b; },
       [=](Vec256<bool> a, Vec256<bool> b) {
         Vec256<bool> c = Vec256<bool>();
         for (int i = 0; i != Vec256<bool>::size(); i++) {
-          c[i] = (a[i] || b[i]) ? 1 : 0;
+          c[i] = a[i] || b[i];
         }
         return c;
       },
