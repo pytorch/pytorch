@@ -96,6 +96,19 @@ struct Pipeline final {
     }
   } layout;
 
+  //
+  // Stage
+  //
+
+  struct Stage final {
+    typedef uint8_t Flags;
+
+    enum Type : Flags {
+      Compute = 1u << 0u,
+      Transfer = 1u << 1u,
+    };
+  };
+
   /*
     Descriptor
   */

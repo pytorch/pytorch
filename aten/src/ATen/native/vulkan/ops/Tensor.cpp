@@ -92,16 +92,10 @@ vTensor::Buffer allocate_buffer(
   // Forward declaration
   bool requires_staging(const api::Adapter*);
 
-  const VkFlags usage = [adapter]() {
-    VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-    if (requires_staging(adapter)) {
-      usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-               VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    }
-
-    return usage;
-  }();
+  const VkFlags usage =
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
   const auto memory = [adapter]() -> api::Resource::Memory::Descriptor {
     if (requires_staging(adapter)) {

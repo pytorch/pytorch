@@ -132,16 +132,15 @@ class vTensor final {
     Payload wait() const &;
 
    private:
+    template<typename, Access::Flags>
+    friend class Future;
+
     // Intentionally disabed to enforce a usage pattern wherein the Future's
     // lifetime exceeds that of the Payload as we use the Future's destructor
     // to eagerly (as opposed to lazily and upon first use) upload the
     // modifications back onto the GPU in an effort to hide the upload latency.
 
     Payload wait() const && = delete;
-
-   private:
-    template<typename, Access::Flags>
-    friend class Future;
 
    private:
     const vTensor* tensor_;
@@ -248,6 +247,10 @@ class vTensor final {
     View operator=(View&&) = delete;
     ~View() = default;
 
+    /*
+      Device
+    */
+
     Buffer& buffer(Access::Flags) const;
     Buffer& buffer(api::Command::Buffer&, Access::Flags) const;
 
@@ -255,9 +258,17 @@ class vTensor final {
     Image& image(Access::Flags) const;
     Image& image(api::Command::Buffer&, Access::Flags) const;
 
+    /*
+      Host
+    */
+
     Buffer& staging(Access::Flags) const;
     Buffer& staging(api::Command::Buffer&, Access::Flags) const;
     vTensor::Memory& wait() const;
+
+    /*
+      Metadata
+    */
 
     const VkExtent3D& extents() const;
     const TensorOptions& options() const;
