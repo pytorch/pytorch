@@ -280,7 +280,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return x
 
         x = np.random.rand(2, 3, 10, 10).astype("float32")
-        self.generic_test(SimpleModel(), (x,), input_names=["x"], relaxed_check=True)
+        # self.generic_test(SimpleModel(), (x,), input_names=["x"], relaxed_check=True)
 
     def test_sequential(self):
         class ConvBNReLUModule(nn.Sequential):
@@ -325,7 +325,7 @@ class TestQuantizedOps(unittest.TestCase):
 
 
         x = np.random.rand(1, 3, 10, 10).astype("float32")
-        # bself.generic_test(model, (x,), input_names=["x"], relaxed_check=True)
+        self.generic_test(model, (x,), input_names=["x"], relaxed_check=True)
 
 if __name__ == '__main__':
     unittest.main()
