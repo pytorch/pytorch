@@ -144,12 +144,12 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
 
 /**
  * Prepares this instance for a cuda graph capture region.
- * offset_intergraph is the initial offset at the start of the graphed region.
+ * offset_extragraph is the initial offset at the start of the graphed region.
  * offset_intragraph tracks the offset in the graphed region.
  */
-void CUDAGeneratorImpl::graph_prologue(int64_t* offset_intergraph) {
+void CUDAGeneratorImpl::graph_prologue(int64_t* offset_extragraph) {
   TORCH_INTERNAL_ASSERT(is_default_);
-  offset_intergraph_ = offset_intergraph;
+  offset_extragraph_ = offset_extragraph;
   offset_intragraph_ = 0;
 }
 
@@ -190,7 +190,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
                           std::numeric_limits<uint32_t>::max() - increment); 
     this->offset_intragraph_ += increment;
     return PhiloxCudaState(this->seed_,
-                           this->offset_intergraph_,
+                           this->offset_extragraph_,
                            offset);
   } else {
     uint64_t offset = this->philox_offset_per_thread_;

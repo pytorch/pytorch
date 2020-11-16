@@ -97,10 +97,10 @@ struct PhiloxCudaState {
   }
   // Called if graph capture is underway
   PhiloxCudaState(uint64_t seed,
-                  int64_t* offset_intergraph,
+                  int64_t* offset_extragraph,
                   uint32_t offset_intragraph) {
     seed_ = seed;
-    offset_.ptr = offset_intergraph;
+    offset_.ptr = offset_extragraph;
     offset_intragraph_ = offset_intragraph;
     captured_ = true;
   }
@@ -131,7 +131,7 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread();
-  void graph_prologue(int64_t* offset_intergraph_);
+  void graph_prologue(int64_t* offset_extragraph_);
   uint64_t graph_epilogue();
   PhiloxCudaState philox_cuda_state(uint64_t increment);
   void set_is_default(bool is_default) {
@@ -148,7 +148,7 @@ private:
   CUDAGeneratorImpl* clone_impl() const override;
   uint64_t seed_ = default_rng_seed_val;
   uint64_t philox_offset_per_thread_ = 0;
-  int64_t* offset_intergraph_;
+  int64_t* offset_extragraph_;
   uint32_t offset_intragraph_ = 0;
   bool is_default_ = false;
 };
