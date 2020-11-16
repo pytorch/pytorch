@@ -9,13 +9,13 @@ namespace {
 
 Tensor empty_memory_format(
     const IntArrayRef sizes,
-    const TensorOptions& options_,
+    const TensorOptions& options_arg,
     const optional<MemoryFormat> memory_format = c10::nullopt) {
   TORCH_CHECK(
-      !(options_.has_memory_format() && memory_format.has_value()),
+      !(options_arg.has_memory_format() && memory_format.has_value()),
       "Cannot set memory_format both in TensorOptions and explicit argument!");
 
-  const TensorOptions options = options_.merge_in(
+  const TensorOptions options = options_arg.merge_in(
       TensorOptions().memory_format(memory_format));
   verify(options);
 
@@ -30,7 +30,7 @@ Tensor empty_strided(
     const IntArrayRef sizes,
     const IntArrayRef /* strides */,
     const optional<ScalarType> dtype,
-    const optional<Layout> layout,
+    const optional<c10::Layout> layout,
     const optional<Device> device,
     const optional<bool> pin_memory) {
   return empty_memory_format(

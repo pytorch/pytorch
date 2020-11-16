@@ -112,6 +112,28 @@ Example::
 
 """.format(**new_common_args))
 
+add_docstr_all('new_empty_strided',
+               r"""
+new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Returns a Tensor of size :attr:`size` and strides :attr:`stride` filled with
+uninitialized data. By default, the returned Tensor has the same
+:class:`torch.dtype` and :class:`torch.device` as this tensor.
+
+Args:
+    {dtype}
+    {device}
+    {requires_grad}
+
+Example::
+
+    >>> tensor = torch.ones(())
+    >>> tensor.new_empty_strided((2, 3), (3, 1))
+    tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
+            [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
+
+""".format(**new_common_args))
+
 add_docstr_all('new_ones',
                r"""
 new_ones(size, dtype=None, device=None, requires_grad=False) -> Tensor
@@ -939,6 +961,19 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('copysign',
+               r"""
+copysign(other) -> Tensor
+
+See :func:`torch.copysign`
+""")
+
+add_docstr_all('copysign_', r"""
+copysign_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.copysign`
+""")
+
 add_docstr_all('cos',
                r"""
 cos() -> Tensor
@@ -1210,7 +1245,7 @@ In-place version of :meth:`~Tensor.divide`
 
 add_docstr_all('dot',
                r"""
-dot(tensor2) -> Tensor
+dot(other) -> Tensor
 
 See :func:`torch.dot`
 """)
@@ -4011,7 +4046,7 @@ See :func:`torch.var`
 
 add_docstr_all('vdot',
                r"""
-dot(other) -> Tensor
+vdot(other) -> Tensor
 
 See :func:`torch.vdot`
 """)

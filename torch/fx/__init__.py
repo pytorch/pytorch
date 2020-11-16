@@ -44,7 +44,8 @@ graph(x):
 The semantics are as follows:
 
 - `placeholder` represents a function input. The `name` attribute specifies the name this value will take on.
-  `target` is similarly the name of the argument. `args` and `kwargs` are don't-care. Placeholders correspond to
+  `target` is similarly the name of the argument. `args` holds either: 1) nothing, or 2) a single argument
+  denoting the default parameter of the function input. `kwargs` is don't-care. Placeholders correspond to
   the function parameters (e.g. `x`) in the graph printout.
 - `get_attr` retrieves a parameter from the module hierarchy. `name` is similarly the name the result of the
    fetch is assigned to. `target` is the fully-qualified name of the parameter's position in the module hierarchy.

@@ -220,11 +220,11 @@ void TensorPipeAgent::collectNames() {
 }
 
 TensorPipeAgent::TensorPipeAgent(
-    const std::shared_ptr<::c10d::Store>& store,
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
-    std::shared_ptr<c10d::ProcessGroup> processGroup,
+    c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
     TensorPipeRpcBackendOptions opts,
     std::unique_ptr<RequestCallback> cb)
     : RpcAgent(

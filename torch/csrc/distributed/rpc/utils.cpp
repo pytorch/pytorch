@@ -9,6 +9,8 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
@@ -134,6 +136,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::RUN_WITH_PROFILING_REQ: {
       return autograd::RpcWithProfilingReq::fromMessage(request);
     }
+    case MessageType::RREF_BACKWARD_REQ: {
+      return autograd::RRefBackwardReq::fromMessage(request);
+    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", request.type(), " not supported.");
@@ -197,6 +202,9 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
       auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
       return wrappedRPC;
+    }
+    case MessageType::RREF_BACKWARD_RESP: {
+      return autograd::RRefBackwardResp::fromMessage(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(

@@ -83,15 +83,17 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
 
 namespace {
 
-void backward(
+void _backward(
     const Tensor& self,
+    TensorList inputs,
     const c10::optional<Tensor>& gradient,
     c10::optional<bool> keep_graph,
     bool create_graph) {
   // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
   // instead of us having to unwrap it to Tensor _gradient here.
   Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
-  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph);
+  std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph, input_vars);
 }
 
 void set_data(Tensor & self, const Tensor & new_data) {
@@ -317,12 +319,12 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   // tensor argument.
   // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
   //      and requires_grad_(), then remove the backend Autograd kernel here, only leaving the Math kernel.
-  m.impl("backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::backward)));
+  m.impl("_backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_backward)));
   m.impl("requires_grad_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::requires_grad_)));
 }
 
 TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
-  m.impl("backward", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::backward)));
+  m.impl("_backward", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::_backward)));
   m.impl("requires_grad_", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::requires_grad_)));
 }
 

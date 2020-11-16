@@ -27,12 +27,8 @@ Tensor add_scalar(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float other;
       } block {
-        v_output.extents().width,
-        v_output.extents().height,
-        v_output.extents().depth,
         other.to<float>() * alpha.to<float>(),
       };
 
@@ -82,12 +78,8 @@ Tensor& add_scalar_(
   {
     if (v_self.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float other;
       } block {
-        v_self.extents().width,
-        v_self.extents().height,
-        v_self.extents().depth,
         other.to<float>() * alpha.to<float>(),
       };
 
@@ -139,12 +131,8 @@ Tensor add_tensor(
   {
     if (v_self.has_image() && v_other.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float alpha;
       } block {
-        v_output.extents().width,
-        v_output.extents().height,
-        v_output.extents().depth,
         alpha.to<float>(),
       };
 
@@ -201,12 +189,8 @@ Tensor& add_tensor_(
   {
     if (v_self.has_image() && v_other.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float alpha;
       } block {
-        v_self.extents().width,
-        v_self.extents().height,
-        v_self.extents().depth,
         alpha.to<float>(),
       };
 

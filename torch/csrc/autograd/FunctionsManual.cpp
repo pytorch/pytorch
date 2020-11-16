@@ -50,6 +50,12 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
+Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, const Tensor & result) {
+  auto ratio = result / self;
+  ratio.masked_fill_(self == 0, 0);
+  return grad * ratio;
+}
+
 Tensor not_implemented(const char* name) {
   throw std::runtime_error(
       std::string("the derivative for '") + name + "' is not implemented");
@@ -416,15 +422,15 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
 }
 
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return std::get<0>(at::solve(grad, A.transpose(-2, -1)));
+  return std::get<0>(at::solve(grad, A.conj().transpose(-2, -1)));
 }
 
 Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
   Tensor grad_self = solve_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
-    return -at::mm(grad_self, solution.transpose(-2, -1));
+    return -at::mm(grad_self, solution.conj().transpose(-2, -1));
   }
-  return -at::matmul(grad_self, solution.transpose(-2, -1));
+  return -at::matmul(grad_self, solution.conj().transpose(-2, -1));
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
@@ -709,8 +715,13 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   // output/grad Size   (8,    3,    36,   15)
   // grad_size          [4, 2,    3, 9, 4, 3, 5]
   // sum_dims           [0,          3,    5]
-  grad = grad.reshape(grad_size);
-  grad = grad.sum(sum_dims);
+
+  // When repeat 1 time over all original dimensions, the empty sum_dims will reduce
+  // the whole grad tensor into a scalar rather than keeping original dimensions.
+  if (!sum_dims.empty()) {
+    grad = grad.reshape(grad_size);
+    grad = grad.sum(sum_dims);
+  }
   return grad;
 }
 
@@ -1635,7 +1646,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
     _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
     _min_storage_size(out_sizes_, out_strides_, out_effective_offset)
   );
-  auto storage = at::zeros({base_size}, grad.options());
+  auto storage = grad.new_zeros({base_size});
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;

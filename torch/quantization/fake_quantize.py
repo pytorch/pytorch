@@ -204,7 +204,7 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
     def __init__(self,
                  scale,
                  zero_point,
-                 dtype,
+                 dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine,
                  quant_min=0,
                  quant_max=255):
@@ -243,10 +243,13 @@ default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver
                                             dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
 default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
+
+# TODO(future PR): remove these defaults and enforce activation functions
+# to explicitly specify their output range
 default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(
-    scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8)
+    scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8, quant_min=0, quant_max=255)
 default_affine_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(
-    scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=-128, quant_max=127)
+    scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
 
 default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                                quant_min=-128,
