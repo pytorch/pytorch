@@ -3114,10 +3114,11 @@ class AbstractTestCases:
             f = tempfile.NamedTemporaryFile(delete=False)
             assert_with_filename(f.name)
             os.unlink(f.name)
-    
-            f2 = tempfile.NamedTemporaryFile(delete=False, dir='中文')
+
+            temp_dir = tempfile.TemporaryDirectory(suffix='中文')
+            f2 = tempfile.NamedTemporaryFile(delete=False, dir=temp_dir.name)
             assert_with_filename(f2.name)
-            os.unlink(f2.name)            
+            os.unlink(f2.name)
 
         def test_torch_from_file(self):
             def assert_with_filename(filename):
@@ -3143,8 +3144,9 @@ class AbstractTestCases:
             f = tempfile.NamedTemporaryFile(delete=False)
             assert_with_filename(f.name)
             os.unlink(f.name)
-            
-            f2 = tempfile.NamedTemporaryFile(delete=False, dir='中文')
+
+            temp_dir = tempfile.TemporaryDirectory(suffix='中文')
+            f2 = tempfile.NamedTemporaryFile(delete=False, dir=temp_dir.name)
             assert_with_filename(f2.name)
             os.unlink(f2.name)
 
