@@ -53,6 +53,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  VonMises, Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import transform_to
 from torch.distributions.constraints import Constraint, is_dependent
+from torch.distributions.transforms import (AffineTransform, CatTransform, ExpTransform,
+                                            StackTransform, identity_transform)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.utils import probs_to_logits, lazy_property

@@ -561,11 +561,11 @@ class CorrCholeskyTransform(Transform):
     def _call(self, x):
         x = torch.tanh(x)
         eps = torch.finfo(x.dtype).eps
-        x = x.clamp(min=-1+eps, max=1-eps)
+        x = x.clamp(min=-1 + eps, max=1 - eps)
         n = (1 + math.sqrt(1 + 8 * x.shape[-1])) / 2
         if round(n) - n > eps:
             raise ValueError(f'The size of last dimension is {y.shape[-1]} which cannot be expressed ' +
-                             f'(D * (D-1)) / 2, i.e. the lower triangular part of a square D x D matrix.')
+                             '(D * (D-1)) / 2, i.e. the lower triangular part of a square D x D matrix.')
         n = round(n)
         r = torch.zeros(x.shape[:-1] + (n, n))
         # TODO: Explore a JIT friendly way to convert a tensor to
