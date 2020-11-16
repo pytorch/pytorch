@@ -93,42 +93,24 @@ void reflection_pad1d_out_template(
   /* resize output */
   if (input.ndimension() == 2) {
     output.resize_({nplane, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
-        reflection_pad1d_out_frame<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
-        reflection_pad1d_out_frame<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    }
+    AT_DISPATCH_FLOATING_AND_QINT_TYPES(input.scalar_type(),
+                                        "reflection_pad1d", [&]() {
+      reflection_pad1d_out_frame<scalar_t>(
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+        nplane,
+        input_w, output_w,
+        pad_l);
+    });
   } else {
     output.resize_({nbatch, nplane, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
-        reflection_pad1d_out_loop<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
-        reflection_pad1d_out_loop<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, output_w,
-          pad_l);
-      });
-    }
+    AT_DISPATCH_FLOATING_AND_QINT_TYPES(input.scalar_type(),
+                                        "reflection_pad1d", [&] {
+      reflection_pad1d_out_loop<scalar_t>(
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+        nbatch, nplane,
+        input_w, output_w,
+        pad_l);
+    });
   }
 }
 
@@ -346,43 +328,25 @@ void reflection_pad2d_out_template(
   if (input.ndimension() == 3) {
     /* resize output */
     output.resize_({nplane, output_h, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
-        reflection_pad2d_out_frame(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
-        reflection_pad2d_out_frame(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    }
+    AT_DISPATCH_FLOATING_AND_QINT_TYPES(input.scalar_type(),
+                                        "reflection_pad2d", [&] {
+      reflection_pad2d_out_frame(
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+        nplane,
+        input_w, input_h, output_w, output_h,
+        pad_l, pad_t);
+    });
   } else {
     /* resize output */
     output.resize_({nbatch, nplane, output_h, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
-        reflection_pad2d_out_loop(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
-        reflection_pad2d_out_loop(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    }
+    AT_DISPATCH_FLOATING_AND_QINT_TYPES(input.scalar_type(),
+                                        "reflection_pad2d", [&] {
+      reflection_pad2d_out_loop(
+        input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+        nbatch, nplane,
+        input_w, input_h, output_w, output_h,
+        pad_l, pad_t);
+    });
   }
 }
 
