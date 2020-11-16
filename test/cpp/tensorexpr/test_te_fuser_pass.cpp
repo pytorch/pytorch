@@ -26,7 +26,6 @@ struct WithCPUFuser {
 
 void testFuserPass_1() {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128, strides=[1], device=cpu),
           %1 : Float(128, strides=[1], device=cpu)):
@@ -53,7 +52,6 @@ void testFuserPass_1() {
 
 void testFuserPass_2() {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128, strides=[1], device=cpu),
           %1 : Float(128, strides=[1], device=cpu)):
@@ -78,7 +76,6 @@ void testFuserPass_2() {
 
 void testFuserPass_3() {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(128, strides=[1], device=cpu),
           %y : Float(128, strides=[1], device=cpu)):
@@ -107,7 +104,6 @@ void testFuserPass_3() {
 }
 
 void testFuserPass_0DimInput() {
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(device=cuda),
           %y : Float(device=cuda)):
@@ -127,7 +123,6 @@ void testFuserPass_0DimInput() {
 
 void testFuserPass_UnfusibleDevice() {
   WithCPUFuser cf(false);
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(10, strides=[1], device=cpu)):
@@ -145,7 +140,6 @@ void testFuserPass_UnfusibleDevice() {
 
 void testFuserPass_UnknownShapes() {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Tensor,
           %y : Tensor):
@@ -165,7 +159,6 @@ void testFuserPass_UnknownShapes() {
 void testFuserPass_Multidevice() {
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -185,7 +178,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cuda:0),
@@ -206,7 +198,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -228,7 +219,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cpu),
@@ -250,7 +240,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cpu),
           %y : Float(20, strides=[1], device=cuda:0)):
@@ -267,7 +256,6 @@ void testFuserPass_Multidevice() {
   }
   {
     WithCPUFuser cf;
-    KernelScope kernel_scope;
     const auto graph_string = R"IR(
     graph(%x : Float(10, strides=[1], device=cuda:0),
           %y : Float(20, strides=[1], device=cuda:1),
@@ -290,7 +278,6 @@ void testFuserPass_Multidevice() {
 
 void testFuserPass_MergeGroups() {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%a : Float(128, strides=[1], device=cpu),
           %b : Float(128, strides=[1], device=cpu)):
@@ -313,7 +300,6 @@ void testFuserPass_MergeGroups() {
 
 void testFuserPass_UnknownShapesIgnored() {
   WithCPUFuser cf;
-  KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(device=cpu),
           %y : Float(device=cpu)):
