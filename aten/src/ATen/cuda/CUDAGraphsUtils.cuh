@@ -25,6 +25,10 @@ unpack(at::PhiloxCudaState arg) {
 } // namespace philox
 
 inline int currentStreamCaptureStatus() {
+  // protects against enum cudaStreamCaptureStatus implementation changes
+  static_assert(int(cudaStreamCaptureStatusNone) == 0);
+  static_assert(int(cudaStreamCaptureStatusActive) == 1);
+  static_assert(int(cudaStreamCaptureStatusInvalidated) == 2);
   #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
   cudaStreamCaptureStatus is_capturing;
   AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
@@ -36,7 +40,7 @@ inline int currentStreamCaptureStatus() {
 }
 
 inline void assertNotCapturing(std::string attempt) {
-  auto status = currentStreamCaptureStatus;
+  auto status = currentStreamCaptureStatus();
   TORCH_CHECK(status == 0,
               attempt,
               " during graph capture. ",
