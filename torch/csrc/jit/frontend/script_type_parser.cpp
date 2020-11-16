@@ -202,6 +202,12 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
 
     throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";
   } else if (auto name = parseBaseTypeName(expr)) {
+    if (*name == "torch.classes.cuda.Stream") {
+        std::cout << " In custom Class " << *name << std::endl;
+        auto custom_class_type = getCustomClass(std::string("__torch__.torch.classes.cuda.Stream"));
+        return custom_class_type;
+    }
+
     auto itr = string_to_type_lut().find(*name);
     if (itr != string_to_type_lut().end()) {
       return itr->second;

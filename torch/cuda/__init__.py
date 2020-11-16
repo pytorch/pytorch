@@ -401,7 +401,26 @@ def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.get_current_strea
     """
     if stream is None:
         return
-    return get_current_stream(stream)
+
+    def __init__(self, stream: 'torch.classes.cuda.Stream'):
+        self.idx = get_device_index(device=None, optional=True)
+        self.cur_stream = stream
+        self.src_prev_stream = stream
+        self.dst_prev_stream = stream
+
+    def __enter__(self):
+        if self.idx == -1:
+            return
+        self.src_prev_stream = torch.cuda._cuda_getStream(self.idx)
+        if self.idx != self.cur_stream.device_index():
+            with device_jit(self.cur_stream.device()):
+                self.dst_prev_stream = torch.cuda._cuda_getStream(self.idx)
+        torch.cuda._cuda_setStream(self.cur_stream)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
+            torch.cuda._cuda_setStream(self.dst_prev_stream)
+        torch.cuda._cuda_setStream(self.src_prev_stream)
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
