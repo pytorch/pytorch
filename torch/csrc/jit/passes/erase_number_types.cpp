@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void EraseNumberTypesOnBlock(Block* block) {
+static void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
     for (auto inp : it->inputs()) {
@@ -24,7 +24,7 @@ void EraseNumberTypesOnBlock(Block* block) {
             it->output()->type()->isSubtypeOf(BoolType::get())) {
           at::Scalar s;
           if (it->output()->type()->isSubtypeOf(BoolType::get())) {
-            s = *constant_as<bool>(it->output());
+            s = static_cast<int64_t>(*constant_as<bool>(it->output()));
           } else {
             s = *constant_as<at::Scalar>(it->output());
           }
