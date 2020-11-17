@@ -1353,7 +1353,7 @@ class TestLinalg(TestCase):
         def run_test_singular_input(batch_dim, n):
             x = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             x[n, -1, -1] = 0
-            with self.assertRaisesRegex(RuntimeError, r'.*For batch .* : U(3,3) is zero.*'):
+            with self.assertRaisesRegex(RuntimeError, rf'inverse_{device}: For batch {n}: U\(3,3\) is zero, singular U.'):
                 torch.inverse(x)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
