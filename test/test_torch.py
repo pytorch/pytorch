@@ -9040,11 +9040,14 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
     @dtypes(torch.float)
+    @onlyOnCPUAndCUDA   # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
-        x = torch.tensor([2], device=device, dtype=dtype)
-        self.assertEqual(x.squeeze().kthvalue(1), x.kthvalue(1))
+        res = torch.tensor(2, device=device, dtype=dtype).kthvalue(1)
+        ref = torch.tensor([2], device=device, dtype=dtype).kthvalue(1)
+        self.assertEqual(res[0], ref[0].squeeze())
+        self.assertEqual(res[1], ref[1].squeeze())
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
