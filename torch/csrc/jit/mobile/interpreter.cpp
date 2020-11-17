@@ -36,8 +36,8 @@ bool InterpreterState::run(Stack& stack) {
     switch (inst.op) {
       case OP: {
         if (at::hasGlobalCallbacks()) {
-          if (auto* mobile_debug_info = static_cast<MobileDebugInfo*>(
-                  c10::ThreadLocalDebugInfo::get(
+          if (auto* mobile_debug_info =
+                  static_cast<MobileDebugInfo*>(c10::ThreadLocalDebugInfo::get(
                       c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
             mobile_debug_info->setOpIdx(pc);
           }
