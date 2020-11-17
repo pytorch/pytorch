@@ -18,8 +18,11 @@ class AttributePropagator {
   AttributePropagator(
       Module& module,
       std::vector<std::string>& preservedAttrs,
-      bool freezeInterfaces)
-      : module_(module), freezeInterfaces_(freezeInterfaces) {
+      bool freezeInterfaces,
+      bool preserveParameters)
+      : module_(module),
+        freezeInterfaces_(freezeInterfaces),
+        preserveParameters_(preserveParameters) {
     // Currently only top level attributes and functions can  be preserved
     // explicitly.
     auto checkName = [this](std::string& name) {
@@ -79,7 +82,8 @@ class AttributePropagator {
       ClearProfilingInformation(subgraph);
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
-      runOptimization(subgraph, /* unroll? */ false);
+      runOptimization(
+          subgraph, /* unroll? */ false, /* const_prop_user_classes? */ false);
     };
 
     for (auto function : preservedMethods_) {
@@ -312,6 +316,15 @@ class AttributePropagator {
         val = overrideGradient(val);
       }
       attr = std::move(dict);
+    } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
+      auto obj_type = attr.type()->expect<ClassType>();
+      auto obj_value = std::move(attr).toObject();
+      auto sub_attributes = obj_type->getAttributes();
+      for (const auto& sub_attr : sub_attributes) {
+        auto sub_attr_val = obj_value->getAttr(sub_attr.getName());
+        sub_attr_val = overrideGradient(sub_attr_val);
+      }
+      return obj_value;
     }
 
     return attr;
@@ -426,8 +439,18 @@ class AttributePropagator {
           }
           if (!paramConst) {
             auto attr = attrModule.attr(name);
-
-            if (isEval) {
+            if (!isEval || preserveParameters_) {
+              auto type = attrModule.type();
+              auto slot = *type->findAttributeSlot(name);
+              if (type->is_parameter(slot) || type->is_buffer(slot)) {
+                continue;
+              } else {
+                attr = overrideGradient(attr);
+              }
+              if (!isEval && name == "training") {
+                continue;
+              }
+            } else {
               attr = overrideGradient(attr);
             }
             if (auto attrVal = tryInsertConstant(*graph, attr)) {
@@ -713,6 +736,9 @@ class AttributePropagator {
   // Allow to freeze modules containing interfaces.
   bool freezeInterfaces_;
 
+  // Preserve module parameters
+  bool preserveParameters_;
+
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
 }; // class AttributePropagator
@@ -721,18 +747,8 @@ class AttributePropagator {
 Module freeze_module(
     const Module& module,
     std::vector<std::string> preservedAttrs,
-    bool freezeInterfaces) {
-  // Currently freezing module is supported only in eval mode.
-  // If assertion below is commented and module is in training mode then this
-  // implementation folds attributes correctly. Tensor attributes with
-  // required_grad set are not folded and 'training' attribute is also not
-  // folded.
-  // TODO: Determine if freezing in training mode is useful and further clarify
-  // its semantics.
-  TORCH_CHECK(
-      !module.hasattr("training") || !module.is_training(),
-      "Freezing module in training mode is not yet supported");
-
+    bool freezeInterfaces,
+    bool preserveParameters) {
   Method method = module.get_method("forward");
   // Check that module does not return itself.
   for (auto& output : method.graph()->outputs()) {
@@ -743,7 +759,7 @@ Module freeze_module(
 
   auto moduleClone = module.clone(true);
   AttributePropagator attrPropagator(
-      moduleClone, preservedAttrs, freezeInterfaces);
+      moduleClone, preservedAttrs, freezeInterfaces, preserveParameters);
   attrPropagator.run();
   return moduleClone;
 }
