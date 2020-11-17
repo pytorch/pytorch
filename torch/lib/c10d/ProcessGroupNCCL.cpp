@@ -440,7 +440,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    const c10::intrusive_ptr<Options>& options)
+    c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(store),
       ncclCommCounter_(0),
@@ -989,7 +989,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     int rank,
     OpType opType,
     const char* profilingTitle) {
-  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType);
+  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType, profilingTitle);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {

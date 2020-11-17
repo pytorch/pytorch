@@ -1612,13 +1612,13 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty_meta(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  #use_c10_dispatcher: full
+  use_c10_dispatcher: full
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  #use_c10_dispatcher: full
+  use_c10_dispatcher: full
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -1626,7 +1626,7 @@
     SparseCPU, SparseCUDA: empty_sparse
 
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  #use_c10_dispatcher: full
+  use_c10_dispatcher: full
   variants: method
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1679,7 +1679,7 @@
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
@@ -4595,12 +4595,12 @@
   use_c10_dispatcher: full
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_sparse
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_and_tensor_sparse
 
@@ -5680,13 +5680,13 @@
     DefaultBackend: tril
 
 - func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
 - func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  use_c10_dispatcher: full
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda

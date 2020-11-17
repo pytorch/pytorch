@@ -94,7 +94,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'exp', 'nonzero', 'mean'
+    'exp', 'nonzero', 'mean', 'inverse', 'solve'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -399,6 +399,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         strategy = dispatch_strategy(declaration)
         if declaration['name'] not in MANUAL_AUTOGRAD and strategy == 'use_derived':
             body = emit_body(declaration)
+
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body, formals=formals))
             if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase
@@ -365,7 +366,8 @@ class QuantizationTestCase(TestCase):
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_default_qat_module_mappings().values() and \
-           type(module) not in float_to_observed_module_class_mapping.values():
+           type(module) not in float_to_observed_module_class_mapping.values() and \
+           not isinstance(module, _FusedModule):
             for child in module.children():
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
