@@ -565,6 +565,7 @@ namespace jit {
   _(CudaHalfCast)                          \
   _(CudaHalfSupport)                       \
   _(CudaHalfPropagation)                   \
+  _(CudaUnusedHalfArgument)                \
   _(CudaPrioritizeDependents)              \
   _(CudaMaskBlockDim)                      \
   _(CudaMaskThreadDim)                     \
