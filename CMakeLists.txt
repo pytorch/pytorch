@@ -524,7 +524,7 @@ if(USE_KINETO AND (NOT USE_CUDA))
   set(USE_KINETO OFF)
 endif()
 
-if (USE_KINETO AND MSVC)
+if(USE_KINETO AND MSVC)
   message(STATUS "Not using libkineto in a Windows build.")
   set(USE_KINETO OFF)
 endif()
