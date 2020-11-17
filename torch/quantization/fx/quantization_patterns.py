@@ -459,7 +459,7 @@ class Embedding(QuantizeHandler):
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes not in supported_dtypes:
             warnings.warn("dtype combination: {} is not "
-                          "supported by Embedding/EmbeddingBag op".format(dtypes))
+                          "supported by Embedding/EmbeddingBag".format(dtypes))
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         qemb = get_static_quant_module_class(type(emb))
