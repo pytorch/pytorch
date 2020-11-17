@@ -129,9 +129,12 @@ ExprHandle TensorExprKernel::broadcast(
 ExprHandle TensorExprKernel::chunk(
     Tensor* t,
     size_t chunkIdx,
-    size_t dim,
-    size_t chunks,
+    int64_t dim,
+    int64_t chunks,
     const std::vector<ExprHandle>& axes) {
+  if (dim < 0) {
+    dim = axes.size() + dim;
+  }
   auto sizes = bufferSizes(t);
   size_t step = sizes[dim] / chunks;
 

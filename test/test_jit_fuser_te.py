@@ -1347,6 +1347,14 @@ class TestTEFuser(JitTestCase):
         t = torch.rand(8, dtype=torch.float, device='cuda')
         scripted = self.checkScript(eager, (t, t, t, t, 0.1))
 
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_chunk_mul_one(self):
+        def eager(x):
+            z, y, w = torch.chunk(x, 3, -1)
+            return z*3, y, w
+        x = torch.rand(64, 1, 3072, dtype=torch.float, device='cuda')
+        script = self.checkScript(eager, (x,))
+
 
 if __name__ == '__main__':
     run_tests()
