@@ -11,6 +11,7 @@
 
 namespace torch {
 namespace jit {
+
 namespace {
 void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
   Inline(*graph);
@@ -69,18 +70,191 @@ std::unique_ptr<c10::FunctionSchema> RemoveSelfFromSchema(
   return std::make_unique<c10::FunctionSchema>(s.cloneWithArguments(args));
 }
 
-void AssignRegisters(
+// Returns two useful constructs:
+//  first: map each value to all values that are alive
+//    at the same time.
+//  second: set of all inputs/outputs/constants (always alive)
+std::pair<std::unordered_map<Value*, std::set<Value*>>, std::set<Value*>>
+LivenessMap(const std::shared_ptr<torch::jit::Graph>& graph) {
+  std::unordered_map<Value*, std::set<Value*>> liveness_map;
+  std::set<Value*> always_alive;
+
+  std::vector<Value*> frontier;
+  // map live values to their deps, invariant: set.size() > 0
+  std::unordered_map<Value*, std::set<Node*>> live_values;
+  for (const auto& input : graph->inputs()) {
+    frontier.emplace_back(input);
+    always_alive.insert(input);
+  }
+  for (const auto& output : graph->outputs()) {
+    always_alive.insert(output);
+  }
+
+  auto add_live_value = [&](Value* v) {
+    liveness_map[v] = {};
+
+    for (const auto& live_v : live_values) {
+      liveness_map.at(v).insert(live_v.first);
+      liveness_map.at(live_v.first).insert(v);
+    }
+
+    // only add values to the live set if they
+    // have deps, otherwise they die immediately
+    if (v->uses().size()) {
+      live_values[v] = {};
+    }
+
+    for (const auto& u : v->uses()) {
+      const auto& node = u.user;
+      // track deps of this value
+      live_values.at(v).insert(node);
+    }
+  };
+
+  auto traverse_node = [&](Node* node, std::vector<Value*>& dead) {
+    for (const auto& input : node->inputs()) {
+      // ignore constant values
+      if (input->node()->kind() == prim::Constant) {
+        always_alive.insert(input);
+        continue;
+      }
+      if (live_values.count(input)) {
+        live_values.at(input).erase(node);
+        if (!live_values.at(input).size()) {
+          dead.emplace_back(input);
+        }
+      }
+    }
+  };
+
+  for (const auto& node : graph->nodes()) {
+    for (const auto& v : node->outputs()) {
+      add_live_value(v);
+    }
+
+    std::vector<Value*> dead;
+    traverse_node(node, dead);
+    for (const auto& dead_value : dead) {
+      live_values.erase(dead_value);
+    }
+  }
+
+  for (const auto& v : live_values) {
+    TORCH_CHECK(always_alive.count(v.first));
+  }
+
+  for (const auto& node : graph->nodes()) {
+    for (const auto& input : node->inputs()) {
+      for (const auto& output : node->outputs()) {
+        if (liveness_map.count(input) && liveness_map.count(output)) {
+          liveness_map.at(input).insert(output);
+          liveness_map.at(output).insert(input);
+        }
+      }
+    }
+  }
+
+  return std::make_pair(liveness_map, always_alive);
+}
+
+std::unordered_set<Value*> GetOptimizableValues(
+    const std::shared_ptr<torch::jit::Graph>& graph) {
+  std::unordered_set<Value*> is_out_of_place;
+  std::unordered_set<Value*> is_not_out_of_place;
+  for (const auto& n : graph->nodes()) {
+    for (const auto& container : {n->inputs(), n->outputs()}) {
+      for (const auto& v : container) {
+        if (canRunOutOfPlace(n)) {
+          is_out_of_place.insert(v);
+        } else {
+          is_not_out_of_place.insert(v);
+        }
+      }
+    }
+  }
+  for (auto v : is_not_out_of_place) {
+    is_out_of_place.erase(v);
+  }
+  return is_out_of_place;
+}
+
+size_t AssignRegisters(
     const std::shared_ptr<torch::jit::Graph>& graph,
     std::unordered_map<Value*, size_t>& value_to_reg,
     std::vector<Value*>& values,
     std::vector<size_t>& input_regs,
-    std::vector<size_t>& output_regs) {
+    std::vector<size_t>& output_regs,
+    bool optimize_memory) {
+  auto lm = LivenessMap(graph);
+  auto optimizable_values = GetOptimizableValues(graph);
+
+  size_t num_regs = 0;
+  size_t reused_regs = 0;
+  std::unordered_map<size_t, std::set<Value*>> reg_to_val;
+  auto getReg = [&](Value* v) -> size_t {
+    if (!optimize_memory) {
+      return num_regs++;
+    }
+    auto iter = lm.first.find(v);
+    if (iter == lm.first.end()) {
+      return num_regs++;
+    }
+    if (!optimizable_values.count(v)) {
+      return num_regs++;
+    }
+    if (lm.second.count(v)) {
+      return num_regs++;
+    }
+    const auto& live_values = iter->second;
+    // iterate through all the allocated registers
+    // and check for potential re-use, greedily
+    for (const auto& v2r : value_to_reg) {
+      auto candidate_v = v2r.first;
+
+      if (!optimizable_values.count(candidate_v)) {
+        continue;
+      }
+      if (lm.second.count(candidate_v)) {
+        continue;
+      }
+
+      // Only re-use float* tensors
+      auto t = candidate_v->type()->cast<TensorType>();
+      if (!t) {
+        continue;
+      }
+      // TODO audit this assumption (passes tests, but is scary)
+      if (t->scalarType() && *(t->scalarType()) != at::kFloat) {
+        continue;
+      }
+      // TODO
+      // if (*(t->scalarType()) != at::kFloat) {
+      //  continue;
+      //}
+      if (!live_values.count(candidate_v)) {
+        bool already_used = false;
+        for (auto use : reg_to_val.at(v2r.second)) {
+          if (live_values.count(use)) {
+            already_used = true;
+          }
+        }
+        if (already_used) {
+          continue;
+        }
+        reused_regs++;
+        return v2r.second;
+      }
+    }
+    return num_regs++;
+  };
+
   // assign register to Value*
   for (Value* input : graph->inputs()) {
     TORCH_CHECK(value_to_reg.count(input) == 0);
-    size_t index = value_to_reg.size();
-    value_to_reg[input] = index;
-    input_regs.push_back(index);
+    auto reg = getReg(input);
+    value_to_reg[input] = reg;
+    reg_to_val[reg].insert(input);
+    input_regs.push_back(reg);
   }
   for (Node* node : graph->nodes()) {
     for (Value* input : node->inputs()) {
@@ -89,8 +263,9 @@ void AssignRegisters(
     for (Value* output : node->outputs()) {
       TORCH_CHECK(
           value_to_reg.count(output) == 0, "the graph needs to be in SSA form");
-      size_t index = value_to_reg.size();
-      value_to_reg[output] = index;
+      auto reg = getReg(output);
+      value_to_reg[output] = reg;
+      reg_to_val[reg].insert(output);
     }
   }
   TORCH_CHECK(graph->outputs().size() > 0);
@@ -103,11 +278,12 @@ void AssignRegisters(
   for (const auto& p : value_to_reg) {
     values[p.second] = p.first;
   }
+  return reused_regs;
 }
 
-// Internal blobs (IValues) are discarded after run if
+// Internal values are discarded after run if
 // opts_.cleanup_activations is true.
-void DeduceInternalBlobs(
+void DeduceInternalValues(
     const std::shared_ptr<torch::jit::Graph>& graph,
     const std::unordered_map<Value*, size_t>& value_to_reg,
     std::vector<size_t>& internals) {
@@ -129,12 +305,20 @@ void InferenceModule::init() {
   OptimizeGraph(graph);
   CheckGraphEligibility(graph);
   RemoveSelfFromGraphInput(graph);
-  AssignRegisters(graph, value_to_reg, values, input_regs, output_regs);
-  DeduceInternalBlobs(graph, value_to_reg, internals);
+  reused_regs = AssignRegisters(
+      graph,
+      value_to_reg,
+      values,
+      input_regs,
+      output_regs,
+      opts.optimize_memory);
+  DeduceInternalValues(graph, value_to_reg, internals);
 }
 
-InferenceModule::InferenceModule(const torch::jit::Module& m)
-    : module(m.copy()), graph(nullptr), schema(nullptr) {
+InferenceModule::InferenceModule(
+    const torch::jit::Module& m,
+    InferenceModuleOptions opts_)
+    : module(m.copy()), graph(nullptr), schema(nullptr), opts(opts_) {
   module.eval();
   module = freeze_module(module);
 
@@ -147,8 +331,10 @@ InferenceModule::InferenceModule(const torch::jit::Module& m)
   init();
 }
 
-InferenceModule::InferenceModule(std::shared_ptr<torch::jit::Graph> g)
-    : module(), graph(g), schema(nullptr) {
+InferenceModule::InferenceModule(
+    std::shared_ptr<torch::jit::Graph> g,
+    InferenceModuleOptions opts_)
+    : module(), graph(std::move(g)), schema(nullptr), opts(opts_) {
   init();
 }
 
@@ -171,6 +357,9 @@ StaticRuntime::StaticRuntime(
   const auto& value_to_reg = module_->value_to_reg;
 
   // fill workspace_ with constants and create ProcessedNodes
+  // NB: before optimizing the order of execution, ensure that the
+  // memory optimization pass (LivenessMap + AssignRegisters) is
+  // aware of the new order!
   for (Node* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
       TORCH_CHECK(node->output()->type()->kind() != FunctionType::Kind);
@@ -235,6 +424,9 @@ c10::IValue StaticRuntime::run(
     Input(i) = stack[i];
   }
 
+  // NB: before optimizing the order of execution, ensure that the
+  // memory optimization pass (LivenessMap + AssignRegisters) is
+  // aware of the new order!
   for (const auto& n : nodes_) {
     n.run(reg_);
   }
@@ -290,6 +482,15 @@ void StaticRuntime::benchmark(
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
+
+  if (planner_) {
+    std::cout << "Total memory managed: " << planner_->total_managed()
+              << " bytes" << std::endl;
+  }
+  if (module_->opts.optimize_memory) {
+    std::cout << "Total number of reused registers: " << module_->reused_regs
+              << std::endl;
+  }
 }
 
 float StaticRuntime::benchmark_model(
