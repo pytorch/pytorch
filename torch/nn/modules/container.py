@@ -398,7 +398,6 @@ class ParameterList(Module):
 
     def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
         super(ParameterList, self).__init__()
-        self._initialized = True
         if parameters is not None:
             self += parameters
 
@@ -431,7 +430,7 @@ class ParameterList(Module):
         return self.register_parameter(str(idx), param)
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
+        if not isinstance(value, torch.nn.Parameter):
             warnings.warn("Setting attributes on ParameterList is not supported.")
         super(ParameterList, self).__setattr__(key, value)
 
@@ -534,7 +533,6 @@ class ParameterDict(Module):
 
     def __init__(self, parameters: Optional[Mapping[str, 'Parameter']] = None) -> None:
         super(ParameterDict, self).__init__()
-        self._initialized = True
         if parameters is not None:
             self.update(parameters)
 
@@ -548,7 +546,7 @@ class ParameterDict(Module):
         del self._parameters[key]
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
+        if not isinstance(value, torch.nn.Parameter):
             warnings.warn("Setting attributes on ParameterDict is not supported.")
         super(ParameterDict, self).__setattr__(key, value)
 
