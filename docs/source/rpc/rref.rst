@@ -87,7 +87,7 @@ The only requirement is that any
 ``UserRRef`` must notify the owner upon destruction. Hence, we need the first
 guarantee:
 
-**G1. The owner will be notified when any ``UserRRef`` is deleted.**
+**G1. The owner will be notified when any UserRRef is deleted.**
 
 As messages might come delayed or out-of-order, we need one more guarantee to
 make sure the delete message is not processed too soon. If A sends a message to
@@ -132,12 +132,12 @@ to Y, and Y forks to Z:
   OwnerRRef -> A -> Y -> Z
 
 If all of Z's messages, including the delete message, are processed by the
-owner before all messages from Y, the owner will learn Z's deletion before
-knowing Y. Nevertheless, this does not cause any problem. Because, at least
-one of Y's ancestors will be alive (in this case, A) and it will
+owner before Y's messages. the owner will learn of Z's deletion befores
+knowing Y exists. Nevertheless, this does not cause any problem. Because, at least
+one of Y's ancestors will be alive (A) and it will
 prevent the owner from deleting the ``OwnerRRef``. More specifically, if the
-owner does not know Y, A cannot be deleted due to **G2**, and the owner knows A
-as the owner is A's parent.
+owner does not know Y, A cannot be deleted due to **G2**, and the owner knows A 
+since it is A's parent.
 
 Things get a little trickier if the RRef is created on a user:
 
