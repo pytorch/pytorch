@@ -298,10 +298,13 @@ class DispatcherSignature:
     def arguments(self) -> Tuple[DispatcherArgument, ...]:
         return self._arguments
 
+    def name(self) -> str:
+        return dispatcher.name(self.func)
+
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(map(str, self.arguments()))
         if name is None:
-            name = native.name(self.func)
+            name = self.name()
         return f"{self._returns_type} {name}({args_str})"
 
     def exprs(self) -> Sequence[DispatcherExpr]:
@@ -367,10 +370,13 @@ class NativeSignature:
     _arguments: Tuple[NativeArgument, ...]
     _returns_type: str
 
+    def name(self) -> str:
+        return native.name(self.func)
+
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(map(str, self.arguments()))
         if name is None:
-            name = dispatcher.name(self.func)
+            name = self.name()
         return f"{self._returns_type} {name}({args_str})"
 
     def arguments(self) -> Tuple[NativeArgument, ...]:
@@ -389,6 +395,25 @@ class NativeSignature:
             _arguments=arguments,
             _returns_type=returns_type,
         )
+
+# ------------------------------------------------------------------- #
+
+#                           meta api
+
+# ------------------------------------------------------------------- #
+
+@dataclass(frozen=True)
+class MetaArgument:
+    type: str
+    name: str
+    # structured kernels (for which MetaArgument matters) always will
+    # be use_c10_dispatcher full.  That means JIT arguments and 
+    # meta arguments are always in 1:1 correspondence.  If this is ever not true
+    # we will have to do something more fancy here.
+    argument: Argument
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native
