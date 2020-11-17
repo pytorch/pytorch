@@ -26,6 +26,7 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
+#include <c10d/frontend.hpp>
 #include <c10d/reducer.hpp>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
@@ -967,9 +968,9 @@ Arguments:
             ::c10d::ProcessGroupGloo::Options options;
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
+            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV);
             if (ifnameEnv) {
-              for (const auto& iface : split(',', ifnameEnv)) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options.devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }

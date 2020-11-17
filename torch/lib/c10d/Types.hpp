@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iostream>
 
 namespace c10d {
 
@@ -15,6 +16,7 @@ enum class ReduceOp : std::uint8_t {
   BXOR, // Bitwise XOR
   UNUSED,
 };
+
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
