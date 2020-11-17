@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
      skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
      skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC,
-     wrapDeterministicFlagAPITest, make_tensor)
+     wrapDeterministicFlagAPITest, make_tensor, TemporaryFileName)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, \
@@ -3111,14 +3111,15 @@ class AbstractTestCases:
                 t2.fill_(rnum)
                 self.assertEqual(t1, t2, atol=0, rtol=0)
 
-            f = tempfile.NamedTemporaryFile(delete=False)
-            assert_with_filename(f.name)
-            os.unlink(f.name)
+                # release the tensors
+                del s1, t1, s2, t2
 
-            temp_dir = tempfile.TemporaryDirectory(suffix='中文')
-            f2 = tempfile.NamedTemporaryFile(delete=False, dir=temp_dir.name)
-            assert_with_filename(f2.name)
-            os.unlink(f2.name)
+            with TemporaryFileName() as fname:
+                assert_with_filename(fname)
+
+            temp_dir = tempfile.TemporaryDirectory(suffix=u'中文')
+            with TemporaryFileName(dir=temp_dir.name) as fname:
+                assert_with_filename(fname)
 
         def test_torch_from_file(self):
             def assert_with_filename(filename):
@@ -3141,14 +3142,15 @@ class AbstractTestCases:
                 t2.fill_(rnum)
                 self.assertEqual(t1, t2, atol=0, rtol=0)
 
-            f = tempfile.NamedTemporaryFile(delete=False)
-            assert_with_filename(f.name)
-            os.unlink(f.name)
+                # release the tensors
+                del s1, t1, s2, t2
 
-            temp_dir = tempfile.TemporaryDirectory(suffix='中文')
-            f2 = tempfile.NamedTemporaryFile(delete=False, dir=temp_dir.name)
-            assert_with_filename(f2.name)
-            os.unlink(f2.name)
+            with TemporaryFileName() as fname:
+                assert_with_filename(fname)
+
+            temp_dir = tempfile.TemporaryDirectory(suffix=u'中文')
+            with TemporaryFileName(dir=temp_dir.name) as fname:
+                assert_with_filename(fname)
 
         def test_print(self):
             default_type = torch.Tensor().type()
