@@ -482,6 +482,29 @@ class TestObserver(QuantizationTestCase):
             # Verify that state_dict matches exactly with original one.
             self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_observer_qparams_respects_device_affinity(self):
+        """
+        Ensure that the scale and zero_point returned by the observer
+        are on the same device as the input tensor.
+        """
+        observerList = [MinMaxObserver(),
+                        MovingAverageMinMaxObserver(),
+                        PerChannelMinMaxObserver(),
+                        MovingAveragePerChannelMinMaxObserver()]
+        for obs in observerList:
+            device = torch.device('cuda:1')
+            x = torch.randn(1, 2, device=device)
+            obs.to(device)
+            result = obs(x)
+            scale, zero_point = obs.calculate_qparams()
+
+            self.assertEqual(x.device, scale.device)
+            self.assertEqual(x.device, zero_point.device)
+
+
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
     def __init__(self, *args, **kwargs):

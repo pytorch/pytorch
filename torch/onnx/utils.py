@@ -494,7 +494,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
-                             fixed_batch_size=False, custom_opsets=None, add_node_names=True):
+                             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
+                             onnx_shape_inference=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -503,6 +504,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         custom_opsets = {}
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
+    from torch.onnx.symbolic_helper import _set_onnx_shape_inference
+    _set_onnx_shape_inference(onnx_shape_inference)
     with select_model_mode_for_export(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
@@ -583,7 +586,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=False, use_new_jit_passes=False):
+            onnx_shape_inference=True, use_new_jit_passes=False):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
@@ -949,10 +952,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
-            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
+            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack" or op_name == "Uninitialized":
                 # None is not an ONNX operator; keep it as None
                 # Let the exporter handle and finally eliminate these ops
                 # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
+                # Uninitialized will be erased during shape/type inference
                 return None
             elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
                 return None
@@ -962,8 +966,21 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 for b in n.blocks():
                     new_block = new_node.addBlock()
                     # Copy input metadata to subblock
-                    # This is for Loop only, since If only has a single input.
+                    #
+                    # If format:
+                    #   prim::If(cond)
+                    #     block0()
+                    #     block1()
+                    #
+                    # Loop format:
+                    #   prim::Loop(iter, cond, input_1, ..., input_n)
+                    #     block0(iter, input_1, ..., input_n)
+                    #
+                    # For `If` node, there is nothing to copy.
+                    # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
                     for i, b_in in enumerate(b.inputs()):
+                        if i == 0 and i < len(inputs):
+                            b_in.setType(inputs[i].type())
                         if i > 0 and (i + 1) < len(inputs):
                             b_in.setType(inputs[i + 1].type())
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)

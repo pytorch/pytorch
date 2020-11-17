@@ -275,18 +275,7 @@ public:
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
   Vec256<c10::complex<double>> sqrt() const {
-    //   sqrt(a + bi)
-    // = sqrt(2)/2 * [sqrt(sqrt(a**2 + b**2) + a) + sgn(b)*sqrt(sqrt(a**2 + b**2) - a)i]
-    // = sqrt(2)/2 * [sqrt(abs() + a) + sgn(b)*sqrt(abs() - a)i]
-
-    const __m256d scalar = _mm256_set1_pd(std::sqrt(2)/2);             //sqrt(2)/2      sqrt(2)/2
-    const __m256d sign_mask = _mm256_setr_pd(0.0, -0.0, 0.0, -0.0);
-    auto sign = _mm256_and_pd(values, sign_mask);
-    auto factor = _mm256_or_pd(scalar, sign);
-
-    auto a_a = _mm256_xor_pd(_mm256_movedup_pd(values), sign_mask);    // a             -a
-    auto res_re_im = _mm256_sqrt_pd(_mm256_add_pd(abs_(), a_a));       // sqrt(abs + a) sqrt(abs - a)
-    return _mm256_mul_pd(factor, res_re_im);
+    return map(std::sqrt);
   }
   Vec256<c10::complex<double>> reciprocal() const;
   Vec256<c10::complex<double>> rsqrt() const {

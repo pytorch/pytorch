@@ -966,6 +966,18 @@ class TestTensorExprFuser(BaseTestClass):
         assert np.isnan(warmup_and_run_forward(tmax, y, x).item())
         self.assertLastGraphAllFused()
 
+    def test_double_intrinsics(self):
+        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
+        def do_pow(x):
+            return torch.pow(x, 7)
+
+        for device in devices:
+            x = torch.rand(10, dtype=torch.double, device=device)
+            traced = torch.jit.trace(do_pow, (x))
+            x = warmup_and_run_forward(traced, x)
+            self.assertLastGraphAllFused()
+
     def test_remainder(self):
         def run_remainder(x, y):
             c = torch.remainder(torch.add(x, y), x)
@@ -1293,6 +1305,21 @@ class TestTensorExprFuser(BaseTestClass):
             b = torch.rand(1024, dtype=torch.half, device=device)
             traced = torch.jit.trace(bias_gelu, (a, b))
             x = warmup_and_run_forward(traced, a, b)
+            self.assertLastGraphAllFused()
+
+    def test_exp_pow(self):
+        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
+        @torch.jit.script
+        def do_exp(x, y, z):
+            return ((x * y) * 2) * torch.pow(z, 2)
+
+        for device in devices:
+            x = torch.rand(10, dtype=torch.double, device=device)
+            y = torch.rand(10, dtype=torch.double, device=device)
+            z = torch.rand(10, dtype=torch.double, device=device)
+            traced = torch.jit.trace(do_exp, (x, y, z))
+            x = warmup_and_run_forward(traced, x, y, z)
             self.assertLastGraphAllFused()
 
     def test_transpose(self):
