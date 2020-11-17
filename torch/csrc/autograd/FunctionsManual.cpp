@@ -158,8 +158,9 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).type_as(self);
-    scale_v = grad.clone(at::MemoryFormat::Preserve);
+    Tensor is_eq_max = (self.abs() == norm).type_as(self);
+    self_scaled = self.sign() * is_eq_max;
+    scale_v = grad / is_eq_max.count_nonzero();
   } else if (p < 2.0) {
     self_scaled = self.sign() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
