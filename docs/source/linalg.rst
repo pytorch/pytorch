@@ -12,6 +12,7 @@ Common linear algebra operations.
 Functions
 ---------
 
+.. autofunction:: cholesky
 .. autofunction:: det
 .. autofunction:: eigh
 .. autofunction:: eigvalsh

@@ -13,7 +13,7 @@
 
 // Wait for work to complete
 void waitWork(
-    std::shared_ptr<c10d::ProcessGroupMPI> pg,
+    c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
     std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
   for (auto& work : works) {
     try {
