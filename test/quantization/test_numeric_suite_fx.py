@@ -17,6 +17,7 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
 )
 
+from torch.testing._internal.common_quantized import override_qengines
 
 class TestGraphModeNumericSuite(QuantizationTestCase):
     @override_qengines
