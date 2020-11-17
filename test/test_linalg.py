@@ -324,7 +324,13 @@ class TestLinalg(TestCase):
         m_scalar = torch.tensor(1, device=device, dtype=dtype)
         check(m_scalar, a, b, beta, alpha)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+        # test nans and infs are not propagated to the output when beta == 0
+        float_and_complex_dtypes =  torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()
+        if beta == 0 and dtype in float_and_complex_dtypes:
+            m[0][10] = m[10][10] = m[20][20] = float('inf')
+            m[1][10] = m[11][10] = m[21][20] = float('nan')
+        check(m, a, b, 0, alpha)
+
     @dtypes(torch.bool)
     def test_addr_bool(self, device, dtype):
         self._test_addr_vs_numpy(device, dtype, beta=True, alpha=False)
@@ -332,7 +338,6 @@ class TestLinalg(TestCase):
         self._test_addr_vs_numpy(device, dtype, beta=False, alpha=False)
         self._test_addr_vs_numpy(device, dtype, beta=True, alpha=True)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes()))
     def test_addr_integral(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError,
@@ -353,7 +358,6 @@ class TestLinalg(TestCase):
         # when beta is not zero
         self._test_addr_vs_numpy(device, dtype, beta=2, alpha=2)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @precisionOverride({torch.bfloat16: 1e-1})
     @dtypes(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
     def test_addr_float_and_complex(self, device, dtype):
