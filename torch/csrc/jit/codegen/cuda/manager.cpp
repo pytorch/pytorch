@@ -256,7 +256,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
         std::make_move_iterator(outputs.end()));
   };
 
-  const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
+  const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
   int disable_fb_flag = disable_fb_env ? atoi(disable_fb_env) : 0;
   if (disable_fb_flag) {
     execute_lambda();
@@ -268,7 +268,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
           "FALLBACK path is taken. This is an indication that codegen"
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
-          "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");
+          "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
       // copying graph here since we are eliminating shape information;
       auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
       EraseShapeInformation(copied_graph);

@@ -11,9 +11,9 @@ from test_jit import JitTestCase, RUN_CUDA
 import itertools
 import numpy as np
 
-os.environ['PYTORCH_CUDA_FUSER_DISABLE_FALLBACK'] = '1'
-os.environ['PYTORCH_CUDA_FUSER_DISABLE_FMA'] = '1'
-os.environ['PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL'] = '0'
+os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '1'
+os.environ['PYTORCH_NVFUSER_DISABLE_FMA'] = '1'
+os.environ['PYTORCH_NVFUSER_JIT_OPT_LEVEL'] = '0'
 
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_texpr_fuser_enabled(False)
@@ -552,7 +552,7 @@ class TestCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_random_topo(self):
-        os.environ["PYTORCH_CUDA_FUSER_DISABLE_FALLBACK"] = "1"
+        os.environ["PYTORCH_NVFUSER_DISABLE_FALLBACK"] = "1"
         self.assertTrue(runDefaultTestWithSeed(28449))
 
     def _compare(self, desc, inp1, inp2, error):

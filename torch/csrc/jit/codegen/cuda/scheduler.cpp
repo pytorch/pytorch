@@ -263,7 +263,7 @@ ReductionParams multipleReductionHeuristic(
     gdimx = std::max(gdimx, (int64_t)1);
   }
 
-  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_RED_SCHED_DEBUG");
+  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
   if (debug_env && atoi(debug_env)) {
     std::cout << "\n===== Multiple Reduction Parameters ========" << std::endl
               << "Inputs:" << std::endl
@@ -415,7 +415,7 @@ ReductionParams reductionHeuristic(
     }
   }
 
-  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_RED_SCHED_DEBUG");
+  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
   if (debug_env && atoi(debug_env)) {
     std::cout << "\n===== Reduction Parameters ========" << std::endl
               << "Inputs:" << std::endl

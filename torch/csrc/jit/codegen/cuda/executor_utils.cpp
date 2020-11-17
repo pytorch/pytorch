@@ -348,14 +348,14 @@ NvrtcFunction nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
+  const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
   if (disable_fma && atoi(disable_fma)) {
     args.push_back("--fmad=false");
   }
 
-  const char* ptxas_opt_level = getenv("PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL");
-  uint32_t jit_opt_level;
+  const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
+  uint32_t jit_opt_level = 0;
 
   std::vector<CUjit_option> options;
   std::vector<void*> option_vals;
@@ -368,7 +368,7 @@ NvrtcFunction nvrtcCompile(
       option_vals.emplace_back(&jit_opt_level);
     } else {
       TORCH_WARN_ONCE(
-          "acceptable range for PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
+          "acceptable range for PYTORCH_NVFUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
           jit_opt_level,
           ", ignoring the option");
     }
