@@ -298,6 +298,8 @@ namespace jit {
   _(FuserPass_UnknownShapes)                \
   _(FuserPass_UnknownShapesIgnored)         \
   _(FuserPass_MergeGroups)                  \
+  _(FuserPass_Where)                        \
+  _(FuserPass_WhereList)                    \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \

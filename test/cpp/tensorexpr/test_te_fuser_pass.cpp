@@ -330,5 +330,55 @@ void testFuserPass_UnknownShapesIgnored() {
   testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
+void testFuserPass_IgnoreUnknownShapeAtStart() {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%x : Bool(8:1, device=cpu),
+          %y : Bool(8:1, device=cpu)):
+      %a : Bool(8:1, device=cpu) = aten::__and__(%x, %y)
+      %b : Tensor = aten::__or__(%a, %y)
+      return (%b)
+    )IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 2);
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_Where() {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%x : Float(8:1, device=cpu),
+          %y : Float(8:1, device=cpu),
+          %z : Float(8:1, device=cpu)):
+      %cond : Bool(8:1, device=cpu) = aten::eq(%x, %y)
+      %b : Float(8:1, device=cpu) = aten::where(%cond, %y, %z)
+      return (%b)
+    )IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 2);
+  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_WhereList() {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%x : Float(8:1, device=cpu),
+          %y : Float(8:1, device=cpu),
+          %z : Float(8:1, device=cpu)):
+      %cond : Bool(8:1, device=cpu) = aten::eq(%x, %y)
+      %b : Tensor[] = aten::where(%cond)
+      return (%b)
+    )IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 2);
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
 } // namespace jit
 } // namespace torch
