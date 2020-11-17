@@ -3118,7 +3118,7 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            temp_dir = tempfile.TemporaryDirectory(suffix=u'中文')
+            temp_dir = tempfile.TemporaryDirectory(suffix=u'中文'.encode('utf-8'))
             with TemporaryFileName(dir=temp_dir.name) as fname:
                 assert_with_filename(fname)
 
@@ -3149,7 +3149,7 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            temp_dir = tempfile.TemporaryDirectory(suffix=u'中文')
+            temp_dir = tempfile.TemporaryDirectory(suffix=u'中文'.encode('utf-8'))
             with TemporaryFileName(dir=temp_dir.name) as fname:
                 assert_with_filename(fname)
 
