@@ -5653,7 +5653,7 @@ swapdims(input, dim0, dim1) -> Tensor
 
 Alias for :func:`torch.transpose`.
 
-This function is equivalent to Numpy's swapaxes function.
+This function is equivalent to NumPy's swapaxes function.
 
 Examples::
 
@@ -5683,7 +5683,7 @@ swapaxes(input, axis0, axis1) -> Tensor
 
 Alias for :func:`torch.transpose`.
 
-This function is equivalent to Numpy's swapaxes function.
+This function is equivalent to NumPy's swapaxes function.
 
 Examples::
 
