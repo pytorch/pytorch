@@ -1612,8 +1612,8 @@ Tensor _linalg_cond_exception_helper(const Tensor& self) {
   // This should change when at::inverse works with silent errors
   if (self.dim() > 2) {
     TORCH_CHECK(false,
-      "At least one matrix in the batch is not invertible, its condition number is infinity, "
-      "linalg_cond does not support yet calculating the condition number for all other (possibly invertible) matrices in the batch.");
+      "One or more matrices in the batch was not invertible! "
+      "linalg_cond does not support yet this case.");
   }
   auto result_shape = self.sizes().vec();
   result_shape.pop_back();
