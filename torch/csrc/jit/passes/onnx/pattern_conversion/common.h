@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
+// Functions used by both encapsulation and conversion.
+
 namespace torch {
 namespace jit {
 

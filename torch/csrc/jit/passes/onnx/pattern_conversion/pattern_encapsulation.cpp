@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 
@@ -94,6 +93,10 @@ void EncapsulateInplaceIndexPutForONNX(Block* block) {
 void EncapsulatePatternIntoSubblock(const std::shared_ptr<Graph>& graph) {
   // Other patterns to be added here.
   EncapsulateInplaceIndexPutForONNX(graph->block());
+  EliminateDeadCode(
+      graph->block(),
+      true,
+      DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
 } // namespace jit
