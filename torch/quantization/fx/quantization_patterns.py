@@ -214,14 +214,7 @@ class ConvRelu(QuantizeHandler):
                 convert_custom_config_dict = {}
             additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
             # 1. attach activation post process to module
-            if type(self.conv) in [
-                    torch.nn.intrinsic.ConvReLU1d,
-                    torch.nn.intrinsic.ConvReLU2d,
-                    torch.nn.intrinsic.ConvReLU3d
-            ]:
-                self.conv[1].activation_post_process = quantizer.activation_post_process_map[node.name]
-            else:
-                self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
+            self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
             qconv_cls = get_static_quant_module_class(
                 type(self.conv), additional_static_quant_mapping)
@@ -302,8 +295,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes not in supported_dtypes:
-            warnings.warn("dtype combination: {} is not "
-                          "supported by Linear".format(dtypes))
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Linear "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
@@ -320,11 +315,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 output_activation_post_process = None
 
             if output_activation_post_process:
-                if type(self.linear) == torch.nn.intrinsic.LinearReLU:
-                    float_linear_module = self.linear[1]
-                else:
-                    float_linear_module = self.linear
-                float_linear_module.activation_post_process = output_activation_post_process
+                self.linear.activation_post_process = output_activation_post_process
 
             # 2. select corresponding quantized linear class for the float linear class
             if type(self.linear) in [torch.nn.Linear, torch.nn.qat.Linear]:
@@ -421,13 +412,7 @@ class BatchNorm(QuantizeHandler):
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
-        activation_post_process = quantizer.activation_post_process_map[node.name]
-        if type(self.bn) in \
-            [torch.nn.intrinsic.BNReLU2d,
-             torch.nn.intrinsic.BNReLU3d]:
-            self.bn[1].activation_post_process = activation_post_process
-        else:
-            self.bn.activation_post_process = activation_post_process
+        self.bn.activation_post_process = quantizer.activation_post_process_map[node.name]
         qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
@@ -461,8 +446,10 @@ class Embedding(QuantizeHandler):
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes not in supported_dtypes:
-            warnings.warn("dtype combination: {} is not "
-                          "supported by Embedding/EmbeddingBag".format(dtypes))
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Embedding/EmbeddingBag, "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         qemb = get_static_quant_module_class(type(emb))

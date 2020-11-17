@@ -227,14 +227,14 @@ class TestQuantizedOps(TestCase):
                     torch.relu,
                     torch.relu_,
                     torch.nn.functional.relu,
-                    torch.nn.quantized.functional.relu,
+                    torch.nn.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu
             },
             {
                 'quantized_fn': [
                     torch.nn.functional.relu,
-                    torch.nn.quantized.functional.relu,
+                    torch.nn.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu,
                 'extra_kwargs': {
