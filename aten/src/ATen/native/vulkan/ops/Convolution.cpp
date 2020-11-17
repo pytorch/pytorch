@@ -632,8 +632,8 @@ void conv2d_old(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
+
   using namespace api::utils;
-  std::cout << "XXX conv2d_old" << std::endl;
 
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const int32_t W = v_input.extents().width;

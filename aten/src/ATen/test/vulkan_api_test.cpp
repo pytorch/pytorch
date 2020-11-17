@@ -328,7 +328,7 @@ TEST(VulkanAPITest, conv2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, conv2d_big) {
+TEST(VulkanAPITest, conv2d_fixed) {
   if (!at::is_vulkan_available()) {
     return;
   }
@@ -370,26 +370,24 @@ TEST(VulkanAPITest, conv2d_big) {
     }
   } weights {2, input.channels, 2, 2};
 
-  //const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
   std::vector<float> inputVec{
     1, 2, 3, 4, 5, 6, 7, 8, 9,
     11, 12, 13, 14, 15, 16, 17, 18, 19,
     101, 102, 103, 104, 105, 106, 107, 108, 109};
   const auto input_cpu = at::from_blob(
-      inputVec.data(), 
+      inputVec.data(),
       {1, 3, 3, 3},
       at::device(at::kCPU).dtype(at::kFloat));
 
-  //const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
   std::vector<float> wVec{
-    1, 0, 0, 0, 
+    1, 0, 0, 0,
     0, 1, 0, 0,
     0, 0, 1, 0,
     -1, 0, 0, 0,
     0, -1, 0, 0,
     0, 0, -1, 0};
   const auto weights_cpu = at::from_blob(
-      wVec.data(), 
+      wVec.data(),
       {2, 3, 2, 2},
       at::device(at::kCPU).dtype(at::kFloat));
 
