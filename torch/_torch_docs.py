@@ -4478,8 +4478,6 @@ lu_solve(input, LU_data, LU_pivots, *, out=None) -> Tensor
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
 LU factorization of A from :meth:`torch.lu`.
 
-Supports real-valued and complex-valued inputs.
-
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
                 is zero or more batch dimensions.
@@ -8141,7 +8139,7 @@ transpose(input, dim0, dim1) -> Tensor
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
 
-The resulting :attr:`out` tensor shares it's underlying storage with the
+The resulting :attr:`out` tensor shares its underlying storage with the
 :attr:`input` tensor, so changing the content of one would change the content
 of the other.
 
