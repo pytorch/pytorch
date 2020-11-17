@@ -368,7 +368,7 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
         }
     }
 
-    if (!can_use_fast_route(tensors) && !has_complex) {
+    if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
 
@@ -384,7 +384,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
         }
     }
 
-    if (!can_use_fast_route(tensors) && !has_complex) {
+    if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }
 
@@ -393,7 +393,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
 
 template<typename T>
 struct Trunc {
-    __device__ T operator()(T t) const { return std::trunc(t); }
+    __device__ T operator()(T t) const { return t - std::trunc(t); }
 };
 
 std::vector<Tensor> foreach_tensor_frac_cuda(TensorList tensors) {
@@ -416,7 +416,7 @@ std::vector<Tensor> foreach_tensor_frac_cuda(TensorList tensors) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<2>(tensor_lists,
-                              FracFunctor<scalar_t,
+                              UnaryOpFunctor<scalar_t,
                                           /* depth */ 2,
                                           /* r_args_depth */ 1, 
                                           /* res_arg_index */ 1>(),
@@ -438,7 +438,7 @@ void foreach_tensor_frac_cuda_(TensorList tensors) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<1>(tensor_lists,
-                              FracFunctor<scalar_t,
+                              UnaryOpFunctor<scalar_t,
                                           /* depth */ 1,
                                           /* r_args_depth */ 1, 
                                           /* res_arg_index */ 0>(),
