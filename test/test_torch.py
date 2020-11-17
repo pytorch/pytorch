@@ -17136,7 +17136,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 torch.fmod(x, zero, out=out)
                 self.assertEqual(out == 4294967295, x >= 0)
                 self.assertEqual(out == -1, x < 0)
-                self.assertEqual(out.size(), torch.Size(10, 10))
+                self.assertEqual(out.size(), torch.Size([10, 10]))
                 # in-place
                 x_.fmod_(zero)
                 self.assertEqual(x_ == 4294967295, x >= 0)
@@ -17159,21 +17159,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fmod(self, device, dtype):
         # Use numpy as reference
-        def _reference_implementation(dtype, x, mod):
+        def _reference_implementation(x, mod):
             res = torch.fmod(x, mod)
             # out
-            out = torch.empty(0, device=device, dtype=dtype)
+            out = torch.empty(0, device=device, dtype=x.dtype)
             torch.fmod(x, mod, out=out)
             # in-place
             x_ = x.clone()
             x_.fmod_(mod)
             # Numpy cast to integral due to non type promotion
             if torch.is_tensor(mod):
-                if dtype in torch.testing.get_all_int_dtypes() and mod.dtype != dtype:
+                if x.dtype in torch.testing.get_all_int_dtypes() and mod.dtype != dtype:
                     mod = mod.to(dtype)
                 mod = mod.cpu().numpy()
             else:
-                if dtype in torch.testing.get_all_int_dtypes():
+                if x.dtype in torch.testing.get_all_int_dtypes():
                     mod = int(mod)
             np_x = x.cpu().numpy()
             exp = np.fmod(np_x, mod)
@@ -17202,17 +17202,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         mod_nc = mod.t()
 
         # fmod to Integer Scalar
-        _reference_implementation(dtype, x, 3)
-        _reference_implementation(dtype, x_nc, 3)
+        _reference_implementation(x, 3)
+        _reference_implementation(x_nc, 3)
         # fmod to Float Scalar
-        _reference_implementation(dtype, x, 2.3)
-        _reference_implementation(dtype, x_nc, 2.3)
+        _reference_implementation(x, 2.3)
+        _reference_implementation(x_nc, 2.3)
         # fmod to Tensor with same dtype 
         # cross-product of contiguous and non-contiguous Tensors
-        _reference_implementation(dtype, x, mod)
-        _reference_implementation(dtype, x_nc, mod)
-        _reference_implementation(dtype, x, mod_nc)
-        _reference_implementation(dtype, x_nc, mod_nc)
+        _reference_implementation(x, mod)
+        _reference_implementation(x_nc, mod)
+        _reference_implementation(x, mod_nc)
+        _reference_implementation(x_nc, mod_nc)
 
         # fmod to float Tensor
         if dtype in torch.testing.get_all_int_dtypes():
@@ -17221,7 +17221,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                                       "output type (Byte|Char|Short|Int|Long)"):
                 x.fmod(mod_float)
         else:
-            _reference_implementation(dtype, x, mod_float)
+            _reference_implementation(x, mod_float)
 
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_fmod_(self, device, dtype):
