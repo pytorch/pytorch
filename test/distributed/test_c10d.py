@@ -3950,6 +3950,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     def world_size(self):
         return 3
 
+    @property
+    def blocking_wait_error_msg(self):
+        return "Caught collective operation timeout"
+
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
 
@@ -3987,12 +3991,12 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # Operation would time out in blocking mode.
                 work.wait()
-            # Run some GPU operations to make sure cuda does not stuck to
-            # run new events. It was observed cuda could stuck if not
-            # aborting nccl communicators before throwing Operation timed out
+            # Run some GPU operations to make sure cuda has not gotten stuck.
+            # It was observed cuda could get stuck if NCCL communicators were
+            # not properly aborted before throwing RuntimeError.
             a = torch.rand(10).cuda(self.rank)
         elif self.rank == 1:
             # Clean up structures (ex: files for FileStore before going down)
@@ -4054,7 +4058,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             timeout=timedelta(seconds=self.op_timeout_sec))
         process_group.barrier().wait()
         if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # This should timeout
                 process_group.barrier().wait()
 
@@ -4103,7 +4107,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # This should timeout in about 1 second.
             start = time.time()
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
         else:
             # Sleep to ensure timeout.
