@@ -238,7 +238,7 @@ however that function is not differentiable.
           a valid eigenvector. This function may compute different eigenvector representations on
           different device types. Usually the difference is only in the sign of the eigenvector.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd`` and ``_heevd``.
           This function always checks whether the call to LAPACK/MAGMA is successful
           using ``info`` argument of ``_syevd``, ``_heevd`` and throws a RuntimeError if it isn't.
           On CUDA this causes a cross-device memory synchronization.
@@ -296,7 +296,7 @@ See :func:`torch.linalg.eigh` for a related function that computes both eigenval
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd``, ``_heevd``.
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd`` and ``_heevd``.
           This function always checks whether the call to LAPACK/MAGMA is successful
           using ``info`` argument of ``_syevd``, ``_heevd`` and throws a RuntimeError if it isn't.
           On CUDA this causes a cross-device memory synchronization.
