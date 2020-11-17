@@ -1041,12 +1041,6 @@ def ne(g, self, other):
     return g.op("Equal", self, other)
 
 
-def prim_dtype(g, self):
-    dtype = sym_help._try_get_scalar_type(self)
-    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    return g.op("Constant", value_t=torch.IntTensor([dtype]))
-
-
 def __isnot_(g, self, other):
     if sym_help._is_none(other):
         if sym_help._is_none(self):
