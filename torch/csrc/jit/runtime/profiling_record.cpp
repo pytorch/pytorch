@@ -378,7 +378,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
         SetPartitioningHelper partition_helper;
         for (const auto& val_type_pair : profiled_types_iter->second) {
           auto insertion_result = merged_profiled_types.insert(val_type_pair);
-          if (!insertion_result.second) {  // Already existed
+          if (!insertion_result.second) { // Already existed
             const TensorType* type = insertion_result.first->second.get();
             auto merged_type = type->merge(*val_type_pair.second);
             if (merged_type->sizes().size().has_value()) {

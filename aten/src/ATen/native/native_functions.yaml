@@ -530,11 +530,19 @@
   dispatch:
     CPU, CUDA: argmax
 
+- func: argmax.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: argmax_out
+
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: argmin
+
+- func: argmin.out(Tensor self, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: argmin_out
 
 - func: acosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2206,6 +2214,7 @@
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
+    Math: math_native_layer_norm
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -8908,6 +8917,19 @@
 #   The "linalg_" names should be hidden from the user and not documented.
 #
 # See linalg_det as an example.
+
+- func: linalg_cholesky(Tensor self) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_cholesky
+
+- func: linalg_cholesky.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_cholesky_out
 
 # torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor

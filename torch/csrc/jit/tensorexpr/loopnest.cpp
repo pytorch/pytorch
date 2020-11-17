@@ -38,6 +38,19 @@ class IndexFlattener : public IRMutator {
         {flatten_index(v->buf()->dims(), v->indices())},
         v->mask());
   }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    const Expr* new_body = v->body()->accept_mutator(this);
+
+    auto* out = new ReduceOp(
+        v->accumulator(),
+        new_body,
+        {flatten_index(v->accumulator()->dims(), v->output_args())},
+        v->reduce_args(),
+        v->reducer());
+    return out;
+  }
+
   Stmt* mutate(const Store* v) override {
     const Expr* value = v->value();
     const Expr* new_value = value->accept_mutator(this);
@@ -184,6 +197,26 @@ class Vectorizer : public IRMutator {
     });
   }
 
+  const Expr* mutate(const ReduceOp* v) override {
+    Dtype dtype(v->dtype().scalar_type(), lanes_);
+
+    auto inputs = v->output_args();
+    // should already be flattened.
+    TORCH_INTERNAL_ASSERT(inputs.size() == 1);
+
+    inputs.push_back(v->body());
+
+    auto* out = try_vectorize(v, inputs, [&]() {
+      return ExprHandle(new ReduceOp(
+          v->accumulator(),
+          inputs[1],
+          {inputs[0]},
+          v->reduce_args(),
+          v->reducer()));
+    });
+    return out;
+  }
+
   const Expr* mutate(const Broadcast* v) override {
     const Expr* val = v->value();
     const Expr* new_val = val->accept_mutator(this);
@@ -321,6 +354,15 @@ void LoopNest::vectorize(Stmt* stmt) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
     return;
+  }
+
+  // Can't vectorize reduction axes.
+  auto reductions = NodeFinder<ReduceOp>::find(f);
+  for (auto* r : reductions) {
+    if (std::find(r->reduce_args().begin(), r->reduce_args().end(), f->var()) !=
+        r->reduce_args().end()) {
+      throw std::logic_error("Cannot vectorize reduction axis - rfactor first");
+    }
   }
 
   Vectorizer v;
