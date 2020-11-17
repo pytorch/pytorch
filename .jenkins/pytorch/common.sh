@@ -137,6 +137,10 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
   else
     conda install -q -y cmake
   fi
+  if [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]]; then
+    # cmake3 package will conflict with conda cmake
+    sudo yum remove cmake3 || true
+  fi
 fi
 
 retry () {
