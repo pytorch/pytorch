@@ -650,12 +650,26 @@ public:
   ); \
   void TORCH_LIBRARY_init_ ## ns (torch::Library& m)
 
+
+// TODO: comment, maybe fold this into TORCH_LIBRARY_FRAGMENT
+#define TORCH_LIBRARY_FRAGMENT_UNIQUE(ns, m, uid) \
+  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library&); \
+  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## uid ( \
+    torch::Library::FRAGMENT, \
+    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid, \
+    #ns, c10::nullopt, __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library& m)
+
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
-/// is only one library (it is a "fragment").  This should ONLY be used
-/// inside the PerOpRegistration.cpp file (as its name suggests).
-#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
+/// is only one library (it is a "fragment").  This is used inside the
+/// PerOpRegistration.cpp file, as well as in places where all op registrations
+/// within the same namespace cannot be easily put into one macro block
+/// (this is mostly the case for custom ops in fbcode that were ported from
+/// the old API)
+#define TORCH_LIBRARY_FRAGMENT(ns, m) \
   static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
     torch::Library::FRAGMENT, \
@@ -717,6 +731,20 @@ public:
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
 
+// TODO: meaningful comment
+#define TORCH_LIBRARY_IMPL_FRAGMENT(ns, k, m, uid) \
+  static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid (torch::Library&); \
+  static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## uid ( \
+    torch::Library::IMPL, \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
+      []() { return & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid; }, \
+      []() { return [](torch::Library&) -> void {}; } \
+    ), \
+    #ns, c10::make_optional(c10::DispatchKey::k), \
+    __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid (torch::Library& m)
+
 
 // These are variants of the macros above which are to be used for testing (they
 // don't setup the static initializer, so you can control the visibility of
@@ -727,6 +755,8 @@ public:
 
 /// \private
 #define MAKE_TORCH_LIBRARY(ns) torch::Library(torch::Library::DEF, #ns, c10::nullopt, __FILE__, __LINE__)
+/// \private
+#define MAKE_TORCH_LIBRARY_FRAGMENT(ns) torch::Library(torch::Library::FRAGMENT, #ns, c10::nullopt, __FILE__, __LINE__)
 /// \private
 #define MAKE_TORCH_LIBRARY_IMPL(ns, k) torch::Library(torch::Library::IMPL, #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__)
 
