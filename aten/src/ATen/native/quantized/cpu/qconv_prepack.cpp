@@ -84,11 +84,11 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
     zero_points = {static_cast<int32_t>(weight.q_zero_point())};
   } else if (qtype == c10::kPerChannelAffine) {
     int64_t axis = weight.q_per_channel_axis();
-    TORCH_CHECK(
-        !transpose,
-        "Per Channel Quantization is currently disabled for transposed conv");
-    zero_points.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+    // TODO: This has to be `output_channels`
+    // zero_points.resize(output_channels);
+    // for (int i = 0; i < output_channels; ++i) {
+    zero_points.resize(output_channels / groups);
+    for (int i = 0; i < output_channels / groups; ++i) {
       zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
   } else {
@@ -243,8 +243,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   );
 
   auto weight_contig = weight.contiguous(c10::MemoryFormat::ChannelsLast);
-  const bool is_per_channel = weight_contig.qscheme() == at::kPerChannelAffine;
-
+  const bool is_per_channel = (
+    (weight_contig.qscheme() == at::kPerChannelAffine) |
+    (weight_contig.qscheme() == at::kPerChannelSymmetric));
   std::vector<uint8_t> w_zero_points;
   at::Tensor w_scales;
   std::tie(w_zero_points, w_scales) =

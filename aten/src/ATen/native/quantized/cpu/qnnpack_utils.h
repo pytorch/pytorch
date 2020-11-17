@@ -126,9 +126,8 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
                       : this->orig_weight.size(1) * groups_,
             transpose ? this->orig_weight.size(1) * groups_
                       : this->orig_weight.size(0),
-            transpose_,
+            transpose,
             is_per_channel) {
-
           if (conv_p.per_channel && conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
             TORCH_INTERNAL_ASSERT(
               "Per channel quantized weights are not supported for XZP kernels");
@@ -181,7 +180,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
             }
           } else {
             const bool any_padding = (conv_p.padding[0]| conv_p.padding[1]
-                |conv_p.padding[2] | conv_p.padding[3]) != 0;
+                | conv_p.padding[2] | conv_p.padding[3]) != 0;
 
             zero_buffer_size = 0;
             if (any_padding) {
@@ -388,7 +387,9 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
     uint32_t groups = 1
   ) {
   const int out_ch_idx = transpose ? 1 : 0;
-  auto num_output_channels = weight_contig.size(out_ch_idx) * (transpose ? groups : 1);
+  // TODO: This has to take into account the groups by multiplying the result by
+  // (transpose ? groups : 1);
+  auto num_output_channels = weight_contig.size(out_ch_idx);
   // Add 8 to account for bufferring needed by QNNPACK.
   auto num_output_channels_padded = num_output_channels + 8;
   const auto qtype = weight_contig.qscheme();

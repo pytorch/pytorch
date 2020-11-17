@@ -53,9 +53,6 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
                   w_scale[0],
                   w_zp[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
-    TORCH_CHECK(
-        !transpose(),
-        "Per Channel Quantization is currently disabled for transposed conv");
     auto scales = at::from_blob(
         w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
     auto zero_points = at::from_blob(
