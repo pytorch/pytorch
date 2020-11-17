@@ -1347,8 +1347,8 @@
   self: _sparse_softmax_backward_data(grad, result, dim, self)
 
 - name: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
-  self: _sparse_sparse_matmul_backward_data(grad, other, 1)
-  other: _sparse_sparse_matmul_backward_data(grad, self, 0)
+  self: sparse_sparse_matmul_backward(grad, self, other, 0)
+  other: sparse_sparse_matmul_backward(grad, self, other, 1)
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   self: softplus_backward(grad, self, beta, threshold, result)

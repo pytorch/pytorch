@@ -622,6 +622,42 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
   return grad_sparse.sparse_mask(sparse);
 }
 
+template <short grad_order>
+Tensor sparse_matmul_kernel_grad(const Tensor& grad_, const Tensor& x) {
+  Tensor grad = fill_with_ones(grad_.coalesce());
+  if (grad_order == 1) {
+    auto ret =  x.t().mm(grad);
+    return ret;
+  } else if (grad_order == 0) {
+    // Since mm(dense, sparse) doesn't exist,
+    // pass a transposed output matrix to the underlying "addmm"
+    // function directly.
+    int64_t out_rows = x.size(0);
+    int64_t out_cols = grad.size(0);
+
+    Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
+    Tensor r = at::empty({out_cols, out_rows}, grad.options());
+    at::addmm_out(r, t, x, grad.t(), 1, 1);
+    return r.t();
+  }
+}
+
+Tensor sparse_sparse_matmul_backward(
+    const Tensor& grad,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    int64_t grad_order) {
+  TORCH_CHECK(
+      grad_order == 0 || grad_order == 1,
+      ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
+  if (grad_order == 0) {
+    auto sparse = mat1.coalesce();
+    return sparse_matmul_kernel_grad<0>(grad, mat2).sparse_mask(sparse);
+  } 
+  auto sparse = mat2.coalesce();
+  return sparse_matmul_kernel_grad<1>(grad, mat1).sparse_mask(sparse);
+}
+
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
   auto transposed_sizes = self.transpose(dim, 0).sizes().vec();
   auto flatten = [&](const Tensor & t) {

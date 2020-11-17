@@ -2975,10 +2975,12 @@
     SparseCPU: sparse_sparse_matmul_cpu
     SparseCUDA: sparse_sparse_matmul_cuda
 
-- func: _sparse_sparse_matmul_backward_data(Tensor grad, Tensor var, int order) -> Tensor
+- func: fill_with_ones(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
   dispatch:
-    SparseCPU: sparse_sparse_matmul_backward_cpu
-    SparseCUDA: sparse_sparse_matmul_backward_cuda
+    SparseCPU: fill_with_ones_cpu
+    SparseCUDA: fill_with_ones_cuda
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full

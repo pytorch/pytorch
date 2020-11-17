@@ -202,125 +202,31 @@ void sparse_matmul_kernel(
   csr_to_coo(M, output_indptr.data_ptr<int64_t>(), output_row_indices.data_ptr<int64_t>());
 }
 
-template <typename scalar_t, short fill_with_ones_order>
-void sparse_matmul_with_ones_kernel(Tensor& result, const Tensor& x) {
-  auto x_indices = x._indices().contiguous();
-  auto x_values = x._values().contiguous();
-
-  auto nnz_a = x_values.size(0);
-
-  auto indices_accessor = x_indices.accessor<int64_t, 2>();
-  auto rows = indices_accessor[0];
-  auto cols = indices_accessor[1];
-  auto values_accessor = x_values.accessor<scalar_t, 1>();
-
-  auto result_indices = result._indices();
-  auto result_values = result._values();
-
-  auto n = result.size(0);
-  auto m = result.size(1);
-  auto size = fill_with_ones_order ? n : m;
-  auto inner_size = fill_with_ones_order ? m : n;
-
-  auto indices = (fill_with_ones_order ? rows : cols);
-
-  std::vector<scalar_t> scalar_values(size, static_cast<scalar_t>(0));
-  for (int64_t i = 0; i < nnz_a; i++) {
-    for (int64_t index = 0; index < size; index++) {
-      if (indices[i] == index) {
-        scalar_values[index] += values_accessor[i];
-      }
-    }
-  }
-
-  int64_t index = 0;
-  std::map<std::pair<int64_t, int64_t>, scalar_t> d;
-
-  for (int64_t curr_index = 0; curr_index < scalar_values.size();
-       curr_index++) {
-    if (scalar_values[curr_index] != static_cast<scalar_t>(0)) {
-      for (int64_t mat2_index = 0; mat2_index < inner_size; mat2_index++) {
-        std::pair<int64_t, int64_t> current_index;
-        if (fill_with_ones_order) {
-          current_index = std::make_pair(curr_index, mat2_index);
-        } else {
-          current_index = std::make_pair(mat2_index, curr_index);
-        }
-        d[current_index] += scalar_values[curr_index];
-        index++;
-      }
-    }
-  }
-  int64_t nnz_result = d.size();
-
-  std::vector<int64_t> values_size = {nnz_result};
-  result_indices.resize_({2, nnz_result});
-  result_values.resize_(values_size);
-
-  auto result_indices_accessor = result_indices.accessor<int64_t, 2>();
-  auto result_values_accessor = result_values.accessor<scalar_t, 1>();
-
-  index = 0;
-  for (auto kv : d) {
-    auto idx = kv.first;
-    result_indices_accessor[0][index] = idx.first;
-    result_indices_accessor[1][index] = idx.second;
-    result_values[index] = kv.second;
-    index++;
-  } 
-}
-
-template <typename scalar_t, short grad_order>
-void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad_, const Tensor& x) {
-  /* 
-    Computes  the backward output  for matrix C = A@B.
-
-    C = A@B 
-      then 
-    A_grad = C_grad @ B^T
-    B_grad = A^T @ C_grad
-
-    A matrix multiplication of two sparse tensors A and B with fill values a and b,
-    respectively, then the matmul operation can be expanded as follows:
-    matmul(A, B) = matmul(A - a + a, B - b + b)
-                 = matmul(A - a, B - b) + a * matmul(ones_like(A), B) + b * matmul(A, ones_like(B))
-
-    if grad_order == 0:
-      A_grad = C_grad @ x^T, where x is B 
-  
-      A_grad = matmul(C_grad - 1, x^T) + matmul(C_grad, ones_like(x^T)) 
-
-    else:
-      B_grad = x^T @ C_grad, where x is A 
-
-      B_grad = matmul(x^T, C_grad - 1) + matmul(ones_like(x^T), C_grad) 
-  */
-
-  auto grad = grad_.coalesce();
-  auto xt = x.transpose(0, 1).coalesce();
-
-  Tensor output_ones = at::native::empty_sparse(output.sizes(), output.options());
-  sparse_matmul_with_ones_kernel<scalar_t, grad_order>(output_ones, xt);
-
-  auto grad_values = grad._values().contiguous().clone();
-  auto grad_values_accessor = grad_values.accessor<scalar_t, 1>();
-  at::parallel_for(0, grad_values.size(0), 0, [&](int64_t start, int64_t end) {
-    for (auto index = start; index < end; index++) {
-      grad_values_accessor[index] -= static_cast<scalar_t>(1);
-    }
-  });
-  Tensor grad_updated = at::native::empty_like(grad);
-  alias_into_sparse(grad_updated, grad._indices(), grad_values);
-
-  if (grad_order == 1) {
-    sparse_matmul_kernel<scalar_t>(output, xt, grad_updated);
-  } else if (grad_order == 0) {
-    sparse_matmul_kernel<scalar_t>(output, grad_updated, xt);
-  }
-  native::add_sparse_(output, output_ones);
-}
-
 } // end anonymous namespace
+
+Tensor fill_with_ones_cpu(const Tensor& input){
+
+  Tensor output = at::ones(input.sizes(), input.options().layout(kStrided));
+  
+  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "fill_with_ones", [&] {
+        auto input_indices = input._indices();
+        auto input_values = input._values();
+        auto nnz = input._nnz();
+        auto input_indices_accessor = input_indices.accessor<int64_t, 2>();
+        auto input_values_accessor = input_values.accessor<scalar_t, 1>();
+
+        auto output_values_accessor = output.accessor<scalar_t, 2>();
+
+        at::parallel_for(0, nnz, 0, [&](int64_t start, int64_t end) {
+          for (auto index = start; index < end; index++) {
+            auto x = input_indices_accessor[0][index];
+            auto y = input_indices_accessor[1][index];
+            output_values_accessor[x][y] = input_values_accessor[index];
+          }
+        });
+      });
+  return output;
+}
 
 Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
@@ -343,33 +249,6 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   return output;
 }
 
-Tensor sparse_sparse_matmul_backward_cpu(
-    const Tensor& grad,
-    const Tensor& var,
-    int64_t grad_order) {
-  TORCH_CHECK(
-      grad_order == 0 || grad_order == 1,
-      ": grad_order not in [0, 1] at sparse_sparse_matmul_backward_cpu function");
-  Tensor output = at::native::empty_like(var);
-  if (grad_order == 0) {
-    std::vector<int64_t> size = {var.size(1), grad.size(1)};
-    at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
-    
-    AT_DISPATCH_FLOATING_TYPES(
-        output.scalar_type(), "sparse_matmul_kernel_grad", [&] {
-          sparse_matmul_kernel_grad<scalar_t, 1>(output,  grad, var);
-        });
-  } else if (grad_order == 1) {
-    std::vector<int64_t> size = {grad.size(0), var.size(0)};
-    at::sparse::get_sparse_impl(output)->resize_and_clear_(size.size(), 0, size);
-
-    AT_DISPATCH_FLOATING_TYPES(
-        output.scalar_type(), "sparse_matmul_kernel_grad", [&] {
-          sparse_matmul_kernel_grad<scalar_t, 0>(output, grad, var);
-        });
-  }
-  return output;
-}
 
 } // namespace native
 } // namespace at
