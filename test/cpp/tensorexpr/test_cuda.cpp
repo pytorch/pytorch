@@ -1034,6 +1034,63 @@ void testCudaHalfPropagation() {
   cudaFree(reluDev);
 }
 
+void testCudaUnusedHalfArgument() {
+  KernelScope kernel_scope;
+  Placeholder a("a", kFloat, {4});
+  auto half = ToDtype<at::Half>();
+  Placeholder b("b", half, {4});
+  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+    return Max::make(a.load(i), ExprHandle(new FloatImm(0)), true);
+  });
+
+  LoopNest l({relu});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b, relu});
+
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  // Check the types used by the Max are Float.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (
+# CHECK:  float v = a[n];
+# CHECK:  relu[n] = Max(v, 0.f
+# CHECK: })IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // Sanity Cbeck;
+  std::vector<float> aData(4, 2.0f);
+  std::vector<at::Half> bData(4, 2.0f);
+  std::vector<float> reluData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  at::Half* bDev = nullptr;
+  at::Half* reluDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = bData.size() * sizeof(bData[0]);
+  auto reluSize = reluData.size() * sizeof(reluData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMalloc(&reluDev, reluSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev, reluDev});
+  cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(aData, reluData);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
+  cudaFree(reluDev);
+}
+
 void testCudaPrioritizeDependents() {
   KernelScope kernel_scope;
   Placeholder a("a", kFloat, {10});
