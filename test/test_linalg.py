@@ -543,7 +543,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
-    @dtypesIfCUDA(torch.float64)
     def test_eigh_autograd(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
@@ -574,28 +573,6 @@ class TestLinalg(TestCase):
 
         for dims, uplo in itertools.product([(3, 3), (2, 3, 3)], ["L", "U"]):
             run_test(dims, uplo)
-
-    # TODO: once batched matmul works for complex dtypes on GPU, they shall be added to above test
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex128)
-    def test_eigh_autograd_xfailed(self, device, dtype):
-        def func(x, uplo):
-            x = 0.5 * (x + x.conj().transpose(-2, -1))
-            return torch.linalg.eigh(x, UPLO=uplo)
-
-        def func_grad_w(x, uplo):
-            return func(x, uplo)[0]
-
-        def run_test(dims, uplo):
-            x = torch.randn(*dims, dtype=dtype, device=device, requires_grad=True)
-
-            gradcheck(func_grad_w, [x, uplo])
-            gradgradcheck(func_grad_w, [x, uplo])
-
-        dims = (2, 3, 3)
-        run_test(dims, "L")
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

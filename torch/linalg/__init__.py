@@ -228,7 +228,6 @@ is always treated as zero. When :attr:`UPLO` is "L", its default value, only the
 each matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
-For complex-valued batched input on CUDA the backpropagation is not supported yet.
 
 See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues,
 however that function is not differentiable.
