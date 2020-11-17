@@ -11,6 +11,7 @@
 #include <ATen/metal/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/Parallel.h>
 #include <torch/library.h>
 
 #ifdef USE_FBGEMM
@@ -111,14 +112,30 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         ((self.is_contiguous() && src.is_contiguous()) ||
          (self.is_non_overlapping_and_dense() && self.strides() == src.strides()))) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
-        auto* output_ptr = reinterpret_cast<fbgemm::float16*>(
-            self.data_ptr<at::Half>());
-        fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+        auto* output_ptr =
+            reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
+        at::parallel_for(
+            0,
+            self.numel(),
+            at::internal::GRAIN_SIZE,
+            [&](int64_t begin, int64_t end) {
+              fbgemm::FloatToFloat16_simd(
+                  src.data_ptr<float>() + begin,
+                  output_ptr + begin,
+                  end - begin);
+            });
       } else {
         auto in_data = reinterpret_cast<fbgemm::float16*>(
             src.data_ptr<at::Half>());
         auto* output_ptr = self.data_ptr<float>();
-        fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
+        at::parallel_for(
+            0,
+            self.numel(),
+            at::internal::GRAIN_SIZE,
+            [&](int64_t begin, int64_t end) {
+              fbgemm::Float16ToFloat_simd(
+                  in_data + begin, output_ptr + begin, end - begin);
+            });
       }
       return self;
     }
