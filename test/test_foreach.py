@@ -234,40 +234,15 @@ class TestForeach(TestCase):
                 torch._foreach_abs_(tensors1)
                 self.assertEqual(res, tensors1)
             else:
-                if self.device_type == 'cpu':
-                    if dtype == torch.complex64:
-                        expected = [torch.abs(tensors1[i]) for i in range(N)]
-                        self.assertEqual(res, expected)
+                expected = [torch.abs(tensors1[i]) for i in range(N)]
+                self.assertEqual(res, expected)
 
-                        with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
-                            torch._foreach_abs_(tensors1)
-                        break
-                    elif dtype == torch.complex128:
-                        expected = [torch.abs(tensors1[i]) for i in range(N)]
-                        self.assertEqual(res, expected)
-
-                        with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
-                            torch._foreach_abs_(tensors1)
-                        break
-                    else:
-                        self.assertEqual(res, expected)
+                if dtype in [torch.complex64, torch.complex128]:
+                    with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
+                        torch._foreach_abs_(tensors1)
                 else:
-                    if dtype == torch.complex64:
-                        expected = [torch.abs(tensors1[i]).to(torch.complex64) for i in range(N)]
-                        self.assertEqual(res, expected)
-
-                        torch._foreach_abs_(tensors1)
-                        self.assertEqual(res, tensors1)
-                        break
-                    elif dtype == torch.complex128:
-                        expected = [torch.abs(tensors1[i]).to(torch.complex128) for i in range(N)]
-                        self.assertEqual(res, expected)
-
-                        torch._foreach_abs_(tensors1)
-                        self.assertEqual(res, tensors1)
-                        break
-                    else:
-                        self.assertEqual(res, expected)
+                    torch._foreach_abs_(tensors1)
+                    self.assertEqual(res, tensors1)
 
     #
     # Pointwise ops
