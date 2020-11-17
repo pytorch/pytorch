@@ -472,7 +472,10 @@ class Graph:
                not _shadows_builtin_name(op):
                 return op
         i = self._used_names[op] = self._used_names[op] + 1
-        return f'{op}_{i}'
+        # Someone may have explicitly created a name line `add_0`, so recursively
+        # enter this function again to check that that string is not already
+        # used.
+        return self._register_name_used(f'{op}_{i}')
 
     def python_code(self, root_module: str) -> str:
         """

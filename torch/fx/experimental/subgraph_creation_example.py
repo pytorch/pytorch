@@ -155,6 +155,9 @@ def split_module(
         output_vals = output_vals[0] if len(output_vals) == 1 else output_vals  # type: ignore
         partition.graph.output(output_vals)
 
+        # Lint graph
+        partition.graph.lint()
+
         # Construct GraphModule for this partition
         submod_name = f'submod_{partition_name}'
         base_mod_attrs[submod_name] = torch.fx.graph_module.GraphModule(partition.targets, partition.graph)
@@ -173,5 +176,8 @@ def split_module(
     for node in m.graph.nodes:
         if node.op == 'output':
             base_mod_graph.output(torch.fx.graph.map_arg(node.args[0], lambda n : base_mod_env[n.name]))
+
+    # Lint base graph
+    base_mod_graph.lint()
 
     return torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)
