@@ -6501,8 +6501,10 @@ TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   // Manual Binding
+  tv2->axis(-3)->parallelize(ParallelType::TIDy);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-3)->parallelize(ParallelType::TIDy);
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
   tv6->axis(-3)->parallelize(ParallelType::TIDy);
   tv6->axis(-2)->parallelize(ParallelType::TIDx);
@@ -6583,8 +6585,10 @@ TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   tv5->axis(-2)->parallelize(ParallelType::TIDy);
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   // Manual Binding
+  tv2->axis(-3)->parallelize(ParallelType::TIDy);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-3)->parallelize(ParallelType::TIDy);
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
 
   tv7->axis(-3)->parallelize(ParallelType::TIDy);
