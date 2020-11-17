@@ -365,7 +365,7 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
         }
     }
 
-    if (!can_use_fast_route(tensors) && !has_complex) {
+    if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow(tensors);
     }
 
@@ -381,7 +381,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
         }
     }
 
-    if (!can_use_fast_route(tensors) && !has_complex) {
+    if (!can_use_fast_route(tensors) || has_complex) {
         return at::native::foreach_tensor_abs_slow_(tensors);
     }
 
