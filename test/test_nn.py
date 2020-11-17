@@ -2659,17 +2659,13 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.weight_norm(m)
 
     def test_parameterlistdict_setting_attributes(self):
-        with warnings.catch_warnings(record=True) as w:
-            mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        self.assertTrue(len(w) == 0)
+        mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
 
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterList is not supported"):
             torch.nn.utils.weight_norm(mod, "0")
 
-        with warnings.catch_warnings(record=True) as w:
-            mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        self.assertTrue(len(w) == 0)
+        mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
 
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterDict is not supported"):

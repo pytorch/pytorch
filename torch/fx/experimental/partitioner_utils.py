@@ -30,7 +30,6 @@ class Partition:
             if n.op in {'placeholder', 'get_attr'}:
                 self.nodes.add(n)
         self.nodes.add(node)
-        self.recalculate_mem_size()
 
     def remove_node(self, node):
         # Remove a node only if the node is in the partition
@@ -44,9 +43,8 @@ class Partition:
             # and this input node is not used by some other nodes in this partition,
             # the remove this input node
             for input_node in input_nodes:
-                if all([n not in self.nodes for n in input_node.users]) and input_node.op in {'placeholder', 'get_attr'}:
+                if all([n not in self.nodes for n in input_node.users]):
                     self.nodes.remove(input_node)
-            self.recalculate_mem_size()
 
 class Device(NamedTuple):
     name: str
