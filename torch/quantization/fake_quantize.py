@@ -49,6 +49,15 @@ class FakeQuantizeBase(ABC, Module):
     def disable_fake_quant(self):
         self.enable_fake_quant(False)
 
+    @torch.jit.export
+    def enable_observer(self, enabled=True):
+        # type: (bool) -> None
+        self.observer_enabled[0] = 1 if enabled else 0
+
+    @torch.jit.export
+    def disable_observer(self):
+        self.enable_observer(False)
+
     with_args = classmethod(_with_args)
 
 class FakeQuantize(FakeQuantizeBase):
@@ -113,15 +122,6 @@ class FakeQuantize(FakeQuantizeBase):
             'Only per channel and per tensor quantization are supported in fake quantize' + \
             ' got qscheme: ' + str(self.qscheme)
         self.is_per_channel = _is_per_channel(self.qscheme)
-
-    @torch.jit.export
-    def enable_observer(self, enabled=True):
-        # type: (bool) -> None
-        self.observer_enabled[0] = 1 if enabled else 0
-
-    @torch.jit.export
-    def disable_observer(self):
-        self.enable_observer(False)
 
     @torch.jit.export
     def calculate_qparams(self):
