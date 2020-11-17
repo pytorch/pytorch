@@ -8,6 +8,62 @@
 namespace torch {
 namespace nn {
 
+/// An OrderedDict of `Module`s that registers its elements by their `key`s.
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
+///     {"linear", Linear(10, 3).ptr()},
+///     {"conv", Conv2d(1, 2, 3).ptr()},
+///     {"dropout", Dropout(0.5).ptr()},
+///   };
+///   torch::nn::ModuleDict dict1(ordereddict);
+///
+///   for (const auto &module : *dict1) {
+///     module->pretty_print(std::cout);
+///   }
+///
+///   std::vector<std::pair<std::string, std::shared_ptr<Module>>> list = {
+///     {"linear", Linear(10, 3).ptr()},
+///     {"conv", Conv2d(1, 2, 3).ptr()},
+///     {"dropout", Dropout(0.5).ptr()},
+///   };
+///   torch::nn::ModuleDict dict2(list);
+///
+///   for (const auto &module : *dict2) {
+///     module->pretty_print(std::cout);
+///   }
+///
+/// \endrst
+///
+/// Why should you use `ModuleDict` instead of a simple `map` or `OrderedDict`? 
+/// The value a `ModuleDict` provides over manually calling an ordered map of 
+/// modules is that it allows treating the whole container *as a single module*,
+/// such that performing a transformation on the `ModuleDict` applies to each of the
+/// modules it stores (which are each a registered submodule of the `ModuleDict`). 
+/// For example, calling `.to(torch::kCUDA)` on a `ModuleDict` will move each module
+/// in the map to CUDA memory. For example:
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
+///     {"linear", Linear(10, 3).ptr()},
+///     {"conv", Conv2d(1, 2, 3).ptr()},
+///     {"dropout", Dropout(0.5).ptr()},
+///   };
+///   torch::nn::ModuleDict dict(ordereddict);
+///
+///   // Convert all modules to CUDA.
+///   dict->to(torch::kCUDA);
+///
+/// \endrst
+///
+/// Finally, `ModuleDict` provides a lightweight container API, such as allowing
+/// iteration over submodules, positional access, adding new modules from a vector
+/// of key-module pairs or an `OrderedDict` or another `ModuleDict` after 
+/// construction via `update`.
 class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
  public:
   using Iterator = torch::OrderedDict<std::string, std::shared_ptr<Module>>::Iterator;
@@ -15,13 +71,13 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
 
   ModuleDictImpl() = default;
 
-  /// Constructs the `ModuleDict` from a list of string-Module paris.
+  /// Constructs the `ModuleDict` from a list of string-Module pairs.
   explicit ModuleDictImpl(
       const std::vector<std::pair<std::string, std::shared_ptr<Module>>>& modules) {
     update(modules);
   }
 
-  /// Constructs the `ModuleDict` from an OrderedDict.
+  /// Constructs the `ModuleDict` from an `OrderedDict`.
   explicit ModuleDictImpl(
       const torch::OrderedDict<std::string, std::shared_ptr<Module>>& modules) {
     update(modules);
@@ -77,7 +133,9 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     return modules_.contains(key);
   }
 
+  /// Remove all items from the `ModuleDict`.
   void clear() {
+    // Not remove the registration of modules to make it consistent with python version.
     modules_.clear();
   }
 
@@ -101,22 +159,15 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     stream << "torch::nn::ModuleDict";
   }
 
-  /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ModuleDict`. Check contains(key) before
-  /// for a non-throwing way of access.
-  std::shared_ptr<Module>& operator[](const std::string& key) {
-    return modules_[key];
-  }
-
-  /// Returns the value associated with the given `key`. Throws an exception if
-  /// no such key is stored in the `ModuleDict`. Check contains(key) before
-  /// for a non-throwing way of access.
-  const std::shared_ptr<Module>& operator[](const std::string& key) const {
+  /// Attempts to returns the `Module` associated with the given `key`. Throws
+  /// an exception if no such `key` is stored in the `ModuleDict`. Check 
+  /// contains(key) before for a non-throwing way of access.
+  std::shared_ptr<Module> operator[](const std::string& key) const {
     return modules_[key];
   }
 
   /// Attempts to return the module at the given key as the requested type.
-  /// Throws an exception if no such key is stored in the `ModuleDict`.
+  /// Throws an exception if no such `key` is stored in the `ModuleDict`.
   /// Check contains(key) before for a non-throwing way of access.
   template <typename T>
   T& at(const std::string& key) {
@@ -127,7 +178,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
   }
 
   /// Attempts to return the module at the given key as the requested type.
-  /// Throws an exception if no such key is stored in the `ModuleDict`.
+  /// Throws an exception if no such `key` is stored in the `ModuleDict`.
   /// Check contains(key) before for a non-throwing way of access.
   template <typename T>
   const T& at(const std::string& key) const {
@@ -137,16 +188,17 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     return *modules_[key]->as<T>();
   }
 
-  /// Removes and returns the value associated with the given `key`.
-  /// Throws an exception if no such key is stored in the `ModuleDict`.
+  /// Removes and returns the `Module` associated with the given `key`.
+  /// Throws an exception if no such `key` is stored in the `ModuleDict`.
   /// Check contains(key) before for a non-throwing way of access.
   std::shared_ptr<Module> pop(const std::string& key) {
     auto module = modules_[key];
     modules_.erase(key);
+    // Not remove the registration of the module to make it consistent with python version.
     return module;
   }
 
-  /// Updated the `ModuleDict` with key-value paris from vector of key-module pairs
+  /// Updated the `ModuleDict` with a vector of key-module pairs.
   void update(
       const std::vector<std::pair<std::string, std::shared_ptr<Module>>>& modules) {
     for (auto& item : modules) {
@@ -154,7 +206,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
     }
   }
 
-  /// Updated the `ModuleDict` with key-value paris from OrderedDict or `ModuleDict`
+  /// Updated the `ModuleDict` with key-value pairs from `OrderedDict` or `ModuleDict`.
   template <typename Container>
   void update(const Container& container) {
     for (auto& item : container) {
@@ -163,9 +215,11 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
   }
 
 private:
+  /// Private `OrderedDict` holding the key-Module pairs.
   torch::OrderedDict<std::string, std::shared_ptr<Module>> modules_;
 
-  /// Insert a key-module pair by overwriting existing keys.
+  /// Insert a key-module pair by overwriting existing keys,
+  /// and register or replace the `Module`.
   void insert(const std::string& key, std::shared_ptr<Module> module) {
     if (contains(key)) {
       modules_[key] = std::move(module);
@@ -179,6 +233,10 @@ private:
 
 };
 
+/// A `ModuleHolder` subclass for `ModuleDictImpl`.
+/// See the documentation for `ModuleDictImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(ModuleDict);
 
 } // namespace nn

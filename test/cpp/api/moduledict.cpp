@@ -26,18 +26,18 @@ TEST_F(ModuleDictTest, ConstructsFromList) {
   ASSERT_EQ(dict->size(), 3);
 }
 
-TEST_F(ModuleDictTest, ConstructsFromOrderDict) {
+TEST_F(ModuleDictTest, ConstructsFromordereddict) {
   struct M : Module {
     explicit M(int value_) : value(value_) {}
     int value;
   };
 
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"module_1", std::make_shared<M>(1)},
     {"module_2", std::make_shared<M>(2)},
     {"module_3", std::make_shared<M>(3)},
   };
-  ModuleDict dict(orderdict);
+  ModuleDict dict(ordereddict);
   ASSERT_EQ(dict->size(), 3);
 }
 
@@ -57,10 +57,10 @@ TEST_F(ModuleDictTest, UpdatePopClearContains) {
   ASSERT_EQ(dict->size(), 1);
   ASSERT_TRUE(dict->contains("module_1"));
   // Update by OrderedDict
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"module_2", std::make_shared<M>(2)}
   };
-  dict->update(orderdict);
+  dict->update(ordereddict);
   ASSERT_EQ(dict->size(), 2);
   ASSERT_TRUE(dict->contains("module_2"));
   // Update by another ModuleDict
@@ -100,12 +100,12 @@ TEST_F(ModuleDictTest, UpdateExist) {
   dict->update(list2);
   ASSERT_EQ(dict->size(), 3);
   ASSERT_EQ(dict->at<M>("module_2").value, 0);
-  // Update by OrderDict
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  // Update by ordereddict
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"module_3", std::make_shared<M>(0)},
     {"module_4", std::make_shared<M>(4)}
   };
-  dict->update(orderdict);
+  dict->update(ordereddict);
   ASSERT_EQ(dict->size(), 4);
   ASSERT_EQ(dict->at<M>("module_3").value, 0);
   // Update by ModuleDict
@@ -126,12 +126,12 @@ TEST_F(ModuleDictTest, Keys) {
     int value;
   };
 
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
     {"dropout", Dropout(0.5).ptr()},
   };
-  ModuleDict dict(orderdict);
+  ModuleDict dict(ordereddict);
   const auto& keys = dict->keys();
   std::vector<std::string> expected{"linear", "conv", "dropout"};
   ASSERT_EQ(keys, expected);
@@ -148,18 +148,18 @@ TEST_F(ModuleDictTest, Values) {
     int value;
   };
 
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"module_1", std::make_shared<M>(1)},
     {"module_2", std::make_shared<M>(2)},
   };
-  ModuleDict dict(orderdict);
+  ModuleDict dict(ordereddict);
   const auto& values = dict->values();
-  const auto& expected = orderdict.values();
+  const auto& expected = ordereddict.values();
   ASSERT_EQ(values, expected);
   ASSERT_TRUE(std::equal(
       dict->begin(),
       dict->end(),
-      orderdict.begin(),
+      ordereddict.begin(),
       [](const auto& lhs,
          const auto& rhs) {
         return lhs.value().get() == rhs.value().get();
@@ -167,7 +167,7 @@ TEST_F(ModuleDictTest, Values) {
 }
 
 TEST_F(ModuleDictTest, SanityCheckForHoldingStandardModules) {
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
     {"dropout", Dropout(0.5).ptr()},
@@ -175,17 +175,17 @@ TEST_F(ModuleDictTest, SanityCheckForHoldingStandardModules) {
     {"embedding", Embedding(4, 10).ptr()},
     {"lstm", LSTM(4, 5).ptr()}
   };
-  ModuleDict dict(orderdict);
+  ModuleDict dict(ordereddict);
 }
 
 TEST_F(ModuleDictTest, HasReferenceSemantics) {
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear1", Linear(2, 3).ptr()},
     {"linear2", Linear(3, 4).ptr()},
     {"linear3", Linear(4, 5).ptr()},
   };
-  ModuleDict first(orderdict);
-  ModuleDict second(orderdict);
+  ModuleDict first(ordereddict);
+  ModuleDict second(ordereddict);
 
   ASSERT_EQ(first->size(), second->size());
   ASSERT_TRUE(std::equal(
@@ -199,12 +199,12 @@ TEST_F(ModuleDictTest, HasReferenceSemantics) {
 }
 
 TEST_F(ModuleDictTest, IsCloneable) {
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear", Linear(2, 3).ptr()},
     {"relu", Functional(torch::relu).ptr()},
     {"batch", BatchNorm1d(3).ptr()},
   };
-  ModuleDict dict(orderdict);
+  ModuleDict dict(ordereddict);
   ModuleDict clone = std::dynamic_pointer_cast<ModuleDictImpl>(dict->clone());
   ASSERT_EQ(dict->size(), clone->size());
 
@@ -235,12 +235,12 @@ TEST_F(ModuleDictTest, IsCloneable) {
 }
 
 TEST_F(ModuleDictTest, RegistersElementsAsSubmodules) {
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict1 = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict1 = {
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
     {"test", Dropout(0.5).ptr()},
   };
-  ModuleDict dict(orderdict1);
+  ModuleDict dict(ordereddict1);
 
   auto modules = dict->children();
   ASSERT_TRUE(modules[0]->as<Linear>());
@@ -248,11 +248,11 @@ TEST_F(ModuleDictTest, RegistersElementsAsSubmodules) {
   ASSERT_TRUE(modules[2]->as<Dropout>());
 
   // Update Existing
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict2 = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict2 = {
     {"lstm", LSTM(4, 5).ptr()},
     {"test", BatchNorm2d(5).ptr()}
   };
-  dict->update(orderdict2);
+  dict->update(ordereddict2);
 
   modules = dict->children();
   ASSERT_TRUE(modules[0]->as<Linear>());
@@ -263,12 +263,12 @@ TEST_F(ModuleDictTest, RegistersElementsAsSubmodules) {
 }
 
 TEST_F(ModuleDictTest, CloneToDevice_CUDA) {
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear", Linear(2, 3).ptr()},
     {"relu", Functional(torch::relu).ptr()},
     {"batch", BatchNorm1d(3).ptr()},
   };
-  ModuleDict dict(orderdict);
+  ModuleDict dict(ordereddict);
   torch::Device device(torch::kCUDA, 0);
   ModuleDict clone =
       std::dynamic_pointer_cast<ModuleDictImpl>(dict->clone(device));
@@ -280,8 +280,46 @@ TEST_F(ModuleDictTest, CloneToDevice_CUDA) {
   }
 }
 
+TEST_F(ModuleDictTest, IsCloneable_CUDA) {
+  torch::Device device(torch::kCUDA, 0);
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
+    {"linear", Linear(2, 3).ptr()},
+    {"relu", Functional(torch::relu).ptr()},
+    {"batch", BatchNorm1d(3).ptr()},
+  };
+  ModuleDict dict(ordereddict);
+  dict->to(device);
+  ModuleDict clone = std::dynamic_pointer_cast<ModuleDictImpl>(dict->clone(device));
+  ASSERT_EQ(dict->size(), clone->size());
+
+  for (auto it = dict->begin(), it_c = clone->begin(); it != dict->end(); ++it, ++it_c) {
+    // The key should be same
+    ASSERT_EQ(it->key(), it_c->key());
+    // The modules should be the same kind (type).
+    ASSERT_EQ(it->value()->name(), it_c->value()->name());
+    // But not pointer-equal (distinct objects).
+    ASSERT_NE(it->value(), it_c->value());
+  }
+
+  // Verify that the clone is deep, i.e. parameters of modules are cloned too.
+  torch::NoGradGuard no_grad;
+
+  auto params1 = dict->named_parameters();
+  auto params2 = clone->named_parameters();
+  ASSERT_EQ(params1.size(), params2.size());
+  for (auto& param : params1) {
+    ASSERT_FALSE(pointer_equal(param.value(), params2[param.key()]));
+    ASSERT_EQ(param->device(), params2[param.key()].device());
+    ASSERT_TRUE(param->allclose(params2[param.key()]));
+    param->add_(2);
+  }
+  for (auto& param : params1) {
+    ASSERT_FALSE(param->allclose(params2[param.key()]));
+  }
+}
+
 TEST_F(ModuleDictTest, PrettyPrintModuleDict) {
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> orderdict = {
+  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear", Linear(10, 3).ptr()},
     {"conv", Conv2d(1, 2, 3).ptr()},
     {"dropout", Dropout(0.5).ptr()},
@@ -289,7 +327,7 @@ TEST_F(ModuleDictTest, PrettyPrintModuleDict) {
     {"embedding", Embedding(4, 10).ptr()},
     {"lstm", LSTM(4, 5).ptr()}
   };
-  ModuleDict dict(orderdict);
+  ModuleDict dict(ordereddict);
 
   ASSERT_EQ(
       c10::str(dict),
