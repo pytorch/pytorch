@@ -33,7 +33,10 @@ namespace torch { namespace autograd { namespace python {
 PythonEngine::PythonEngine() = default;
 
 Engine& PythonEngine::get_python_engine() {
-  static PythonEngine engine;
+  // It's ok to "leak" PythonEngine singleton during application shutdown.
+  // Otherwise destructor needs to wait for all the worker/device threads to finish,
+  // which can be tricky as Python runtime was already destroyed at that point.
+  static PythonEngine *engine = new PythonEngine();
   // This is "probably" thread-safe because the flag is set in a fork handler
   // before any threads are created, and this function is only called with the
   // GIL held. However, using fork + threads is playing with fire so this is
@@ -41,12 +44,12 @@ Engine& PythonEngine::get_python_engine() {
   // backwards threads hold a lock, we'll probably deadlock in the engine
   // destructor.
   if (_reinitialize_engine) {
-    engine.release_workers();
-    engine.~PythonEngine();
-    new (&engine) torch::autograd::python::PythonEngine();
+    engine->release_workers();
+    delete engine;
+    engine = new PythonEngine();
     _reinitialize_engine = false;
   }
-  return engine;
+  return *engine;
 }
 
 void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
