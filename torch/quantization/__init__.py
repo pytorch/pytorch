@@ -43,7 +43,7 @@ _all__ = [
     'register_activation_post_process_hook',
     # Observers
     'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
-    'default_weight_observer',
+    'default_weight_observer', 'default_placeholder_observer',
     # FakeQuantize (for qat)
     'default_fake_quant', 'default_weight_fake_quant',
     'default_symmetric_fixed_qparams_fake_quant',
