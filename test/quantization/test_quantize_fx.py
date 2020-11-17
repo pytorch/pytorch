@@ -23,7 +23,7 @@ from torch.quantization import (
     default_dynamic_qconfig,
     default_qat_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_dynamic_qconfig,
+    float_qparams_weight_only_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
     fuse_modules,
