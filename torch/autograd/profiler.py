@@ -869,7 +869,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.device_type == 0:  # CPU
             # account for the kernels in the children ops
             return (sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) +
-                        sum(ch.cuda_time_total for ch in self.cpu_children))
+                    sum(ch.cuda_time_total for ch in self.cpu_children))
         else:
             assert self.device_type == 1  # CUDA
             return self.time_range.elapsed_us()
@@ -1056,11 +1056,11 @@ def parse_kineto_results(result):
 
         cpu_memory_usage = 0
         cuda_memory_usage = 0
-        if kineto_event.device_type() == 0: # CPU
+        if kineto_event.device_type() == 0:  # CPU
             # find the corresponding memory allocation events
             for mem_record in mem_records:
                 if (mem_record.start_us() >= kineto_event.start_us() and
-                    mem_record.start_us() <= abs_end_us):
+                        mem_record.start_us() <= abs_end_us):
                     cpu_memory_usage += mem_record.cpu_memory_usage()
                     cuda_memory_usage += mem_record.cuda_memory_usage()
         is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()

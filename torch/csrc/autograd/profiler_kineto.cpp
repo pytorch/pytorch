@@ -7,7 +7,7 @@
 
 #ifdef USE_KINETO
 #include <pthread.h>
-#include "libkineto.h"
+#include <libkineto.h>
 #endif
 
 namespace torch { namespace autograd { namespace profiler {

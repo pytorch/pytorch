@@ -368,7 +368,7 @@ struct TORCH_API ProfilerConfig {
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
         with_stack(with_stack) {}
-  ~ProfilerConfig();
+  ~ProfilerConfig() = default;
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;

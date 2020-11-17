@@ -455,8 +455,6 @@ void registerCUDAMethods(CUDAStubs* stubs) {
   cuda_stubs = stubs;
 }
 
-ProfilerConfig::~ProfilerConfig() = default;
-
 at::IValue ProfilerConfig::toIValue() const {
   c10::impl::GenericList eventIValueList(at::AnyType::get());
   eventIValueList.reserve(NUM_PROFILER_CFG_IVALUE_IDX);
@@ -675,7 +673,7 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
 
 CUDAStubs::~CUDAStubs() = default;
 
-static jit::CodeTemplate event_template(R"(
+static const jit::CodeTemplate event_template(R"(
 {
   "name": "${name}",
   "ph": "X",

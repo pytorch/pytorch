@@ -1,5 +1,4 @@
 import argparse
-import statistics
 import sys
 import timeit
 import torch
