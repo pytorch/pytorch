@@ -266,7 +266,7 @@ def _is_fake_quant_script_module(mod):
     return False
 
 def disable_fake_quant(mod):
-    if isinstancef(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
+    if isinstance(mod, FakeQuantizeBase) or _is_fake_quant_script_module(mod):
         mod.disable_fake_quant()
 
 def enable_fake_quant(mod):
