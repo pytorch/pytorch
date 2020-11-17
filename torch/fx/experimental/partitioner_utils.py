@@ -30,6 +30,7 @@ class Partition:
             if n.op in {'placeholder', 'get_attr'}:
                 self.nodes.add(n)
         self.nodes.add(node)
+        self.recalculate_mem_size()
 
     def remove_node(self, node):
         # Remove a node only if the node is in the partition
@@ -43,8 +44,9 @@ class Partition:
             # and this input node is not used by some other nodes in this partition,
             # the remove this input node
             for input_node in input_nodes:
-                if all([n not in self.nodes for n in input_node.users]):
+                if all([n not in self.nodes for n in input_node.users]) and input_node.op in {'placeholder', 'get_attr'}:
                     self.nodes.remove(input_node)
+            self.recalculate_mem_size()
 
 class Device(NamedTuple):
     name: str
@@ -197,7 +199,7 @@ def get_comm_latency_between(parent_partition: Partition, child_partition: Parti
                 if size_bytes is not None:
                     comm_size += size_bytes.output_size
                 visited_nodes.add(n)
-    return comm_size * transfer_rate_bytes_per_sec
+    return comm_size / transfer_rate_bytes_per_sec
 
 def get_latency_of_partitioned_graph(
     partitions: List[Partition],

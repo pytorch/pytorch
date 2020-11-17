@@ -593,5 +593,136 @@ void testBoundsInferenceFlattened() {
   ASSERT_TRUE(exprEquals(TABI.stop[0], new IntImm(3 * 4 * 5 - 1)));
 }
 
+void testGetPotentialHazards() {
+  KernelScope kernel_scope;
+  BufHandle a("A", {5}, kInt);
+  BufHandle b("B", {5}, kInt);
+  BufHandle c("C", {5}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+
+  using namespace analysis;
+
+  {
+    /*
+     * A[0] = B[0];
+     * B[0] = 3;      WAR on B
+     * A[0] = B[0];   WAW on A, RAW on B
+     * C[0] = 5;
+     */
+
+    Store* store1 = Store::make(a, {0}, Load::make(b, {0}, 1), 1);
+    Store* store2 = Store::make(b, {0}, 3, 1);
+    Store* store3 = Store::make(a, {0}, Load::make(b, {0}, 1), 1);
+    Store* store4 = Store::make(c, {0}, 5, 1);
+    Stmt* stmt = Block::make({store1, store2, store3, store4});
+
+    MemDependencyChecker analyzer;
+    stmt->accept(&analyzer);
+
+    ASSERT_EQ(
+        HazardKind::WriteAfterRead,
+        getPotentialHazards(analyzer, store1, store2));
+
+    ASSERT_EQ(
+        HazardKind::ReadAfterWrite,
+        getPotentialHazards(analyzer, store2, store3));
+
+    ASSERT_EQ(
+        HazardKind::WriteAfterWrite,
+        getPotentialHazards(analyzer, store1, store3));
+
+    // Fourth store has no dependencies
+    ASSERT_EQ(
+        HazardKind::NoDependency,
+        getPotentialHazards(analyzer, store1, store4));
+    ASSERT_EQ(
+        HazardKind::NoDependency,
+        getPotentialHazards(analyzer, store2, store4));
+    ASSERT_EQ(
+        HazardKind::NoDependency,
+        getPotentialHazards(analyzer, store3, store4));
+  }
+}
+
+void testGetPotentialHazardsLoopNoHazard() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return (i + 1) * (j + 1);
+      });
+
+  LoopNest l({A, B});
+
+  using namespace analysis;
+
+  MemDependencyChecker analyzer;
+  l.root_stmt()->accept(&analyzer);
+
+  For* loopRootA = l.getLoopStmtsFor(A)[0];
+  For* loopRootB = l.getLoopStmtsFor(B)[0];
+
+  // No dependencies between loops.
+  ASSERT_EQ(
+      HazardKind::NoDependency,
+      getPotentialHazards(analyzer, loopRootA, loopRootB));
+}
+
+void testGetPotentialHazardsLoopCall() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i, j) + 5;
+      });
+
+  LoopNest l({A, B});
+
+  using namespace analysis;
+
+  MemDependencyChecker analyzer;
+  l.root_stmt()->accept(&analyzer);
+
+  For* loopRootA = l.getLoopStmtsFor(A)[0];
+  For* loopRootB = l.getLoopStmtsFor(B)[0];
+
+  ASSERT_EQ(
+      HazardKind::ReadAfterWrite,
+      getPotentialHazards(analyzer, loopRootA, loopRootB));
+}
+
+void testGetPotentialHazardsLoopSplit() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+
+  LoopNest l({A});
+  For *outer, *inner, *tail;
+
+  // Splitting with tail by something offset creates a tail which also writes to
+  // A.
+  l.splitWithTail(l.getLoopStmtsFor(A)[0], 5, &outer, &inner, &tail);
+
+  using namespace analysis;
+
+  MemDependencyChecker analyzer;
+  l.root_stmt()->accept(&analyzer);
+
+  ASSERT_EQ(
+      HazardKind::WriteAfterWrite, getPotentialHazards(analyzer, outer, tail));
+}
+
 } // namespace jit
 } // namespace torch
