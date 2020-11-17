@@ -17110,6 +17110,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x.fmod_(zero)
         self.assertTrue(torch.all(x.isnan()))
 
+    @skipCUDAIfRocm # Check https://github.com/pytorch/pytorch/issues/48130
     @dtypes(*torch.testing.get_all_int_dtypes())
     def test_fmod_by_zero_integral(self, device, dtype):
         # check integral tensor fmod to zero
