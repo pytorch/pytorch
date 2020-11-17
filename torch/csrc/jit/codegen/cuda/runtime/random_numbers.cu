@@ -26,7 +26,7 @@ class Philox {
       output = single_round(counter_, key_);
       incr();
     }
-    unsigned long ret;
+    unsigned long ret = 0;
     switch (STATE) {
       case 0:
         ret = output.x;
@@ -88,15 +88,15 @@ class Philox {
   }
 
  private:
-  static const unsigned long kPhilox10A = 0x9E3779B9;
-  static const unsigned long kPhilox10B = 0xBB67AE85;
-  static const unsigned long kPhiloxSA = 0xD2511F53;
-  static const unsigned long kPhiloxSB = 0xCD9E8D57;
+  static constexpr unsigned long kPhilox10A = 0x9E3779B9;
+  static constexpr unsigned long kPhilox10B = 0xBB67AE85;
+  static constexpr unsigned long kPhiloxSA = 0xD2511F53;
+  static constexpr unsigned long kPhiloxSB = 0xCD9E8D57;
 
-  uint4 counter;
-  uint4 output;
-  uint2 key;
-  unsigned int STATE;
+  uint4 counter = {};
+  uint4 output = {};
+  uint2 key = {};
+  unsigned int STATE = 0;
 };
 
 __device__ float uniform(unsigned int x) {
