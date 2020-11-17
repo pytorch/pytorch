@@ -480,10 +480,10 @@ class Quantizer:
                     output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
-                    elif quantize_handler.all_node_args and input_output_observed(quantize_handler):
-                        # observer for outputs
-                        new_observer = qconfig.activation()
-                        insert_observer(node, new_observer)
+                elif quantize_handler.all_node_args and input_output_observed(quantize_handler):
+                    # observer for outputs
+                    new_observer = qconfig.activation()
+                    insert_observer(node, new_observer)
 
             # insert observer for input of standalone module
             if standalone_module_input_idxs is not None:
