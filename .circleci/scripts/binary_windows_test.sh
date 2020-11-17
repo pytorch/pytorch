@@ -14,6 +14,7 @@ fi
 
 pushd "$BUILDER_ROOT"
 
+./windows/internal/test.bat
 ./windows/internal/smoke_test.bat
 
 popd
