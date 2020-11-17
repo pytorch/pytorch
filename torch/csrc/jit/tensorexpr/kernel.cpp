@@ -259,6 +259,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::trunc:
     case aten::frac:
     case aten::lgamma:
+    case aten::type_as:
       return sizesForValue(v->node()->input());
 
     case aten::sub:
@@ -278,7 +279,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::lt:
     case aten::min:
     case aten::max:
-    case aten::type_as:
     case aten::pow:
     case aten::fmod:
     case aten::remainder:
@@ -500,6 +500,7 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
   auto res2 = broadcastShapes(shapes);
   return res2;
 }
+
 std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
@@ -1006,9 +1007,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::type_as: {
-      return computeTwoOperand(
-          "aten_type_as", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Cast::make(rhs.dtype(), lhs);
+      auto const& n = v->node();
+      Tensor* rhs = tensors_.at(n->inputs()[1]->unique());
+      auto dtype = rhs->body()->dtype();
+      return computeOneOperand(
+          "aten_type_as", v, [dtype](const ExprHandle& lhs) {
+            return Cast::make(dtype, lhs);
           });
     } break;
 
