@@ -59,7 +59,7 @@ CONFIG_TREE_DATA = [
             ]),
             ("11.1", [
                 ("3.8", [
-                    X(True),
+                    ("important", [X(True)]),
                     ("libtorch", [
                         (True, [
                             ('build_only', [XImportant(True)]),
