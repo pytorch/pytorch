@@ -193,10 +193,10 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           } else {
             typesFromTensors.emplace_back(scalar_type);
           }
-        } else if (
-            auto scalar_type =
-                input->type()->cast<TensorType>()->scalarType()) {
-          typesFromTensors.emplace_back(*scalar_type);
+        } else if (auto tensor_type = input->type()->cast<TensorType>()) {
+          auto scalar_type = tensor_type->scalarType();
+          if (scalar_type)
+            typesFromTensors.emplace_back(*scalar_type);
         }
       });
 
