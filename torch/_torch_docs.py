@@ -5632,13 +5632,7 @@ swapdims(input, dim0, dim1) -> Tensor
 
 Alias for :func:`torch.transpose`.
 
-Swaps the dimension of :attr:`input` at the position in :attr:`dim0`
-to the position in :attr:`dim1`.
-
-Args:
-    {input}
-    dim0 (int): Original position of the dim to move
-    dim1 (int): Destination position
+This function is equivalent to Numpy's swapaxes function.
 
 Examples::
 
@@ -5668,13 +5662,7 @@ swapaxes(input, axis0, axis1) -> Tensor
 
 Alias for :func:`torch.transpose`.
 
-Swaps the dimension of :attr:`input` at the position in :attr:`axis0`
-to the position in :attr:`axis1`.
-
-Args:
-    {input}
-    axis0 (int): Original position of the dim to move
-    axis1 (int): Destination position
+This function is equivalent to Numpy's swapaxes function.
 
 Examples::
 
