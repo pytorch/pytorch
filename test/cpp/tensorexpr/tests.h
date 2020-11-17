@@ -413,6 +413,8 @@ namespace jit {
   _(FuserPass_IgnoreUnknownShapeAtStart)            \
   _(FuserPass_Multidevice)                          \
   _(FuserPass_MergeGroups)                          \
+  _(FuserPass_Where)                                \
+  _(FuserPass_WhereList)                            \
   _(TrainBasic)                                     \
   _(Conv2D)
 
