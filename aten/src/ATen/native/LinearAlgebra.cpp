@@ -1623,83 +1623,8 @@ Tensor _linalg_cond_exception_helper(const Tensor& self) {
   return result;
 }
 
-enum class CondMode {
-    kNorm2,  // 2-norm using the SVD, default
-    kNormNegative2,
-    kNorm1,
-    kNormNegative1,
-    kNormInfinity,
-    kNormNegativeInfinity,
-    kNormFrobenius,
-    kNormNuclear,
-    kUndefined
-};
-
-// this function converts cond_mode enum to ord argument compatible with linalg_norm
-c10::variant<Scalar, std::string> cond_mode_to_ord(CondMode cond_mode) {
-  c10::variant<Scalar, std::string> ord;
-  switch (cond_mode) {
-    case CondMode::kNorm2:
-        ord = 2;
-        break;
-    case CondMode::kNormNegative2:
-        ord = -2;
-        break;
-    case CondMode::kNorm1:
-        ord = 1;
-        break;
-    case CondMode::kNormNegative1:
-        ord = -1;
-        break;
-    case CondMode::kNormInfinity:
-        ord = 1;
-        break;
-    case CondMode::kNormNegativeInfinity:
-        ord = -1;
-        break;
-    case CondMode::kNormFrobenius:
-        ord = "fro";
-        break;
-    case CondMode::kNormNuclear:
-        ord = "nuc";
-        break;
-    default:
-      TORCH_CHECK(false, "cond_mode_to_ord: got an unexpected norm type.");
-  }
-  return ord;
-}
-
-// this function converts ord argument compatible with linalg_norm to cond_mode enum compatible with _linalg_cond_helper
-CondMode ord_to_cond_mode(c10::variant<Scalar, std::string> ord_variant) {
-  if (ord_variant.index() == 0) {
-    // ord_variant holds a Scalar type
-    auto ord = c10::get<Scalar>(ord_variant).toDouble();
-    if (ord == 2) {
-      return CondMode::kNorm2;
-    } else if (ord == -2) {
-      return CondMode::kNormNegative2;
-    } else if (ord == 1) {
-      return CondMode::kNorm1;
-    } else if (ord == -1) {
-      return CondMode::kNormNegative1;
-    } else if (ord == INFINITY) {
-      return CondMode::kNormInfinity;
-    } else if (ord == -INFINITY) {
-      return CondMode::kNormNegativeInfinity;
-    }
-  } else if (ord_variant.index() == 1) {
-    // ord_variant holds a std::string type
-    std::string ord = c10::get<std::string>(ord_variant);
-    if (ord == "fro") {
-      return CondMode::kNormFrobenius;
-    } else if (ord == "nuc") {
-      return CondMode::kNormNuclear;
-    }
-  }
-  return CondMode::kUndefined;
-}
-
-Tensor _linalg_cond_helper(const Tensor& self, CondMode cond_mode) {
+// This function helps to dispatch norm computations depending on 'ord' of variant type
+Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string> ord_variant) {
   // Ignore errors if not invertible, result is INFINITY in this case
   // Currently checking for error in at::inverse causes cross-device data movement
   // For batched input if at least one matrix in the batch is not invertible,
@@ -1717,8 +1642,6 @@ Tensor _linalg_cond_helper(const Tensor& self, CondMode cond_mode) {
   }
   std::array<int64_t, 2> dim_arr = {-2, -1};
   optional<IntArrayRef> dim = IntArrayRef(dim_arr);
-
-  c10::variant<Scalar, std::string> ord_variant = cond_mode_to_ord(cond_mode);
 
   return c10::visit([&](auto&& ord) {
     Tensor norm_self = at::linalg_norm(self, ord, dim);
@@ -1777,29 +1700,8 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
               "linalg_cond only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
 
-  // Ignore errors if not invertible, result is INFINITY in this case
-  // Currently checking for error in at::inverse causes cross-device data movement
-  // For batched input if at least one matrix in the batch is not invertible,
-  // then the result for all other (possibly) invertible matrices will be infinity as well
-  // since there is currently no way to use at::inverse with silent errors
-  // Tensor self_inverse;
-  // try {
-  //   self_inverse = at::inverse(self);
-  // } catch (const std::exception& e) {
-  //   if (strstr(e.what(), "singular")) {
-  //     return _linalg_cond_exception_helper(self);
-  //   } else {
-  //     TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
-  //   }
-  // }
-  // std::array<int64_t, 2> dim_arr = {-2, -1};
-  // optional<IntArrayRef> dim = IntArrayRef(dim_arr);
-  // Tensor norm_self = at::linalg_norm(self, ord, dim);
-  // Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
-  // Tensor result = norm_self * norm_inverse;
-  // return result;
-  CondMode cond_mode = ord_to_cond_mode(ord);
-  return _linalg_cond_helper(self, cond_mode);
+  c10::variant<Scalar, std::string> ord_variant = ord;
+  return _linalg_cond_helper(self, ord_variant);
 }
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
@@ -1828,29 +1730,8 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
               "linalg_cond only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
 
-  // Ignore errors if not invertible, result is INFINITY in this case
-  // Currently checking for error in at::inverse causes cross-device data movement
-  // For batched input if at least one matrix in the batch is not invertible,
-  // then the result for all other (possibly) invertible matrices will be infinity as well
-  // since there is currently no way to use at::inverse with silent errors
-  // Tensor self_inverse;
-  // try {
-  //   self_inverse = at::inverse(self);
-  // } catch (const std::exception& e) {
-  //   if (strstr(e.what(), "singular")) {
-  //     return _linalg_cond_exception_helper(self);
-  //   } else {
-  //     TORCH_CHECK(false, "linalg_cond got an unexpected error:\n", e.what());
-  //   }
-  // }
-  // std::array<int64_t, 2> dim_arr = {-2, -1};
-  // optional<IntArrayRef> dim = IntArrayRef(dim_arr);
-  // Tensor norm_self = at::linalg_norm(self, ord, dim);
-  // Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
-  // Tensor result = norm_self * norm_inverse;
-  // return result;
-  CondMode cond_mode = ord_to_cond_mode(ord);
-  return _linalg_cond_helper(self, cond_mode);
+  c10::variant<Scalar, std::string> ord_variant = ord;
+  return _linalg_cond_helper(self, ord_variant);
 }
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
