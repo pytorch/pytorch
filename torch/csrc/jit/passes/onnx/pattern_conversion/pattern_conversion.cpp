@@ -4,6 +4,9 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 
+// EDITING THIS FILE? READ THIS FIRST!
+// see Note [Edit Pattern Conversion] in pattern_conversion.h
+
 namespace torch {
 namespace jit {
 
@@ -21,17 +24,12 @@ size_t CountNodesBefore(const Node* n) {
   return i;
 }
 
-size_t CountNodesAfterExcludingSubblock(const Node* n) {
+size_t CountNodesAfter(const Node* n) {
   auto graph = n->owningGraph();
   size_t i = 0;
   auto node = n->next();
-  while (node != graph->return_node()) {
-    if (std::none_of(
-            n->blocks().begin(), n->blocks().end(), [&](const Block* b) {
-              return b == node->owningBlock();
-            })) {
-      i++;
-    }
+  while (node && node != graph->return_node()) {
+    i++;
     node = node->next();
   }
   return i;
@@ -313,15 +311,6 @@ std::vector<Value*> ConvertIndexPutToONNX(
   auto subblock = old_node->blocks()[0];
   auto index_put_node = subblock->nodes().back()->prev();
 
-  // Open up SquashSliceAndSelect
-  // 1. get all slice and select nodes, as before.
-  // 2. MergeSliceAndSelectToIndices
-  // 3. ReshapeToAdvancedIndexingFormat
-  // 4. Create new index_put
-  // 5. For nodes created in 2-4, run onnx conversion.
-  // Node modifications are only allowed within the subblock.
-
-  // 1.
   // Find slice and select operators that are associated with this index
   // operator. E.g. x[1:3, 0] = y will generate one slice operator(1:3) and one
   // select operator(0).
@@ -332,16 +321,16 @@ std::vector<Value*> ConvertIndexPutToONNX(
       : index_put_node;
   Value* orig_data = last_node->input(0);
 
-  // 2.
+  // Convert slice and select operators to indices.
   std::unordered_map<int64_t, ConvertedIndex> dim_index_map =
       MergeSliceAndSelectToIndices(
           old_graph, index_put_node, slice_and_select_nodes, orig_data, env);
 
-  // 3.
+  // Reshape indices to advanced indexing format.
   std::vector<Value*> indices =
       ReshapeToAdvancedIndexingFormat(old_graph, index_put_node, dim_index_map);
 
-  // 4.
+  // Create new index_put node with converted indices.
   const auto list_indices =
       old_graph->createList(OptionalType::ofTensor(), indices)
           ->insertBefore(index_put_node)
@@ -353,21 +342,20 @@ std::vector<Value*> ConvertIndexPutToONNX(
        index_put_node->input(2),
        index_put_node->input(3)});
   new_index_put_node->insertBefore(index_put_node);
-
   auto new_index_put = new_index_put_node->output();
-
   new_index_put->copyMetadata(index_put_node->output());
   index_put_node->output()->replaceAllUsesWith(new_index_put);
-
   orig_data->replaceAllUsesAfterNodeWith(new_index_put->node(), new_index_put);
 
+  // Convert aten type to onnx type.
   EraseNumberTypesOnBlock(subblock);
   EliminateDeadCode(
       subblock,
       true,
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 
-  // 5. Convert all these things to onnx.
+  // Convert all the new aten nodes that were just created to onnx.
+  // New onnx nodes are appended at the end of new_block.
   for (auto at_n : subblock->nodes()) {
     if (at_n == subblock->param_node() || at_n == subblock->return_node()) {
       continue;
@@ -376,7 +364,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
     NodeToONNX(at_n, new_block, torch::onnx::OperatorExportTypes::ONNX, env);
   }
 
-  // 6. figure out onnx outputs.
+  // Find onnx outputs corresponding to the aten outputs of index_put.
   std::vector<Value*> outs;
   for (auto o : subblock->return_node()->inputs()) {
     outs.emplace_back(env[o]);
@@ -390,10 +378,8 @@ std::vector<Value*> ConvertPatternFromSubblock(
     Block* new_block,
     Node* old_node,
     std::unordered_map<Value*, Value*>& env) {
-  // Assert that the number of nodes in original torch graph is unchanged
-  // before and after converting patterns from subblock.
   size_t n_count_before = CountNodesBefore(old_node);
-  size_t n_count_after = CountNodesAfterExcludingSubblock(old_node);
+  size_t n_count_after = CountNodesAfter(old_node);
 
   std::vector<Value*> res;
 
@@ -405,9 +391,12 @@ std::vector<Value*> ConvertPatternFromSubblock(
     res = ConvertIndexPutToONNX(new_block, old_node, env);
   }
 
+  // Assert that the number of nodes in original torch graph is unchanged
+  // before and after converting patterns from subblock.
+  // The pattern conversion code should not alter nodes outside the Placeholder
+  // subblock.
   TORCH_INTERNAL_ASSERT(n_count_before == CountNodesBefore(old_node));
-  TORCH_INTERNAL_ASSERT(
-      n_count_after == CountNodesAfterExcludingSubblock(old_node));
+  TORCH_INTERNAL_ASSERT(n_count_after == CountNodesAfter(old_node));
 
   return res;
 }

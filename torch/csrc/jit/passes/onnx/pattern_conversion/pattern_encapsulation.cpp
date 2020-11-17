@@ -4,12 +4,27 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 
+// EDITING THIS FILE? READ THIS FIRST!
+// see Note [Edit Pattern Encapsulation] in pattern_encapsulation.h
+
 namespace torch {
 namespace jit {
 
 namespace {
 
-// TODO: Add comment here for index_put pattern
+// Trace back all the slice & select nodes associated with the index_put node,
+// and copy them under the placeholder subblock.
+// E.g. The IR for x[1:3, 0] = update
+//    ...
+//    %8 : Float(2, 4) = aten::slice(%0, %4, %5, %6, %7)
+//    ...
+//    %11 : Float(2) = aten::select(%8, %9, %10)
+//    ...
+//    %13 : Tensor?[] = prim::ListConstruct()
+//    ...
+//    %16 : Float(2) = aten::index_put(%11, %13, %14, %15)
+// The aten::index_put node alone does not contain any indices (%13 : Tensor?[]
+// = prim::ListConstruct()).
 void EncapsulateInplaceIndexPutForONNX(Node* index_put_node) {
   auto graph = index_put_node->owningGraph();
 
