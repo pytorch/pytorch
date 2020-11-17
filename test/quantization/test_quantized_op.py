@@ -4108,7 +4108,10 @@ class TestPadding(TestCase):
         y_ref = padding_op(x)
         qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
         qy_hat = padding_op(qx)
+        self.assertEqual(qy_ref, qy_hat)
 
+        # Out variant
+        qy_hat = torch._C._nn.reflection_pad1d(qx, padding, out=qy_hat)
         self.assertEqual(qy_ref, qy_hat)
 
     @given(batch_size=st.integers(1, 64),
@@ -4130,7 +4133,10 @@ class TestPadding(TestCase):
         y_ref = padding_op(x)
         qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
         qy_hat = padding_op(qx)
+        self.assertEqual(qy_ref, qy_hat)
 
+        # Out variant
+        qy_hat = torch._C._nn.reflection_pad2d(qx, padding, out=qy_hat)
         self.assertEqual(qy_ref, qy_hat)
 
     @given(batch_size=st.integers(1, 64),
