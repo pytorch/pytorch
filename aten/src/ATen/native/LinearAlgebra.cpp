@@ -1618,8 +1618,7 @@ Tensor _linalg_cond_exception_helper(const Tensor& self) {
   auto result_shape = self.sizes().vec();
   result_shape.pop_back();
   result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
-  Tensor result = at::empty(result_shape, self.options());
-  at::fill_(result, INFINITY);
+  Tensor result = at::full(result_shape, INFINITY, self.options());
   return result;
 }
 
@@ -1684,8 +1683,7 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
         // Scalar.dtype() is always ScalarType::Double for isFloatingPoint() = true
         // and at::where doesn't allow arguments with different dtype
         // so let's use 0-dim tensor filled with inf
-        Tensor inf_tensor = at::empty({}, result.options());
-        at::fill_(inf_tensor, inf);
+        Tensor inf_tensor = at::full({}, inf, result.options());
         return at::where(result == flt_max, inf_tensor, result);
       }
       default:
