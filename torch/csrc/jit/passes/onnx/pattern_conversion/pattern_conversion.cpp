@@ -256,10 +256,14 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
         AT_ERROR("Unexpected node kind ", index_i->second.orig_node_kind);
     }
 
-    std::vector<int64_t> view_shape(ind_size, 1);
-    view_shape[0] = -1;
-    auto unsqueezed_index = graph->insert(aten::view, {index, view_shape});
-    indices.emplace_back(unsqueezed_index);
+    if (ind_size != 1) {
+      std::vector<int64_t> view_shape(ind_size, 1);
+      view_shape[0] = -1;
+      auto unsqueezed_index = graph->insert(aten::view, {index, view_shape});
+      indices.emplace_back(unsqueezed_index);
+    } else {
+      indices.emplace_back(index);
+    }
   }
 
   return indices;

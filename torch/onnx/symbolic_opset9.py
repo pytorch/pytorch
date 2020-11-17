@@ -470,13 +470,11 @@ def size(g, self, dim=None):
 
 @parse_args('v', 'i', 'i')
 def transpose(g, self, dim0, dim1):
-    # print(self)
     if dim0 == dim1:  # micro-optimization
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    # if self.isCompleteTensor():
-    if self.type() and self.type().dim():
+    if self.isCompleteTensor():
         axes = list(range(self.type().dim()))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return g.op("Transpose", self, perm_i=axes)
@@ -1379,7 +1377,7 @@ def index_copy(g, self, dim, index, source):
 def type_as(g, self, other):
     if self.isCompleteTensor() and other.isCompleteTensor() and self.type().scalarType() == other.type().scalarType():
         return self
-    if other.type() and other.type().scalarType():
+    if other.isCompleteTensor():
         other_type_name = other.type().scalarType()
         return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other_type_name])
     else:
