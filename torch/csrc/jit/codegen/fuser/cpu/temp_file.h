@@ -6,11 +6,8 @@
 #include <torch/csrc/utils/disallow_copy.h>
 
 #ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
+#include <c10/util/win32-headers.h>
 #include <WinError.h>
-#include <Windows.h>
 #include <fcntl.h>
 #include <io.h>
 #include <process.h>

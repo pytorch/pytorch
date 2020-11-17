@@ -333,7 +333,7 @@ typedef struct{
   HANDLE handle;
   HANDLE wait;
 } ReleaseContext;
-static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
+static void CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
 {
   if (lpParam) {
     ReleaseContext *ctx = (ReleaseContext *)lpParam;

@@ -24,10 +24,20 @@
 #ifndef NOGDI
 #define NOGDI
 #endif
+#ifndef NOMSG
+#define NOMSG
+#endif
+#ifndef NOMB
+#define NOMB
+#endif
+#ifndef NOCLIPBOARD
+#define NOCLIPBOARD
+#endif
 
 #include <windows.h>
 #include <dbghelp.h>
 
+#undef VOID
 #undef DELETE
 #undef IN
 #undef THIS
