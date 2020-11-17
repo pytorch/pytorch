@@ -219,6 +219,14 @@ ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
   return Buf::make("", dims, dtype);
 }
 
+ExprHandle expr_to_vec(ExprHandle v, int lanes) {
+  if (lanes == 1) {
+    return v;
+  } else {
+    return Broadcast::make(v, lanes);
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

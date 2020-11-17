@@ -22,12 +22,10 @@ torch/csrc/autograd/generated/
 #
 
 import argparse
-import copy
 import os
 import yaml
 import re
-from collections import defaultdict
-from .utils import YamlLoader, split_name_params, op_name_with_overload
+from .utils import YamlLoader, op_name_with_overload
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
@@ -157,68 +155,6 @@ def load_aten_declarations(path):
     return selected_declarations
 
 
-def load_deprecated_signatures(aten_decls, deprecated_path):
-    def group_declarations_by_signature():
-        d = defaultdict(list)
-        for declaration in aten_decls:
-            name = declaration['name']
-            base_name = name[:-1] if declaration['inplace'] else name
-            simple_types = [arg['simple_type'] for arg in declaration['arguments']]
-            signature = '{}({})'.format(base_name, ', '.join(simple_types))
-            d[signature].append(declaration)
-        return d
-
-    with open(deprecated_path, 'r') as f:
-        deprecated_defs = yaml.load(f, Loader=YamlLoader)
-    declarations = []
-    declarations_by_signature = group_declarations_by_signature()
-
-    def get_signature(name, params, call_args):
-        # create a mapping of parameter name to parameter type
-        types = dict([param.split(' ')[::-1] for param in params if param != '*'])
-        # if the name in the call is not in the parameter list, assume it's
-        # a literal Scalar
-        rearranged_types = [types.get(arg, 'Scalar') for arg in call_args]
-        return '{}({})'.format(name, ', '.join(rearranged_types))
-
-    for deprecated in deprecated_defs:
-        aten_name, call_args = split_name_params(deprecated['aten'])
-        name, params = split_name_params(deprecated['name'])
-        signature = get_signature(aten_name, params, call_args)
-
-        for declaration in declarations_by_signature[signature]:
-            declaration = copy.deepcopy(declaration)
-            declaration['deprecated'] = True
-            declaration['call_args'] = call_args
-
-            call_arg_to_idx = {arg: i for i, arg in enumerate(call_args)}
-            original_args = declaration['arguments']
-
-            # Create an arguments list that uses the types from the original
-            # ATen declaration, but the ordering and parameter names from
-            # the deprecated overload. Any default parameter values from the
-            # original ATen declaration are ignored.
-            arguments = []
-            kwarg_only = False
-            for param in params:
-                if param == '*':
-                    kwarg_only = True
-                    continue
-                _, param_name = param.split(' ')
-                original = original_args[call_arg_to_idx[param_name]]
-                arguments.append({
-                    'name': param_name,
-                    'kwarg_only': kwarg_only,
-                    'type': original['type'],
-                    'simple_type': original['simple_type'],
-                    'dynamic_type': original['dynamic_type'],
-                    'output': original.get('output', False),
-                })
-            declaration['arguments'] = arguments
-            declarations.append(declaration)
-    return declarations
-
-
 def gen_autograd(aten_path, native_functions_path, out, autograd_dir, operator_selector: SelectiveBuilder, disable_autograd=False):
     full_aten_decls = load_aten_declarations(aten_path)
 
@@ -255,7 +191,7 @@ def gen_autograd(aten_path, native_functions_path, out, autograd_dir, operator_s
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
     # Some non-selectable ops (e.g. prim ops) need factory methods so we pass in `full_aten_decls` here.
-    gen_variable_factories(out, full_aten_decls, template_path)
+    gen_variable_factories(out, native_functions_path, template_path)
 
 
 def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
@@ -270,10 +206,6 @@ def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
 
     template_path = os.path.join(autograd_dir, 'templates')
 
-    # Load deprecated signatures
-    deprecated = load_deprecated_signatures(
-        aten_decls, os.path.join(autograd_dir, 'deprecated.yaml'))
-
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_python
     gen_autograd_functions_python(
@@ -281,19 +213,9 @@ def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
 
     # Generate Python bindings
     from . import gen_python_functions
-    # TODO: change gen_python_functions to process native functions directly.
-    gen_python_functions.init(native_functions_path)
-
-    gen_python_functions.gen_py_variable_methods(
-        out, aten_decls + deprecated, template_path)
-    gen_python_functions.gen_py_torch_functions(
-        out, aten_decls + deprecated, template_path)
-    gen_python_functions.gen_py_nn_functions(
-        out, aten_decls, template_path)
-    gen_python_functions.gen_py_fft_functions(
-        out, aten_decls, template_path)
-    gen_python_functions.gen_py_linalg_functions(
-        out, aten_decls, template_path)
+    deprecated_path = os.path.join(autograd_dir, 'deprecated.yaml')
+    gen_python_functions.gen(
+        out, native_functions_path, deprecated_path, template_path)
 
 
 def main():
