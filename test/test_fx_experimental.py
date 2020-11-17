@@ -615,7 +615,6 @@ terrible spacing
         module_with_submodule = split_module(traced, mm, split_cb)
         self.assertEqual(module_with_submodule(a, b, c, d), traced(a, b, c, d))
 
-
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):
             return torch.relu(x)
