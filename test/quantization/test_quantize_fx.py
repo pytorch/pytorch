@@ -19,7 +19,6 @@ from torch.quantization import (
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
-    default_dynamic_quant_observer,
     default_qat_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
