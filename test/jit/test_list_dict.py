@@ -562,7 +562,7 @@ class TestList(JitTestCase):
     def test_mutable_list_append_if_else(self):
         def test_append_if_else():
             a = [1]
-            if False:
+            if 1 == 2:
                 a.append(4)
             else:
                 a.append(10)

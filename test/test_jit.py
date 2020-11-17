@@ -1872,7 +1872,7 @@ graph(%Ra, %Rb):
                 if bool(b):  # -> c0
                     if 1 == 1:  # -> c0
                         c0 = c0 + 1
-                        if False:
+                        if 1 == 2:
                             c1 = c1 + 1
                             c2 = c2 + 1
             else:  # -> c0, c1
@@ -1929,7 +1929,7 @@ graph(%Ra, %Rb):
             b = 1
             c = 1
             for i in range(iter):
-                if False:
+                if 1 == 2:
                     a = 10
                 if i == 5:
                     b = 2
@@ -9670,7 +9670,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "Type mismatch"):
             @torch.jit.script
             def diff_tuple_sizes(x):
-                if False:
+                if 1 == 2:
                     c0 = ((x, x), (x, x, x))
                 else:
                     c0 = ((x, x, x), (x, x))
@@ -9681,7 +9681,7 @@ dedent """
                                     "in the true branch and type float in the false branch:"):
             @torch.jit.script
             def diff_type_used():
-                if False:
+                if 1 == 2:
                     c0 = 1
                 else:
                     c0 = 1.0
@@ -9691,7 +9691,7 @@ dedent """
             @torch.jit.script
             def diff_existing_type(x):
                 c0 = 1.0
-                if False:
+                if 1 == 2:
                     c0 = 1
                     print(x)
                 return x
@@ -12575,7 +12575,7 @@ dedent """
             a = 3
             if bool(cond):
                 raise ArbitraryError(a, "hi")
-                if False:
+                if 1 == 2:
                     raise ArbitraryError
             return a
 
@@ -13799,7 +13799,7 @@ dedent """
 
         @torch.jit.script
         def foo():
-            if 1 == 1:
+            if True:
                 return 1
             else:
                 return "2"
@@ -14554,7 +14554,7 @@ dedent """
 
             def forward(self, x, use_ignore_path):
                 # type: (Tensor, bool) -> Tuple[Tensor, Tensor]
-                if False:
+                if 1 == 2:
                     return self.tuple_ignored(x)
                 if use_ignore_path:
                     return self.single_val_ignored(x, x), self.single_val_ignored(x, x)
