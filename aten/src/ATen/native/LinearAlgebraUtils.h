@@ -97,7 +97,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     } else if (info > 0) {
       if (strstr(name, "svd")) {
         AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-      } else if (strstr(name, "symeig")) {
+      } else if (strstr(name, "symeig") || strstr(name, "syevd")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
                  " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
       } else if (!allow_singular) {
