@@ -109,7 +109,7 @@ class Metrics(object):
 
 
 class State():
-    _metaclass__ = abc.ABCMeta
+    _metaclass__ = ABCMeta
 
     @abstractmethod
     def start(self):
