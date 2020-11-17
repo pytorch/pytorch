@@ -558,9 +558,6 @@ of size `m`, then :attr:`input` must be
 :math:`(n \times m)` and :attr:`out` will be a matrix of size
 :math:`(n \times m)`.
 
-For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
-:attr:`alpha` must be real numbers, otherwise they should be integers.
-
 Args:
     input (Tensor): matrix to be added
     vec1 (Tensor): the first vector of the outer product
