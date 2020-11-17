@@ -14,6 +14,7 @@ from .fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
 )
+from .utils import get_combined_dict
 
 # Default map for swapping float module to quantized ones
 DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
@@ -117,10 +118,7 @@ def get_static_quant_module_class(float_module_class, additional_static_quant_ma
     """
     if additional_static_quant_mapping is None:
         additional_static_quant_mapping = {}
-    all_mappings = DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.copy()
-    for k, v in additional_static_quant_mapping.items():
-        all_mappings[k] = v
-
+    all_mappings = get_combined_dict(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
         "Floating point module class {}".format(str(float_module_class)) + \
