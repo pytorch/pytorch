@@ -176,9 +176,19 @@ DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
 
+SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
+auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+""")
+
 SETUP_DERIVATIVE = CodeTemplate("""\
-if (compute_requires_grad( ${args_with_derivatives} )) {
+if (_any_requires_grad) {
   ${setup}
+}
+""")
+
+SETUP_NONE_REQUIRES_GRAD = CodeTemplate("""\
+if (compute_requires_grad( ${args_to_check} )) {
+  throw_error_out_requires_grad("${base_name}");
 }
 """)
 
@@ -532,22 +542,21 @@ def emit_body(declaration):
         return setup
 
     def setup_derivative(differentiable_inputs):
-
         env = {}
         env['args_with_derivatives'] = [arg['name'] for arg in args_with_derivatives]
         env['op'] = func['op'] if func is not None else 'NotImplemented'
         env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
-            setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
+            # For out functions, ensure that no input or output requires grad
             body = []
             body.append(DECLARE_GRAD_FN.substitute(op='Node'))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_outputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_inputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_outputs]))
             return body
 
         setup = []
@@ -557,7 +566,7 @@ def emit_body(declaration):
         body = []
         body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
         body.append(DECLARE_GRAD_FN.substitute(env))
-        body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
+        body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
 
     def emit_check_if_in_complex_autograd_allowlist():
@@ -786,10 +795,14 @@ def emit_body(declaration):
             return CONDITIONAL.substitute(cond='grad_fn', statements=stmts)
         return ''
 
+    def emit_any_requires_grad():
+        return [SETUP_ANY_REQUIRES_GRAD.substitute(
+            args_with_derivatives=[arg['name'] for arg in args_with_derivatives]), ]
+
     def emit_check_inplace():
         if not inplace:
             return []
-        return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
+        return ['check_inplace({}, _any_requires_grad);'.format(arg['name']) for arg in differentiable_outputs]
 
     def emit_increment_version():
         if not modifies_arguments:
@@ -805,6 +818,7 @@ def emit_body(declaration):
 
     body.extend(unpack_args(env, declaration))
     if requires_derivative:
+        body.extend(emit_any_requires_grad())
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables)
@@ -815,7 +829,6 @@ def emit_body(declaration):
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.append(emit_history())
-    if requires_derivative:
         body.append(emit_save_outputs())
         body.extend(emit_check_if_in_complex_autograd_allowlist())
     if base_name in RESET_GRAD_ACCUMULATOR:
