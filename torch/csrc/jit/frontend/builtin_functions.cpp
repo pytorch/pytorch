@@ -73,7 +73,7 @@ const auto aten_ops_additional =
 def _assert(condition : Tensor, message : str):
   assert bool(condition), message
 def __contains__(self: str, key: str):
-    return self.find(self, key) != -1
+    return self.find(key, 0, len(self)) != -1
 )SCRIPT";
 
 // Implementations of historic symbol behaviors are defined here
