@@ -730,8 +730,6 @@ Tensor all(const Tensor& self) {
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
 
   Tensor result = at::empty({0}, self.options());
   auto iter = make_reduction(
@@ -749,8 +747,7 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
+
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
@@ -776,8 +773,6 @@ Tensor any(const Tensor& self) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
 
   Tensor result = at::empty({0}, self.options());
   auto iter = make_reduction(
@@ -795,8 +790,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "any only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
-    "all only supports torch.uint8 and torch.bool dtypes");
+
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
