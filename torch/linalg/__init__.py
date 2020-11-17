@@ -222,14 +222,17 @@ or of each matrix in a batched :attr:`input`, using the matrix norm defined by :
 The condition number is defined as the matrix norm of
 :attr:`input` times the matrix norm of the inverse of :attr:`input`.
 
-This function supports real-valued, and only on CPU, complex-valued input.
+This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``cdouble`` dtype for :attr:`input`.
 
 .. note:: For `p = {None, 2, -2}` :attr:`input` can be non-square. For other norm types :attr:`input` must be
-          a square matrix or a batch of square matrices. If :attr:`input` does not satisfy the requirement
+          a square matrix or a batch of square matrices. If :attr:`input` does not satisfy this requirement
           then a RuntimeError will be thrown.
 
-.. note:: For the batched input if at least one matrix in the batch is not invertible,
-          currently getting the result for all other (possibly) invertible matrices in the batch is not implemented.
+.. note:: If :attr:`input` is a non-invertible matrix then a tensor containing infinity will be returned.
+          If :attr:`input` is a batch of matrices and one or more of them is not invertible
+          then a RuntimeError will be thrown.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
 Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
@@ -279,6 +282,16 @@ Examples::
     tensor(1.4142)
     >>> LA.cond(a, -2)
     tensor(0.7071)
+
+    >>> a = torch.randn(3, 4, 4)
+    >>> LA.cond(a)
+    tensor([ 4.4739, 76.5234, 10.8409])
+
+    >>> a = torch.randn(3, 4, 4, dtype=torch.complex64)
+    >>> LA.cond(a)
+    tensor([ 5.9175, 48.4590,  5.6443])
+    >>> LA.cond(a, 1)
+    >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
 """)
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
