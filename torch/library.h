@@ -653,9 +653,12 @@ public:
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
-/// is only one library (it is a "fragment").  This should ONLY be used
-/// inside the PerOpRegistration.cpp file (as its name suggests).
-#define TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(ns, m) \
+/// is only one library (it is a "fragment").  This is used inside the
+/// PerOpRegistration.cpp file, as well as in places where all op registrations
+/// within the same namespace cannot be easily put into one macro block
+/// (this is mostly the case for custom ops in fbcode that were ported from
+/// the old API)
+#define TORCH_LIBRARY_FRAGMENT(ns, m) \
   static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## k ( \
     torch::Library::FRAGMENT, \
@@ -663,6 +666,24 @@ public:
     #ns, c10::nullopt, __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## k (torch::Library& m)
+
+/// \private
+///
+/// This macro should only be used in a few legacy areas.
+/// This macro is a version of TORCH_LIBRARY() that:
+///     - doesn't enforce that there is only library for the given namespace
+///     - takes in a unique identifier that it appends to the names
+///       of each static variable that it creates
+/// It effectively lets you define multiple TORCH_LIBRARY_FRAGMENT blocks
+/// for the same namespace within the same translation unit, avoiding naming collisions.
+#define TORCH_LIBRARY_FRAGMENT_UNIQUE(ns, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library&); \
+  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
+    torch::Library::FRAGMENT, \
+    &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid), \
+    #ns, c10::nullopt, __FILE__, __LINE__ \
+  ); \
+  void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library& m)
 
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
@@ -716,6 +737,28 @@ public:
     __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
+
+/// \private
+///
+/// This macro should only be used in a few legacy areas.
+/// This macro is a version of TORCH_LIBRARY_IMPL() that:
+///     - takes in a unique identifier that it appends to the names
+///       of each static variable that it creates
+/// It effectively lets you define multiple TORCH_LIBRARY_IMPL blocks
+/// for the same namespace/dispatch key within the same translation unit,
+/// avoiding naming collisions.
+#define TORCH_LIBRARY_IMPL_UNIQUE(ns, k, m, uid) \
+  static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, uid) (torch::Library&); \
+  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k, uid) ( \
+    torch::Library::IMPL, \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
+      []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, uid); }, \
+      []() { return [](torch::Library&) -> void {}; } \
+    ), \
+    #ns, c10::make_optional(c10::DispatchKey::k), \
+    __FILE__, __LINE__ \
+  ); \
+  void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, uid) (torch::Library& m)
 
 
 // These are variants of the macros above which are to be used for testing (they

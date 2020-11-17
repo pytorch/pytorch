@@ -285,7 +285,7 @@ def einsum(equation, *operands):
         The output is computed by multiplying the input :attr:`operands` element-wise, with their dimensions aligned based
         on the subscripts, and then summing out the dimensions whose subscripts are not part of the output.
 
-        Optionally, the output subscripts can be explictly defined by adding an arrow ('->') at the end of the equation
+        Optionally, the output subscripts can be explicitly defined by adding an arrow ('->') at the end of the equation
         followed by the subscripts for the output. For instance, the following equation computes the transpose of a
         matrix multiplication: 'ij,jk->ki'. The output subscripts must appear at least once for some input operand and
         at most once for the output.
@@ -295,9 +295,9 @@ def einsum(equation, *operands):
         e.g. for an input operand with 5 dimensions, the ellipsis in the equation `'ab...c'` cover the third and fourth
         dimensions. The ellipsis does not need to cover the same number of dimensions across the :attr:`operands` but the
         'shape' of the ellipsis (the size of the dimensions covered by them) must broadcast together. If the output is not
-        explicitly defined with the arrow ('->') notation, the ellipsis will come first in the output, before the subscript
-        labels that appear exactly once for the input operands. e.g. the following equation implements batch matrix
-        multiplication `'...ij,...jk'`.
+        explicitly defined with the arrow ('->') notation, the ellipsis will come first in the output (left-most dimensions),
+        before the subscript labels that appear exactly once for the input operands. e.g. the following equation implements
+        batch matrix multiplication `'...ij,...jk'`.
 
         A few final notes: the equation may contain whitespaces between the different elements (subscripts, ellipsis,
         arrow and comma) but something like `'. . .'` is not valid. An empty string `''` is valid for scalar operands.
