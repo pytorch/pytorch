@@ -124,10 +124,7 @@ fi
 build_args+=("BUILD_BINARY=ON")
 build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
-# conda installs zstd package and will conflict with third_party
-if ! which conda; then
-  build_args+=("USE_ZSTD=ON")
-fi
+build_args+=("USE_ZSTD=ON")
 
 if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   # removing http:// duplicate in favor of nvidia-ml.list
