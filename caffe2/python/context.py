@@ -6,7 +6,7 @@
 
 
 import threading
-import six
+import functools
 
 
 class _ContextInfo(object):
@@ -76,7 +76,7 @@ def __exit__(self, *args):
 
 
 def __call__(self, func):
-    @six.wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         with self:
             return func(*args, **kwargs)

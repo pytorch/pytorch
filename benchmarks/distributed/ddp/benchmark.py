@@ -26,10 +26,6 @@ import torch.optim as optim
 import torchvision
 
 
-if not torch._six.PY3:
-    raise RuntimeError("DDP benchmark requires Python 3")
-
-
 def allgather_object(obj):
     buffer = io.BytesIO()
     torch.save(obj, buffer)

@@ -10,7 +10,6 @@ import time
 import logging
 import socket
 import abc
-import six
 
 from collections import OrderedDict
 from future.utils import viewkeys, viewvalues
@@ -26,7 +25,7 @@ an external log destination.
 
 
 class ExternalLogger(object):
-    six.add_metaclass(abc.ABCMeta)
+    __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
     def set_runtime_args(self, runtime_args):
