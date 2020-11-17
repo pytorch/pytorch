@@ -52,6 +52,7 @@ _all__ = [
     'default_histogram_fake_quant',
     # QConfig
     'QConfig', 'default_qconfig', 'default_dynamic_qconfig', 'float16_dynamic_qconfig',
+    'float_qparams_weight_only_qconfig',
     # QAT utilities
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
     # module transformations

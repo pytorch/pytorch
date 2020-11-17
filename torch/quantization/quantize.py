@@ -18,7 +18,7 @@ from .quantization_mappings import (
 )
 
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
+from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
@@ -348,7 +348,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             }
         elif dtype == torch.quint8:
             qconfig_spec = {
-                nn.EmbeddingBag : float_qparams_dynamic_qconfig,
+                nn.EmbeddingBag : float_qparams_weight_only_qconfig,
             }
         else:
             raise ValueError(

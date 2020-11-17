@@ -447,13 +447,13 @@ class Embedding(QuantizeHandler):
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # Supported combinations are:
-        # quant_type  | activation (compute_type) | weight
-        # weight_only |  float32 (torch.uint8)    | quint8
-        # weight_only |  float32 (torch.uint8)    | quint4x2
+        # quant_type  | activation | weight | activation_compute_type
+        # weight_only |  float32   | quint8 | None
+        # weight_only |  float32   | quint4x2 | None
         # tuple (activation_dtype, weight_dtype, compute_dtype)
         supported_dtypes = [
-            (torch.float32, torch.quint8, torch.quint8),
-            (torch.float32, torch.quint4x2, torch.quint8),
+            (torch.float32, torch.quint8, None),
+            (torch.float32, torch.quint4x2, None),
         ]
         assert node.op == 'call_module'
         emb_node = node
