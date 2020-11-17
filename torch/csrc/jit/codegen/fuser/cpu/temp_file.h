@@ -6,8 +6,8 @@
 #include <torch/csrc/utils/disallow_copy.h>
 
 #ifdef _WIN32
-#include <c10/util/win32-headers.h>
 #include <WinError.h>
+#include <c10/util/win32-headers.h>
 #include <fcntl.h>
 #include <io.h>
 #include <process.h>
