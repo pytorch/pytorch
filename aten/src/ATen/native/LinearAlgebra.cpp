@@ -1695,7 +1695,7 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   // since at::inverse is used in the implementation, self has to be a tensor consisting of square matrices
   // the same check as squareCheckInputs(self) but with a slightly more informative error message
   TORCH_CHECK(self.size(-1) == self.size(-2),
-              "linalg_cond only supports square matrices or batches of square matrices "
+              "linalg_cond with ±1 or ±inf norm types only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
 
   c10::variant<Scalar, std::string> ord_variant = ord;
@@ -1725,7 +1725,7 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
   TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
     self.dim(), " dimensions.");
   TORCH_CHECK(self.size(-1) == self.size(-2),
-              "linalg_cond only supports square matrices or batches of square matrices "
+              "linalg_cond with frobenius or nuclear norm types only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
 
   c10::variant<Scalar, std::string> ord_variant = ord;
