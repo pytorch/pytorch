@@ -6,7 +6,7 @@ from torch.futures import Future
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 try:
     # Available in Python >= 3.2
@@ -275,9 +275,9 @@ class EventList(list):
             An EventList containing FunctionEventAvg objects.
         """
         assert self._tree_built
-        stats = defaultdict(FunctionEventAvg)
+        stats: Dict[Tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
-        def get_key(event, group_by_input_shapes, group_by_stack_n):
+        def get_key(event, group_by_input_shapes, group_by_stack_n) -> Tuple[str, ...]:
             key = [str(event.key), str(event.node_id)]
             if group_by_input_shapes:
                 key.append(str(event.input_shapes))
@@ -1046,7 +1046,7 @@ def parse_kineto_results(result):
     # Create and return FunctionEvent list
     string_table = StringTable()
     function_events = []
-    cuda_corr_map = {}
+    cuda_corr_map: Dict[int, List[torch.autograd.KinetoEvent]] = {}
     for kineto_event in result.events():
         if filter_name(kineto_event.name()):
             continue
