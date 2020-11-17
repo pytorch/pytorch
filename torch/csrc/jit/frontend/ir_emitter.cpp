@@ -374,7 +374,7 @@ struct Environment {
           as_simple_value,
           /*allow_conversions=*/true);
       std::stringstream why_not;
-      if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
+      if (!as_simple_value->type()->isSubtypeOfExt(*parent_type, &why_not)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
               << simple_parent->type()->repr_str()
@@ -397,7 +397,7 @@ struct Environment {
       if (!annotated_type) {
         annotated_type = as_simple_value->type();
       }
-      if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
+      if (!as_simple_value->type()->isSubtypeOf(*annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
             << annotated_type->repr_str()
@@ -583,8 +583,8 @@ static Value* materializeConstant(
 }
 
 inline bool isSupportedListElementType(const TypePtr& type) {
-  return type->isSubtypeOf(TensorType::get()) ||
-      type->isSubtypeOf(NumberType::get());
+  return type->isSubtypeOf(*TensorType::get()) ||
+      type->isSubtypeOf(*NumberType::get());
 }
 
 // Information for each def being emitted.
@@ -993,8 +993,8 @@ struct to_ir {
       // this guard skips implicit conversion from None -> Tensor for the return
       // type. otherwise forgetting a return a function returning a tensor will
       // cause a None to be converted to a tensor.
-      if (!(result_type->isSubtypeOf(TensorType::get()) &&
-            result->type()->isSubtypeOf(NoneType::get()))) {
+      if (!(result_type->isSubtypeOf(*TensorType::get()) &&
+            result->type()->isSubtypeOf(*NoneType::get()))) {
         result = tryConvertToType(
             stmt.range(),
             *graph,
@@ -1003,7 +1003,7 @@ struct to_ir {
             /*allow_conversions=*/true);
       }
 
-      if (!result->type()->isSubtypeOf(result_type)) {
+      if (!result->type()->isSubtypeOf(*result_type)) {
         throw ErrorReport(stmt.range())
             << "Return value was annotated as having type "
             << result_type->repr_str() << " but is actually of type "
@@ -1404,7 +1404,7 @@ struct to_ir {
                              << v->type()->repr_str() << " to bool";
     }
     // cast value not response for checking output type
-    if (!out->type()->isSubtypeOf(BoolType::get())) {
+    if (!out->type()->isSubtypeOf(*BoolType::get())) {
       throw ErrorReport(loc)
           << "expected a bool expression for condition but found "
           << out->type()->repr_str();
@@ -1611,7 +1611,7 @@ struct to_ir {
       bool staticallyTrue(const TypePtr& actual_type) {
         // is this isinstance check statically true?
         for (const TypePtr& typ : types) {
-          if (actual_type->isSubtypeOf(typ)) {
+          if (actual_type->isSubtypeOf(*typ)) {
             return true;
           }
         }
@@ -1628,12 +1628,12 @@ struct to_ir {
       }
       bool staticallyFalse(const TypePtr& actual_type) {
         for (const TypePtr& typ : types) {
-          if (typ->isSubtypeOf(actual_type)) {
+          if (typ->isSubtypeOf(*actual_type)) {
             return false;
           }
-          if ((typ->isSubtypeOf(AnyListType::get()) &&
+          if ((typ->isSubtypeOf(*AnyListType::get()) &&
                maybeOfKind(ListType::Kind, actual_type)) ||
-              (typ->isSubtypeOf(AnyTupleType::get()) &&
+              (typ->isSubtypeOf(*AnyTupleType::get()) &&
                maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
@@ -1648,7 +1648,7 @@ struct to_ir {
     auto val = emitExpr(obj);
     RefinementSet refinement;
     if (gathered.types.size() == 1 &&
-        gathered.types.at(0)->isSubtypeOf(val->type()) &&
+        gathered.types.at(0)->isSubtypeOf(*val->type()) &&
         obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
       Refinement isinstance(std::move(ident), gathered.types.at(0));
@@ -1914,7 +1914,7 @@ struct to_ir {
           << "exceptions must derive from BaseException";
     }
 
-    if (!error_message->type()->isSubtypeOf(StringType::get())) {
+    if (!error_message->type()->isSubtypeOf(*StringType::get())) {
       error_message = graph->insert(aten::str, {error_message});
     }
 
@@ -1984,7 +1984,7 @@ struct to_ir {
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
   Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
-    bool use_inplace_op = type->isSubtypeOf(TensorType::get()) ||
+    bool use_inplace_op = type->isSubtypeOf(*TensorType::get()) ||
         type->kind() == TypeKind::ListType;
     switch (stmt.aug_op()) {
       case '+':
@@ -2162,7 +2162,7 @@ struct to_ir {
     const auto lhs = Subscript(stmt.lhs());
     const auto sliceable = emitExpr(lhs.value());
 
-    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+    if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
       // If it's a tensor, just fully evaluate the subscript operation and emit
       // an in-place assignment
       std::vector<Value*> tensorIndices;
@@ -2247,7 +2247,7 @@ struct to_ir {
     auto sliceable = emitExpr(lhs.value());
 
     // If it's a tensor, copy the RHS data into it
-    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+    if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
       std::vector<Value*> tensorIndices;
       Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
@@ -2291,7 +2291,7 @@ struct to_ir {
             << " subscripted assignment. "
             << "File a bug if you want this";
       }
-      if (sliceable->type()->isSubtypeOf(AnyTupleType::get())) {
+      if (sliceable->type()->isSubtypeOf(*AnyTupleType::get())) {
         throw ErrorReport(lhs) << sliceable->type()->repr_str()
                                << " does not support subscripted assignment";
       }
@@ -2717,7 +2717,7 @@ struct to_ir {
             /*allow_conversions=*/true);
 
         std::stringstream why_not;
-        if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
+        if (!expr->type()->isSubtypeOfExt(*type, &why_not)) {
           throw ErrorReport(apply.inputs())
               << "expected an expression of type " << type->repr_str()
               << " but found " << expr->type()->repr_str() << "\n"
@@ -2729,7 +2729,7 @@ struct to_ir {
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
         if (type->kind() == OptionalType::Kind &&
-            expr->type()->isSubtypeOf(NoneType::get())) {
+            expr->type()->isSubtypeOf(*NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);
           graph->insertNode(none);
@@ -3319,7 +3319,7 @@ struct to_ir {
 
         for (auto v : values) {
           std::stringstream ss;
-          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
+          if (!v->type()->isSubtypeOfExt(*elem_type, &ss)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << elem_type->repr_str() << " but found "
@@ -3370,7 +3370,7 @@ struct to_ir {
                                     TreeList trees) {
           for (size_t i = 0, N = values.size(); i < N; ++i) {
             std::stringstream ss;
-            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
+            if (!values[i]->type()->isSubtypeOfExt(*type, &ss)) {
               throw ErrorReport(trees[i])
                   << "Dict " << what
                   << " must contain only a single type, expected: "
@@ -3432,11 +3432,11 @@ struct to_ir {
     // XXX: If list slicing becomes more complicated or stops using
     // aten::slice, we should separate it from this function.
     if (dim) {
-      AT_ASSERT(sliceable->type()->isSubtypeOf(TensorType::get()));
+      AT_ASSERT(sliceable->type()->isSubtypeOf(*TensorType::get()));
 
       args.emplace_back(dim);
     } else {
-      AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
+      AT_ASSERT(!sliceable->type()->isSubtypeOf(*TensorType::get()));
     }
 
     // Default value for start is 0.
@@ -3601,7 +3601,7 @@ struct to_ir {
       }
 
       exprs[expr_idx] = index;
-      if (index->type()->isSubtypeOf(NoneType::get())) {
+      if (index->type()->isSubtypeOf(*NoneType::get())) {
         if (is_reverse) {
           return dim;
         } else {
@@ -3613,7 +3613,7 @@ struct to_ir {
         } else {
           return dim;
         }
-      } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
+      } else if (index->type()->isSubtypeOf(*OptionalType::ofTensor())) {
         if (is_reverse) {
           throw ErrorReport(loc)
               << "Ellipses followed by tensor indexing is currently not supported";
@@ -3678,13 +3678,13 @@ struct to_ir {
         continue;
       }
       auto expr = exprs[i].value();
-      if (expr->type()->isSubtypeOf(NoneType::get())) {
+      if (expr->type()->isSubtypeOf(*NoneType::get())) {
         sliceable =
             emitUnsqueeze(loc, sliceable, insert_value_for_dim(dims[i]));
       } else if (expr->type() == IntType::get()) {
         sliceable =
             emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
-      } else if (expr->type()->isSubtypeOf(OptionalType::ofTensor())) {
+      } else if (expr->type()->isSubtypeOf(*OptionalType::ofTensor())) {
         tensor_indices.resize(dims[i] + 1);
         tensor_indices[dims[i]] = expr;
       } else {
@@ -3724,7 +3724,7 @@ struct to_ir {
       const SourceRange& loc,
       Value* sliceable,
       const List<Expr>& subscript_exprs) {
-    if (!sliceable->type()->isSubtypeOf(TensorType::get())) {
+    if (!sliceable->type()->isSubtypeOf(*TensorType::get())) {
       throw ErrorReport(loc)
           << "Unsupported operation: attempted to use multidimensional "
           << "indexing on a non-tensor type";
@@ -3752,7 +3752,7 @@ struct to_ir {
     AT_ASSERT(subscript_exprs[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript_exprs[0]);
     Value* maybe_dim = nullptr;
-    if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+    if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = graph->insertConstant(0, loc);
     }
@@ -3895,7 +3895,7 @@ struct to_ir {
               dynamic_cast<SliceValue*>(subscript_sv.get())) {
         Value* dim = nullptr;
         // aten::slice.tensor needs an additional `dim` input.
-        if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+        if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
           dim = method.graph()->insertConstant(0, val_range);
         }
 
@@ -3916,7 +3916,7 @@ struct to_ir {
       if (sliceable->type()->cast<TupleType>()) {
         return std::make_shared<SimpleValue>(
             emitTupleIndex(range, sv->asValue(val_range, method), idx));
-      } else if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+      } else if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
         return std::make_shared<SimpleValue>(
             emitMultidimSlicing(range, sliceable, subscript_exprs));
       } else {

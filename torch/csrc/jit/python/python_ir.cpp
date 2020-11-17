@@ -733,7 +733,7 @@ void initPythonIRBindings(PyObject* module_) {
             if (!other) {
               return false;
             }
-            return self->isSubtypeOf(other);
+            return self->isSubtypeOf(*other);
           })
       .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
         return self->cast<InterfaceType>() != nullptr;

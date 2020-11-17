@@ -100,9 +100,9 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   // This additional information should only contain details that are not obvious
   // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
-  virtual bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const;
+  virtual bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
-  bool isSubtypeOf(const TypePtr rhs) const {
+  bool isSubtypeOf(const Type& rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
   }
 
@@ -308,12 +308,12 @@ struct CAFFE2_API OptionalType
     return create(contained_types[0]);
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
-    if (auto rhs_ = rhs->cast<OptionalType>()) {
-      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
+    if (auto rhs_ = rhs.cast<OptionalType>()) {
+      return getElementType()->isSubtypeOfExt(*rhs_->getElementType(), why_not);
     }
     return false;
   }
@@ -675,7 +675,7 @@ struct CAFFE2_API TensorType : public Type {
   }
 
   bool operator==(const Type& rhs) const override;
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
   std::string str() const override;
 
@@ -758,7 +758,7 @@ struct CAFFE2_API TensorType : public Type {
 
   const SymbolicShape& symbolic_sizes() const;
 
-  TensorTypePtr merge(TensorTypePtr other, bool merge_sizes = true) const;
+  TensorTypePtr merge(const TensorType& other, bool merge_sizes = true) const;
 
   bool matchTensor(const at::Tensor& t);
 
@@ -882,7 +882,7 @@ struct CAFFE2_API ListType
     return create(contained_types.at(0));
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
@@ -1004,12 +1004,12 @@ struct CAFFE2_API FutureType
     return create(contained_types.at(0));
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
-    if (auto rhs_ = rhs->cast<FutureType>()) {
-      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
+    if (auto rhs_ = rhs.cast<FutureType>()) {
+      return getElementType()->isSubtypeOfExt(*rhs_->getElementType(), why_not);
     }
     return false;
   }
@@ -1115,7 +1115,7 @@ struct CAFFE2_API TupleType : public NamedType {
   }
 
   bool operator==(const Type& rhs) const override;
-  bool isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const override;
 
   std::string str() const override;
   bool hasFreeVariables() const override {
@@ -1210,7 +1210,7 @@ struct CAFFE2_API EnumType : public NamedType {
     return false;
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
   std::shared_ptr<const ::torch::jit::CompilationUnit> compilation_unit() const {
     auto cu = cu_.lock();
@@ -1318,8 +1318,8 @@ struct CAFFE2_API FloatType : public NumberType {
   std::string str() const override {
     return "float";
   }
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
-    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
+    return rhs.kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
@@ -1345,8 +1345,8 @@ struct CAFFE2_API IntType : public NumberType {
   std::string str() const override {
     return "int";
   }
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
-    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
+    return rhs.kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
@@ -1449,8 +1449,8 @@ struct CAFFE2_API NoneType : public Type {
   std::string str() const override {
     return "None";
   }
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream *why_not) const override {
-    if (rhs->kind() == OptionalType::Kind) {
+  bool isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const override {
+    if (rhs.kind() == OptionalType::Kind) {
       return true;
     }
     return Type::isSubtypeOfExt(rhs, why_not);
@@ -1665,18 +1665,18 @@ CAFFE2_API std::ostream& operator<<(std::ostream& os, const Stride& s);
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return TensorType::get();
   }
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
 
 inline TypePtr TensorType::fromNumberType(TypePtr typ) {
-  if (typ->isSubtypeOf(IntType::get())) {
+  if (typ->isSubtypeOf(*IntType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
-  } else if (typ->isSubtypeOf(FloatType::get())) {
+  } else if (typ->isSubtypeOf(*FloatType::get())) {
     return TensorType::createContiguous(at::kFloat, at::kCPU, {});
-  } else if (typ->isSubtypeOf(BoolType::get())) {
+  } else if (typ->isSubtypeOf(*BoolType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
@@ -2128,7 +2128,7 @@ struct CAFFE2_API ClassType : public NamedType {
         "'");
     TypePtr atype = getAttribute(*slot_idx);
     TORCH_CHECK(
-      ty->isSubtypeOf(atype),
+      ty->isSubtypeOf(*atype),
       ty->repr_str(),
       " is not compatible with the type ",
       atype->repr_str(),
@@ -2218,7 +2218,7 @@ struct CAFFE2_API ClassType : public NamedType {
     auto ptr = ClassType::create(name(), compilation_unit_, is_module());
     AT_ASSERT(numAttributes() == contained_types.size());
     for(size_t i = 0; i < attributes_.size(); ++i) {
-      AT_ASSERT(attributes_[i].getType()->isSubtypeOf(contained_types[i]));
+      AT_ASSERT(attributes_[i].getType()->isSubtypeOf(*contained_types[i]));
       ptr->addAttribute(attributes_[i].getName(), contained_types[i]);
     }
     // Copy methods over
@@ -2274,7 +2274,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
   static const TypeKind Kind = TypeKind::ClassType;
 
@@ -2350,13 +2350,13 @@ struct CAFFE2_API InterfaceType : public NamedType {
     return std::string("InterfaceType<") + name()->name() + ">";
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
   // try to find a method of this interface,
   // returns nullptr if not found.
   const FunctionSchema* getMethod(const std::string& name) const;
   void addMethod(FunctionSchema schema);
-  const std::vector<FunctionSchema>& methods() {
+  const std::vector<FunctionSchema>& methods() const {
     return *methods_;
   }
 

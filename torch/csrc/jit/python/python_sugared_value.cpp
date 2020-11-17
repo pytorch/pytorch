@@ -261,7 +261,7 @@ SugaredValuePtr ModuleValue::getitem(
         const auto& attr_type = self_type->getAttribute(i);
         if (attr_type->is_module()) {
           std::stringstream ss;
-          if (!attr_type->isSubtypeOfExt(type_hint, &ss)) {
+          if (!attr_type->isSubtypeOfExt(*type_hint, &ss)) {
             auto loc = self_->node()->sourceRange();
             throw ErrorReport(loc)
                 << "Attribute " << self_type->getAttributeName(i)
@@ -795,7 +795,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
     TORCH_CHECK(
-        type->isSubtypeOf(tt),
+        type->isSubtypeOf(*tt),
         "Can't to redefine NamedTuple: ",
         tt->repr_str());
     return type;
@@ -843,7 +843,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
   Graph& graph = *(caller.graph());
 
   auto ValOr = [&](Value* given, int64_t default_val) {
-    if (!given || given->type()->isSubtypeOf(NoneType::get())) {
+    if (!given || given->type()->isSubtypeOf(*NoneType::get())) {
       return graph.insertConstant(default_val, loc);
     }
     return given;

@@ -476,7 +476,7 @@ class IrParser {
           [](const Node* node) -> bool {
             // we don't support cast of output types yet;
             if (!node->inputs()[3]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    *static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half and float;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
@@ -539,7 +539,8 @@ class IrParser {
   }
 
   bool registerScalar(const JitValue* val) {
-    if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+    if (val->type()->isSubtypeOf(
+            *static_cast<c10::TypePtr>(FloatType::get()))) {
       CgValue cg_val;
       if (auto ival = constant_as<float>(val)) {
         cg_val = new Float(ival.value());
@@ -549,7 +550,7 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(IntType::get()))) {
+                   *static_cast<c10::TypePtr>(IntType::get()))) {
       CgValue cg_val;
       if (auto ival = constant_as<int>(val)) {
         cg_val = new Int(ival.value());
@@ -559,7 +560,7 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(BoolType::get()))) {
+                   *static_cast<c10::TypePtr>(BoolType::get()))) {
       CgValue cg_val;
       if (auto ival = constant_as<bool>(val)) {
         cg_val = new Bool(ival.value());
@@ -569,7 +570,7 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(NoneType::get()))) {
+                   *static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
       return true;
     } else if (val->type()->cast<ListType>()) {

@@ -43,7 +43,7 @@ class NaiveTypePropagator {
     switch (node->kind()) {
       // Constant:
       case prim::Constant: {
-        if (node->output()->type()->isSubtypeOf(TensorType::get())) {
+        if (node->output()->type()->isSubtypeOf(*TensorType::get())) {
           node->output()->inferTypeFrom(node->t(attr::value));
         }
         break;
@@ -152,7 +152,7 @@ class NaiveTypePropagator {
 
         // accept dtype input to `aten::sum` node
         if (!node->input(3)->type()->isSubtypeOf(
-                static_cast<c10::TypePtr>(NoneType::get()))) {
+                *static_cast<c10::TypePtr>(NoneType::get()))) {
           if (auto opt_ivalue = toIValue(node->input(3))) {
             out_type = out_type->withScalarType(opt_ivalue->toScalarType());
           }

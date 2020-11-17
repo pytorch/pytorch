@@ -243,7 +243,7 @@ struct GuardElimination {
       if ((input->node()->kind() == prim::Guard &&
            !input->type()->expect<TensorType>()->isSummarized()) ||
           input->node()->kind() == prim::Constant ||
-          (allow_numbers && input->type()->isSubtypeOf(NumberType::get())) ||
+          (allow_numbers && input->type()->isSubtypeOf(*NumberType::get())) ||
           except.count(i) != 0) {
         AT_ASSERT(
             input->node()->kind() != prim::Guard ||

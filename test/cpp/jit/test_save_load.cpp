@@ -115,8 +115,8 @@ TEST(SerializationTest, TypeTags) {
   for (auto item : items) {
     auto bytes = torch::pickle_save(item.value);
     auto loaded = torch::pickle_load(bytes);
-    ASSERT_TRUE(loaded.type()->isSubtypeOf(item.expected_type));
-    ASSERT_TRUE(item.expected_type->isSubtypeOf(loaded.type()));
+    ASSERT_TRUE(loaded.type()->isSubtypeOf(*item.expected_type));
+    ASSERT_TRUE(item.expected_type->isSubtypeOf(*loaded.type()));
   }
 }
 

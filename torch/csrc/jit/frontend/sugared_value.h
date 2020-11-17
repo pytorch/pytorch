@@ -511,7 +511,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
       size_t n_binders) override {
     if (args.size() == 1 && kwargs.size() == 0) {
       auto v = args[0].value(*m.graph());
-      if (v->type()->isSubtypeOf(type_)) {
+      if (v->type()->isSubtypeOf(*type_)) {
         return std::make_shared<SimpleValue>(v);
       }
     }
@@ -753,7 +753,7 @@ struct TORCH_API ExceptionValue : public SugaredValue {
     auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
     for (auto& input : args) {
       auto input_str = input.value(*m.graph());
-      if (!input_str->type()->isSubtypeOf(StringType::get())) {
+      if (!input_str->type()->isSubtypeOf(*StringType::get())) {
         input_str =
             emitBuiltinCall(loc, *m.graph(), aten::str, {input_str}, {});
       }

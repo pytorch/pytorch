@@ -251,7 +251,7 @@ class class_ {
     auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
-        ser_type->isSubtypeOf(arg_type),
+        ser_type->isSubtypeOf(*arg_type),
         "__getstate__'s return type should be a subtype of "
         "input argument of __setstate__. Got ",
         ser_type->repr_str(),

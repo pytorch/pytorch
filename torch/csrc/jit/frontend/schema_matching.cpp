@@ -33,7 +33,7 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   if (!list_type) {
     return false;
   }
-  if (type->isSubtypeOf(list_type_)) {
+  if (type->isSubtypeOf(*list_type_)) {
     return true;
   }
   if (auto tuple = type->cast<TupleType>()) {
@@ -42,14 +42,14 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
         tuple->elements().end(),
         [&](const TypePtr& t) {
           // TODO: resolve VarType if necessary
-          return t->isSubtypeOf(list_type->getElementType());
+          return t->isSubtypeOf(*list_type->getElementType());
         });
   }
   return false;
 }
 
 // Applies implicit conversion from value trying to turn it into type
-// concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
+// concrete_type. It succeeds if `return_value->isSubtypeOf(*concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
@@ -59,7 +59,7 @@ Value* tryConvertToType(
   // treat conversion to Optional[T] as conversions to T
   if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
     if (value->type()->kind() != OptionalType::Kind &&
-        !value->type()->isSubtypeOf(NoneType::get())) {
+        !value->type()->isSubtypeOf(*NoneType::get())) {
       return tryConvertToType(
           loc, graph, op->getElementType(), value, allow_conversions);
     }
@@ -77,7 +77,7 @@ Value* tryConvertToType(
 
     // inductively apply implicit conversions to tuples
     if (auto concrete_tuple = concrete_type->cast<TupleType>()) {
-      if (!value_tuple->isSubtypeOf(concrete_tuple) &&
+      if (!value_tuple->isSubtypeOf(*concrete_tuple) &&
           concrete_tuple->elements().size() == value_tuple->elements().size()) {
         auto unpacked = createTupleUnpack(value);
         std::vector<Value*> converted;
@@ -97,7 +97,7 @@ Value* tryConvertToType(
   // implicit conversions
   if (allow_conversions) {
     // Convert tensor or number to concrete int/float types
-    bool value_isa_tensor = value->type()->isSubtypeOf(TensorType::get());
+    bool value_isa_tensor = value->type()->isSubtypeOf(*TensorType::get());
     bool value_equals_number = *value->type() == *NumberType::get();
     bool concrete_float = *concrete_type == *FloatType::get();
     bool concrete_int = *concrete_type == *IntType::get();
@@ -119,8 +119,8 @@ Value* tryConvertToType(
     }
 
     // Convert strings to device
-    if (value->type()->isSubtypeOf(StringType::get()) &&
-        concrete_type->isSubtypeOf(DeviceObjType::get())) {
+    if (value->type()->isSubtypeOf(*StringType::get()) &&
+        concrete_type->isSubtypeOf(*DeviceObjType::get())) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
   }
@@ -178,7 +178,7 @@ static Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
   std::stringstream ss;
   if (!value->type()->isSubtypeOfExt(
-          concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
+          *concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
           << arg.formatTypeMismatchMsg(value->type()->repr_str());
@@ -196,7 +196,7 @@ static Value* tryMatchArgument(
       }
 
       if (auto v = value->type()->cast<ListType>()) {
-        if (v->getElementType()->isSubtypeOf(TensorType::get())) {
+        if (v->getElementType()->isSubtypeOf(*TensorType::get())) {
           ostream << "Empty lists default to List[Tensor]. Add a variable "
                      "annotation to the assignment to create an empty list "
                      "of another type (torch.jit.annotate(List[T, []]) where T "

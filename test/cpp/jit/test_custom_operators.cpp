@@ -85,17 +85,17 @@ TEST(CustomOperatorTest, ListParameters) {
   ASSERT_EQ(op->schema().arguments().size(), 3);
   ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
   ASSERT_TRUE(
-      op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
+      op->schema().arguments()[0].type()->isSubtypeOf(*ListType::ofInts()));
   ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
   ASSERT_TRUE(
-      op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
+      op->schema().arguments()[1].type()->isSubtypeOf(*ListType::ofFloats()));
   ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
   ASSERT_TRUE(
-      op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
+      op->schema().arguments()[2].type()->isSubtypeOf(*ListType::ofTensors()));
 
   ASSERT_EQ(op->schema().returns().size(), 1);
   ASSERT_TRUE(
-      op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
+      op->schema().returns()[0].type()->isSubtypeOf(*ListType::ofFloats()));
 
   Stack stack;
   push(stack, c10::List<int64_t>({1, 2}));
@@ -124,11 +124,11 @@ TEST(CustomOperatorTest, ListParameters2) {
   ASSERT_EQ(op->schema().arguments().size(), 1);
   ASSERT_EQ(op->schema().arguments()[0].name(), "tensors");
   ASSERT_TRUE(
-      op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofTensors()));
+      op->schema().arguments()[0].type()->isSubtypeOf(*ListType::ofTensors()));
 
   ASSERT_EQ(op->schema().returns().size(), 1);
   ASSERT_TRUE(
-      op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
+      op->schema().returns()[0].type()->isSubtypeOf(*ListType::ofTensors()));
 
   Stack stack;
   push(stack, c10::List<at::Tensor>({at::ones(5)}));

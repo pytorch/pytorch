@@ -225,20 +225,20 @@ AnyEnumTypePtr AnyEnumType::get() {
 
 c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
-  if (t1->isSubtypeOf(t2)) {
+  if (t1->isSubtypeOf(*t2)) {
     return t2;
-  } else if (t2->isSubtypeOf(t1)) {
+  } else if (t2->isSubtypeOf(*t1)) {
     return t1;
   }
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
+    return t1->expect<TensorType>()->merge(*t2->expect<TensorType>());
   }
 
-  if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
+  if (t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get())) {
     return OptionalType::create(t2);
-  } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
+  } else if (t2->isSubtypeOf(*NoneType::get()) && !t1->isSubtypeOf(*NoneType::get())) {
     return OptionalType::create(t1);
   }
 
@@ -289,9 +289,9 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   auto t1_unshaped = unshapedType(t1);
   auto t2_unshaped = unshapedType(t2);
 
-  if (t1_unshaped->isSubtypeOf(t2_unshaped)) {
+  if (t1_unshaped->isSubtypeOf(*t2_unshaped)) {
     return t2_unshaped;
-  } else if (t2_unshaped->isSubtypeOf(t1_unshaped)) {
+  } else if (t2_unshaped->isSubtypeOf(*t1_unshaped)) {
     return t1_unshaped;
   }
 
@@ -429,7 +429,7 @@ MatchTypeReturn matchTypeVariables(
       if (!optionedMatch.success()) {
         return optionedMatch;
       }
-    } else if (!actual->isSubtypeOf(NoneType::get())) {
+    } else if (!actual->isSubtypeOf(*NoneType::get())) {
       // If the actual type is a non-optional, allow matching to the formal if
       // its element type matches the actual.
       // Don't match None because it is already an optional (but one of
@@ -517,12 +517,12 @@ const char * typeKindToString(TypeKind kind) {
   return "";
 }
 
-bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
+bool Type::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (rhs.kind() == TypeKind::AnyType || *this == rhs) {
     return true;
   }
-  if(auto rhs_ = rhs->cast<OptionalType>()) {
-    return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
+  if(auto rhs_ = rhs.cast<OptionalType>()) {
+    return this->isSubtypeOfExt(*rhs_->getElementType(), why_not);
   }
   return false;
 }
@@ -560,16 +560,16 @@ VaryingShape<int64_t> TensorType::sizes() const {
       }));
 }
 
-TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
-  auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-  auto dev = merge_primitive(device(), other->device());
-  auto sprops = stride_properties().merge(other->stride_properties());
-  auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-  auto undef = merge_primitive(undefined(), other->undefined());
+TensorTypePtr TensorType::merge(const TensorType& other, bool merge_sizes) const {
+  auto scalar_type = merge_primitive(scalarType(), other.scalarType());
+  auto dev = merge_primitive(device(), other.device());
+  auto sprops = stride_properties().merge(other.stride_properties());
+  auto gr = merge_primitive(requiresGrad(), other.requiresGrad());
+  auto undef = merge_primitive(undefined(), other.undefined());
   return TensorType::create(
       scalar_type,
       dev,
-      merge_sizes ? symbolic_sizes().merge(other->symbolic_sizes())
+      merge_sizes ? symbolic_sizes().merge(other.symbolic_sizes())
                   : symbolic_sizes(),
       sprops,
       gr,
@@ -739,14 +739,14 @@ TupleType::TupleType(
   }
 }
 
-bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
-  if (rhs_->kind() == AnyTupleType::Kind) {
+  if (rhs_.kind() == AnyTupleType::Kind) {
     return true;
   }
-  auto rhs = rhs_->cast<TupleType>();
+  auto rhs = rhs_.cast<TupleType>();
   if (!rhs)
     return false;
   // unnamed tuple is not a subtype of nametuple
@@ -770,15 +770,15 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
   // co-variant rules for tuples
   return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
-    return a->isSubtypeOfExt(b, why_not);
+    return a->isSubtypeOfExt(*b, why_not);
   });
 }
 
-bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
-  if (rhs_->kind() == AnyListType::Kind) {
+  if (rhs_.kind() == AnyListType::Kind) {
     return true;
   }
   return false;
@@ -1017,13 +1017,13 @@ const SymbolicShape& TensorType::symbolic_sizes() const {
   return sizes_;
 }
 
-bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  if (auto rhs_p = rhs->cast<TensorType>()) {
+bool TensorType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (auto rhs_p = rhs.cast<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
     if (this == rhs_p.get()) {
       return true;
     }
-    return *merge(rhs_p) == *rhs_p;
+    return *merge(*rhs_p) == *rhs_p;
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
@@ -1087,7 +1087,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_, is_module());
   AT_ASSERT(numAttributes() == refined_slots.size());
   for (size_t i = 0; i < attributes_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributes_[i].getType()));
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(*attributes_[i].getType()));
     ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER),
     (attributes_[i].getKind() == AttributeKind::BUFFER));
   }
@@ -1098,18 +1098,18 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  if (rhs->cast<AnyClassType>()) {
+bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  if (rhs.cast<AnyClassType>()) {
     return true;
   }
   // to improve performance, this check can be cached
-  if (auto iface = rhs->cast<InterfaceType>()) {
+  if (auto iface = rhs.cast<InterfaceType>()) {
     // ClassType is not a subtype of InterfaceType if the InterfaceType is a
     // Module Interface Type but the Class Type is not a Module Class Type
     if (!is_module() && iface->is_module()) {
       if (why_not) {
         *why_not << "Class '" << repr_str() << "' is not a subtype of "
-                 << "the module interface '" << rhs->repr_str()
+                 << "the module interface '" << rhs.repr_str()
                  << "' , only ScriptModule class can be subtype of module"
                  << " interface.\n";
       }
@@ -1120,7 +1120,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
       if (!self_method) {
         if (why_not) {
           *why_not << "Class '" << repr_str() << "' does not have method '"
-                   << schema.name() << "' but '" << rhs->repr_str()
+                   << schema.name() << "' but '" << rhs.repr_str()
                    << "' does.\n";
         }
         return false;
@@ -1130,7 +1130,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
-                   << rhs->repr_str() << "' (2)\n"
+                   << rhs.repr_str() << "' (2)\n"
                    << "  (1) " << self_method->getSchema() << "\n"
                    << "  (2) " << schema << "\n";
         }
@@ -1182,9 +1182,9 @@ bool InterfaceType::isSubTypeImpl(
     return true;
 }
 
-bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool InterfaceType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
-  if (auto iface = rhs->cast<InterfaceType>()) {
+  if (auto iface = rhs.cast<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
   }
   return Type::isSubtypeOfExt(rhs, why_not);
@@ -1440,9 +1440,9 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
   return SymbolicShape(std::move(dims));
 }
 
-bool EnumType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  return rhs->kind() == TypeKind::AnyType ||
-      rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
+bool EnumType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+  return rhs.kind() == TypeKind::AnyType ||
+      rhs.kind() == TypeKind::AnyEnumType || *this == rhs;
 }
 
 } // namespace c10

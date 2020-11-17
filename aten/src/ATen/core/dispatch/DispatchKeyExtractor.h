@@ -155,7 +155,7 @@ private:
         " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS());
     c10::utils::bitset dispatch_arg_indices_reverse;
     for (size_t index = 0; index < schema.arguments().size(); ++index) {
-      if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) || schema.arguments()[index].type()->isSubtypeOf(ListType::ofTensors())) {
+      if (schema.arguments()[index].type()->isSubtypeOf(*TensorType::get()) || schema.arguments()[index].type()->isSubtypeOf(*ListType::ofTensors())) {
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
       }
     }

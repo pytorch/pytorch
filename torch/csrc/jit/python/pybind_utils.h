@@ -500,7 +500,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
 }
 
 inline bool isTraceableType(TypePtr type) {
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return true;
   }
 
@@ -751,7 +751,7 @@ inline IValue toIValue(
       }
       // check if the classType conform with the interface or not
       std::stringstream why_not;
-      if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
+      if (!classType->isSubtypeOfExt(*interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
             "Object ",
             py::str(obj),

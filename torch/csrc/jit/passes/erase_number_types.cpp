@@ -9,7 +9,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
     for (auto inp : it->inputs()) {
-      if (inp->type()->isSubtypeOf(NumberType::get())) {
+      if (inp->type()->isSubtypeOf(*NumberType::get())) {
         inp->setType(TensorType::get());
       }
     }
@@ -20,10 +20,10 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case prim::Constant: {
         // remove primitive constants, replacing with tensor equivalent
         // ONNX does not support non-tensor constants
-        if (it->output()->type()->isSubtypeOf(NumberType::get()) ||
-            it->output()->type()->isSubtypeOf(BoolType::get())) {
+        if (it->output()->type()->isSubtypeOf(*NumberType::get()) ||
+            it->output()->type()->isSubtypeOf(*BoolType::get())) {
           at::Scalar s;
-          if (it->output()->type()->isSubtypeOf(BoolType::get())) {
+          if (it->output()->type()->isSubtypeOf(*BoolType::get())) {
             s = static_cast<int64_t>(*constant_as<bool>(it->output()));
           } else {
             s = *constant_as<at::Scalar>(it->output());
@@ -48,9 +48,9 @@ static void EraseNumberTypesOnBlock(Block* block) {
       } break;
       default: {
         for (auto o : it->outputs()) {
-          if (o->type()->isSubtypeOf(NumberType::get())) {
+          if (o->type()->isSubtypeOf(*NumberType::get())) {
             o->setType(TensorType::fromNumberType(o->type()));
-          } else if (o->type()->isSubtypeOf(BoolType::get())) {
+          } else if (o->type()->isSubtypeOf(*BoolType::get())) {
             o->setType(TensorType::fromBoolType());
           }
         }

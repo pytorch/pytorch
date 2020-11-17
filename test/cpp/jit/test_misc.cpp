@@ -497,21 +497,21 @@ TEST(SchemaParserTest, NestedArrays) {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
   ASSERT_TRUE(s.arguments().at(0).N() == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expect<ListType>()
-                                              ->getElementType()
-                                              ->expect<ListType>()
-                                              ->getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expect<ListType>()
+                                               ->getElementType()
+                                               ->expect<ListType>()
+                                               ->getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
-                                              .at(0)
-                                              .type()
-                                              ->expect<ListType>()
-                                              ->getElementType()
-                                              ->expect<ListType>()
-                                              ->getElementType()));
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(*s2.arguments()
+                                               .at(0)
+                                               .type()
+                                               ->expect<ListType>()
+                                               ->getElementType()
+                                               ->expect<ListType>()
+                                               ->getElementType()));
 }
 
 TEST(SchemaParserTest, NamedReturns) {
@@ -527,7 +527,7 @@ TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(
-      s4.arguments().at(0).type()->expect<FutureType>()->getElementType()));
+      *s4.arguments().at(0).type()->expect<FutureType>()->getElementType()));
 }
 
 TEST(SchemaParserTest, AnnotatedAliasSets) {

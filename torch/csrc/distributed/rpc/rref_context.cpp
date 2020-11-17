@@ -343,7 +343,7 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // information on other workers because it's only information only.
     if (type == TensorType::get()) {
       TORCH_INTERNAL_ASSERT(
-          ownerRRef->type()->isSubtypeOf(TensorType::get()),
+          ownerRRef->type()->isSubtypeOf(*TensorType::get()),
           "Expect OwnerRRef to be a sub-type of TensorType, but got ",
           ownerRRef->type()->repr_str());
     } else {

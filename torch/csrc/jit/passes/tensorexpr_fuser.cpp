@@ -324,7 +324,7 @@ class TensorExprFuser {
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
-      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
+      if (inputs[i]->type()->isSubtypeOf(*TensorType::get())) {
         Value* soutput = graph->insert(aten::size, {inputs[i]});
         aliasDb_->createValue(soutput);
         GRAPH_DEBUG(
@@ -384,7 +384,7 @@ class TensorExprFuser {
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(TensorType::get());
+        return v->type()->isSubtypeOf(*TensorType::get());
       });
       GRAPH_DEBUG("Building sizes for ", getHeader(n));
       bool all_inputs_have_sizes = true;
