@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <c10/core/DeviceType.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -70,6 +71,20 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("correlation_id", &LegacyEvent::correlationId)
       .def("start_us", &LegacyEvent::cpuUs);
 
+  py::enum_<c10::DeviceType>(m, "DeviceType")
+      .value("CPU", c10::DeviceType::CPU)
+      .value("CUDA", c10::DeviceType::CUDA)
+      .value("MKLDNN", c10::DeviceType::MKLDNN)
+      .value("OPENGL", c10::DeviceType::OPENGL)
+      .value("OPENCL", c10::DeviceType::OPENCL)
+      .value("IDEEP", c10::DeviceType::IDEEP)
+      .value("HIP", c10::DeviceType::HIP)
+      .value("FPGA", c10::DeviceType::FPGA)
+      .value("MSNPU", c10::DeviceType::MSNPU)
+      .value("XLA", c10::DeviceType::XLA)
+      .value("Vulkan", c10::DeviceType::Vulkan)
+      .value("Metal", c10::DeviceType::Metal);
+
 #ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "KinetoEvent")
       // name of the event
@@ -126,9 +141,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("device_index", &KinetoEvent::deviceIndex)
       // for CUDA - stream id, for CPU - start thread id
       .def("device_resource_id", &KinetoEvent::deviceResourceId)
-      // device type, currently: CPU or CUDA
+      // device type
       .def("device_type", [](const KinetoEvent& e) {
-        return (uint8_t)e.deviceType();
+        return e.deviceType();
       })
       // correlation id of a linked event
       .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId);

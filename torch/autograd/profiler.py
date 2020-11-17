@@ -1,6 +1,7 @@
 import itertools
 from typing import Any
 import torch
+from torch.autograd import DeviceType
 from torch.futures import Future
 
 from collections import defaultdict, namedtuple
@@ -83,7 +84,7 @@ class EventList(list):
         # Some events can be async (i.e. start and end on different threads),
         # since it's generally undefined how to attribute children ranges to
         # async ranges, we do not use them when calculating nested ranges and stats
-        sync_events = [evt for evt in self if not evt.is_async and evt.device_type == 0]
+        sync_events = [evt for evt in self if not evt.is_async and evt.device_type == DeviceType.CPU]
         events = sorted(
             sync_events,
             key=attrgetter("thread"),
@@ -340,7 +341,8 @@ class profile(object):
 
         use_kineto (bool, default False): experimental support for Kineto profiler
 
-        use_cpu (default True) - whether to profile CPU events
+        use_cpu (default True) - whether to profile CPU events; setting to False requires
+            use_kineto=True and can be used to lower the overhead for GPU-only profiling
 
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
@@ -787,7 +789,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __init__(
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=False, sequence_nr=-1, node_id=-1, device_type=0, device_index=0):
+            is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -806,11 +808,11 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_async: bool = is_async
         self.is_remote: bool = is_remote
         self.sequence_nr: int = sequence_nr
-        self.device_type: int = device_type
+        self.device_type: DeviceType = device_type
         self.device_index: int = device_index
 
     def append_kernel(self, name, device, start, end):
-        assert self.device_type == 0  # CPU
+        assert self.device_type == DeviceType.CPU
         self.kernels.append(Kernel(name, device, Interval(start, end)))
 
     def append_cpu_child(self, child):
@@ -819,9 +821,9 @@ class FunctionEvent(FormattedTimesMixin):
         One is supposed to append only direct children to the event to have
         correct self cpu time being reported.
         """
-        assert(self.device_type == 0)  # CPU
+        assert(self.device_type == DeviceType.CPU)
         assert(isinstance(child, FunctionEvent))
-        assert(child.device_type == 0)
+        assert(child.device_type == DeviceType.CPU)
         self.cpu_children.append(child)
 
     def set_cpu_parent(self, parent):
@@ -831,16 +833,16 @@ class FunctionEvent(FormattedTimesMixin):
         the child's range interval is completely inside the parent's. We use
         this connection to determine the event is from top-level op or not.
         """
-        assert(self.device_type == 0)  # CPU
+        assert(self.device_type == DeviceType.CPU)
         assert(isinstance(parent, FunctionEvent))
-        assert(parent.device_type == 0)
+        assert(parent.device_type == DeviceType.CPU)
         self.cpu_parent = parent
 
     # Note: async events don't have children, are not used when computing 'self'
     # metrics of other events, have only total cpu time
     @property
     def self_cpu_memory_usage(self):
-        if self.is_async or self.device_type != 0:  # CPU
+        if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cpu_memory_usage - sum(
             [child.cpu_memory_usage for child in self.cpu_children]
@@ -848,7 +850,7 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def self_cuda_memory_usage(self):
-        if self.is_async or self.device_type != 0:  # CPU
+        if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cuda_memory_usage - sum(
             [child.cuda_memory_usage for child in self.cpu_children]
@@ -856,7 +858,7 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def self_cpu_time_total(self):
-        if self.is_async or self.device_type != 0:
+        if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cpu_time_total - sum(
             [child.cpu_time_total for child in self.cpu_children]
@@ -866,28 +868,28 @@ class FunctionEvent(FormattedTimesMixin):
     def cuda_time_total(self):
         if self.is_async:
             return 0
-        if self.device_type == 0:  # CPU
+        if self.device_type == DeviceType.CPU:
             # account for the kernels in the children ops
             return (sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) +
                     sum(ch.cuda_time_total for ch in self.cpu_children))
         else:
-            assert self.device_type == 1  # CUDA
+            assert self.device_type == DeviceType.CUDA
             return self.time_range.elapsed_us()
 
     @property
     def self_cuda_time_total(self):
         if self.is_async:
             return 0
-        if self.device_type == 0:  # CPU
+        if self.device_type == DeviceType.CPU:
             return self.cuda_time_total - \
                 sum([child.cuda_time_total for child in self.cpu_children])
         else:
-            assert(self.device_type == 1)  # CUDA
+            assert(self.device_type == DeviceType.CUDA)
             return self.cuda_time_total
 
     @property
     def cpu_time_total(self):
-        if self.device_type == 0:  # CPU
+        if self.device_type == DeviceType.CPU:
             return self.time_range.elapsed_us()
         else:
             return 0
@@ -1056,7 +1058,7 @@ def parse_kineto_results(result):
 
         cpu_memory_usage = 0
         cuda_memory_usage = 0
-        if kineto_event.device_type() == 0:  # CPU
+        if kineto_event.device_type() == DeviceType.CPU:
             # find the corresponding memory allocation events
             for mem_record in mem_records:
                 if (mem_record.start_us() >= kineto_event.start_us() and
@@ -1082,7 +1084,7 @@ def parse_kineto_results(result):
             device_index=kineto_event.device_index(),
         )
         function_events.append(fe)
-        if kineto_event.device_type() == 1:  # CUDA
+        if kineto_event.device_type() == DeviceType.CUDA:
             corr_id = kineto_event.linked_correlation_id()
             if corr_id > 0 and corr_id not in cuda_corr_map:
                 cuda_corr_map[corr_id] = []
@@ -1090,7 +1092,7 @@ def parse_kineto_results(result):
 
     # associate CUDA kernels with CPU events
     for fe in function_events:
-        if (fe.device_type == 0 and not fe.is_async and
+        if (fe.device_type == DeviceType.CPU and not fe.is_async and
                 fe.id in cuda_corr_map):
             for k_evt in cuda_corr_map[fe.id]:
                 fe.append_kernel(
@@ -1206,7 +1208,7 @@ def parse_legacy_records(thread_records):
                     is_async=is_async,
                     is_remote=is_remote_event,
                     sequence_nr=start.sequence_nr(),
-                    device_type=0,  # CPU
+                    device_type=DeviceType.CPU,
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():

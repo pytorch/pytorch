@@ -294,11 +294,7 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   start_us_ = activity.timestamp();
   duration_us_ = activity.duration();
   correlation_id_ = activity.correlationId();
-  //std::cerr << "DEBUG: " name_ << ":  setting corr. id to " << correlation_id_ << std::endl;
   activity_type_ = (uint8_t)activity.type();
-  //if (activity.linkedActivity()) {
-  //  std::cerr << "DEBUG: linkedActivity: " << activity.name() << " " << activity.linkedActivity()->deviceId() << " " << activity.linkedActivity()->resourceId() << std::endl;
-  //}
   if (activity.linkedActivity()) {
     linked_correlation_id_ = activity.linkedActivity()->correlationId();
   }
