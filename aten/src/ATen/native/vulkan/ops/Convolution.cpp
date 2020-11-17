@@ -679,7 +679,8 @@ void conv2d_old(
           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
-        VK_KERNEL(conv2d_nogroup_clamp),
+        //VK_KERNEL(conv2d_nogroup_clamp),
+        VK_KERNEL(conv2d_nogroup_clamp_1x),
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
@@ -702,7 +703,7 @@ void conv2d_old(
   }
 }
 
-Tensor Context::run(const Tensor& input_arg) const {
+Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
@@ -741,24 +742,7 @@ Tensor Context::run(const Tensor& input_arg) const {
           packed_.dilation,
           packed_.output_min,
           packed_.output_max);
-    }
-    /*
-    else if (is_pointwise(unpacked_.filter)) {
-      conv2d_pointwise(
-          context,
-          command_buffer,
-          v_output,
-          v_input,
-          packed_.v_weight,
-          packed_.v_bias,
-          packed_.filter,
-          packed_.stride,
-          packed_.padding,
-          packed_.output_min,
-          packed_.output_max);
-    }
-    */
-    else {
+    } else {
       conv2d_old(
           context,
           command_buffer,
