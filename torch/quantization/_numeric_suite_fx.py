@@ -1,24 +1,14 @@
+from typing import Dict
 
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-from typing import Dict
+from torch.fx import GraphModule  # type: ignore
+from torch.fx import map_arg  # type: ignore
+from torch.fx.graph import Graph
+from torch.quantization.fx.quantize import _remove_qconfig, is_activation_post_process
 
-
-from torch.fx.graph import (
-    Graph,
-)
-
-from torch.fx import (
-    GraphModule,
-    map_arg
-)
-
-from torch.quantization.fx.quantize import (
-    _remove_qconfig,
-    is_activation_post_process
-)
 
 NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
     nnqd.Linear,
@@ -26,6 +16,7 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
     nnqd.LSTM,
     nn.LSTM,
 }
+
 
 def remove_qconfig_observer_fx(model):
     # remove activation post process
@@ -36,12 +27,14 @@ def remove_qconfig_observer_fx(model):
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
+
     for node in model.graph.nodes:
-        if node.op == 'output':
+        if node.op == "output":
             act_post_process_removed_graph.output(map_arg(node.args[0], load_arg))
             continue
-        if node.op == 'call_module' and \
-           is_activation_post_process(modules[node.target]):
+        if node.op == "call_module" and is_activation_post_process(
+            modules[node.target]
+        ):
             # remove activation post process node
             env[node.name] = env[node.args[0].name]
         else:
@@ -51,6 +44,7 @@ def remove_qconfig_observer_fx(model):
     _remove_qconfig(model)
     model = GraphModule(model, act_post_process_removed_graph)
     return model
+
 
 def _find_match(str_list, key_str, postfix):
     split_str = key_str.split(".")
@@ -106,7 +100,9 @@ def compare_weights_fx(float_dict, quantized_dict):
         a dictionary with two keys 'float' and 'quantized', containing the float and
         quantized weights
     """
-    torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.compare_weights_fx")
+    torch._C._log_api_usage_once(
+        "quantization_api._numeric_suite_fx.compare_weights_fx"
+    )
     weight_dict: Dict[str, Dict] = {}
     for key in quantized_dict:
         match_key = _find_match(float_dict, key, "weight")

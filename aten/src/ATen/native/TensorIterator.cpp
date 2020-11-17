@@ -542,15 +542,6 @@ void TensorIterator::coalesce_dimensions() {
   auto can_coalesce = [&](int dim0, int dim1) {
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
-    if (is_reduction_) {
-      // The dimension being reduced should not be coalesced
-      for (int i = 0; i < noutputs(); i++) {
-        auto& stride = operands_[i].stride_bytes;
-        if (stride[dim0] == 0 || stride[dim1] == 0) {
-          return false;
-        }
-      }
-    }
     if (shape0 == 1 || shape1 == 1) {
       return true;
     }
@@ -811,7 +802,7 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
-  if (size == 1) {
+  if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
   }
 }
@@ -1404,26 +1395,6 @@ std::array<int64_t, 2> DimCounter::max_2d_step() const {
     step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);
   }
   return {step0, step1};
-}
-
-std::ostream& operator<<(std::ostream& os, const TensorIterator& iter) {
-  os << "TensorIterator @ " << &iter << " {" << std::endl;
-  os << "  ntensors() = " << iter.ntensors() << std::endl;
-  os << "  noutputs() = " << iter.noutputs() << std::endl;
-  os << "  shape() = " << iter.shape() << std::endl;
-  os << "  strides(*) = {" << std::endl;
-  for (int i = 0; i < iter.ntensors(); i++) {
-    os << "    (" << i << ") = " << iter.strides(i) << std::endl;
-  }
-  os << "  }" << std::endl;
-  os << "  dtype(*) = {" << std::endl;
-  for (int i = 0; i < iter.ntensors(); i++) {
-    os << "    (" << i << ") = " << iter.dtype(i) << std::endl;
-  }
-  os << "  }" << std::endl;
-  os << "  is_reduction_ = " << iter.is_reduction_ << std::endl;
-  os << "}";
-  return os;
 }
 
 }  // namespace at
