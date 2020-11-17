@@ -1,3 +1,4 @@
+#include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/AccumulateType.h>
@@ -6,9 +7,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
-
-#include <limits>
-#include <type_traits>
 
 namespace at { namespace native {
 
@@ -47,7 +45,7 @@ void sign_kernel_cuda(TensorIterator& iter){
 
 void signbit_kernel_cuda(TensorIterator& iter){
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return std::is_signed<scalar_t>::value && a < 0; });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return a < 0; });
   });
 }
 
