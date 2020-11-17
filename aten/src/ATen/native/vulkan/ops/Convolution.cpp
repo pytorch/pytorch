@@ -305,16 +305,25 @@ void conv2d_depthwise(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight.image(command_buffer),
+        v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -339,7 +348,7 @@ void conv2d_pointwise(
   using namespace api::utils;
 
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    
+
     vTensor v_weight_reshaped{
         context,
         {1,1, v_weight.sizes()[0], v_weight.sizes()[1]},
@@ -351,8 +360,13 @@ void conv2d_pointwise(
     temp_command_buffer.begin();
 
     temp_command_buffer.copy(
-        v_weight.buffer(temp_command_buffer),
-        v_weight_reshaped.buffer(temp_command_buffer, vTensor::Access::Write)
+        v_weight.buffer(
+            temp_command_buffer,
+            vTensor::Stage::Transfer),
+        v_weight_reshaped.buffer(
+            temp_command_buffer,
+            vTensor::Stage::Transfer,
+            vTensor::Access::Write)
     );
 
     temp_command_buffer.end();
@@ -389,16 +403,26 @@ void conv2d_pointwise(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight_reshaped.image(command_buffer, vTensor::Access::Read),
+        v_weight_reshaped.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Read),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -458,16 +482,25 @@ void conv2d(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight.image(command_buffer),
+        v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);

@@ -104,8 +104,10 @@ struct Pipeline final {
     typedef uint8_t Flags;
 
     enum Type : Flags {
+      None = 0u << 0u,
       Compute = 1u << 0u,
-      Transfer = 1u << 1u,
+      Host = 1u << 1u,
+      Transfer = 1u << 2u,
     };
   };
 

@@ -85,6 +85,7 @@ class vTensor final {
     Types
   */
 
+  typedef api::Pipeline::Stage Stage;
   typedef api::Resource::Memory::Access Access;
   typedef api::Resource::Buffer Buffer;
   typedef api::Resource::Fence Fence;
@@ -177,16 +178,16 @@ class vTensor final {
     predictability of usage and efficiency.
   */
 
-  Buffer::Object buffer() const &;
-  Buffer::Object buffer(Access::Flags access) &;
-  Buffer::Object buffer(api::Command::Buffer&) const &;
-  Buffer::Object buffer(api::Command::Buffer&, Access::Flags) &;
+  Buffer::Object buffer(Stage::Flags) const &;
+  Buffer::Object buffer(Stage::Flags, Access::Flags) &;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const &;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   bool has_image() const;
-  Image::Object image() const &;
-  Image::Object image(Access::Flags access) &;
-  Image::Object image(api::Command::Buffer&) const &;
-  Image::Object image(api::Command::Buffer&, Access::Flags) &;
+  Image::Object image(Stage::Flags) const &;
+  Image::Object image(Stage::Flags, Access::Flags) &;
+  Image::Object image(api::Command::Buffer&, Stage::Flags) const &;
+  Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   /*
     Metadata
@@ -222,15 +223,15 @@ class vTensor final {
     Device
   */
 
-  Buffer::Object buffer() const && = delete;
-  Buffer::Object buffer(Access::Flags) && = delete;
-  Buffer::Object buffer(api::Command::Buffer&) const && = delete;
-  Buffer::Object buffer(api::Command::Buffer&, Access::Flags) && = delete;
+  Buffer::Object buffer(Stage::Flags) const && = delete;
+  Buffer::Object buffer(Stage::Flags, Access::Flags) && = delete;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const && = delete;
+  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
-  Image::Object image() const && = delete;
-  Image::Object image(Access::Flags) && = delete;
-  Image::Object image(api::Command::Buffer&) const && = delete;
-  Image::Object image(api::Command::Buffer&, Access::Flags) && = delete;
+  Image::Object image(Stage::Flags) const && = delete;
+  Image::Object image(Stage::Flags, Access::Flags) && = delete;
+  Image::Object image(api::Command::Buffer&, Stage::Flags) const && = delete;
+  Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
  private:
   class View final {
@@ -251,19 +252,19 @@ class vTensor final {
       Device
     */
 
-    Buffer& buffer(Access::Flags) const;
-    Buffer& buffer(api::Command::Buffer&, Access::Flags) const;
+    Buffer& buffer(Stage::Flags, Access::Flags) const;
+    Buffer& buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
     bool has_image() const;
-    Image& image(Access::Flags) const;
-    Image& image(api::Command::Buffer&, Access::Flags) const;
+    Image& image(Stage::Flags, Access::Flags) const;
+    Image& image(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
     /*
       Host
     */
 
-    Buffer& staging(Access::Flags) const;
-    Buffer& staging(api::Command::Buffer&, Access::Flags) const;
+    Buffer& staging(Stage::Flags, Access::Flags) const;
+    Buffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
     vTensor::Memory& wait() const;
 
     /*
@@ -337,11 +338,11 @@ class vTensor final {
    private:
     // Accessors / Lazy Allocation
     Buffer& buffer() const;
-    Buffer& buffer(CMD&, Access::Flags) const;
+    Buffer& buffer(CMD&, Stage::Flags, Access::Flags) const;
     Image& image() const;
-    Image& image(CMD&, Access::Flags) const;
+    Image& image(CMD&, Stage::Flags, Access::Flags) const;
     Buffer& staging() const;
-    Buffer& staging(CMD&, Access::Flags) const;
+    Buffer& staging(CMD&, Stage::Flags, Access::Flags) const;
     Fence& fence() const;
 
     // Validation

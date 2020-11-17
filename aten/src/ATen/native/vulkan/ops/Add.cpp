@@ -27,8 +27,10 @@ Tensor add_scalar(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
+        VkExtent3D extents;
         float other;
       } block {
+        v_self.extents(),
         other.to<float>() * alpha.to<float>(),
       };
 
@@ -43,10 +45,15 @@ Tensor add_scalar(
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -78,8 +85,10 @@ Tensor& add_scalar_(
   {
     if (v_self.has_image()) {
       const struct {
+        VkExtent3D extents;
         float other;
       } block {
+        v_self.extents(),
         other.to<float>() * alpha.to<float>(),
       };
 
@@ -93,7 +102,10 @@ Tensor& add_scalar_(
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
-          v_self.image(command_buffer, vTensor::Access::Read | vTensor::Access::Write),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -131,8 +143,10 @@ Tensor add_tensor(
   {
     if (v_self.has_image() && v_other.has_image()) {
       const struct {
+        VkExtent3D extents;
         float alpha;
       } block {
+        v_output.extents(),
         alpha.to<float>(),
       };
 
@@ -148,13 +162,20 @@ Tensor add_tensor(
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_other.image(command_buffer),
+          v_other.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -189,8 +210,10 @@ Tensor& add_tensor_(
   {
     if (v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
       const struct {
+        VkExtent3D extents;
         float alpha;
       } block {
+        v_self.extents(),
         alpha.to<float>(),
       };
 
@@ -205,10 +228,15 @@ Tensor& add_tensor_(
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
-          v_self.image(command_buffer, vTensor::Access::Read | vTensor::Access::Write),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_other.image(command_buffer),
+          v_other.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);

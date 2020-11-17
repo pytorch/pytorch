@@ -6,47 +6,44 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-VkDeviceSize bytes(
-    const IntArrayRef sizes,
-    const caffe2::TypeMeta dtype) {
-  VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
+VkAccessFlags access(
+    const vTensor::Stage::Flags stage,
+    const vTensor::Access::Flags access) {
+  VkAccessFlags vk_access = 0u;
 
-  // Forward declaration
-  bool requires_image(IntArrayRef);
+  if (access & vTensor::Access::Read) {
+    if (stage & vTensor::Stage::Compute) {
+      vk_access |= VK_ACCESS_SHADER_READ_BIT;
+    }
 
-  if (requires_image(sizes)) {
-    // Forward declaration
-    VkExtent3D image_extents(IntArrayRef);
+    if (stage & vTensor::Stage::Host) {
+      vk_access |= VK_ACCESS_HOST_READ_BIT;
+    }
 
-    const VkExtent3D extents = image_extents(sizes);
-    size *= extents.width * extents.height * (4u * extents.depth);
+    if (stage & vTensor::Stage::Transfer) {
+      vk_access |= VK_ACCESS_TRANSFER_READ_BIT;
+    }
   }
-  else {
-    size *= prod_intlist(sizes);
+
+  if (access & vTensor::Access::Write) {
+    if (stage & vTensor::Stage::Compute) {
+      vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
+    }
+
+    if (stage & vTensor::Stage::Host) {
+      vk_access |= VK_ACCESS_HOST_WRITE_BIT;
+    }
+
+    if (stage & vTensor::Stage::Transfer) {
+      vk_access |= VK_ACCESS_TRANSFER_WRITE_BIT;
+    }
   }
 
-  return size;
+  return vk_access;
 }
 
-VkFormat convert(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
-    case kFloat:
-    #ifdef USE_VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-    #else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-    #endif /* USE_VULKAN_FP16_INFERENCE */
-
-    default:
-      TORCH_CHECK(
-        false,
-        "Vulkan tensor format not supported!");
-  }
-
-  return VK_FORMAT_UNDEFINED;
-}
-
-vTensor::Access::Flags convert(const VkAccessFlags vk_access) {
+vTensor::Access::Flags access(
+    const VkAccessFlags vk_access) {
   vTensor::Access::Flags access = 0u;
 
   constexpr VkAccessFlags kRead =
@@ -71,6 +68,97 @@ vTensor::Access::Flags convert(const VkAccessFlags vk_access) {
   }
 
   return access;
+}
+
+VkDeviceSize bytes(
+    const IntArrayRef sizes,
+    const caffe2::TypeMeta dtype) {
+  VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
+
+  // Forward declaration
+  bool requires_image(IntArrayRef);
+
+  if (requires_image(sizes)) {
+    // Forward declaration
+    VkExtent3D image_extents(IntArrayRef);
+
+    const VkExtent3D extents = image_extents(sizes);
+    size *= extents.width * extents.height * (4u * extents.depth);
+  }
+  else {
+    size *= prod_intlist(sizes);
+  }
+
+  return size;
+}
+
+VkFormat format(const caffe2::TypeMeta dtype) {
+  switch (c10::typeMetaToScalarType(dtype)) {
+    case kFloat:
+    #ifdef USE_VULKAN_FP16_INFERENCE
+      return VK_FORMAT_R16G16B16A16_SFLOAT;
+    #else
+      return VK_FORMAT_R32G32B32A32_SFLOAT;
+    #endif /* USE_VULKAN_FP16_INFERENCE */
+
+    default:
+      TORCH_CHECK(
+        false,
+        "Vulkan tensor format not supported!");
+  }
+
+  return VK_FORMAT_UNDEFINED;
+}
+
+VkImageLayout layout(
+    const vTensor::Stage::Flags stage,
+    const vTensor::Access::Flags access) {
+  switch (stage) {
+    case vTensor::Stage::Compute:
+      switch (access) {
+        case vTensor::Access::Read:
+          return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        default:
+          return VK_IMAGE_LAYOUT_GENERAL;
+      } break;
+
+    case vTensor::Stage::Transfer:
+      switch (access) {
+        case vTensor::Access::Read:
+          return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+        case vTensor::Access::Write:
+          return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+        default:
+          TORCH_INTERNAL_ASSERT(false, "Invalid!");
+      } break;
+
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Invalid!");
+  }
+
+  return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+VkPipelineStageFlags stage(
+    const vTensor::Stage::Flags stage) {
+  VkPipelineStageFlags vk_stage = 0u;
+
+  if (stage & vTensor::Stage::Compute) {
+    vk_stage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  }
+
+  if (stage & vTensor::Stage::Host) {
+    vk_stage |= VK_PIPELINE_STAGE_HOST_BIT;
+  }
+
+  if (stage & vTensor::Stage::Transfer) {
+    vk_stage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+  }
+
+  return vk_stage;
 }
 
 vTensor::Buffer allocate_buffer(
@@ -179,7 +267,7 @@ vTensor::Image allocate_image(
 
   return pool->image({
       VK_IMAGE_TYPE_3D,
-      convert(options.dtype()),
+      format(options.dtype()),
       extents,
       // Usage
       {
@@ -194,7 +282,7 @@ vTensor::Image allocate_image(
       // View
       {
         VK_IMAGE_VIEW_TYPE_3D,
-        convert(options.dtype()),
+        format(options.dtype()),
       },
       // Sampler
       {
@@ -266,8 +354,8 @@ Barrier categorize(
     return Barrier::None;
   }
 
-  const vTensor::Access::Flags src_access = convert(vk_src_access);
-  const vTensor::Access::Flags dst_access = convert(vk_dst_access);
+  const vTensor::Access::Flags src_access = access(vk_src_access);
+  const vTensor::Access::Flags dst_access = access(vk_dst_access);
 
   if ((src_access & vTensor::Access::Read) == src_access) {
     if ((dst_access & vTensor::Access::Read) == dst_access) {
@@ -322,53 +410,81 @@ vTensor::vTensor(
 }
 
 const vTensor* vTensor::host() const {
-  view_->staging(Access::Read);
+  view_->staging(Stage::Host, Access::Read);
   return this;
 }
 
 vTensor* vTensor::host(const Access::Flags access) {
-  view_->staging(access);
+  view_->staging(Stage::Host, access);
   return this;
 }
 
-vTensor::Buffer::Object vTensor::buffer() const & {
-  return view_->buffer(Access::Read).object;
+vTensor::Buffer::Object vTensor::buffer(
+  const Stage::Flags stage) const & {
+  return view_->buffer(
+      stage,
+      Access::Read).object;
 }
 
 vTensor::Buffer::Object vTensor::buffer(
+    const Stage::Flags stage,
     const Access::Flags access) & {
-  return view_->buffer(access).object;
-}
-
-vTensor::Buffer::Object vTensor::buffer(
-    api::Command::Buffer& command_buffer) const & {
-  return view_->buffer(command_buffer, Access::Read).object;
+  return view_->buffer(
+      stage,
+      access).object;
 }
 
 vTensor::Buffer::Object vTensor::buffer(
     api::Command::Buffer& command_buffer,
-    const Access::Flags access) & {
-  return view_->buffer(command_buffer, access).object;
+    const Stage::Flags stage) const & {
+  return view_->buffer(
+      command_buffer,
+      stage,
+      Access::Read).object;
 }
 
-vTensor::Image::Object vTensor::image() const & {
-  return view_->image(Access::Read).object;
+vTensor::Buffer::Object vTensor::buffer(
+    api::Command::Buffer& command_buffer,
+    const Stage::Flags stage,
+    const Access::Flags access) & {
+  return view_->buffer(
+      command_buffer,
+      stage,
+      access).object;
 }
 
 vTensor::Image::Object vTensor::image(
-    const Access::Flags access) & {
-  return view_->image(access).object;
+    const Stage::Flags stage) const & {
+  return view_->image(
+      stage,
+      Access::Read).object;
 }
 
 vTensor::Image::Object vTensor::image(
-    api::Command::Buffer& command_buffer) const & {
-  return view_->image(command_buffer, Access::Read).object;
+    const Stage::Flags stage,
+    const Access::Flags access) & {
+  return view_->image(
+      stage,
+      access).object;
 }
 
 vTensor::Image::Object vTensor::image(
     api::Command::Buffer& command_buffer,
+    const Stage::Flags stage) const & {
+  return view_->image(
+      command_buffer,
+      stage,
+      Access::Read).object;
+}
+
+vTensor::Image::Object vTensor::image(
+    api::Command::Buffer& command_buffer,
+    const Stage::Flags stage,
     const Access::Flags access) & {
-  return view_->image(command_buffer, access).object;
+  return view_->image(
+      command_buffer,
+      stage,
+      access).object;
 }
 
 vTensor::View::View()
@@ -508,7 +624,7 @@ api::Command::Buffer& vTensor::View::CMD::command_buffer() {
 }
 
 void vTensor::View::CMD::barrier(State::Transition transition) {
-  // Buffer and Staging are just an alias for the same memory location on UMA.
+  // Buffer and Staging are just an alias for the same memory region on UMA.
 
   if (view_.state_.is_uma()) {
     transition.first.buffer.stage |= transition.first.staging.stage;
@@ -634,8 +750,6 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
       barrier.stage.src = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
 
-    // Optimization opportunity: delay and batch.
-
     command_buffer().barrier(barrier);
   }
 }
@@ -652,13 +766,13 @@ void vTensor::View::CMD::copy_buffer_to_staging(
       state.transition({
           // Staging
           {
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_ACCESS_TRANSFER_WRITE_BIT,
+            stage(Stage::Transfer),
+            access(Stage::Transfer, Access::Write),
           },
           // Buffer
           {
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_ACCESS_TRANSFER_READ_BIT,
+            stage(Stage::Transfer),
+            access(Stage::Transfer, Access::Read),
           },
           // Image
           {},
@@ -679,13 +793,13 @@ void vTensor::View::CMD::copy_staging_to_buffer(
       state.transition({
           // Staging
           {
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_ACCESS_TRANSFER_READ_BIT,
+            stage(Stage::Transfer),
+            access(Stage::Transfer, Access::Read),
           },
           // Buffer
           {
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_ACCESS_TRANSFER_WRITE_BIT,
+            stage(Stage::Transfer),
+            access(Stage::Transfer, Access::Write),
           },
           // Image
           {},
@@ -708,14 +822,14 @@ void vTensor::View::CMD::copy_buffer_to_image(
           {},
           // Buffer
           {
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_ACCESS_SHADER_READ_BIT,
+            stage(Stage::Compute),
+            access(Stage::Compute, Access::Read),
           },
           // Image
           {
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_GENERAL,
+            stage(Stage::Compute),
+            access(Stage::Compute, Access::Write),
+            layout(Stage::Compute, Access::Write),
           },
         }));
 
@@ -745,14 +859,14 @@ void vTensor::View::CMD::copy_image_to_buffer(
           {},
           // Buffer
           {
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_ACCESS_SHADER_WRITE_BIT,
+            stage(Stage::Compute),
+            access(Stage::Compute, Access::Write),
           },
           // Image
           {
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_ACCESS_SHADER_READ_BIT,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            stage(Stage::Compute),
+            access(Stage::Compute, Access::Read),
+            layout(Stage::Compute, Access::Read),
           },
         }));
 
@@ -788,9 +902,10 @@ vTensor::Buffer& vTensor::View::buffer() const {
 }
 
 vTensor::Buffer& vTensor::View::buffer(
+    const Stage::Flags stage,
     const Access::Flags access) const {
   CMD command_buffer(*this);
-  Buffer& buffer = this->buffer(command_buffer, access);
+  Buffer& buffer = this->buffer(command_buffer, stage, access);
   command_buffer.submit();
 
   return buffer;
@@ -798,25 +913,27 @@ vTensor::Buffer& vTensor::View::buffer(
 
 vTensor::Buffer& vTensor::View::buffer(
     api::Command::Buffer& command_buffer_,
+    const Stage::Flags stage,
     const Access::Flags access) const {
   CMD command_buffer(*this, command_buffer_);
-  return buffer(command_buffer, access);
+  return buffer(command_buffer, stage, access);
 }
 
 vTensor::Buffer& vTensor::View::buffer(
     CMD& command_buffer,
+    const Stage::Flags stage,
     const Access::Flags access) const {
   if ((access & Access::Read) && state_.is_dirty(Component::Buffer)) {
     if (state_.is_clean(Component::Staging)) {
       command_buffer.copy_staging_to_buffer(
           state_,
-          staging(command_buffer, Access::Read).object,
+          staging(command_buffer, Stage::Transfer, Access::Read).object,
           buffer().object);
     }
     else if (state_.is_clean(Component::Image)) {
       command_buffer.copy_image_to_buffer(
           state_,
-          image(command_buffer, Access::Read).object,
+          image(command_buffer, Stage::Compute, Access::Read).object,
           buffer().object);
     }
     else {
@@ -832,20 +949,8 @@ vTensor::Buffer& vTensor::View::buffer(
           {},
           // Buffer
           {
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            [access]() {
-              VkAccessFlags vk_access = 0u;
-
-              if (access & Access::Read) {
-                vk_access |= VK_ACCESS_SHADER_READ_BIT;
-              }
-
-              if (access & Access::Write) {
-                vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
-              }
-
-              return vk_access;
-            }(),
+            ops::stage(stage),
+            ops::access(access),
           },
           // Image
           {},
@@ -872,9 +977,10 @@ vTensor::Image& vTensor::View::image() const {
 }
 
 vTensor::Image& vTensor::View::image(
+    const Stage::Flags stage,
     const Access::Flags access) const {
   CMD command_buffer(*this);
-  Image& image = this->image(command_buffer, access);
+  Image& image = this->image(command_buffer, stage, access);
   command_buffer.submit();
 
   return image;
@@ -882,18 +988,20 @@ vTensor::Image& vTensor::View::image(
 
 vTensor::Image& vTensor::View::image(
     api::Command::Buffer& command_buffer_,
+    const Stage::Flags stage,
     const Access::Flags access) const {
   CMD command_buffer(*this, command_buffer_);
-  return image(command_buffer, access);
+  return image(command_buffer, stage, access);
 }
 
 vTensor::Image& vTensor::View::image(
     CMD& command_buffer,
+    const Stage::Flags stage,
     const Access::Flags access) const {
   if ((access & Access::Read) && state_.is_dirty(Component::Image)) {
     command_buffer.copy_buffer_to_image(
         state_,
-        buffer(command_buffer, Access::Read).object,
+        buffer(command_buffer, stage, Access::Read).object,
         image().object);
   }
 
@@ -905,27 +1013,9 @@ vTensor::Image& vTensor::View::image(
           {},
           // Image
           {
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            [access]() {
-              VkAccessFlags vk_access = 0u;
-
-              if (access & Access::Read) {
-                vk_access |= VK_ACCESS_SHADER_READ_BIT;
-              }
-
-              if (access & Access::Write) {
-                vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
-              }
-
-              return vk_access;
-            }(),
-            [access]() {
-              if ((access & Access::Read) == access) {
-                return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-              }
-
-              return VK_IMAGE_LAYOUT_GENERAL;
-            }(),
+            ops::stage(stage),
+            ops::access(stage, access),
+            ops::layout(stage, access),
           },
         }));
 
@@ -954,9 +1044,11 @@ vTensor::Buffer& vTensor::View::staging() const {
   return staging_;
 }
 
-vTensor::Buffer& vTensor::View::staging(const Access::Flags access) const {
+vTensor::Buffer& vTensor::View::staging(
+    const Stage::Flags stage,
+    const Access::Flags access) const {
   CMD command_buffer(*this);
-  Buffer& staging = this->staging(command_buffer, access);
+  Buffer& staging = this->staging(command_buffer, stage, access);
   command_buffer.submit(fence());
 
   return staging;
@@ -964,11 +1056,12 @@ vTensor::Buffer& vTensor::View::staging(const Access::Flags access) const {
 
 vTensor::Buffer& vTensor::View::staging(
     CMD& command_buffer,
+    const Stage::Flags stage,
     const Access::Flags access) const {
   if ((access & Access::Read) && state_.is_dirty(Component::Staging)) {
     command_buffer.copy_buffer_to_staging(
         state_,
-        buffer(command_buffer, Access::Read).object,
+        buffer(command_buffer, Stage::Transfer, Access::Read).object,
         staging().object);
   }
 
@@ -976,20 +1069,8 @@ vTensor::Buffer& vTensor::View::staging(
       state_.transition({
           // Staging
           {
-            VK_PIPELINE_STAGE_HOST_BIT,
-            [access]() {
-              VkAccessFlags vk_access = 0u;
-
-              if (access & Access::Read) {
-                vk_access |= VK_ACCESS_HOST_READ_BIT;
-              }
-
-              if (access & Access::Write) {
-                vk_access |= VK_ACCESS_HOST_WRITE_BIT;
-              }
-
-              return vk_access;
-            }(),
+            ops::stage(stage),
+            ops::access(access),
           },
           // Buffer
           {},

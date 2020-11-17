@@ -90,16 +90,25 @@ void addmm_impl(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_mat1.image(command_buffer),
+        v_mat1.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_mat2.image(command_buffer),
+        v_mat2.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_self.image(command_buffer),
+        v_self.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         context->resource().pool.uniform(block).object);
   } else {
     TORCH_CHECK(false, "Not implemented!");
@@ -157,13 +166,20 @@ Tensor mm(const Tensor& self_arg, const Tensor& mat2_arg) {
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_mat1.image(command_buffer),
+          v_mat1.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_mat2.image(command_buffer));
+          v_mat2.image(
+              command_buffer,
+              vTensor::Stage::Compute));
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }

@@ -46,6 +46,7 @@ struct Resource final {
       typedef uint8_t Flags;
 
       enum Type : Flags {
+        None = 0u << 0u,
         Read = 1u << 0u,
         Write = 1u << 1u,
       };
