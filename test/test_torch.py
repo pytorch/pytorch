@@ -4483,6 +4483,20 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             z = x + y
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
 
+        def test_upsample_nearest1d_meta(self):
+            # TODO: this is not a sustainable way of testing meta functions,
+            # but I want some quick scaffolding first before a more
+            # integrated testing strategy
+            x = torch.empty_meta(2 * 10 ** 10, 3, 2 * 10 ** 10)
+            z = torch.nn.functional.interpolate(x, scale_factor=2)
+            self.assertEqual(z.size(), (2 * 10 ** 10, 3, 4 * 10 ** 10))
+
+            # interpolate doesn't seem to support out=
+            # (not sure why passing None here doesn't work? How strange...)
+            z = torch.empty_meta(0)
+            torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 10,), 2, out=z)
+            self.assertEqual(z.size(), (2 * 10 ** 10, 3, 4 * 10 ** 10))
+
         def test_tensor_grad_warnings(self):
             dummy = torch.empty(1)
 
