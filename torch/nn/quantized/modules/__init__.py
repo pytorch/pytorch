@@ -2,7 +2,7 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU, ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid
+from .activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
@@ -106,7 +106,6 @@ __all__ = [
     'Linear',
     'MaxPool2d',
     'Quantize',
-    'ReLU',
     'ReLU6',
     'Sigmoid',
     # Wrapper modules
