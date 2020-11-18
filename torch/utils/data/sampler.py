@@ -1,8 +1,5 @@
 import itertools
 import random
-
-#import torchvision
-
 import torch
 from torch._six import int_classes as _int_classes
 from torch import Tensor

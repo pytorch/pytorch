@@ -2219,7 +2219,7 @@ class TestPartialBalancedBatchSampler(TestCase):
         dataset = CustomDataset(self, x)
         b_balanced = torch.utils.data.PartialBalancedBatchSampler(dataset, balanced_classes=2, num_classes=2)
         a = b_balanced.__iter__()
-        class_instances = [i for i in a]
+        class_instances = list(a)
         self.assertEqual(len(class_instances), 4)
         self.assertEqual(x[class_instances[0]][1], 0)
         self.assertEqual(x[class_instances[1]][1], 0)
@@ -2231,7 +2231,8 @@ class TestPartialBalancedBatchSampler(TestCase):
         x = [[1, 1], [2, 1], [3, 0], [4, 0], [5, 1], [6, 0], [7, 1]]
         dataset = CustomDataset(self, x)
         b_balanced = torch.utils.data.PartialBalancedBatchSampler(dataset, balanced_classes=1, num_classes=2)
-        train_loader = torch.utils.data.DataLoader(dataset, sampler=b_balanced, batch_size=2, shuffle=False, num_workers=16, pin_memory=True)
+        train_loader = torch.utils.data.DataLoader(dataset, sampler=b_balanced, batch_size=2, shuffle=False,
+                                                   num_workers=16, pin_memory=True)
 
         for data, label in train_loader:
             tmp_label.append(label)
