@@ -102,7 +102,7 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`hermitian` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
-Supports real-valued and complex-valued input.
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
 
 Args:
     input (Tensor): the input 2-D tensor
