@@ -93,6 +93,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         else:
             qlinear = nnq.Linear(in_features, out_features, backend_independent=backend_independent)
 
+        print('begin')
+        self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
+        print('end')
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
         qlinear(X_q)
@@ -158,7 +161,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         else:
             linear_unpack = torch.ops.quantized.linear_unpack
             self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
-                            linear_unpack(loaded_qlinear._packed_params._packed_params))
+                             linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
