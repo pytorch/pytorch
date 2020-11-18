@@ -609,7 +609,7 @@ terrible spacing
         traced = symbolic_trace(mm)
 
         def split_cb(node : torch.fx.Node):
-            if node.name == 'a' or node.name == 'b' or node.name == 'add_1':
+            if node.name == 'a' or node.name == 'b' or node.name == 'add':
                 return 0
             else:
                 return 1
