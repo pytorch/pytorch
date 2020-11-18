@@ -1,3 +1,8 @@
+import itertools
+import random
+
+#import torchvision
+
 import torch
 from torch._six import int_classes as _int_classes
 from torch import Tensor
@@ -241,3 +246,51 @@ class BatchSampler(Sampler[List[int]]):
             return len(self.sampler) // self.batch_size  # type: ignore
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore
+
+
+class PartialBalancedBatchSampler(Sampler[List[int]]):
+    r"""Samples elements randomly balanced per class for each batch until to achieve the batch-size.
+
+        Args:
+            dataset (Dataset): dataset to sample from
+            balanced_classes (int): number of random samples in a generic class for each batch.
+            num_classes (int): number of classes
+    """
+
+    def __init__(self, dataset, balanced_classes, num_classes):
+        self.dataset = dict()
+        self.d=dataset
+        self.balanced_classes=balanced_classes
+        self.num_cl_list=[i for i in range(num_classes)]
+        self.train_idx = [i for i in range(len(dataset))]
+
+
+
+    def __iter__(self):
+        for idx in self.train_idx:
+            label = self._get_label(self.d, idx)
+            if label not in self.dataset:
+                self.dataset[label] = list()
+            self.dataset[label].append(idx)
+
+        rand_tensor=[]
+        while all(self.dataset.values()):
+            random.shuffle(self.num_cl_list)
+            for i in self.num_cl_list:
+                stack_class=len(self.dataset[i])
+                if self.balanced_classes < stack_class:
+                    r_values=random.sample(self.dataset[i], k=self.balanced_classes)
+                    rand_tensor.append(r_values)
+                    for j in r_values:
+                        self.dataset[i].remove(j)
+                else:
+                    r_values = random.sample(self.dataset[i], k=stack_class)
+                    rand_tensor.append(r_values)
+                    for j in r_values:
+                        self.dataset[i].remove(j)
+
+        flatten=list(itertools.chain(*rand_tensor))
+        return iter(flatten)
+
+    def _get_label(self, dataset, idx):
+        return dataset.imgs[idx][1]
