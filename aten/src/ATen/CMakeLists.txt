@@ -135,7 +135,7 @@ endif()
 
 # Metal
 if(USE_PYTORCH_METAL)
-  if(IOS)
+  if(APPLE)
     set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
   else()
     # Add files needed from optimized_for_mobile
