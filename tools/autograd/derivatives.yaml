@@ -177,14 +177,14 @@
   batch2: batch1.transpose(1, 2).bmm(grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) })) * alpha
 
 - name: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
-  self: grad
-  tensor1: grad * value / tensor2
-  tensor2: -grad * value * tensor1 / (tensor2 * tensor2)
+  self: handle_r_to_c(self.scalar_type(), grad)
+  tensor1: handle_r_to_c(tensor1.scalar_type(), grad * (value / tensor2).conj())
+  tensor2: handle_r_to_c(tensor2.scalar_type(), -grad * (value * tensor1 / (tensor2 * tensor2)).conj())
 
 - name: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
-  self: grad
-  tensor1: grad * tensor2 * value
-  tensor2: grad * tensor1 * value
+  self: handle_r_to_c(self.scalar_type(), grad)
+  tensor1: handle_r_to_c(tensor1.scalar_type(), grad * (tensor2 * value).conj())
+  tensor2: handle_r_to_c(tensor2.scalar_type(), grad * (tensor1 * value).conj())
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
@@ -293,6 +293,9 @@
 
 - name: cholesky(Tensor self, bool upper=False) -> Tensor
   self: cholesky_backward(grad, upper, result)
+
+- name: linalg_cholesky(Tensor self) -> Tensor
+  self: cholesky_backward(grad, false, result)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
@@ -587,7 +590,7 @@
   index: non_differentiable
 
 - name: inverse(Tensor self) -> Tensor
-  self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
+  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
@@ -1106,7 +1109,24 @@
   self: zeros_like(grad)
 
 - name: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
   self: not_implemented("_unique")
+
+- name: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  output_differentiability: [True, False, False]
+  self: not_implemented("unique_dim")
+
+- name: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
+  output_differentiability: [True, False, False]
+  self: not_implemented("unique_consecutive")
+
+- name: unique_dim_consecutive(Tensor self, int dim, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  output_differentiability: [True, False, False]
+  self: not_implemented("unique_dim_consecutive")
+
+- name: _unique2(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  output_differentiability: [True, False, False]
+  self: not_implemented("_unique2")
 
 - name: _unsafe_view(Tensor self, int[] size) -> Tensor
   self: grad.reshape(self.sizes())

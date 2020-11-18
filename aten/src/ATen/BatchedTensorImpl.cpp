@@ -19,13 +19,18 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
 
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
+  const auto value_strides = value_.strides();
   sizes_.clear();
   sizes_.reserve(public_dims);
+  strides_.clear();
+  strides_.reserve(public_dims);
   for (int64_t dim = 0; dim < public_dims; dim++) {
     auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
     sizes_.push_back(value_sizes.at(actual_dim));
+    strides_.push_back(value_strides.at(actual_dim));
   }
   refresh_numel();
+  refresh_contiguous();
 }
 
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
@@ -77,9 +82,14 @@ IntArrayRef BatchedTensorImpl::strides() const {
 int64_t BatchedTensorImpl::stride(int64_t d) const {
   TORCH_CHECK(false, "NYI: Getting tensor strides inside of vmap");
 }
+
 bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-  TORCH_CHECK(false, "NYI: querying is_contiguous inside of vmap");
+  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+      "NYI: querying is_contiguous inside of vmap for memory_format ",
+      "other than torch.contiguous_format");
+  return is_contiguous_;
 }
+
 const Storage& BatchedTensorImpl::storage() const {
   TORCH_CHECK(false, "Due to limitations, we cannot access the storage() of a tensor from inside of vmap.");
 }

@@ -255,7 +255,6 @@ Quantized version of standard NN layers.
 * :class:`~torch.nn.quantized.Conv3d` — 3D convolution
 * :class:`~torch.nn.quantized.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.MaxPool2d` — 2D max pooling
-* :class:`~torch.nn.quantized.ReLU` — Rectified linear unit
 * :class:`~torch.nn.quantized.ReLU6` — Rectified linear unit with cut-off at
   quantized representation of 6
 * :class:`~torch.nn.quantized.ELU` — ELU
@@ -294,7 +293,6 @@ quantization output parameters)
 * :func:`~torch.nn.quantized.functional.interpolate` — Down-/up- sampler
 * :func:`~torch.nn.quantized.functional.linear` — Linear (fully-connected) op
 * :func:`~torch.nn.quantized.functional.max_pool2d` — 2D max pooling
-* :func:`~torch.nn.quantized.functional.relu` — Rectified linear unit
 * :func:`~torch.nn.quantized.functional.elu` — ELU
 * :func:`~torch.nn.quantized.functional.hardsigmoid` — Hardsigmoid
 * :func:`~torch.nn.quantized.functional.hardswish` — Hardswish
