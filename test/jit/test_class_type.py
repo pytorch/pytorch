@@ -1338,27 +1338,23 @@ class TestClassType(JitTestCase):
             def j(self, l: List[device_t]) -> device_ty:
                 return l[0]
 
-        def k():
+        def call_f():
             a = A()
             return a.f(torch.tensor([1]), torch.device("cpu"))
 
-        def l():
+        def call_g():
             a = A()
             return a.g(torch.device("cpu"))
 
-        def m():
-            a = A()
-            return a.h(a)
-
-        def n():
+        def call_i():
             a = A()
             return a.i([3])
 
-        def o():
+        def call_o():
             a = A()
             return a.j([torch.device("cpu"), torch.device("cpu")])
 
-        for fn in [k, l, n, o]:
+        for fn in [call_f, call_g, call_i, call_o]:
             self.checkScript(fn, ())
             s = self.getExportImportCopy(torch.jit.script(fn))
             self.assertEqual(s(), fn())
