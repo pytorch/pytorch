@@ -1014,7 +1014,7 @@ def method_tests():
         ('cumprod', lambda dtype, device: prod_zeros(S, [0, 1], dtype), (1,), 'zeros_dim2', (), [0]),
         ('cumprod', lambda dtype, device: prod_zeros(S, [0, 2], dtype), (1,), 'zeros_dim1', (), [0]),
         ('cumprod', lambda dtype, device: prod_zeros(S, [1, 2], dtype), (1,), 'zeros_dim0', (), [0]),
-        ('cumprod', lambda dtype, device: prod_zeros(S, [1, 2], dtype), (1,), 'zeros_dim0_cast', (), [0], (), ident, {'dtype': torch.cdouble}),
+        ('cumprod', lambda dtype, device: prod_zeros(S, [1, 2], dtype) if not dtype.is_complex else prod_zeros(S, [1, 2]).to(dtype), (1,), 'zeros_dim0_cast', (), [0], (), ident, {'dtype': torch.double}),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('unfold', (), (0, 1, 1), 'scalar', (), [0]),
         ('unfold', (S, S, S, S), (0, 3, 1), '4d_dim0_step1', (), [0]),
