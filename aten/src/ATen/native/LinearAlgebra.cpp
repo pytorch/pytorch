@@ -1622,8 +1622,8 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // self[:ind]
   std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
 
-  int64_t prod_ind_end = std::accumulate(shape_ind_end.begin(), shape_ind_end.end(), int64_t{1}, std::multiplies<int64_t>());
-  int64_t prod_start_ind = std::accumulate(shape_start_ind.begin(), shape_start_ind.end(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t prod_ind_end = std::accumulate(shape_ind_end.cbegin(), shape_ind_end.cend(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t prod_start_ind = std::accumulate(shape_start_ind.cbegin(), shape_start_ind.cend(), int64_t{1}, std::multiplies<int64_t>());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(prod_ind_end == prod_start_ind,
@@ -1632,7 +1632,7 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
 
   // Concatenate shape_ind_end and shape_start_ind to form the shape of the result
   // self[ind:] + self[:ind]
-  shape_ind_end.insert(shape_ind_end.end(), shape_start_ind.begin(), shape_start_ind.end());
+  shape_ind_end.insert(shape_ind_end.cend(), shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // If the reshaped self is not invertible catch this error
   Tensor result;
