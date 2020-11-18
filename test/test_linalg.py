@@ -1644,9 +1644,9 @@ class TestLinalg(TestCase):
             # hermitian flag for NumPy was added in 1.14.0
             if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
                 self.assertEqual(matrix_rank(aaH, hermitian=True),
-                                    np.linalg.matrix_rank(aaH.cpu().numpy(), hermitian=True))
+                                 np.linalg.matrix_rank(aaH.cpu().numpy(), hermitian=True))
                 self.assertEqual(matrix_rank(aaH, 0.01, True),
-                                    np.linalg.matrix_rank(aaH.cpu().numpy(), 0.01, True))
+                                 np.linalg.matrix_rank(aaH.cpu().numpy(), 0.01, True))
 
             # check out= variant
             result = matrix_rank(a)
@@ -1738,8 +1738,7 @@ class TestLinalg(TestCase):
 
         if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
-            self.assertEqual(torch.matrix_rank(aaT, 0.01, True),
-                                np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
+            self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     def triangular_solve_test_helper(self, A_dims, b_dims, upper, unitriangular,
                                      device, dtype):
