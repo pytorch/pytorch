@@ -28,7 +28,8 @@ VkDeviceSize bytes(
   return size;
 }
 
-VkFormat format(const caffe2::TypeMeta dtype) {
+
+VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
     #ifdef USE_VULKAN_FP16_INFERENCE
@@ -46,7 +47,35 @@ VkFormat format(const caffe2::TypeMeta dtype) {
   return VK_FORMAT_UNDEFINED;
 }
 
-VkAccessFlags access(
+vTensor::Access::Flags access(
+    const VkAccessFlags vk_access) {
+  vTensor::Access::Flags access = 0u;
+
+  constexpr VkAccessFlags kRead =
+      VK_ACCESS_HOST_READ_BIT |
+      VK_ACCESS_MEMORY_READ_BIT |
+      VK_ACCESS_SHADER_READ_BIT |
+      VK_ACCESS_TRANSFER_READ_BIT |
+      VK_ACCESS_UNIFORM_READ_BIT;
+
+  constexpr VkAccessFlags kWrite =
+      VK_ACCESS_HOST_WRITE_BIT |
+      VK_ACCESS_MEMORY_WRITE_BIT |
+      VK_ACCESS_SHADER_WRITE_BIT |
+      VK_ACCESS_TRANSFER_WRITE_BIT;
+
+  if (vk_access & kRead) {
+    access |= vTensor::Access::Read;
+  }
+
+  if (vk_access & kWrite) {
+    access |= vTensor::Access::Write;
+  }
+
+  return access;
+}
+
+VkAccessFlags vk_access(
     const vTensor::Stage::Flags stage,
     const vTensor::Access::Flags access) {
   VkAccessFlags vk_access = 0u;
@@ -82,35 +111,7 @@ VkAccessFlags access(
   return vk_access;
 }
 
-vTensor::Access::Flags access(
-    const VkAccessFlags vk_access) {
-  vTensor::Access::Flags access = 0u;
-
-  constexpr VkAccessFlags kRead =
-      VK_ACCESS_HOST_READ_BIT |
-      VK_ACCESS_MEMORY_READ_BIT |
-      VK_ACCESS_SHADER_READ_BIT |
-      VK_ACCESS_TRANSFER_READ_BIT |
-      VK_ACCESS_UNIFORM_READ_BIT;
-
-  constexpr VkAccessFlags kWrite =
-      VK_ACCESS_HOST_WRITE_BIT |
-      VK_ACCESS_MEMORY_WRITE_BIT |
-      VK_ACCESS_SHADER_WRITE_BIT |
-      VK_ACCESS_TRANSFER_WRITE_BIT;
-
-  if (vk_access & kRead) {
-    access |= vTensor::Access::Read;
-  }
-
-  if (vk_access & kWrite) {
-    access |= vTensor::Access::Write;
-  }
-
-  return access;
-}
-
-VkImageLayout layout(
+VkImageLayout vk_layout(
     const vTensor::Stage::Flags stage,
     const vTensor::Access::Flags access) {
   switch (stage) {
@@ -142,7 +143,7 @@ VkImageLayout layout(
   return VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
-VkPipelineStageFlags stage(
+VkPipelineStageFlags vk_stage(
     const vTensor::Stage::Flags stage) {
   VkPipelineStageFlags vk_stage = 0u;
 
@@ -267,7 +268,7 @@ vTensor::Image allocate_image(
 
   return pool->image({
       VK_IMAGE_TYPE_3D,
-      format(options.dtype()),
+      vk_format(options.dtype()),
       extents,
       // Usage
       {
@@ -282,7 +283,7 @@ vTensor::Image allocate_image(
       // View
       {
         VK_IMAGE_VIEW_TYPE_3D,
-        format(options.dtype()),
+        vk_format(options.dtype()),
       },
       // Sampler
       {
@@ -766,13 +767,13 @@ void vTensor::View::CMD::copy_buffer_to_staging(
       state.transition({
           // Staging
           {
-            stage(Stage::Transfer),
-            access(Stage::Transfer, Access::Write),
+            vk_stage(Stage::Transfer),
+            vk_access(Stage::Transfer, Access::Write),
           },
           // Buffer
           {
-            stage(Stage::Transfer),
-            access(Stage::Transfer, Access::Read),
+            vk_stage(Stage::Transfer),
+            vk_access(Stage::Transfer, Access::Read),
           },
           // Image
           {},
@@ -789,19 +790,17 @@ void vTensor::View::CMD::copy_staging_to_buffer(
     return;
   }
 
-  std::cout << "copy_staging_to_buffer: " << std::endl;
-
   barrier(
       state.transition({
           // Staging
           {
-            stage(Stage::Transfer),
-            access(Stage::Transfer, Access::Read),
+            vk_stage(Stage::Transfer),
+            vk_access(Stage::Transfer, Access::Read),
           },
           // Buffer
           {
-            stage(Stage::Transfer),
-            access(Stage::Transfer, Access::Write),
+            vk_stage(Stage::Transfer),
+            vk_access(Stage::Transfer, Access::Write),
           },
           // Image
           {},
@@ -824,27 +823,45 @@ void vTensor::View::CMD::copy_buffer_to_image(
           {},
           // Buffer
           {
-            stage(Stage::Compute),
-            access(Stage::Compute, Access::Read),
+            vk_stage(Stage::Compute),
+            vk_access(Stage::Compute, Access::Read),
           },
           // Image
           {
-            stage(Stage::Compute),
-            access(Stage::Compute, Access::Write),
-            layout(Stage::Compute, Access::Write),
+            vk_stage(Stage::Compute),
+            vk_access(Stage::Compute, Access::Write),
+            vk_layout(Stage::Compute, Access::Write),
           },
         }));
+
+  const VkExtent3D extents = view_.extents();
+  const uint32_t plane = extents.width * extents.height;
+
+  const struct {
+    VkExtent3D extents;
+    uint32_t block;
+    uint32_t offset_x, offset_y, offset_z, offset_w;
+  } block {
+    extents,
+    4u * plane,
+    0u * plane,
+    1u * plane,
+    2u * plane,
+    3u * plane,
+  };
 
   view_.context_->dispatch(
       command_buffer(),
       {
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(nchw_to_image),
-      view_.extents(),
+      extents,
       image,
-      buffer);
+      buffer,
+      view_.context_->resource().pool.uniform(block).object);
 }
 
 void vTensor::View::CMD::copy_image_to_buffer(
@@ -861,27 +878,45 @@ void vTensor::View::CMD::copy_image_to_buffer(
           {},
           // Buffer
           {
-            stage(Stage::Compute),
-            access(Stage::Compute, Access::Write),
+            vk_stage(Stage::Compute),
+            vk_access(Stage::Compute, Access::Write),
           },
           // Image
           {
-            stage(Stage::Compute),
-            access(Stage::Compute, Access::Read),
-            layout(Stage::Compute, Access::Read),
+            vk_stage(Stage::Compute),
+            vk_access(Stage::Compute, Access::Read),
+            vk_layout(Stage::Compute, Access::Read),
           },
         }));
+
+  const VkExtent3D extents = view_.extents();
+  const uint32_t plane = extents.width * extents.height;
+
+  const struct {
+    VkExtent3D extents;
+    uint32_t block;
+    uint32_t offset_x, offset_y, offset_z, offset_w;
+  } block {
+    extents,
+    4u * plane,
+    0u * plane,
+    1u * plane,
+    2u * plane,
+    3u * plane,
+  };
 
   view_.context_->dispatch(
       command_buffer(),
       {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
       image,
-      buffer);
+      buffer,
+      view_.context_->resource().pool.uniform(block).object);
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
@@ -951,8 +986,8 @@ vTensor::Buffer& vTensor::View::buffer(
           {},
           // Buffer
           {
-            ops::stage(stage),
-            ops::access(stage, access),
+            vk_stage(stage),
+            vk_access(stage, access),
           },
           // Image
           {},
@@ -1015,9 +1050,9 @@ vTensor::Image& vTensor::View::image(
           {},
           // Image
           {
-            ops::stage(stage),
-            ops::access(stage, access),
-            ops::layout(stage, access),
+            vk_stage(stage),
+            vk_access(stage, access),
+            vk_layout(stage, access),
           },
         }));
 
@@ -1071,8 +1106,8 @@ vTensor::Buffer& vTensor::View::staging(
       state_.transition({
           // Staging
           {
-            ops::stage(stage),
-            ops::access(stage, access),
+            vk_stage(stage),
+            vk_access(stage, access),
           },
           // Buffer
           {},
@@ -1150,16 +1185,15 @@ vTensor::View::State::transition(const Bundle bundle) {
     to.image = bundle.image;
   }
 
-// #ifdef DEBUG
+#ifdef DEBUG
   // Forward declaration
   std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
 
   std::cout << "From:" << std::endl << from << std::endl;
-  std::cout << "bundle:" << std::endl << bundle_ << std::endl;
   std::cout << "To:" << std::endl << to << std::endl;
-// #endif /* DEBUG */
+#endif /* DEBUG */
 
   return Transition{
     from,

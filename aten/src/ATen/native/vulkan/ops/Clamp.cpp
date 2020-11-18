@@ -32,7 +32,7 @@ Tensor clamp(
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
         VkExtent3D extents;
-        uint32_t padding;
+        uint32_t _;
         float min_value;
         float max_value;
       } block {
@@ -98,7 +98,7 @@ Tensor& clamp_(
     if (v_self.has_image()) {
       const struct {
         VkExtent3D extents;
-        uint32_t padding;
+        uint32_t _;
         float min_value;
         float max_value;
       } block {
