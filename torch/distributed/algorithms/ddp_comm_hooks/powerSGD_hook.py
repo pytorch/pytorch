@@ -1,6 +1,5 @@
 import math
 
-import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -11,45 +10,41 @@ def _orthogonalize(matrix, epsilon=1e-8):
     for i in range(num_cols):
         # Normalize the i'th column.
         col = matrix[:, i : i + 1]
-        # Note that col ** 2 can underflow/overflow if we use FP16.
-        # May need to consder multiplying a scaling factor and divding it later, or using bfloat16 isntead.
-        col /= torch.sqrt(torch.sum(col ** 2))
         # If no epsilon is added here, division by zero may be caused by vanishing gradients.
         # This epsilon is not needed if the input matrix covers the gradients of at least one entire layer in the neural network.
-        if epsilon > 0:
-            col += epsilon
+        if epsilon == 0:
+            # Note that col ** 2 can underflow/overflow if we use FP16.
+            # May need to consder multiplying a scaling factor and divding it later, or using bfloat16 isntead.
+            col /= torch.sqrt(torch.sum(col ** 2))
+        else:
+            col /= torch.sqrt(torch.sum(col ** 2)) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
             rest = matrix[:, i + 1 :]
             rest -= torch.sum(col * rest, dim=0) * col
 
 
-def _set_random(vector, random_seed=0):
-    """
-    Initializes a 1D tensor from a standard normal distribution.
-    The see makes sure that the randomized vector in all the DDP replicas are the same at every step.
-    """
-    torch.manual_seed(np.random.RandomState(random_seed).randint(1_000_000_000))
-    vector.data[:] = torch.randn(*vector.shape)
-
-
 def powerSGD_hook(
     process_group: object, bucket: dist._GradBucket, rank: int = 1
 ) -> torch.futures.Future:
     """
-    This DDP communication hook implements a simplified PowerSGD graidient compression
+    This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in https://arxiv.org/abs/1905.13727.
     Once gradient tensors are aggregated across all workers, this hook applies
     compression as follows:
     1) Views the input flattened 1D gradient tensor as a square-shaped tensor M with 0 paddings;
     2) Decomposes M into two low-rank tensors P and Q,
-    such that M = PQ^T, where Q is initialized from a standard normal distribution;
+    such that M = PQ^T, where Q is initialized from a standard normal distribution and orthogonalized;
     2) Allreduces P;
     3) Orthogonizes P;
     4) Compute Q, which is approximately equal to M^TP;
     5) Allreduces Q;
     6) Computes M, which is approximately equal to PQ^T.
     7) Truncates the input tensor to the original length.
+
+    TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
+    one left multiplication and one right multiplication.
+    For warm start, can take one such step at a time, and alternate between them.
 
     Example::
         PowerSGDState state(process_group, 1)
@@ -72,15 +67,22 @@ def powerSGD_hook(
     input_tensor[total_length:padded_total_length].fill_(0)
     matrix = input_tensor.view(square_side_length, square_side_length)
 
-    def create_low_rank_tensor():
+    def create_low_rank_tensor(fill_random_values):
         "Returns a low-rank 2D tensor and the allocated contiguous memory."
         memory = torch.empty(square_side_length * rank, device=device)
+        if fill_random_values:
+            with torch.random.fork_rng():
+                # The seed makes sure that the initial random values are the same across all the DDP replicas.
+                # Such seed should differ at every step.
+                # Currently use the length of input tensor as the seed, which should be mostly different.
+                # TODO(wayi@): Should read the random seed from the state of this hook provided by the constructor.
+                torch.manual_seed(total_length)
+                memory.data[:] = torch.randn_like(memory)
         return memory.view(square_side_length, rank), memory
 
-    p, p_memory = create_low_rank_tensor()
-    q, q_memory = create_low_rank_tensor()
-    # Initialize each Q from a standard normal distribution.
-    _set_random(q)
+    p, p_memory = create_low_rank_tensor(fill_random_values=False)
+    q, q_memory = create_low_rank_tensor(fill_random_values=True)
+    _orthogonalize(q, 0)
 
     torch.matmul(matrix, q, out=p)
     allreduce_p_fut = dist.all_reduce(
