@@ -63,11 +63,11 @@ void assertReduceOpSupportsComplexTensor(ReduceOp op) {
 }  // namespace anonymous
 
 std::string Backend::get(const std::string& backend_type) {
-	return backend_type;
+  return backend_type;
 }
 
 void Backend::registerBackend() {
-	TORCH_CHECK(false, "Registering third-party backend is currently not supported by TorchScript-friendly c10d");
+  TORCH_CHECK(false, "Registering third-party backend is currently not supported by TorchScript-friendly c10d");
 }
 
 c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
