@@ -17800,22 +17800,33 @@ else:
         self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y), dtype, device)
 
     @onlyCUDA
-    @dtypes(torch.float16, torch.float32)
+    @dtypes(torch.float16, torch.float32, torch.cfloat, torch.cdouble)
     def test_prod_gpu(self, device, dtype):
-        x = torch.tensor([2, 3, 6, 9, 8], dtype=dtype, device=device)
+        def run_test(reflect_re2im=False):
+            unit = 1 if not reflect_re2im else (0 + 1j)
+            x = torch.tensor([2, 3, 6, 9, 8], dtype=dtype, device=device) * unit
 
-        # Check all combinations: fp16 input - fp16 output, fp16 input - fp32
-        # output, fp32 input - fp16 output, fp32 input - fp32 output
-        for dtype_output in [torch.float16, torch.float32]:
-            result_expected = torch.tensor(2592, dtype=dtype_output, device=device)
-            output = torch.prod(x, dtype=dtype_output)
-            self.assertEqual(output, result_expected)
+            # Check all combinations: fp16 input - fp16 output, fp16 input - fp32
+            # output, fp32 input - fp16 output, fp32 input - fp32 output,
+            # plus additional complex variants for complex input
+            output_dtypes = {
+                False: [torch.float16, torch.float32],
+                True: ([torch.float16, torch.float32, torch.cfloat, torch.cdouble]
+                    if not reflect_re2im else [torch.cfloat, torch.cdouble])
+            }
+            for dtype_output in output_dtypes[dtype.is_complex]:
+                result_expected = torch.tensor(2592, dtype=dtype_output, device=device) * unit
+                output = torch.prod(x, dtype=dtype_output)
+                self.assertEqual(output, result_expected)
 
-            output = x.prod(dtype=dtype_output)
-            self.assertEqual(output, result_expected)
+                output = x.prod(dtype=dtype_output)
+                self.assertEqual(output, result_expected)
 
-    @onlyCPU
-    @dtypes(torch.float)
+        run_test(reflect_re2im=False)
+        if dtype.is_complex:
+            run_test(reflect_re2im=True)
+
+    @dtypes(torch.float, torch.cfloat, torch.cdouble)
     def test_prod(self, device, dtype):
         x = torch.rand(100, 100, dtype=dtype, device=device)
         res1 = torch.prod(x, 1)
