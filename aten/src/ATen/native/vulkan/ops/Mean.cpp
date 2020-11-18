@@ -61,8 +61,13 @@ Tensor mean(
             },
             VK_KERNEL(mean),
             v_output.extents(),
-            v_output.image(command_buffer, vTensor::Access::Write),
-            v_input.image(command_buffer));
+            v_output.image(
+                command_buffer,
+                vTensor::Stage::Compute,
+                vTensor::Access::Write),
+            v_input.image(
+                command_buffer,
+                vTensor::Stage::Compute));
       } else {
         context->dispatch(
             command_buffer,
@@ -73,8 +78,13 @@ Tensor mean(
             },
             VK_KERNEL(mean2d),
             v_output.extents(),
-            v_output.image(command_buffer, vTensor::Access::Write),
-            v_input.image(command_buffer),
+            v_output.image(
+                command_buffer,
+                vTensor::Stage::Compute,
+                vTensor::Access::Write),
+            v_input.image(
+                command_buffer,
+                vTensor::Stage::Compute),
             context->resource().pool.uniform(block).object);
       }
     } else {

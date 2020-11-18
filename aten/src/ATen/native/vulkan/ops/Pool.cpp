@@ -45,10 +45,15 @@ Tensor adaptive_avg_pool2d(
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer));
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute));
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -167,10 +172,15 @@ Tensor avg_pool2d(
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);

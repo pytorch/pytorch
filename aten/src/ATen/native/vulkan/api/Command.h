@@ -40,7 +40,25 @@ struct Command final {
     void submit(VkQueue queue, Resource::Fence fence = {});
 
    private:
+    void barrier();
+
+   private:
     VkCommandBuffer command_buffer_;
+
+    struct {
+      struct {
+        VkPipelineStageFlags src;
+        VkPipelineStageFlags dst;
+
+        inline operator bool() const {
+          return (0u != src) || (0u != dst);
+        }
+      } stage;
+
+      c10::SmallVector<Resource::Buffer::Barrier, 4u> buffers;
+      c10::SmallVector<Resource::Image::Barrier, 4u> images;
+    } barriers_;
+
     struct {
       Pipeline::Object pipeline;
       VkDescriptorSet descriptor_set;
