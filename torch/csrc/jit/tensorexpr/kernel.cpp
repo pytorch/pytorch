@@ -20,6 +20,7 @@ static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
+static bool te_must_use_llvm_on_cpu = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -66,6 +67,10 @@ int& getTECudaPointwiseBlockSize() {
 // based on device type in tensor.
 bool& getTEGenerateBlockCode() {
   return te_generate_block_code;
+}
+
+bool& getTEMustUseLLVMOnCPU() {
+  return te_must_use_llvm_on_cpu;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -124,9 +129,12 @@ ExprHandle TensorExprKernel::broadcast(
 ExprHandle TensorExprKernel::chunk(
     Tensor* t,
     size_t chunkIdx,
-    size_t dim,
-    size_t chunks,
+    int64_t dim,
+    int64_t chunks,
     const std::vector<ExprHandle>& axes) {
+  if (dim < 0) {
+    dim = axes.size() + dim;
+  }
   auto sizes = bufferSizes(t);
   size_t step = sizes[dim] / chunks;
 
@@ -251,7 +259,8 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::trunc:
     case aten::frac:
     case aten::lgamma:
-      return sizesForValue(v->node()->input());
+    case aten::type_as:
+      return sizesForValue(v->node()->input(0));
 
     case aten::sub:
     case aten::add:
@@ -270,7 +279,6 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::lt:
     case aten::min:
     case aten::max:
-    case aten::type_as:
     case aten::pow:
     case aten::fmod:
     case aten::remainder:
@@ -415,7 +423,7 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
 
 ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
   auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
-  if (!c10::isIntegralType(scalarType)) {
+  if (!c10::isIntegralType(scalarType, /*includeBool*/ true)) {
     return e;
   }
   auto defaultType = static_cast<tensorexpr::ScalarType>(
@@ -492,6 +500,7 @@ std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
   auto res2 = broadcastShapes(shapes);
   return res2;
 }
+
 std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
@@ -998,9 +1007,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::type_as: {
-      return computeTwoOperand(
-          "aten_type_as", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return Cast::make(rhs.dtype(), lhs);
+      auto const& n = v->node();
+      Tensor* rhs = tensors_.at(n->inputs()[1]->unique());
+      auto dtype = rhs->body()->dtype();
+      return computeOneOperand(
+          "aten_type_as", v, [dtype](const ExprHandle& lhs) {
+            return Cast::make(dtype, lhs);
           });
     } break;
 
@@ -1014,54 +1026,30 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::pow: {
       return computeTwoOperand(
           "aten_pow", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            const FloatImm* floatImm = rhs.AsNode<FloatImm>();
-            if (floatImm) {
-              float imm = floatImm->value();
-              if (imm == 1.0f) {
-                return lhs;
-              } else if (imm == 2.0f) { // NOLINT
-                return lhs * lhs;
-              } else if (imm == 3.0f) { // NOLINT
-                return (lhs * lhs) * lhs;
-              } else if (imm == 4.0f) { // NOLINT
-                ExprHandle tmp = lhs * lhs;
-                return tmp * tmp;
-              } else if (imm == 0.5f) { // NOLINT
-                return sqrt(lhs);
-              } else if (imm == 0.0f) {
-                return ExprHandle(1.0f);
-              } else if (imm == -0.5f) { // NOLINT
-                return rsqrt(lhs);
-              } else if (imm == -1.0f) {
-                return ExprHandle(1.0f) / lhs;
-              } else if (imm == -2.0f) { // NOLINT
-                return ExprHandle(1.0f) / (lhs * lhs);
-              }
+            double val = 0;
+            if (rhs.node()->isConstant()) {
+              val = immediateAs<double>(IRSimplifier::simplify(rhs.node()));
             }
 
-            const Cast* floatCast = rhs.AsNode<Cast>();
-            if (floatCast) {
-              const IntImm* intImm =
-                  dynamic_cast<const IntImm*>(floatCast->src_value());
-              if (intImm) {
-                float imm = static_cast<float>(intImm->value());
-                if (imm == 1) {
-                  return lhs;
-                } else if (imm == 2) {
-                  return lhs * lhs;
-                } else if (imm == 3) {
-                  return (lhs * lhs) * lhs;
-                } else if (imm == 4) {
-                  ExprHandle tmp = lhs * lhs;
-                  return tmp * tmp;
-                } else if (imm == 0) {
-                  return ExprHandle(1.0f);
-                } else if (imm == -1) {
-                  return ExprHandle(1.0f) / lhs;
-                } else if (imm == -2) {
-                  return ExprHandle(1.0f) / (lhs * lhs);
-                }
-              }
+            if (val == 1.0f) {
+              return lhs;
+            } else if (val == 2.0f) { // NOLINT
+              return lhs * lhs;
+            } else if (val == 3.0f) { // NOLINT
+              return (lhs * lhs) * lhs;
+            } else if (val == 4.0f) { // NOLINT
+              ExprHandle tmp = lhs * lhs;
+              return tmp * tmp;
+            } else if (val == 0.5f) { // NOLINT
+              return sqrt(lhs);
+            } else if (val == 0.0f) {
+              return ExprHandle(1.0f);
+            } else if (val == -0.5f) { // NOLINT
+              return rsqrt(lhs);
+            } else if (val == -1.0f) {
+              return ExprHandle(1.0f) / lhs;
+            } else if (val == -2.0f) { // NOLINT
+              return ExprHandle(1.0f) / (lhs * lhs);
             }
             return pow(lhs, rhs);
           });
@@ -1165,8 +1153,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sqrt: {
-      return computeOneOperand(
-          "aten_sqrt", v, [](const ExprHandle& a) { return sqrt(a); });
+      return computeOneOperand("aten_sqrt", v, [](const ExprHandle& a) {
+        return sqrt(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::rsqrt: {
@@ -1547,6 +1536,9 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
 #else
     backendType = kSimpleIREval;
 #endif
+    if (getTEMustUseLLVMOnCPU() && backendType == kSimpleIREval) {
+      throw std::runtime_error("LLVM Backend not found");
+    }
   } else {
     throw std::runtime_error("Invalid device type");
   }
