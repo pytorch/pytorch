@@ -177,6 +177,17 @@ def _is_tensor(x):
 def _is_tensor_list(x):
     return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
 
+def _get_tensor_rank(x):
+    if not _is_tensor(x) or x.type() is None:
+        return None
+    return x.type().dim()
+
+def _get_tensor_sizes(x, allow_symbol=True):
+    if not _is_tensor(x) or x.type() is None:
+        return None
+    if allow_symbol:
+        return x.type().varyingSizes()
+    return x.type().sizes()
 
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
@@ -319,7 +330,8 @@ def _get_interpolate_attributes(g, mode, args):
 
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    if isinstance(scale_factor.type(), torch._C.ListType) or (scale_factor.isCompleteTensor() and scale_factor.type().dim() > 0):
+    scale_factor_rank = _get_tensor_rank(scale_factor)
+    if isinstance(scale_factor.type(), torch._C.ListType) or (scale_factor_rank is not None and scale_factor_rank > 0):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
         scale_factor = _unsqueeze_helper(g, scale_factor, 0)

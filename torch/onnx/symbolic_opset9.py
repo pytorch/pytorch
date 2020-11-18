@@ -474,8 +474,9 @@ def transpose(g, self, dim0, dim1):
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    if self.isCompleteTensor():
-        axes = list(range(self.type().dim()))
+    rank = sym_help._get_tensor_rank(self)
+    if rank:
+        axes = list(range(rank))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return g.op("Transpose", self, perm_i=axes)
     else:
@@ -638,10 +639,9 @@ def squeeze(g, self, dim=None):
     return g.op("Squeeze", self, axes_i=[squeeze_dim])
 
 def prelu(g, self, weight):
-    if self.isCompleteTensor():
-        self_sizes = self.type().sizes()
-        if self_sizes and len(self_sizes) > 2:
-            weight = g.op("Unsqueeze", weight, axes_i=list(range(1, len(self_sizes) - 1)))
+    self_rank = sym_help._get_tensor_rank(self)
+    if self_rank and self_rank > 2:
+        weight = g.op("Unsqueeze", weight, axes_i=list(range(1, self_rank - 1)))
     return g.op("PRelu", self, weight)
 
 
@@ -751,7 +751,10 @@ def softplus(g, self, beta, threshold):
 
 
 def get_pool_ceil_padding(input, kernel_size, stride, padding):
-    dim = input.type().sizes()[-len(padding):]
+    sizes = sym_help._get_tensor_sizes(input)
+    dim = sizes[-len(padding):] if sizes is not None else None
+    if dim is None or any([i is None for i in dim]):
+        return _unimplemented(name, "input size not accessible")
     ceiled_output_dim = [int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i]))) + 1
                          for i in range(0, len(padding))]
     # ensure last pooling starts inside
@@ -776,8 +779,6 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 def _max_pool(name, tuple_fn, ndims, return_indices):
     @parse_args('v', 'is', 'is', 'is', 'is', 'i')
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-        if ceil_mode and not input.isCompleteTensor():
-            return _unimplemented(name, "input size not accessible")
         if set(tuple_fn(dilation)) != {1}:
             return _unimplemented(name, "dilation")
         if not stride:
@@ -834,8 +835,6 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
-        if ceil_mode and not input.isCompleteTensor():
-            return _unimplemented(name, "input size not accessible")
         if not stride:
             stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
@@ -881,11 +880,12 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
             return sym_help._onnx_unsupported('adaptive pooling, since output_size is not constant.')
         if output_size == [1] * len(output_size) and type == "AveragePool":
             return g.op("GlobalAveragePool", input)
-        if not input.isCompleteTensor():
+        sizes = sym_help._get_tensor_sizes(input)
+        dim = sizes[2:] if sizes is not None else None
+        if dim is None or any([i is None for i in dim]):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
             return _unimplemented(name, 'input size not accessible')
-        dim = input.type().sizes()[2:]
         # verify if output size % input size = 0 for all dim
         mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
         if mod != [0] * len(mod):
@@ -1298,13 +1298,14 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
 def unfold(g, input, dimension, size, step):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
-    if input.isCompleteTensor():
-        sizedim = input.type().sizes()[dimension]
+    sizes = sym_help._get_tensor_sizes(input)
+    sizedim = sizes[dimension] if sizes is not None else None
+    if sizedim is not None:
         low_indices = range(0, sizedim, step)
         hi_indices = range(size, sizedim + 1, step)
         stack = [sym_help._slice_helper(g, input, axes=[dimension], starts=[low], ends=[hi])
                  for low, hi in zip(low_indices, hi_indices)]
-        ndim = input.type().dim()
+        ndim = len(sizes)
         perm = list(range(0, ndim))
         perm.append(perm.pop(dimension))
         unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
@@ -1375,11 +1376,11 @@ def index_copy(g, self, dim, index, source):
 
 
 def type_as(g, self, other):
-    if self.isCompleteTensor() and other.isCompleteTensor() and self.type().scalarType() == other.type().scalarType():
+    self_dtype, other_dtype = sym_help._try_get_scalar_type(self, other)
+    if self_dtype == other_dtype and self_dtype is not None:
         return self
-    if other.isCompleteTensor():
-        other_type_name = other.type().scalarType()
-        return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other_type_name])
+    if other_dtype is not None:
+        return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other_dtype])
     else:
         if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
             # We don't know the type of other, bail by emitting ATen
@@ -1575,8 +1576,9 @@ def empty_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
 
 
 def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
-    if dtype is None and self.isCompleteTensor():
-        dtype = self.type().scalarType()
+    self_dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None and self_dtype is not None:
+        dtype = self_dtype
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
@@ -1628,8 +1630,9 @@ def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
 
 
 def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
-    if dtype is None and self.isCompleteTensor():
-        dtype = self.type().scalarType()
+    self_dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None and self_dtype is not None:
+        dtype = self_dtype
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
@@ -1679,8 +1682,9 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
 
 
 def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False):
-    if dtype is None and self.isCompleteTensor():
-        dtype = self.type().scalarType()
+    self_dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None and self_dtype is not None:
+        dtype = self_dtype
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
@@ -1769,7 +1773,8 @@ def unsqueeze(g, self, dim):
 def sort(g, self, dim, decending, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported for sort")
-    if not self.isCompleteTensor():
+    self_sizes = sym_help._get_tensor_sizes(self)
+    if self_sizes is None or self_sizes[dim] < 0:
         return _unimplemented("Sort", "input size not accessible")
 
     return g.op("TopK", self, k_i=self.type().sizes()[dim], axis_i=dim, outputs=2)
@@ -2226,13 +2231,16 @@ def scatter(g, self, dim, index, src):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter_add(g, self, dim, index, src):
-    if not self.isCompleteTensor():
-        return _unimplemented("scatter_add", "input size not accessible")
-    dtype = self.type().scalarType()
+    dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None:
+        return _unimplemented("scatter_add", "input dtype not accessible")
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     dtype = sym_help.scalar_type_to_pytorch_type[dtype]
-    sizes = self.type().sizes()
-    to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+    sizes = sym_help._get_tensor_sizes(self, allow_symbol=False)
+    if sizes:
+        to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
+    else:
+        to_add = zeros_like(self, dtype)
     to_add = sym_help._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
