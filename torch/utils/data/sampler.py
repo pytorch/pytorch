@@ -250,6 +250,10 @@ class BatchSampler(Sampler[List[int]]):
 
 class PartialBalancedBatchSampler(Sampler[List[int]]):
     r"""Samples elements randomly balanced per class for each batch until to achieve the batch-size.
+        When it achieve the batch size, the lenght of others classes will be 0.
+        If it is not possibile to take n balanced_classes from a class because the class has less elements, it takes all last elements.
+        If it is not possibile to take n_balanced_classes because the batch-size is full, the remaining
+        elements will be take the next batch.
 
         Args:
             dataset (Dataset): dataset to sample from
@@ -272,6 +276,11 @@ class PartialBalancedBatchSampler(Sampler[List[int]]):
             if label not in self.dataset:
                 self.dataset[label] = list()
             self.dataset[label].append(idx)
+
+        len_classes_dataset=[len(i) for i in self.dataset.values()]
+        if self.balanced_classes >= any(len_classes_dataset):
+            raise Exception('Number of balanced classes should be less than '+str(min(len_classes_dataset)))
+
 
         rand_tensor=[]
         while all(self.dataset.values()):
