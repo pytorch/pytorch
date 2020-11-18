@@ -247,7 +247,9 @@ static void and_kernel_impl(TensorIterator& iter) {
         // In this method, users would expect, e.g., all(), to return 1/0 as
         // true/false.
         Vec256<bool> c = Vec256<bool>();
-        for (int i = 0; i != Vec256<bool>::size(); i++) {
+
+        using size_t = decltype(c.size());
+        for (size_t i = 0; i != Vec256<bool>::size(); i++) {
           c[i] = a[i] && b[i];
         }
         return c;
@@ -261,7 +263,9 @@ static void or_kernel_impl(TensorIterator& iter) {
       [=](bool a, bool b) -> bool { return a || b; },
       [=](Vec256<bool> a, Vec256<bool> b) {
         Vec256<bool> c = Vec256<bool>();
-        for (int i = 0; i != Vec256<bool>::size(); i++) {
+
+        using size_t = decltype(c.size());
+        for (size_t i = 0; i != Vec256<bool>::size(); i++) {
           c[i] = a[i] || b[i];
         }
         return c;
