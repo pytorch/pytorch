@@ -432,7 +432,7 @@ Examples::
 
 add_docstr_all('all',
                r"""
-all(dim=None, keepdim=False, out=None) -> Tensor
+all(dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.all`
 """)
@@ -453,7 +453,7 @@ See :func:`torch.angle`
 
 add_docstr_all('any',
                r"""
-any(dim=None, keepdim=False, out=None) -> Tensor
+any(dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.any`
 """)
