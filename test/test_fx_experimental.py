@@ -595,6 +595,26 @@ terrible spacing
 
         traced = symbolic_trace_with_rewrite(foo)
 
+    def test_to_folder(self):
+        class Test(torch.nn.Module):
+            def __init__(self):
+                super(Test, self).__init__()
+                self.W = torch.nn.Parameter(torch.randn(2))
+                self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
+                self.linear = torch.nn.Linear(2, 2)
+                self.attr = torch.randn(2)
+                self.register_buffer('attr2', torch.randn(2))
+
+            def forward(self, x):
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
+
+        mod = symbolic_trace(Test())
+        mod._to_folder('foo', 'Foo')
+        from foo import Foo
+        t = torch.randn(2, 2)
+        self.assertEqual(Foo()(t), mod(t))
+
+
 
 if __name__ == "__main__":
     run_tests()
