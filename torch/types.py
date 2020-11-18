@@ -1,5 +1,5 @@
 import torch
-from typing import Any, List, Sequence, Tuple, Union
+from typing import Any, List, Sequence, Tuple, Union, MutableSequence
 
 import builtins
 
@@ -31,7 +31,8 @@ Number = Union[builtins.int, builtins.float, builtins.bool]
 Device = Union[_device, str, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
-class Storage(object):
+
+class Storage(MutableSequence, object):
     _cdata: int
 
     def __deepcopy__(self, memo) -> 'Storage':

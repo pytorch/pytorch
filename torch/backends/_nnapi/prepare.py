@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Union
 
 import torch
 from torch.backends._nnapi.serializer import serialize_model
@@ -11,7 +11,7 @@ class NnapiModule(torch.nn.Module):
     of all inputs and outputs.
     """
 
-    comp: Optional[torch.classes._nnapi.Compilation]
+    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
 
     def __init__(
             self,
@@ -170,6 +170,9 @@ def convert_model_to_nnapi(model, inputs):
     ser_model_tensor = torch.tensor(list(ser_model), dtype=torch.uint8)
 
     out_templates = [_condensed_zeros_like(out) for out in outputs]
+
+    nnapi_model: Union[ListDelistWrapper, ListWrapper, DelistWrapper, NnapiInitWrapper]
+
     nnapi_model = NnapiInitWrapper(NnapiModule(
         ser_model_tensor,
         used_weights,
