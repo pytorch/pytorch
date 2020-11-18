@@ -15,12 +15,13 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
+    skipIfNoFBGEMM,
 )
 from torch.testing._internal.common_quantized import override_qengines
 
 
+@skipIfNoFBGEMM
 class TestGraphModeNumericSuite(QuantizationTestCase):
-    @override_qengines
     def test_remove_qconfig_observer_fx(self):
         r"""Remove activation_post_process node from fx prepred model"""
         float_model = SingleLayerLinearModel()
@@ -44,7 +45,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             if node.op == "call_module":
                 self.assertFalse(is_activation_post_process(modules[node.target]))
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_compare_weights_conv_static_fx(self):
         r"""Compare the weights of float and static quantized conv layer"""
 
@@ -62,8 +63,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             for k, v in weight_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-        qengine = torch.backends.quantized.engine
-        qconfig = get_default_qconfig(qengine)
+        qconfig = get_default_qconfig("fbgemm")
         qconfig_dict = {"": qconfig}
 
         model_list = [ConvModel(), ConvBnModel(), ConvBNReLU()]
@@ -82,7 +82,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
             compare_and_validate_results(fused, q_model)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_compare_weights_linear_static_fx(self):
         r"""Compare the weights of float and static quantized linear layer"""
 
@@ -106,8 +106,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         model_to_quantize = copy.deepcopy(float_model)
         model_to_quantize.eval()
 
-        qengine = torch.backends.quantized.engine
-        qconfig = get_default_qconfig(qengine)
+        qconfig = get_default_qconfig("fbgemm")
         qconfig_dict = {"": qconfig}
 
         prepared_model = prepare_fx(model_to_quantize, qconfig_dict)
@@ -123,7 +122,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         compare_and_validate_results(model, q_model)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_compare_weights_linear_dynamic_fx(self):
         r"""Compare the weights of float and dynamic quantized linear layer"""
 
