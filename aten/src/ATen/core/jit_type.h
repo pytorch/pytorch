@@ -2335,8 +2335,11 @@ using ::torch::jit::CompilationUnit;
 // 1. lhs methods are a superset of rhs methods
 // 2. if rhs is module interface, the lhs must be module interface or module itself
 struct CAFFE2_API InterfaceType : public NamedType {
+  // Use regular map and set in order to facilitate deterministic serialization.
+  using InterfaceIgnoredArgsType = std::map<std::string, std::set<std::string>>;
+
   static InterfaceTypePtr create(
-      QualifiedName qualifiedName, bool is_module=false, bool match_args=true);
+      QualifiedName qualifiedName, InterfaceIgnoredArgsType ignored_arg_names, bool is_module=false);
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<InterfaceType>()) {
@@ -2363,14 +2366,14 @@ struct CAFFE2_API InterfaceType : public NamedType {
   bool is_module() const override{
     return is_module_;
   }
-  bool match_args() const {
-    return match_args_;
+  const InterfaceIgnoredArgsType& ignored_arg_names() const {
+    return ignored_arg_names_;
   }
 
   static const TypeKind Kind = TypeKind::InterfaceType;
   ~InterfaceType() override;
  private:
-  InterfaceType(QualifiedName name, bool is_module, bool match_args);
+  InterfaceType(QualifiedName name, InterfaceIgnoredArgsType ignored_arg_names, bool is_module);
   static bool isSubTypeImpl(
       const InterfaceType& lhs,
       const InterfaceType& rhs,
@@ -2383,9 +2386,10 @@ struct CAFFE2_API InterfaceType : public NamedType {
   // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
+  // Map from method name -> set of arguments to ignore during subtyping checks.
+  InterfaceIgnoredArgsType ignored_arg_names_;
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
-  bool match_args_;
 };
 
 template <TypeKind K>

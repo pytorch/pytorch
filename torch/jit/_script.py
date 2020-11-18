@@ -1030,38 +1030,37 @@ def _check_directly_compile_overloaded(obj):
         )
 
 
-def interface(match_args=True):
-    def interface_impl(obj):
-        if not inspect.isclass(obj):
-            raise RuntimeError("interface must be applied to a class")
-        if not _is_new_style_class(obj):
-            raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+def interface(obj):
+    if not inspect.isclass(obj):
+        raise RuntimeError("interface must be applied to a class")
+    if not _is_new_style_class(obj):
+        raise RuntimeError("TorchScript interfaces must inherit from 'object'")
 
-        # Expected MRO is:
-        #   User module
-        #   torch.nn.modules.module.Module
-        #   object
-        is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
+    # Expected MRO is:
+    #   User module
+    #   torch.nn.modules.module.Module
+    #   object
+    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
 
-        if not is_module_interface and len(obj.mro()) > 2:
-            raise RuntimeError(
-                "TorchScript interface does not support inheritance yet. "
-                "Please directly inherit from 'object' or 'nn.Module'."
-            )
-
-        qualified_name = _qualified_name(obj)
-        rcb = _jit_internal.createResolutionCallbackFromFrame(1)
-        # if this type is a `nn.Module` subclass, generate an module interface type
-        # instead of a class interface type, an module interface type only compile
-        # the user provided methods as part of the interface
-        ast = get_jit_class_def(obj, obj.__name__)
-        torch._C._jit_script_interface_compile(
-            qualified_name, ast, rcb, is_module_interface, match_args
+    if not is_module_interface and len(obj.mro()) > 2:
+        raise RuntimeError(
+            "TorchScript interface does not support inheritance yet. "
+            "Please directly inherit from 'object' or 'nn.Module'."
         )
-        obj.__torch_script_interface__ = True
-        return obj
 
-    return interface_impl
+    qualified_name = _qualified_name(obj)
+    rcb = _jit_internal.createResolutionCallbackFromFrame(1)
+    ignored_arg_names = obj.__ignored_argument_names__ if hasattr(obj, "__ignored_argument_names__") else {}
+
+    # if this type is a `nn.Module` subclass, generate an module interface type
+    # instead of a class interface type, an module interface type only compile
+    # the user provided methods as part of the interface
+    ast = get_jit_class_def(obj, obj.__name__)
+    torch._C._jit_script_interface_compile(
+        qualified_name, ast, rcb, is_module_interface, ignored_arg_names
+    )
+    obj.__torch_script_interface__ = True
+    return obj
 
 
 def _recursive_compile_class(obj, loc):

@@ -1,7 +1,7 @@
 # flake8: noqa
 # TODO: enable linting check for this file
 
-from typing import List, Any
+from typing import Any, List
 import torch
 import torch.nn as nn
 import os
@@ -48,7 +48,7 @@ class NewModule(nn.Module):
 
 class TestModuleInterface(JitTestCase):
     def test_not_submodule_interface_call(self):
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModuleInterface(nn.Module):
             def one(self, inp1, inp2):
                 # type: (Tensor, Tensor) -> Tensor
@@ -70,7 +70,7 @@ class TestModuleInterface(JitTestCase):
 
     def test_module_interface(self):
         global OneTwoModule, OneTwoClass
-        @torch.jit.interface()
+        @torch.jit.interface
         class OneTwoModule(nn.Module):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
@@ -84,7 +84,7 @@ class TestModuleInterface(JitTestCase):
                 # type: (Tensor) -> Tensor
                 pass
 
-        @torch.jit.interface()
+        @torch.jit.interface
         class OneTwoClass(object):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
@@ -150,7 +150,7 @@ class TestModuleInterface(JitTestCase):
 
     def test_module_interface_subtype(self):
         global OneTwoModule
-        @torch.jit.interface()
+        @torch.jit.interface
         class OneTwoModule(nn.Module):
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
@@ -204,7 +204,7 @@ class TestModuleInterface(JitTestCase):
 
         # Check that interface implementations can be contravariant in argument types and covariant in return type.
         global TensorToAny
-        @torch.jit.interface()
+        @torch.jit.interface
         class TensorToAny(nn.Module):
             def forward(self, input: torch.Tensor) -> Any:
                 pass
@@ -214,7 +214,7 @@ class TestModuleInterface(JitTestCase):
             return x
 
         global AnyToAny
-        @torch.jit.interface()
+        @torch.jit.interface
         class AnyToAny(nn.Module):
             def forward(self, input: Any) -> Any:
                 pass
@@ -242,14 +242,14 @@ class TestModuleInterface(JitTestCase):
 
     def test_module_interface_inheritance(self):
         with self.assertRaisesRegex(RuntimeError, "does not support inheritance yet. Please directly"):
-            @torch.jit.interface()
+            @torch.jit.interface
             class InheritMod(nn.ReLU):
                 def three(self, x):
                     # type: (Tensor) -> Tensor
                     return 3 * x
 
     def test_module_swap(self):
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModuleInterface(nn.Module):
             def one(self, inp1, inp2):
                 # type: (Tensor, Tensor) -> Tensor
@@ -283,7 +283,7 @@ class TestModuleInterface(JitTestCase):
             scripted_mod.proxy_mod = NewModule()
 
     def test_module_swap_wrong_module(self):
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModuleInterface(nn.Module):
             def one(self, inp1, inp2):
                 # type: (Tensor, Tensor) -> Tensor
@@ -318,7 +318,7 @@ class TestModuleInterface(JitTestCase):
             scripted_mod.proxy_mod = torch.jit.script(NewModuleWrong())
 
     def test_module_swap_no_lazy_compile(self):
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModuleInterface(nn.Module):
             def one(self, inp1, inp2):
                 # type: (Tensor, Tensor) -> Tensor
@@ -395,7 +395,7 @@ class TestModuleInterface(JitTestCase):
             scripted_no_module_interface.proxy_mod = torch.jit.script(NewModule())
 
     def test_script_module_as_interface_swap(self):
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModuleInterface(nn.Module):
             def one(self, inp1, inp2):
                 # type: (Tensor, Tensor) -> Tensor
@@ -470,7 +470,7 @@ class TestModuleInterface(JitTestCase):
             def forward(self, x):
                 return self.a
 
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModInterface(torch.nn.Module):
             def forward(self, x):
                 # type:  (Tensor) -> int
@@ -518,7 +518,7 @@ class TestModuleInterface(JitTestCase):
             def forward(self, x):
                 return self.a
 
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModInterface(torch.nn.Module):
             def forward(self, x):
                 # type:  (Tensor) -> int
@@ -562,7 +562,7 @@ class TestModuleInterface(JitTestCase):
             def forward(self, x):
                 return self.a
 
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModInterface(torch.nn.Module):
             def forward(self, x):
                 # type:  (Tensor) -> Tensor
@@ -608,7 +608,7 @@ class TestModuleInterface(JitTestCase):
             def forward(self, x):
                 return self.a
 
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModInterface(torch.nn.Module):
             def forward(self, x):
                 # type:  (Tensor) -> Tensor
@@ -651,7 +651,7 @@ class TestModuleInterface(JitTestCase):
             def forward(self, x):
                 return self.a
 
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModInterface(torch.nn.Module):
             def forward(self, x):
                 # type:  (Tensor) -> Tensor
@@ -686,7 +686,7 @@ class TestModuleInterface(JitTestCase):
         mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
 
     def test_module_apis_interface(self):
-        @torch.jit.interface()
+        @torch.jit.interface
         class ModuleInterface(nn.Module):
             def one(self, inp1, inp2):
                 # type: (Tensor, Tensor) -> Tensor
@@ -714,8 +714,10 @@ class TestModuleInterface(JitTestCase):
     def test_module_interface_ignore_arg_names(self):
         global ModuleInterface
 
-        @torch.jit.interface(match_args=False)
+        @torch.jit.interface
         class ModuleInterface(nn.Module):
+            __ignored_argument_names__ = {"forward": ["a", "b"]}
+
             def forward(self, a: int, b: torch.Tensor) -> torch.Tensor:
                 pass
 
@@ -732,9 +734,9 @@ class TestModuleInterface(JitTestCase):
             a.forward(b=torch.tensor([1]), a=3)
             return a
 
-        # This should work because match_args=False.
+        # This should work because of __ignored_argument_names__.
         as_module_interface(torch.jit.script(IfaceImpl()))
 
-        # This should fail because match_args=False disables named args.
+        # This should fail because __ignored_argument_names__ disables named args.
         with self.assertRaisesRegex(Exception, "forward cannot be called with keyword arguments"):
             torch.jit.script(uses_kwargs)

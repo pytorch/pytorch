@@ -1370,13 +1370,30 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          ResolutionCallback rcb,
          bool is_module,
-         bool match_args) {
+         py::handle py_ignored_argment_names) {
+        // Convert ignored_argument_names from a py::dict to C++ dictionary.
+        InterfaceType::InterfaceIgnoredArgsType ignored_arg_names;
+        auto py_ignored_argment_names_dict =
+            py_ignored_argment_names.cast<py::dict>();
+        for (const auto& method : py_ignored_argment_names_dict) {
+          auto method_name = method.first.cast<py::str>();
+          auto py_args_list = method.second.cast<py::list>();
+
+          InterfaceType::InterfaceIgnoredArgsType::value_type::second_type
+              args_set;
+          for (const auto& arg : py_args_list) {
+            args_set.insert(arg.cast<py::str>());
+          }
+
+          ignored_arg_names[method_name] = args_set;
+        }
+
         get_python_cu()->define_interface(
             c10::QualifiedName(qualifiedName),
             classDef,
             pythonResolver(std::move(rcb)),
-            is_module,
-            match_args);
+            std::move(ignored_arg_names),
+            is_module);
       });
 
   py::class_<torch::jit::ErrorReport::CallStack>(

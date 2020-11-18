@@ -1423,6 +1423,37 @@ struct PythonPrintImpl {
       }
       {
         auto guard = WithIndented();
+        InterfaceType::InterfaceIgnoredArgsType ignored_arg_names =
+            interfaceType->ignored_arg_names();
+
+        // Print out ignored arguments attribute if needed.
+        if (!ignored_arg_names.empty()) {
+          indent();
+          body_ << "__ignored_argument_names__ = {";
+
+          bool first_method = true;
+          for (const auto& method : ignored_arg_names) {
+            if (!first_method) {
+              body_ << ", ";
+            } else {
+              first_method = false;
+            }
+            body_ << "\"" << method.first << "\": [";
+
+            bool first_arg = true;
+            for (const auto& arg : method.second) {
+              if (!first_arg) {
+                body_ << ", ";
+              } else {
+                first_arg = false;
+              }
+              body_ << "\"" << arg << "\"";
+            }
+            body_ << "]";
+          }
+          body_ << "}\n";
+        }
+
         for (const FunctionSchema& method : interfaceType->methods()) {
           indent();
           body_ << "def " << method.name() << "(self";

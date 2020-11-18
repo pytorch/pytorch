@@ -1028,9 +1028,9 @@ bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const 
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
-InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module, bool match_args) {
+InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, InterfaceIgnoredArgsType ignored_arg_names, bool is_module) {
   return InterfaceTypePtr(
-      new InterfaceType(std::move(qualifiedName), is_module, match_args));
+      new InterfaceType(std::move(qualifiedName), std::move(ignored_arg_names), is_module));
 }
 
 void ClassType::addMethod(torch::jit::Function* method) {
@@ -1125,8 +1125,17 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
         }
         return false;
       }
+
+      // Extract the set of arguments that should be ignored when checking if self_method
+      // subtypes schema.
+      auto it = iface->ignored_arg_names().find(schema.name());
+      InterfaceType::InterfaceIgnoredArgsType::value_type::second_type ignored_arg_names;
+      if (it != iface->ignored_arg_names().end()) {
+        ignored_arg_names = it->second;
+      }
+
       if (!self_method->getSchema().isSubtypeOf(
-              schema, /*is_method=*/true, iface->match_args(), why_not)) {
+              schema, /*is_method=*/true, ignored_arg_names, why_not)) {
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
@@ -1167,7 +1176,16 @@ bool InterfaceType::isSubTypeImpl(
         }
         return false;
       }
-      if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
+
+      // Extract the set of arguments that should be ignored when checking if self_method
+      // subtypes schema.
+      auto it = rhs.ignored_arg_names().find(schema.name());
+      InterfaceType::InterfaceIgnoredArgsType::value_type::second_type ignored_arg_names;
+      if (it != rhs.ignored_arg_names().end()) {
+        ignored_arg_names = it->second;
+      }
+
+      if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, ignored_arg_names, why_not)) {
         if (why_not) {
           *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"
@@ -1201,11 +1219,11 @@ const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
 void InterfaceType::addMethod(FunctionSchema schema) {
   methods_->emplace_back(std::move(schema));
 }
-InterfaceType::InterfaceType(QualifiedName name, bool is_module, bool match_args)
+InterfaceType::InterfaceType(QualifiedName name, InterfaceIgnoredArgsType ignored_arg_names, bool is_module)
     : NamedType(InterfaceType::Kind, std::move(name)),
       methods_(std::make_shared<std::vector<FunctionSchema>>()),
-      is_module_(is_module),
-      match_args_(match_args) {}
+      ignored_arg_names_(std::move(ignored_arg_names)),
+      is_module_(is_module) {}
 
 InterfaceType::~InterfaceType() = default;
 
