@@ -16,13 +16,15 @@ enum RPCErrorType {
                              FaultyProcessGroupAgent for testing */
 };
 
+// The enum values are bitwise ORed with MessageType
+// They are bit flags starting from 0x100 and should have
+// value such as 0x100, 0x200, 0x400, 0x800, 0xF00, etc.
 enum MessageTypeFlags {
   REQUEST_TYPE = 0x100,
   RESPONSE_TYPE = 0x200,
 };
 
 // Message types must have values between 0 to 255
-// The values are bitwise ORed with MessageTypeFlags
 enum MessageType {
   // messages for dist.rpc on builtin operators
   SCRIPT_CALL = 0 | MessageTypeFlags::REQUEST_TYPE,
@@ -68,7 +70,7 @@ enum MessageType {
   RREF_BACKWARD_RESP = 24 | MessageTypeFlags::RESPONSE_TYPE,
 
   // Other internal message types
-  EXCEPTION = 55,
+  EXCEPTION = 55 | MessageTypeFlags::RESPONSE_TYPE,
   UNKNOWN = 60
 };
 
