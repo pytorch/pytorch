@@ -119,6 +119,7 @@ TESTS = [
     'distributed/_pipeline/sync/test_stream',
     'distributed/_pipeline/sync/test_transparency',
     'distributed/_pipeline/sync/test_worker',
+    'flake8_plugins/test_assert_expected_actual',
 ]
 
 # Tests need to be run with pytest.
@@ -145,7 +146,7 @@ USE_PYTEST_LIST = [
     'distributed/_pipeline/sync/test_stream',
     'distributed/_pipeline/sync/test_transparency',
     'distributed/_pipeline/sync/test_worker',
-]
+] + [test for test in TESTS if test.startswith('flake8_plugins/')]
 
 WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
