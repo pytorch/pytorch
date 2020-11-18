@@ -11,6 +11,7 @@ from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
 
 T_co = TypeVar('T_co', covariant=True)
 
+
 class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 
@@ -251,7 +252,8 @@ class BatchSampler(Sampler[List[int]]):
 class PartialBalancedBatchSampler(Sampler[List[int]]):
     r"""Samples elements randomly balanced per class for each batch until to achieve the batch-size.
         When it achieve the batch size, the lenght of others classes will be 0.
-        If it is not possibile to take n balanced_classes from a class because the class has less elements, it takes all last elements.
+        If it is not possibile to take n balanced_classes from a class because the class has less elements, it takes
+        all last elements.
         If it is not possibile to take n_balanced_classes because the batch-size is full, the remaining
         elements will be take the next batch.
 
@@ -265,8 +267,8 @@ class PartialBalancedBatchSampler(Sampler[List[int]]):
         self.dataset = dict()
         self.d = dataset
         self.balanced_classes = balanced_classes
-        self.num_cl_list = [i for i in range(num_classes)]
-        self.train_idx = [i for i in range(len(dataset))]
+        self.num_cl_list = list(range(num_classes))
+        self.train_idx = list(range(len(dataset)))
 
     def __iter__(self):
         for idx in self.train_idx:
@@ -295,7 +297,7 @@ class PartialBalancedBatchSampler(Sampler[List[int]]):
                     for j in r_values:
                         self.dataset[i].remove(j)
 
-        flatten=list(itertools.chain(*rand_tensor))
+        flatten = list(itertools.chain(*rand_tensor))
         return iter(flatten)
 
     def _get_label(self, dataset, idx):

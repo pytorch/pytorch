@@ -1430,10 +1430,14 @@ except RuntimeError as e:
 
         weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]
         for fn in (
-                lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
-                lambda: RandomSampler(self.dataset, replacement=False, generator=torch.Generator().manual_seed(42)),
-                lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
-                lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False, generator=torch.Generator().manual_seed(42)),
+                lambda: RandomSampler(self.dataset, num_samples=5, replacement=True,
+                                      generator=torch.Generator().manual_seed(42)),
+                lambda: RandomSampler(self.dataset, replacement=False,
+                                      generator=torch.Generator().manual_seed(42)),
+                lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True,
+                                              generator=torch.Generator().manual_seed(42)),
+                lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False,
+                                              generator=torch.Generator().manual_seed(42)),
                 lambda: SubsetRandomSampler(range(10), generator=torch.Generator().manual_seed(42)),
         ):
             self.assertEqual(list(fn()), list(fn()))
