@@ -91,7 +91,8 @@ Alias of :func:`torch.det`.
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False) -> Tensor
 
-Returns the numerical rank of a 2-D tensor. The method to compute the
+Computes the numerical rank of a matrix :attr:`input`,
+or of each matrix in a batched :attr:`input`. The method to compute the
 matrix rank is done using SVD by default. If :attr:`hermitian` is ``True``,
 then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
 and the computation of the rank is done by obtaining the eigenvalues.
@@ -102,15 +103,15 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`hermitian` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
 
 Args:
-    input (Tensor): the input 2-D tensor
+    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+                    where `*` is one or more batch dimensions.
     tol (float, optional): the tolerance value. Default: ``None``
-    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian.
-                               Default: ``False``
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
 
-Example::
+Examples::
 
     >>> a = torch.eye(10)
     >>> torch.linalg.matrix_rank(a)
@@ -119,6 +120,15 @@ Example::
     >>> b[0, 0] = 0
     >>> torch.linalg.matrix_rank(b)
     tensor(9)
+
+    >>> a = torch.randn(4, 3, 2)
+    >>> torch.linalg.matrix_rank(a)
+    tensor([2, 2, 2, 2])
+
+    >>> a = torch.randn(2, 4, 2, 3)
+    >>> torch.linalg.matrix_rank(a)
+    tensor([[2, 2, 2, 2],
+            [2, 2, 2, 2]])
 """)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
