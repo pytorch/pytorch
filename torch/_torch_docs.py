@@ -3429,7 +3429,7 @@ If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
 .. math::
     \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
 
-See :func:`torch.lgamma` for a related function.
+See :func:`torch.igammac` and :func:`torch.lgamma` for related functions.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
@@ -3448,8 +3448,58 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
     tensor([0.3528, 0.5665, 0.7350])
+    tensor([0.3528, 0.5665, 0.7350])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
+
+""".format(**common_args))
+
+add_docstr(torch.igammac,
+           r"""
+igammac(input, other, *, out=None) -> Tensor
+
+Computes the regularized upper incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_{\text{other}_i}^{\infty} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.igamma` and :func:`torch.lgamma` for related functions.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
+    tensor([0.6472, 0.4335, 0.2650])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
 
 """.format(**common_args))
 
