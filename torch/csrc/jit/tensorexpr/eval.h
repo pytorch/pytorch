@@ -291,13 +291,14 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     return Value(result_v);
   }
 
+  template <typename T>
   Value bitwise_binary_op(
       const Value& lhs,
       const Value& rhs,
       IRNodeType op_type) {
-    std::vector<int> lhs_v = lhs.as_vec<int>();
-    std::vector<int> rhs_v = rhs.as_vec<int>();
-    std::vector<int> result_v(lhs_v.size());
+    std::vector<T> lhs_v = lhs.as_vec<T>();
+    std::vector<T> rhs_v = rhs.as_vec<T>();
+    std::vector<T> result_v(lhs_v.size());
     for (size_t i = 0; i < lhs_v.size(); i++) {
       switch (op_type) {
         case IRNodeType::kAnd:
@@ -372,11 +373,21 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     if (lhs_v.dtype() != rhs_v.dtype()) {
       throw malformed_input("bad dtype in binary op", v);
     }
+
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
         expr_type == IRNodeType::kXor || expr_type == IRNodeType::kLshift ||
         expr_type == IRNodeType::kRshift) {
-      value_ = bitwise_binary_op(lhs_v, rhs_v, expr_type);
+      switch (lhs_v.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                                  \
+  case ScalarType::Name:                                       \
+    value_ = bitwise_binary_op<Type>(lhs_v, rhs_v, expr_type); \
+    break;
+        AT_FORALL_INT_TYPES(TYPE_CASE);
+#undef TYPE_CASE
+        default:
+          throw unsupported_dtype();
+      }
       return;
     }
 
