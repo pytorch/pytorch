@@ -304,6 +304,11 @@ def einsum(equation, *operands):
 
     .. note::
 
+        ``torch.einsum`` handles ellipsis ('...') differently from NumPy in that it allows dimensions
+        covered by the ellipsis to be summed over, that is, ellipsis are not required to be part of the output.
+
+    .. note::
+
         This function does not optimize the given expression, so a different formula for the same computation may
         run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
         can optimize the formula for you.
