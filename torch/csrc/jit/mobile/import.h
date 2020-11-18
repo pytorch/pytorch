@@ -12,10 +12,7 @@ using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wglobal-constructors"
 static ExtraFilesMap default_extra_files_mobile;
-#pragma GCC diagnostic pop
 
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
