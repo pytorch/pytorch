@@ -104,7 +104,7 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
   std::string backend = Backend::get(backend_str);
   if (backend == "mpi") {
 #ifdef USE_C10D_MPI
-    std::vector<int64_t> group_ranks_copy(group_ranks);
+    std::vector<int> group_ranks_copy(group_ranks.begin(), group_ranks.end());
     pg = ProcessGroupMPI::createProcessGroupMPI(group_ranks_copy);
 #else
     throw std::runtime_error(
