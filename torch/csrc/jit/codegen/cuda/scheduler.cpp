@@ -162,12 +162,6 @@ ReductionParams multipleReductionHeuristic(
         reduction_dim_size > 0 && (outer_dim_size > 0 || inner_dim_size > 0));
   }
 
-  const int64_t kMaxThreadsPerCTA =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
-
-  const int64_t kBlockThresholdNotFastestDim = 64;
-  const int64_t kBlockThresholdFastestDim = 512;
-
   int64_t gdimx = LaunchParams::UNINITIALIZED_VAL;
   int64_t gdimy = LaunchParams::UNINITIALIZED_VAL;
   int64_t bdimx = LaunchParams::UNINITIALIZED_VAL;
@@ -181,6 +175,10 @@ ReductionParams multipleReductionHeuristic(
 
   // Is fastest dimension a reduction dimension?
   if (rparams.fastest_dim) {
+    const int64_t kMaxThreadsPerCTA =
+        at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+
+    const int64_t kBlockThresholdFastestDim = 1024;
     if (reduction_dim_size <= kMaxThreadsPerCTA) {
       rparams.persistent_kernel = true;
 
@@ -231,10 +229,13 @@ ReductionParams multipleReductionHeuristic(
 
     // Warning: Reduce Maximum Threads Per CTA for FP16
     // Register usage exceeds maximum registers per CTA
-    const int64_t kFP16MaxThreadsPerCTA = 896;
+    // Ampere - 896
+    // Volta - 768
+    const int64_t kMaxThreadsPerCTA = 512;
+    const int64_t kBlockThresholdNotFastestDim = 64;
 
     // Setup Block Size
-    bdimy = std::min(inner_dim_size, kFP16MaxThreadsPerCTA);
+    bdimy = std::min(inner_dim_size, kMaxThreadsPerCTA);
     bdimx = 1;
     if (bdimy <= kBlockThresholdNotFastestDim &&
         reduction_dim_size >= kBlockThresholdNotFastestDim) {
