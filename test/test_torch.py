@@ -6062,8 +6062,8 @@ class TestTorchDeviceType(TestCase):
             tensor = torch.randn(shape, device=device)
             for t in (tensor, tensor.T):
                 for dims in reps:
-                    expected = np.tile(t.numpy(), dims)
-                    result = torch.tile(t, dims).numpy()
+                    expected = np.tile(t.cpu().numpy(), dims)
+                    result = torch.tile(t, dims).cpu().numpy()
                     self.assertEqual(expected, result)
 
     @onlyOnCPUAndCUDA
