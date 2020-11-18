@@ -232,8 +232,7 @@ Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
 
 Args:
     input (Tensor): A tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
-    ind (int): A positive integer that describes the inverse tensor equation. See :func:`torch.tensordot` for details.
-               Default: 2.
+    ind (int): A positive integer that describes the inverse tensor equation. See :func:`torch.tensordot` for details. Default: 2.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
