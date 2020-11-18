@@ -1219,6 +1219,7 @@ Arguments:
       py::call_guard<py::gil_scoped_release>());
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
+  module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   Py_RETURN_TRUE;
 }
@@ -1260,10 +1261,9 @@ static const auto ProcessGroupWorkTorchBind =
         .def("result", &::c10d::ProcessGroup::Work::result);
 
 
-
 // TODO: Support argument names in Python API.
 static auto ProcessGroupTorchBind =
-    torch::class_<::c10d::ProcessGroup>("c10d", "ProcessGroup")
+    torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup")
         .def(
             "rank",
             [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
