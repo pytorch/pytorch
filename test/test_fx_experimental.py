@@ -138,6 +138,33 @@ class TestFXExperimental(JitTestCase):
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         assert dag.nodes[0].logical_device_ids == [0]
 
+    def test_partition_node_manipulation(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, a, b):
+                add_1 = a + b
+                add_2 = add_1 + torch.rand(4)
+                add_3 = add_2 + torch.rand(4)
+                return add_3
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a, b = torch.rand(4), torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
+        partitioner = Partitioner()
+        devices = [Device('dev_0', 1000, 0)]
+        partitioner_config = PartitionerConfig(devices)
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        partition = partitioner.partitions[0]
+        assert partition.used_mem_bytes == 112
+        # Select add_3 node to remove
+        selected_node = None
+        for node in partition.nodes:
+            if node.name == 'add_3':
+                selected_node = node
+        partition.remove_node(selected_node)
+        assert(partition.used_mem_bytes == 80)
+
+
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
             def __init__(self):

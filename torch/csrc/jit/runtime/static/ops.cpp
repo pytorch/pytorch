@@ -11,13 +11,17 @@ inline at::Tensor create_empty_from(const at::Tensor& t) {
 } // namespace
 
 bool canRunOutOfPlace(Node* n) {
-  static std::unordered_set<std::string> out_of_place_nodes{"aten::add",
-                                                            "aten::mul",
-                                                            "aten::addmm",
-                                                            "aten::bmm",
-                                                            "aten::sigmoid",
-                                                            "aten::leaky_relu",
-                                                            "aten::cat"};
+  const static std::unordered_set<std::string> out_of_place_nodes{
+      "aten::add",
+      "aten::mul",
+      "aten::addmm",
+      "aten::bmm",
+      "aten::sigmoid",
+      "aten::leaky_relu",
+      "aten::cat",
+      "aten::nan_to_num",
+      "aten::stack",
+  };
   auto str = std::string(n->kind().toQualString());
   return out_of_place_nodes.count(str) > 0;
 }
@@ -25,8 +29,8 @@ bool canRunOutOfPlace(Node* n) {
 // TODO: expand to include all view producing ops, mostly in
 // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/TensorShape.cpp
 bool canRunNatively(Node* n) {
-  static std::unordered_set<std::string> native_nodes{"aten::transpose",
-                                                      "aten::flatten"};
+  const static std::unordered_set<std::string> native_nodes{"aten::transpose",
+                                                            "aten::flatten"};
   auto str = std::string(n->kind().toQualString());
   return native_nodes.count(str) > 0;
 }
@@ -42,6 +46,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::add_out(out_t, in0_t, in1_t, in2_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::mul")) {
@@ -52,6 +57,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::mul_out(out_t, in0_t, in1_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::addmm")) {
@@ -65,6 +71,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::addmm_cpu_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::clamp")) {
@@ -76,6 +83,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::clamp_out(out_t, in0_t, in1_s, in2_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::bmm")) {
@@ -86,7 +94,24 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::bmm_out_cpu(out_t, in0_t, in1_t);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::nan_to_num")) {
+    return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto input_size = p_node->input_regs().size();
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      double in1_d = input_size > 1 ? p_node->Input(1, reg).toDouble() : 0;
+      double in2_d = input_size > 2 ? p_node->Input(2, reg).toDouble()
+                                    : std::numeric_limits<double>::infinity();
+      double in3_d = input_size > 3 ? p_node->Input(3, reg).toDouble()
+                                    : -std::numeric_limits<double>::infinity();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::nan_to_num_out(out_t, in0_t, in1_d, in2_d, in3_d);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::cat")) {
     return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
@@ -96,7 +121,45 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_tl[0]);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::tanh")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::tanh_out(out_t, in0_t);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::stack")) {
+    return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto inputs = p_node->Input(0, reg).toTensorVector();
+      auto dim = p_node->Input(1, reg).toInt();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(inputs[0]);
+      }
+#ifndef NDEBUG
+      at::IntArrayRef entry_shape = inputs[0].sizes();
+      for (auto i = 1; i < inputs.size(); i++) {
+        TORCH_CHECK(
+            inputs[i].sizes() == entry_shape,
+            "stack expects each tensor to be equal size, but got ",
+            entry_shape,
+            " at entry 0 and ",
+            inputs[i].sizes(),
+            " at entry ",
+            i);
+      }
+#endif
+      for (auto i = 0; i < inputs.size(); i++) {
+        inputs[i] = inputs[i].unsqueeze(dim);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::_cat_out_cpu(out_t, inputs, dim);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::sigmoid")) {
     return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
@@ -105,6 +168,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::sigmoid_out(out_t, in0_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::leaky_relu")) {
@@ -130,6 +194,37 @@ getOutOfPlaceOperation(Node* n) {
         at::native::leaky_relu_out(out_t, in0_t, in1_s);
       };
     }
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::relu")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::threshold_out(out_t, in0_t, 0, 0);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::logit")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto in1_d = p_node->Input(1, reg).toDouble();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::logit_out(out_t, in0_t, in1_d);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::clone")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::copy_(out_t, in0_t, false);
+    };
   }
   return [](const ProcessedNode*, std::vector<IValue>&) { TORCH_CHECK(0); };
 }
