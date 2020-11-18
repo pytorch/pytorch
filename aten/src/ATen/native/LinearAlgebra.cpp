@@ -140,6 +140,7 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
   }
 }
 
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match the expected dtype ", self.scalar_type());
