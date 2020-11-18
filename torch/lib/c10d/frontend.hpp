@@ -43,8 +43,10 @@ class Backend {
   std::unordered_set<std::string> registered_backends_;
 };
 
-class DistributedC10d {
+class DistributedC10d : public torch::CustomClassHolder {
  public:
+  DistributedC10d(){};
+
   void initProcessGroup(
       const std::string& backend,
       const std::string& init_method,
@@ -199,8 +201,17 @@ class DistributedC10d {
 
   c10::intrusive_ptr<ProcessGroup> worldProcessGroup();
 
+  c10::intrusive_ptr<ProcessGroup> newProcessGroupHelper(
+    const int64_t world_size,
+    const int64_t rank,
+    const std::vector<int64_t>& group_ranks,
+    const std::string& backend_str,
+    const c10::intrusive_ptr<Store>& store,
+    c10::optional<std::string> group_name,
+    int64_t timeout_milisesonds);
+
+
  private:
-  DistributedC10d(){};
 
   bool rankNotInGroup(const c10::intrusive_ptr<ProcessGroup>& group) const;
   int64_t getGroupRank(
@@ -212,15 +223,6 @@ class DistributedC10d {
   void checkDefaultPg() const;
   int64_t getGroupSize(const c10::intrusive_ptr<ProcessGroup>& group) const;
   std::string getBackend(const c10::intrusive_ptr<ProcessGroup>& group);
-
-  c10::intrusive_ptr<ProcessGroup> newProcessGroupHelper(
-    const int64_t world_size,
-    const int64_t rank,
-    const std::vector<int64_t>& group_ranks,
-    const std::string& backend_str,
-    const c10::intrusive_ptr<Store>& store,
-    c10::optional<std::string> group_name,
-    int64_t timeout_milisesonds);
 
   std::string backend_;
   // TODO: Ask Alex what kind of equality we need. It determine whether we

@@ -1549,6 +1549,16 @@ static const auto ProcessGroupNCCLTorchBind =
             });
 #endif
 
+static auto DistributedC10dFrontendTorchBind =
+    torch::class_<::c10d::DistributedC10d>("c10d", "c10d_frontend")
+        .def(torch::init([]() {
+          static c10::intrusive_ptr<::c10d::DistributedC10d>
+              c10d_frontend_singleton =
+                  c10::make_intrusive<::c10d::DistributedC10d>();
+          return c10d_frontend_singleton;
+        }))
+        .def("new_process_group_helper", &::c10d::DistributedC10d::newProcessGroupHelper);
+
 } // namespace
 
 // c10d methods on torch._C
