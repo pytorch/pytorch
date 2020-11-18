@@ -1263,7 +1263,7 @@ static const auto ProcessGroupWorkTorchBind =
 
 
 // TODO: Support argument names in Python API.
-static auto ProcessGroupTorchBind =
+static const auto ProcessGroupTorchBind =
     torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup")
         .def(
             "rank",
