@@ -459,8 +459,16 @@ class TestFX(JitTestCase):
         m = M()
         m_g = symbolic_trace(m)
         m_g.graph.lint(m_g)
-        for node in m_g.graph.nodes:
-            self.assertTrue(node.name != "getattr")
+
+        def obj_from_dict(d):
+            class Dummy:
+                pass
+            obj = Dummy()
+            for k, v in d.items():
+                setattr(obj, k, v)
+            return obj
+        a = obj_from_dict({'foo' : obj_from_dict({'bar' : obj_from_dict ({'baz' : 42})})})
+        self.assertEqual(m_g(a), m(a))
 
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
@@ -661,7 +669,7 @@ class TestFX(JitTestCase):
         traced.graph.lint(traced)
         printed = str(traced)
         assert 'GraphModuleImpl()' in printed
-        assert 'torch.relu' in printed
+        assert 'relu' in printed
 
     def test_pretty_print_graph(self):
         class KwargPrintTest(torch.nn.Module):

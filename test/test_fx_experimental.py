@@ -18,6 +18,7 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig
 )
 from typing import Union, Callable
+import operator
 
 try:
     from torchvision.models import resnet18
@@ -99,7 +100,7 @@ class TestFXExperimental(JitTestCase):
         assert agm1.serialized_graph["nodes"][0]["target"] == "a"
         assert agm1.serialized_graph["nodes"][0]["op_code"] == "placeholder"
         assert agm1.serialized_graph["nodes"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_2"
+        assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_1"
         assert agm1.serialized_graph["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
@@ -159,8 +160,9 @@ class TestFXExperimental(JitTestCase):
         # Select add_3 node to remove
         selected_node = None
         for node in partition.nodes:
-            if node.name == 'add_3':
+            if node.target == operator.add:
                 selected_node = node
+                break
         partition.remove_node(selected_node)
         assert(partition.used_mem_bytes == 80)
 
@@ -609,7 +611,7 @@ terrible spacing
         traced = symbolic_trace(mm)
 
         def split_cb(node : torch.fx.Node):
-            if node.name == 'a' or node.name == 'b' or node.name == 'add_1':
+            if node.name == 'a' or node.name == 'b' or node.name == 'add':
                 return 0
             else:
                 return 1
