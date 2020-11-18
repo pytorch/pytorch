@@ -227,14 +227,14 @@ class TestQuantizedOps(TestCase):
                     torch.relu,
                     torch.relu_,
                     torch.nn.functional.relu,
-                    torch.nn.quantized.functional.relu,
+                    torch.nn.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu
             },
             {
                 'quantized_fn': [
                     torch.nn.functional.relu,
-                    torch.nn.quantized.functional.relu,
+                    torch.nn.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu,
                 'extra_kwargs': {
@@ -4108,7 +4108,35 @@ class TestPadding(TestCase):
         y_ref = padding_op(x)
         qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
         qy_hat = padding_op(qx)
+        self.assertEqual(qy_ref, qy_hat)
 
+        # Out variant
+        qy_hat = torch._C._nn.reflection_pad1d(qx, padding, out=qy_hat)
+        self.assertEqual(qy_ref, qy_hat)
+
+    @given(batch_size=st.integers(1, 64),
+           channels=st.integers(1, 64),
+           height=st.integers(16, 128),
+           width=st.integers(16, 128),
+           qtype=st.sampled_from(hu._ALL_QINT_TYPES))
+    def test_reflection_pad2d(self, batch_size, channels, height, width, qtype):
+        padding = (width // 4, width // 4, height // 4, height // 4)
+
+        x = torch.arange(batch_size * channels * height * width).to(torch.float)
+        x = x.resize(batch_size, channels, height, width)
+        # Per-Tensor test
+        scale, zp = _calculate_dynamic_qparams(x, qtype)
+        qx = torch.quantize_per_tensor(x, scale, zp, qtype)
+
+        padding_op = torch.nn.ReflectionPad2d(padding)
+
+        y_ref = padding_op(x)
+        qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
+        qy_hat = padding_op(qx)
+        self.assertEqual(qy_ref, qy_hat)
+
+        # Out variant
+        qy_hat = torch._C._nn.reflection_pad2d(qx, padding, out=qy_hat)
         self.assertEqual(qy_ref, qy_hat)
 
     @given(batch_size=st.integers(1, 64),
