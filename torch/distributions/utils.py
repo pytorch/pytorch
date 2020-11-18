@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 import torch.nn.functional as F
 from typing import Dict, Any
-
+from torch.overrides import has_torch_function
 
 def broadcast_all(*values):
     r"""
@@ -15,21 +15,23 @@ def broadcast_all(*values):
         values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
-        values (list of `numbers.Number` or `torch.*Tensor`)
+        values (list of `numbers.Number`, `torch.*Tensor` or objects implementing __torch_function__)
 
     Raises:
-        ValueError: if any of the values is not a `numbers.Number` or
-            `torch.*Tensor` instance
+        ValueError: if any of the values is not a `numbers.Number` instance,
+            a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(isinstance(v, torch.Tensor) or isinstance(v, Number) for v in values):
-        raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
-    if not all([isinstance(v, torch.Tensor) for v in values]):
+    if not all(isinstance(v, torch.Tensor) or has_torch_function((v,)) or isinstance(v, Number)
+               for v in values):
+        raise ValueError('Input arguments must all be instances of numbers.Number, '
+                         'torch.Tensor or objects implementing __torch_function__.')
+    if not all([isinstance(v, torch.Tensor) or has_torch_function((v,)) for v in values]):
         options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
                 break
-        new_values = [v if isinstance(v, torch.Tensor) else torch.tensor(v, **options)
+        new_values = [v if isinstance(v, torch.Tensor) or has_torch_function((v,)) else torch.tensor(v, **options)
                       for v in values]
         return torch.broadcast_tensors(*new_values)
     return torch.broadcast_tensors(*values)
