@@ -35,17 +35,23 @@ class Optimizer(object):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
-        def _step_with_profile(func, class_name):
-            """Wrap self.step under profiler. In order to avoid of instrumenting each sub-class."""
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                name = str.format("{}#{}.{}", "Optimizer.step", class_name, "step")
-                with torch.autograd.profiler.record_function(name):
-                    return func(*args, **kwargs)
-            return wrapper
-        # Using this way could elegantly wrap self.step as a method not function,
-        # which don't influence re-wrapped by _LRScheduler and deepcopy.
-        self.__class__.step = _step_with_profile(self.__class__.step, self.__class__.__name__)
+        self._zero_grad_profile_name = "{}#{}.{}".format("Optimizer.zero_grad", self.__class__.__name__, "zero_grad")
+
+        hooked = getattr(self.__class__.step, "hooked", None)
+        if not hooked:  # Each sub class is hooked only once.
+            step_profile_name = "{}#{}.{}".format("Optimizer.step", self.__class__.__name__, "step")
+
+            def _step_with_profile(func):
+                @functools.wraps(func)
+                def wrapper(*args, **kwargs):
+                    with torch.autograd.profiler.record_function(step_profile_name):
+                        ret = func(*args, **kwargs)
+                    return ret
+                return wrapper
+
+            # Replace method's function, which don't influence re-wrapped by _LRScheduler.
+            self.__class__.step = _step_with_profile(self.__class__.step)
+            self.__class__.step.hooked = True
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -192,8 +198,7 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        name = str.format("{}#{}.{}", "Optimizer.zero_grad", self.__class__.__name__, "zero_grad")
-        with torch.autograd.profiler.record_function(name):
+        with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
                 for p in group['params']:
                     if p.grad is not None:
