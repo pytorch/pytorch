@@ -1351,7 +1351,7 @@ class TestTEFuser(JitTestCase):
     def test_chunk_mul_one(self):
         def eager(x):
             z, y, w = torch.chunk(x, 3, -1)
-            return z*3, y, w
+            return z * 3, y, w
         x = torch.rand(64, 1, 3072, dtype=torch.float, device='cuda')
         script = self.checkScript(eager, (x,))
 
