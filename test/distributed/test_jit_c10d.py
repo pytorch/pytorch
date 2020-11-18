@@ -51,7 +51,8 @@ class ProcessGroupNCCLJitTest(TestCase):
         port = common.find_free_port()
         tcp_store = torch.classes.dist_c10d.TCPStore(addr, port, 1, True)
 
-        return torch.classes.c10d.frontend().newProcessGroupHelper(self.world_size, self.rank, [], "NCCL", tcp_store, "test_process_group", 0)
+        return torch.classes.c10d.frontend().newProcessGroupHelper(
+            self.world_size, self.rank, [], "NCCL", tcp_store, "test_process_group", 0)
 
     @requires_nccl()
     @skip_if_rocm_single_process
