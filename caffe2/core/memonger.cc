@@ -155,13 +155,20 @@ class ComputeBlobRecyclingForDag {
       const string& namescope,
       const std::unordered_set<string>& dont_share_blob_names,
       const std::unordered_map<string, vector<int>>& blob_shapes) {
+
+    // Memonger modifies the graph. Do an early schema check here to make sure
+    // the operators are valid
+    run_schema_check(net);
     // Construct the set of input blobs.
     std::unordered_set<string> heads_blobs_set(heads.begin(), heads.end());
 
     // Construct the set of output blobs we want to optimize.
+    // Blobs not eligible for sharing are filtered out
     for (const int op_index : op_indices) {
       for (const auto& output : net.op(op_index).output()) {
-        optim_op_outputs_.insert(output);
+        if (has_key(shareable_blob_names, output) && !has_key(dont_share_blob_names, output)) {
+          optim_op_outputs_.insert(output);
+        }
       }
     }
 

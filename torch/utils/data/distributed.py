@@ -24,7 +24,7 @@ class DistributedSampler(Sampler[T_co]):
     Arguments:
         dataset: Dataset used for sampling.
         num_replicas (int, optional): Number of processes participating in
-            distributed training. By default, :attr:`rank` is retrieved from the
+            distributed training. By default, :attr:`world_size` is retrieved from the
             current distributed group.
         rank (int, optional): Rank of the current process within :attr:`num_replicas`.
             By default, :attr:`rank` is retrieved from the current distributed
