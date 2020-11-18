@@ -112,7 +112,7 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
   TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
-  // Let's output 0 for this case, since that kind of matrices have zero of non-zero rows, hence rank is 0.
+  // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
   if (self.numel() == 0) {
     auto result_shape = self.sizes().vec();
     result_shape.pop_back();
