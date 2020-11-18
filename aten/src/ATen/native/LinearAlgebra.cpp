@@ -107,21 +107,6 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
 }
 
-static inline Tensor _matrix_rank_helper(const Tensor& self, bool hermitian) {
-  Tensor S;
-  if (!hermitian) {
-    Tensor U, V;
-    // TODO: replace self.svd with linalg_svd
-    std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
-  } else {
-    Tensor eigvecs;
-    // TODO: replace self.symeig with linalg_eigh
-    std::tie(S, eigvecs) = self.symeig(/*eigenvectors=*/false);
-    S = S.abs();
-  }
-  return S;
-}
-
 Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
   // Matrices or batch of matrices is allowed
   TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
@@ -135,7 +120,17 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
     return at::zeros(result_shape, self.options().dtype(ScalarType::Long));
   }
 
-  Tensor S = _matrix_rank_helper(self, hermitian);
+  Tensor S;
+  if (!hermitian) {
+    Tensor U, V;
+    // TODO: replace self.svd with linalg_svd
+    std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
+  } else {
+    Tensor eigvecs;
+    // TODO: replace self.symeig with linalg_eigh
+    std::tie(S, eigvecs) = self.symeig(/*eigenvectors=*/false);
+    S = S.abs();
+  }
 
   if (tol.has_value()) {
     double tol_value = tol.value();
