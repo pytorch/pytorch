@@ -1224,6 +1224,83 @@ Arguments:
 
 #undef PROCESS_GROUP_DEPRECATION_WARNING
 
+// NOTE: Below are TorchBind bindings for c10d, these bindings will
+// live together with those pybind11 bindings above until we resolve
+// all the TorchBind issues and merge these two together. we shouldn't
+// document this until we finish the migration.
+
+static const auto StoreTorchBind =
+    torch::class_<::c10d::Store>("dist_c10d", "Store");
+
+#ifndef _WIN32
+static const auto TCPStoreTorchBind =
+    torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
+        .def(torch::init([](const std::string& host_name,
+                            int64_t port,
+                            int64_t world_size,
+                            bool is_master) {
+          return c10::make_intrusive<::c10d::TCPStore>(
+              host_name, port, world_size, is_master);
+        }));
+#endif
+
+// Torchbind the ProcessGroup to make it available in TorchScript
+static const auto ProcessGroupWorkTorchBind =
+    torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
+        .def(torch::init<>())
+        .def(
+            "wait",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroup::Work>& work)
+                -> bool {
+              // TODO: make std::chrono::millisecond works with TorchBind to
+              // provide the full API in python
+              return work->wait();
+            })
+        .def("result", &::c10d::ProcessGroup::Work::result);
+
+static const auto ProcessGroupTorchBind =
+    torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+
+#ifdef USE_C10D_NCCL
+
+// XXX: Ideally the Options of ProcessGroupNCCL should be
+// bound using `def_readwrite` like in pybind11, but we
+// didn't do that because: 1. no milisecond support yet
+// 2. no def_readwrite or property support yet.
+// TODO: make this binding the same as pybind11
+static const auto ProcessGroupNCCLOptionsTorchBind =
+    torch::class_<::c10d::ProcessGroupNCCL::Options>(
+        "dist_c10d",
+        "ProcessGroupNCCLOptions")
+        .def(torch::init([](int64_t timeout, bool isHighPriorityStream) {
+          auto opTimeout = std::chrono::milliseconds(timeout);
+          return ::c10d::ProcessGroupNCCL::Options::create(
+              opTimeout, isHighPriorityStream);
+        }));
+
+static const auto ProcessGroupNCCLTorchBind =
+    torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
+        .def(torch::init<
+             const c10::intrusive_ptr<::c10d::Store>&,
+             int64_t,
+             int64_t,
+             const c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>&>())
+        .def(
+            "alltoall_base",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+               at::Tensor output,
+               at::Tensor input,
+               std::vector<int64_t> outputSplitSizes,
+               std::vector<int64_t> inputSplitSizes) {
+              return self->alltoall_base(
+                  output,
+                  input,
+                  outputSplitSizes,
+                  inputSplitSizes,
+                  ::c10d::AllToAllOptions());
+            });
+#endif
+
 } // namespace
 
 // c10d methods on torch._C

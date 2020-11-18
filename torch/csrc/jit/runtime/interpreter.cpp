@@ -546,7 +546,11 @@ struct CodeImpl {
     return instructions_source_;
   }
 
-  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0, int64_t S = 0) {
+  void insertInstruction(
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0,
+      int64_t S = 0) {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),

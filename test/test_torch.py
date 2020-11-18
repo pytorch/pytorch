@@ -6917,8 +6917,7 @@ class TestTorchDeviceType(TestCase):
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
@@ -6948,18 +6947,6 @@ class TestTorchDeviceType(TestCase):
             M = fullrank(matsize, *batchdims, dtype=dtype, device=device)
             self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
                              atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
-
-    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
-    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    def test_pinverse_complex_xfailed(self, device, dtype):
-        size = (3, 5, 5)
-        M = torch.randn(*sizes, dtype=dtype, device=device)
-        MPI = torch.pinverse(M)
-        self.assertEqual(M, M.matmul(MPI).matmul(M))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -9039,10 +9026,15 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
+    @dtypes(torch.float)
+    @onlyOnCPUAndCUDA   # Fails on XLA
+    def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
-        x = torch.tensor([2], device=device, dtype=dtype)
-        self.assertEqual(x.squeeze().kthvalue(1), x.kthvalue(1))
+        res = torch.tensor(2, device=device, dtype=dtype).kthvalue(1)
+        ref = torch.tensor([2], device=device, dtype=dtype).kthvalue(1)
+        self.assertEqual(res[0], ref[0].squeeze())
+        self.assertEqual(res[1], ref[1].squeeze())
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -9562,8 +9554,7 @@ class TestTorchDeviceType(TestCase):
     @precisionOverride({torch.float32: 1e-5, torch.complex64: 1e-5})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfCUDA(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_symeig(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
@@ -9611,25 +9602,6 @@ class TestTorchDeviceType(TestCase):
         batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
         for batch_dims, eigenvectors, upper in product(batch_dims_set, (True, False), (True, False)):
             run_test((5,) + batch_dims, eigenvectors, upper)
-
-    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
-    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
-    def test_symeig_complex_xfailed(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
-        dims = (5, 3)
-        x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
-        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-        oute = torch.empty(dims[1:] + dims[:1], dtype=real_dtype, device=device)
-        outv = torch.empty(dims[1:] + dims[:1] * 2, dtype=dtype, device=device)
-        torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
-
-        x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
-        self.assertEqual(x, x_recon, atol=1e-8, rtol=0)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -13839,10 +13811,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
 
-        # TODO: update this once torch.addmm is supported for complex
-        if dtype.is_complex and device != 'cpu':
-            return
-
         # torch.addmm
         input = torch.full((2, 3), value, dtype=dtype, device=device)
         mat2 = torch.ones((0, 3), dtype=dtype, device=device)
@@ -13872,9 +13840,6 @@ class TestTorchDeviceType(TestCase):
         mp = torch.randn((p, m), device=device).t()
         np_out = torch.full((n, p), float('nan'), device=device)
         self.assertEqual(torch.mm(nm, mp), torch.mm(nm, mp, out=np_out))
-
-        if dtype.is_complex and device.startswith('cuda'):
-            return
 
         # torch.bmm
         bnm = torch.randn((b, m, n), device=device).transpose(1, 2)
@@ -15301,28 +15266,12 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(pivots_info, pivots)
 
 
-                if (self.device_type == 'cpu') or (not dtype.is_complex):
-                    P, L, U = torch.lu_unpack(a_LU, pivots)
-                    P_ = P.cpu().numpy()
-                    L_ = L.cpu().numpy()
-                    U_ = U.cpu().numpy()
+                P, L, U = torch.lu_unpack(a_LU, pivots)
+                P_ = P.cpu().numpy()
+                L_ = L.cpu().numpy()
+                U_ = U.cpu().numpy()
 
-                    self.assertEqual(np.matmul(P_, np.matmul(L_, U_)), a)
-                else:
-                    # TODO(@nikitaved): remove this once bmm_out is avaiable on CUDA for complex types
-
-                    # squash batch dimensions for easier iteration
-                    a = a.view(-1, a.size(-2), a.size(-1))
-                    a_LU = a_LU.view(-1, a_LU.size(-2), a_LU.size(-1))
-                    pivots = pivots.view(-1, pivots.size(-1))
-
-                    P, L, U = torch.lu_unpack(a_LU, pivots)
-
-                    for i in range(a.size(0)):
-                        self.assertEqual(
-                            P.select(0, i).cpu().numpy() @ L.select(0, i).cpu().numpy() @ U.select(0, i).cpu().numpy(),
-                            a.select(0, i).cpu().numpy()
-                        )
+                self.assertEqual(np.matmul(P_, np.matmul(L_, U_)), a)
 
                 if self.device_type == 'cuda':
                     # lu without pivoting is implemented only for cuda device
@@ -15332,16 +15281,7 @@ class TestTorchDeviceType(TestCase):
                     L_nopiv_ = L_nopiv.cpu().numpy()
                     U_nopiv_ = U_nopiv.cpu().numpy()
 
-                    if (self.device_type == 'cpu') or (not dtype.is_complex):
-                        self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
-                    else:
-                        # TODO(@nikitaved): remove this once bmm_out is avaiable on CUDA for complex types
-                        for i in range(a.size(0)):
-                            self.assertEqual(
-                                P_nopiv.select(0, i).cpu().numpy() @ L_nopiv.select(0, i).cpu().numpy()
-                                @ U_nopiv.select(0, i).cpu().numpy(),
-                                a.select(0, i).cpu().numpy()
-                            )
+                    self.assertEqual(np.matmul(P_nopiv_, np.matmul(L_nopiv_, U_nopiv_)), a)
 
                     k = min(rows, columns)
                     self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
@@ -16165,70 +16105,6 @@ class TestTorchDeviceType(TestCase):
                 'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
             self._test_memory_format_transformations(
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
-
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_eig(self, device, dtype):
-        a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
-                          (-6.49, 3.80, 0.00, 0.00, 0.00),
-                          (-0.47, -6.39, 4.17, 0.00, 0.00),
-                          (-7.20, 1.50, -1.51, 5.70, 0.00),
-                          (-0.65, -6.34, 2.67, 1.80, -7.10))).t().contiguous().to(dtype=dtype, device=device)
-        e = torch.eig(a)[0]
-        ee, vv = torch.eig(a, True)
-        te = torch.tensor((), dtype=dtype, device=device)
-        tv = torch.tensor((), dtype=dtype, device=device)
-        eee, vvv = torch.eig(a, True, out=(te, tv))
-        self.assertEqual(e, ee, atol=1e-12, rtol=0)
-        self.assertEqual(ee, eee, atol=1e-12, rtol=0)
-        self.assertEqual(ee, te, atol=1e-12, rtol=0)
-        self.assertEqual(vv, vvv, atol=1e-12, rtol=0)
-        self.assertEqual(vv, tv, atol=1e-12, rtol=0)
-
-        # test reuse
-        X = torch.randn(4, 4, dtype=dtype, device=device)
-        X = torch.mm(X.t(), X)
-        e = torch.zeros(4, 2, dtype=dtype, device=device)
-        v = torch.zeros(4, 4, dtype=dtype, device=device)
-        torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
-
-        torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
-
-        # test non-contiguous
-        X = torch.randn(4, 4, dtype=dtype, device=device)
-        X = torch.mm(X.t(), X)
-        e = torch.zeros(4, 2, 2, dtype=dtype, device=device)[:, 1]
-        v = torch.zeros(4, 2, 4, dtype=dtype, device=device)[:, 1]
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
-        self.assertFalse(e.is_contiguous(), 'E is contiguous')
-        torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
-
-        # test invalid input
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should be 2 dimensional',
-            lambda: torch.eig(torch.ones((2))))
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should be square',
-            lambda: torch.eig(torch.ones((2, 3))))
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should not contain infs or NaNs',
-            lambda: torch.eig(np.inf * torch.ones((2, 2))))
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should not contain infs or NaNs',
-            lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -18966,6 +18842,59 @@ else:
         np_fn = partial(np.moveaxis, source=(), destination=())
         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int64, torch.float, torch.complex128)
+    def test_transpose_invalid(self, device, dtype):
+        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
+            shape = self._rand_shape(4, min_size=5, max_size=10)
+            x = self._generate_input(shape, dtype, device, False)
+
+            # Invalid `source` and `destination` dimension
+            with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+                fn(x, 5, 0)
+
+            with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+                fn(x, 0, 5)
+
+    @dtypes(torch.int64, torch.float, torch.complex128)
+    def test_transpose_vs_numpy(self, device, dtype):
+        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
+            for nd in range(5):
+                shape = self._rand_shape(nd, min_size=5, max_size=10)
+                x = self._generate_input(shape, dtype, device, with_extremal=False)
+                for random_negative in [True, False]:
+                    for src_dim, dst_dim in permutations(range(nd), r=2):
+                        random_prob = random.random()
+
+                        if random_negative and random_prob > 0.66:
+                            src_dim = src_dim - nd
+                        elif random_negative and random_prob > 0.33:
+                            dst_dim = dst_dim - nd
+                        elif random_negative:
+                            src_dim = src_dim - nd
+                            dst_dim = dst_dim - nd
+
+                        partial_map = {
+                            torch.swapdims: partial(torch.swapdims, dim0=src_dim, dim1=dst_dim),
+                            torch.swapaxes: partial(torch.swapaxes, axis0=src_dim, axis1=dst_dim),
+                            torch.transpose: partial(torch.transpose, dim0=src_dim, dim1=dst_dim),
+                        }
+
+                        torch_fn = partial_map[fn]
+                        np_fn = partial(np.swapaxes, axis1=src_dim, axis2=dst_dim)
+                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
+            # Move dim to same position
+            x = torch.randn(2, 3, 5, 7, 11)
+            partial_map = {
+                torch.swapdims: partial(torch.swapdims, dim0=0, dim1=0),
+                torch.swapaxes: partial(torch.swapaxes, axis0=0, axis1=0),
+                torch.transpose: partial(torch.transpose, dim0=0, dim1=0),
+            }
+            torch_fn = partial_map[fn]
+            np_fn = partial(np.swapaxes, axis1=0, axis2=0)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
         for ndims in range(0, 5):
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
@@ -19903,12 +19832,13 @@ class TestViewOps(TestCase):
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_transpose_view(self, device):
-        t = torch.ones((5, 5), device=device)
-        v = torch.transpose(t, 0, 1)
-        self.assertTrue(self.is_view_of(t, v))
+        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
+            t = torch.ones((5, 5), device=device)
+            v = fn(t, 0, 1)
+            self.assertTrue(self.is_view_of(t, v))
 
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
+            v[0, 1] = 0
+            self.assertEqual(t[1, 0], v[0, 1])
 
     def test_t_view(self, device):
         t = torch.ones((5, 5), device=device)
@@ -20076,18 +20006,25 @@ class TestViewOps(TestCase):
             self.assertEqual(t[idx, 0], v[0, 0])
 
     def test_movedim_view(self, device):
-        t = torch.zeros(3, 3, device=device)
-        out = torch.movedim(t, (0, 1), (1, 0))
+        def run_test(device, op):
+            t = torch.zeros(3, 3, device=device)
+            out = op(t)
 
-        self.assertTrue(self.is_view_of(t, out))
+            self.assertTrue(self.is_view_of(t, out))
 
-        # Randomly change values in output
-        # and verify that original is changed
-        # as well.
-        for _ in range(3):
-            idx_1, idx_2 = random.randint(0, 2), random.randint(0, 2)
-            out[idx_1, idx_2] = random.random()
-            self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
+            # Randomly change values in output
+            # and verify that original is changed
+            # as well.
+            for _ in range(3):
+                idx_1, idx_2 = random.randint(0, 2), random.randint(0, 2)
+                out[idx_1, idx_2] = random.random()
+                self.assertEqual(t[idx_2, idx_1], out[idx_1, idx_2])
+
+        op = partial(torch.movedim, source=(0, 1), destination=(1, 0))
+        run_test(device, op)
+
+        op = partial(torch.movedim, source=0, destination=1)
+        run_test(device, op)
 
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the

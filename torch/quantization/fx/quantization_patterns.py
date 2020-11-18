@@ -294,8 +294,13 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
-            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Linear "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':

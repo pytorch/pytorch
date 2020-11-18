@@ -3854,7 +3854,6 @@ struct to_ir {
     if (step) {
       auto val = toIValue(step->value(*graph));
       if (val->isInt()) {
-        std::cout << "HI: " << val->to<int64_t>() << std::endl;
         step_size = val->to<int64_t>();
       }
     }
@@ -3921,8 +3920,8 @@ struct to_ir {
               emitTupleSlice(val_range, s_tuple_val, begin, end, c10::nullopt);
           return std::make_shared<SimpleValue>(tupleSliceValue);
         } else {
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt, c10::nullopt);
+          auto tupleSliceValue = emitTupleSlice(
+              val_range, s_tuple_val, begin, c10::nullopt, c10::nullopt);
           return std::make_shared<SimpleValue>(tupleSliceValue);
         }
       } else {
