@@ -15452,75 +15452,75 @@ dedent """
 
         self.checkModule(A(), inp)
 
-        # class B(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.x = (0, 1, 2, 3, 4)
+        class B(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
 
-        #     def forward(self, a):
-        #         return self.x[::1]
+            def forward(self, a):
+                return self.x[::1]
 
-        # self.checkModule(B(), inp)
+        self.checkModule(B(), inp)
 
-        # class C(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.x = (0, 1, 2, 3, 4)
+        class C(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
 
-        #     def forward(self, a):
-        #         return self.x[::55]
+            def forward(self, a):
+                return self.x[::55]
 
-        # self.checkModule(C(), inp)
+        self.checkModule(C(), inp)
 
-        # class D(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.x = (0, 1, 2, 3, 4)
+        class D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
 
-        #     def forward(self, a):
-        #         return self.x[1:4:2]
+            def forward(self, a):
+                return self.x[1:4:2]
 
-        # self.checkModule(D(), inp)
+        self.checkModule(D(), inp)
 
-        # class E(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.x = (0, 1, 2, 3, 4)
+        class E(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
 
-        #     def forward(self, a):
-        #         return self.x[1:4]
+            def forward(self, a):
+                return self.x[1:4]
 
-        # self.checkModule(E(), inp)
+        self.checkModule(E(), inp)
 
-        # class F(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.x = (0, 1, 2, 3, 4, 5, 6)
+        class F(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6)
 
-        #     def forward(self, a):
-        #         return self.x[5::-2]
+            def forward(self, a):
+                return self.x[5::-2]
 
-        # self.checkModule(F(), inp)
+        self.checkModule(F(), inp)
 
-        # class G(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.x = (0, 1, 2, 3, 4, 5, 6, 7)
+        class G(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
 
-        #     def forward(self, a):
-        #         return self.x[7:5:2]
+            def forward(self, a):
+                return self.x[7:5:2]
 
-        # self.checkModule(G(), inp)
+        self.checkModule(G(), inp)
 
-        # class H(nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         self.x = (0, 1, 2, 3, 4, 5, 6, 7)
+        class H(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
 
-        #     def forward(self, a):
-        #         return self.x[5:7:-2]
+            def forward(self, a):
+                return self.x[5:7:-2]
 
-        # self.checkModule(H(), inp)
+        self.checkModule(H(), inp)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
