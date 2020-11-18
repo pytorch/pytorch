@@ -883,7 +883,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         sizes = sym_help._get_tensor_sizes(input)
         try:
             dim = sizes[2:]
-        except:
+        except Exception:
             dim = None
         if dim is None or any([i is None for i in dim]):
             if output_size == [1] * len(output_size):
@@ -1304,7 +1304,7 @@ def unfold(g, input, dimension, size, step):
     sizes = sym_help._get_tensor_sizes(input)
     try:
         sizedim = sizes[dimension]
-    except:
+    except Exception:
         sizedim = None
     if sizedim is not None:
         low_indices = range(0, sizedim, step)
