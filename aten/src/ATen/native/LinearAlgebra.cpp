@@ -1645,6 +1645,7 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   return result.reshape(shape_ind_end);
 }
 
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
