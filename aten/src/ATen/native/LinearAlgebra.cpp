@@ -123,20 +123,16 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool hermitian) {
 }
 
 Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
-              "of floating types");
-
   Tensor S = _matrix_rank_helper(self, hermitian);
 
   if (tol.has_value()) {
     double tol_value = tol.value();
-    return (S > tol_value).sum();
-  }
-  else {
+    return (S > tol_value).sum(/*dim=*/-1);
+  } else {
     ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
     double tol_value = _get_epsilon(real_dtype) * std::max(self.size(0), self.size(1));
-    return (S > S.max().mul_(tol_value)).sum();
+    Tensor max_S = std::get<0>(S.max(/*dim=*/-1));
+    return (S > max_S.mul_(tol_value).unsqueeze_(-1)).sum(/*dim=*/-1);
   }
 }
 
