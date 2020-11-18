@@ -629,7 +629,6 @@ class JitTestCase(TestCase):
 
         with freeze_rng_state():
             eager_out = nn_module(*args)
-
         with freeze_rng_state():
             script_out = sm(*args)
 

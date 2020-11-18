@@ -546,11 +546,16 @@ struct CodeImpl {
     return instructions_source_;
   }
 
-  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
+  void insertInstruction(
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0,
+      int64_t S = 0) {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),
-        safe_narrow_cast<uint16_t, uint64_t>(N));
+        safe_narrow_cast<uint16_t, uint64_t>(N),
+        safe_narrow_cast<int8_t, int64_t>(S));
     instructions_source_.emplace_back(current_node_);
 
     // check that we didn't accidentally emit nodes out of topological order
@@ -874,7 +879,24 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     int64_t beg_ind = node->i(attr::beg);
     int64_t end_ind = node->i(attr::end);
-    insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind);
+    int64_t step_size = node->i(attr::step_size);
+    if (step_size > 0) {
+      // TODO: hack to make sure there is no slicing happens (imagine case
+      // x[7:5:2])
+      if (end_ind < beg_ind) {
+        insertInstruction(TUPLE_SLICE, beg_ind, 0, step_size);
+      } else {
+        insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind, step_size);
+      }
+    } else {
+      // TODO: hack to make sure there is no slicing happens (imagine case
+      // x[5:7:-2])
+      if (beg_ind < end_ind) {
+        insertInstruction(TUPLE_SLICE, end_ind, 0, step_size);
+      } else {
+        insertInstruction(TUPLE_SLICE, end_ind, beg_ind - end_ind, step_size);
+      }
+    }
   }
 
   void emitFork(Node* node) {
@@ -1479,7 +1501,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case TUPLE_SLICE: {
-            tupleSlice(stack, inst.X, inst.X + inst.N);
+            // For TupleSlice, it is guaranteed that it is carrying the slicing
+            // step in the extra unused space inside Instruction.
+            tupleSlice(stack, inst.X, inst.X + inst.N, inst.unused);
             ++frame.pc;
           } break;
           case NAMED_TUPLE_CONSTRUCT: {
