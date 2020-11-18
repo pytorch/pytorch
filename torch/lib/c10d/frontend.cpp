@@ -104,7 +104,8 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
   std::string backend = Backend::get(backend_str);
   if (backend == "mpi") {
 #ifdef USE_C10D_MPI
-    pg = ProcessGroupMPI::createProcessGroupMPI(group_ranks);
+    std::vector<int64_t> group_ranks_copy(group_ranks);
+    pg = ProcessGroupMPI::createProcessGroupMPI(group_ranks_copy);
 #else
     throw std::runtime_error(
         "Distributed package doesn't have MPI built in."
