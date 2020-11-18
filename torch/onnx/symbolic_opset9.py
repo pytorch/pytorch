@@ -1376,7 +1376,8 @@ def index_copy(g, self, dim, index, source):
 
 
 def type_as(g, self, other):
-    self_dtype, other_dtype = sym_help._try_get_scalar_type(self, other)
+    self_dtype = sym_help._try_get_scalar_type(self)
+    other_dtype = sym_help._try_get_scalar_type(other)
     if self_dtype == other_dtype and self_dtype is not None:
         return self
     if other_dtype is not None:
