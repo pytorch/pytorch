@@ -5,9 +5,8 @@
 namespace torch {
 namespace jit {
 
-// findSubModuleAttr function chases getAttr chains to locate the submodules.
-// For example:
-// module M {
+// findSubModuleAttr function chases getAttr chains backwards to locate the
+// submodules. For example: module M {
 //   attributes {
 //     A = <SubModule at ...>
 //   }
@@ -18,6 +17,7 @@ namespace jit {
 //   ...
 //   %weight = prim::GetAttr[name="scale"](%B)
 //   ...
+
 std::deque<std::string> findSubModuleAttr(
     Value* input,
     std::string& name,
@@ -26,6 +26,8 @@ std::deque<std::string> findSubModuleAttr(
   Node* node = input->node();
   std::deque<std::string> moduleNames;
 
+  // Loop starts from inner submodule and follows the chain until reaches the
+  // top module.
   while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
     if (node->kind() == prim::GetAttr) {
       moduleNames.push_front(node->s(attr::name));
@@ -35,6 +37,7 @@ std::deque<std::string> findSubModuleAttr(
     }
   }
 
+  // Assign the inner module to attrModule.
   for (auto& moduleName : moduleNames) {
     attrModule = attrModule.attr(moduleName).toModule();
   }
@@ -87,7 +90,6 @@ std::vector<IValue> getParamAttributes(
         auto input = n->inputs()[0];
 
         auto moduleNames = findSubModuleAttr(input, name, attrModule, graph);
-
         if (!attrModule.hasattr(name)) {
           continue;
         }
@@ -106,31 +108,28 @@ std::vector<IValue> getParamAttributes(
 
         if (type->is_parameter(slot) || type->is_buffer(slot) ||
             name == "training") {
-          if (type->is_parameter(slot) || type->is_buffer(slot) ||
-              name == "training") {
-            if (attr.isTensor()) {
-              TORCH_INTERNAL_ASSERT(attr.isTensor());
-              auto tensor_ = attr.toTensor();
-              if (isEval && tensor_.requires_grad()) {
-                tensor_ = tensor_.detach();
-                tensor_.set_requires_grad(false);
-                attr = IValue(tensor_);
-              }
-              attrValues.emplace_back(attr.toTensor());
-              paramConst = addParamAsArgument(function_, fullName, attr);
-            } else if (attr.isNone() || name == "training") {
-              auto attrVal = tryInsertConstant(*graph, attr);
-              paramConst = *attrVal;
+          if (attr.isTensor()) {
+            TORCH_INTERNAL_ASSERT(attr.isTensor());
+            auto tensor_ = attr.toTensor();
+            if (isEval && tensor_.requires_grad()) {
+              tensor_ = tensor_.detach();
+              tensor_.set_requires_grad(false);
+              attr = IValue(tensor_);
             }
-            n->output()->replaceAllUsesWith(paramConst);
-            n->removeAllInputs();
-
-            GRAPH_UPDATE(
-                "Folding GetAttr %",
-                n->outputs()[0]->debugName(),
-                " with ",
-                paramConst->debugName());
+            attrValues.emplace_back(attr.toTensor());
+            paramConst = addParamAsArgument(function_, fullName, attr);
+          } else if (attr.isNone() || name == "training") {
+            auto attrVal = tryInsertConstant(*graph, attr);
+            paramConst = *attrVal;
           }
+          n->output()->replaceAllUsesWith(paramConst);
+          n->removeAllInputs();
+
+          GRAPH_UPDATE(
+              "Folding GetAttr %",
+              n->outputs()[0]->debugName(),
+              " with ",
+              paramConst->debugName());
         }
       }
     }
