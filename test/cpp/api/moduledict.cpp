@@ -198,14 +198,15 @@ TEST_F(ModuleDictTest, HasReferenceSemantics) {
       }));
 }
 
-TEST_F(ModuleDictTest, IsCloneable) {
+void iscloneable_helper(torch::Device device) {
   torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
     {"linear", Linear(2, 3).ptr()},
     {"relu", Functional(torch::relu).ptr()},
     {"batch", BatchNorm1d(3).ptr()},
   };
   ModuleDict dict(ordereddict);
-  ModuleDict clone = std::dynamic_pointer_cast<ModuleDictImpl>(dict->clone());
+  dict->to(device);
+  ModuleDict clone = std::dynamic_pointer_cast<ModuleDictImpl>(dict->clone(device));
   ASSERT_EQ(dict->size(), clone->size());
 
   for (auto it = dict->begin(), it_c = clone->begin(); it != dict->end(); ++it, ++it_c) {
@@ -232,6 +233,14 @@ TEST_F(ModuleDictTest, IsCloneable) {
   for (auto& param : params1) {
     ASSERT_FALSE(param->allclose(params2[param.key()]));
   }
+}
+
+TEST_F(ModuleDictTest, IsCloneable) {
+  iscloneable_helper(torch::kCPU);
+}
+
+TEST_F(ModuleDictTest, IsCloneable_CUDA) {
+  iscloneable_helper({torch::kCUDA, 0});
 }
 
 TEST_F(ModuleDictTest, RegistersElementsAsSubmodules) {
@@ -277,44 +286,6 @@ TEST_F(ModuleDictTest, CloneToDevice_CUDA) {
   }
   for (const auto& b : clone->buffers()) {
     ASSERT_EQ(b.device(), device);
-  }
-}
-
-TEST_F(ModuleDictTest, IsCloneable_CUDA) {
-  torch::Device device(torch::kCUDA, 0);
-  torch::OrderedDict<std::string, std::shared_ptr<Module>> ordereddict = {
-    {"linear", Linear(2, 3).ptr()},
-    {"relu", Functional(torch::relu).ptr()},
-    {"batch", BatchNorm1d(3).ptr()},
-  };
-  ModuleDict dict(ordereddict);
-  dict->to(device);
-  ModuleDict clone = std::dynamic_pointer_cast<ModuleDictImpl>(dict->clone(device));
-  ASSERT_EQ(dict->size(), clone->size());
-
-  for (auto it = dict->begin(), it_c = clone->begin(); it != dict->end(); ++it, ++it_c) {
-    // The key should be same
-    ASSERT_EQ(it->key(), it_c->key());
-    // The modules should be the same kind (type).
-    ASSERT_EQ(it->value()->name(), it_c->value()->name());
-    // But not pointer-equal (distinct objects).
-    ASSERT_NE(it->value(), it_c->value());
-  }
-
-  // Verify that the clone is deep, i.e. parameters of modules are cloned too.
-  torch::NoGradGuard no_grad;
-
-  auto params1 = dict->named_parameters();
-  auto params2 = clone->named_parameters();
-  ASSERT_EQ(params1.size(), params2.size());
-  for (auto& param : params1) {
-    ASSERT_FALSE(pointer_equal(param.value(), params2[param.key()]));
-    ASSERT_EQ(param->device(), params2[param.key()].device());
-    ASSERT_TRUE(param->allclose(params2[param.key()]));
-    param->add_(2);
-  }
-  for (auto& param : params1) {
-    ASSERT_FALSE(param->allclose(params2[param.key()]));
   }
 }
 
