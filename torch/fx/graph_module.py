@@ -9,7 +9,7 @@ import sys
 import traceback
 import math
 from pathlib import Path
-
+import os
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -148,7 +148,6 @@ class GraphModule(torch.nn.Module):
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
-            self._buffers = root._buffers
             for node in graph.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
@@ -198,40 +197,56 @@ class GraphModule(torch.nn.Module):
         self._graph = g
         self.recompile()
 
-    def to_folder(self, folder, module_name="FxModule"):
+
+    def _to_folder(self, folder: Union[str, os.PathLike], module_name="FxModule"):
         folder = Path(folder)
         Path(folder).mkdir(exist_ok=True)
         torch.save(self.state_dict(), folder / 'state_dict.pt')
         tab = " " * 4
-        module_str = f"""
+        model_str = f"""
 import torch
+from torch.nn import *
 class {module_name}(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        state_dict = torch.load('{folder}/state_dict.pt')
 """
+
+        def _gen_model_repr(module_name: str, module: torch.nn.Module):
+            import torch.nn as nn
+            safe_reprs = [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d]
+            if type(module) in safe_reprs:
+                return f"{module.__repr__()}"
+            else:
+                return None
+
+        blobified_modules = []
         for module_name, module in self.named_children():
-            module_file = folder / f'{module_name}.pt'
-            torch.save(module, module_file)
-            nl = '\n'
-            module_str += f"{tab*2}self.{module_name} = torch.load('{module_file}') # {module.__repr__().replace(nl,' ')}\n"
+            module_str = _gen_model_repr(module_name, module)
+            if module_str is None:
+                nl = '\n'
+                module_file = folder / f'{module_name}.pt'
+                torch.save(module, module_file)
+                blobified_modules.append(module_name)
+                module_str = f"torch.load('{module_file}') # {module.__repr__().replace(nl,' ')}"
+            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+
         for buffer_name, buffer in self._buffers.items():
-            module_str += f"{tab*2}self.{buffer_name} = state_dict['{buffer_name}']\n"
+            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}))\n"
 
         for param_name, param in self._parameters.items():
-            module_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(state_dict['{param_name}'])\n"
+            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(buffer.shape)}))\n"
 
-        module_str += f"{_addindent(self.code, 4)}\n"
+        model_str += f"{tab*2}self.load_state_dict(torch.load('{folder}/state_dict.pt'))\n"
+        model_str += f"{_addindent(self.code, 4)}\n"
 
         module_file = folder / 'module.py'
-        module_file.write_text(module_str)
+        module_file.write_text(model_str)
 
         init_file = folder / '__init__.py'
         init_file.write_text('from .module import *')
 
-
-
-
+        if len(blobified_modules) > 0:
+            print("Was not able to save the following children modules as reprs - saved as pickled files instead: ", blobified_modules)
 
     def recompile(self) -> None:
         """
