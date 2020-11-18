@@ -124,26 +124,26 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
 
     if (backend == "gloo") {
 #ifdef USE_C10D_GLOO
-      auto options = c10::make_intrusive<ProcessGroupGloo::Options>();
+      auto options = ProcessGroupGloo::Options();
 
       // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
       char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
       if (ifnameEnv) {
         for (const auto& iface : split(',', ifnameEnv)) {
-          options->devices.push_back(
+          options.devices.push_back(
               ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
         }
       } else {
         // If no hostname is specified, this function looks up
         // the machine's hostname and returns a device instance
         // associated with the address that the hostname resolves to.
-        options->devices.push_back(
+        options.devices.push_back(
             ::c10d::ProcessGroupGloo::createDefaultDevice());
       }
 
-      options->timeout = timeout;
-      options->threads = options->devices.size() * 2;
-       pg = c10::make_intrusive<ProcessGroupGloo>(
+      options.timeout = timeout;
+      options.threads = options.devices.size() * 2;
+      pg = c10::make_intrusive<ProcessGroupGloo>(
           prefix_store, rank, world_size, options);
 #endif
     } else if (backend == "nccl") {
