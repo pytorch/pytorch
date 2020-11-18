@@ -86,7 +86,7 @@ struct csrOutput {
   }
 
   ~csrOutput() {
-    TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(description_));
+    cusparseDestroyMatDescr(description_);
   }
 
   int size(int index) const {
@@ -153,9 +153,9 @@ struct csrMatrixRef {
 
   ~csrMatrixRef() {
     #if IS_CUSPARSE11_AVAILABLE()
-      TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(description_));
+      cusparseDestroySpMat(description_);
     #else
-      TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(description_));
+      cusparseDestroyMatDescr(description_);
     #endif
   }
  
@@ -180,7 +180,7 @@ struct CusparseMatrixMultiplyOp {
 
   ~CusparseMatrixMultiplyOp() {
     // destroy matrix/vector descriptors
-    TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_destroyDescr(spgemmDesc));
+    cusparseSpGEMM_destroyDescr(spgemmDesc);
   }
 
   csrOutput operator ()(
@@ -362,19 +362,6 @@ using ScsrMatrixRef = csrMatrixRef<float>;
 
 template <class scalar_t>
 struct CusparseMatrixMultiplyOp { 
-  cusparseHandle_t cusparseHandle_;
-  csrgemm2Info_t gemm2Info_;
-
-  CusparseMatrixMultiplyOp() {
-    TORCH_CUDASPARSE_CHECK(cusparseCreateCsrgemm2Info(&gemm2Info_));
-    cusparseHandle_ = at::cuda::getCurrentCUDASparseHandle();
-    TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
-
-  }
-  ~CusparseMatrixMultiplyOp() {
-    TORCH_CUDASPARSE_CHECK(cusparseDestroyCsrgemm2Info(gemm2Info_));
-  }
-
   csrOutput operator()(
       const csrMatrixRef<scalar_t>& lhs,
       const csrMatrixRef<scalar_t>& rhs,
@@ -396,7 +383,7 @@ template<> struct CusparseMatrixMultiplyOp<double> {
 
   }
   ~CusparseMatrixMultiplyOp() {
-    TORCH_CUDASPARSE_CHECK(cusparseDestroyCsrgemm2Info(gemm2Info_));
+    cusparseDestroyCsrgemm2Info(gemm2Info_);
   }
 
   csrOutput operator ()(
@@ -530,7 +517,7 @@ template<> struct CusparseMatrixMultiplyOp<float> {
 
   }
   ~CusparseMatrixMultiplyOp() {
-    TORCH_CUDASPARSE_CHECK(cusparseDestroyCsrgemm2Info(gemm2Info_));
+    cusparseDestroyCsrgemm2Info(gemm2Info_);
   }
   csrOutput operator()(
       const ScsrMatrixRef& lhs,
