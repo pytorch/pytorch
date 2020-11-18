@@ -17168,9 +17168,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             x_ = x.clone()
             # Integral Tensor in-place fmod raises RuntimeError due to invalid type casting
             # It will be solved by type promotion #47779
-            if device != 'xla':
+            if device in ['cpu', 'cuda']:
                 x_.fmod_(mod)
-
             # Numpy cast to integral due to non type promotion
             if torch.is_tensor(mod):
                 if dtype in torch.testing.get_all_int_dtypes() and mod.dtype != dtype:
@@ -17190,7 +17189,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(out, exp)
             self.assertEqual(out.size(), torch.Size([10, 10]))
             # in-place
-            if device != 'xla':
+            if device in ['cpu', 'cuda']:
                 x_ = x_.to(exp.dtype)
                 self.assertEqual(x_, exp)
 
@@ -17220,10 +17219,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 x.fmod(mod_float)
         else:
             _reference_implementation(x, mod_float)
-
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
-    def test_fmod_(self, device, dtype):
-        x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
 
     @onlyCPU
     @dtypes(torch.float, torch.long)
