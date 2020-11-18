@@ -3255,7 +3255,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 18)
 
         ort_sess = convert_to_onnx(model, input=(x,), opset_version=self.opset_version, input_names=['x'],
-            dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
+                                   dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
         for dim_size_ in range(13, 16):
             y = torch.randn(1, dim_size_)
             pytorch_out = model(y)

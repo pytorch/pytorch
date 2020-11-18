@@ -949,16 +949,16 @@ def embedding_bag(g,
 def prim_ConstantChunk(g, self, chunks, dim):
     input_shape = g.op("Shape", self)
     axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-    axis_next = g.op("Constant", value_t=torch.tensor([dim+1], dtype=torch.long))
+    axis_next = g.op("Constant", value_t=torch.tensor([dim + 1], dtype=torch.long))
     input_shape_dim = g.op("Slice", input_shape, axis, axis_next)
     start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
     chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
-    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks-1], dtype=torch.long))
+    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
     input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
     chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
     res = []
     for i in range(chunks):
-        index = g.op("Constant", value_t=torch.tensor([i+1], dtype=torch.long))
+        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
         end = g.op("Mul", chunk_dim, index)
         res.append(g.op("Slice", self, start, end, axis))
         start = end
