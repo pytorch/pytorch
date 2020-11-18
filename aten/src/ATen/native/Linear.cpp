@@ -77,11 +77,13 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
     }
   }
 
-  // Experiments showed that for the cases below it is faster to multiply and sum
-  // instead of reducing to bmm.
-  int64_t batch_size = lro_size * lo_size * ro_size;
-  if (batch_size < 10000 || (lo_size == 1 && ro_size == 1 && sum_size < 1000)) {
-    return at::mul(left, right).sum(sum_dims_, keepdim);
+  if (left_.is_cuda()) {
+    // Experiments showed that for the cases below it is faster to multiply and sum
+    // instead of reducing to bmm on CUDA. see https://github.com/pytorch/pytorch/pull/48184
+    int64_t batch_size = lro_size * lo_size * ro_size;
+    if (batch_size < 10000 || (lo_size == 1 && ro_size == 1 && sum_size < 1000)) {
+      return at::mul(left, right).sum(sum_dims_, keepdim);
+    }
   }
 
   // we now work with the following permutations / shapes.
