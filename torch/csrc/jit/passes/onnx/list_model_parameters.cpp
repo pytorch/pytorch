@@ -28,7 +28,7 @@ std::deque<std::string> findSubModuleAttr(
 
   // Loop starts from inner submodule and follows the chain until reaches the
   // top module.
-  while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
+  while (node->outputs().at(0)->type() != graph->inputs().at(0)->type()) {
     if (node->kind() == prim::GetAttr) {
       moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
