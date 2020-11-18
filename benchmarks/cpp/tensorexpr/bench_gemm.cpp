@@ -249,7 +249,7 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
     te::For* mi = loops[3];
     te::For* ni = loops[4];
     te::Stmt* unrolled;
-    //loop.vectorize(ni);
+    loop.vectorize(ni);
     loop.unroll(mi, &unrolled);
   }
 
@@ -323,7 +323,6 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16Cache)(benchmark::State& state) {
 
   loop.prepareForCodegen();
   te::Stmt* s = loop.root_stmt();
-  std::cerr << *s << "\n";
   s = te::IRSimplifier::simplify(s);
   auto cg = CreateCodeGen("llvm_codegen", s, {AP, BP, CT});
 
@@ -338,5 +337,3 @@ BENCHMARK_REGISTER_F(Gemm, TensorExprTile32x32)->Args({128, 128, 128});
 BENCHMARK_REGISTER_F(Gemm, TensorExprTile4x16)->Args({128, 128, 128});
 BENCHMARK_REGISTER_F(Gemm, TensorExprTile4x16VecUnroll)->Args({128, 128, 128});
 BENCHMARK_REGISTER_F(Gemm, TensorExprTile4x16Cache)->Args({128, 128, 128});
-
-BENCHMARK_MAIN();
