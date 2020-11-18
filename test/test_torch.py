@@ -19249,6 +19249,14 @@ else:
                 with self.assertRaisesRegex(RuntimeError, "any only supports bool tensor"):
                     torch.any(x, dim, out=out)
 
+        def _test_all_any_with_dim_keepdim(x, dim, keepdim):
+            torch_fn = partial(torch.all, dim=dim, keepdim=keepdim)
+            np_fn = partial(np.all, axis=dim, keepdims=keepdim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
+
+            torch_fn = partial(torch.any, dim=dim, keepdim=keepdim)
+            np_fn = partial(np.any, axis=dim, keepdims=keepdim)
+
         for ndim in range(5):
             shape = self._rand_shape(ndim, 1, 5)
             x = self._generate_input(shape, dtype, device, with_extremal=False)
@@ -19277,10 +19285,14 @@ else:
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
 
                 x = self._generate_input(shape, dtype, device, with_extremal=True)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
 
@@ -19289,10 +19301,14 @@ else:
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
 
                 x = torch.ones_like(x)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
 
