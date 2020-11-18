@@ -124,6 +124,9 @@ namespace jit {
   _(ReductionReorderCacheConsumerAccess)            \
   _(ReductionRfactorCacheTempOuter)                 \
   _(ReductionRfactorCacheTempInner)                 \
+  _(ReductionVectorize)                             \
+  _(ReductionVectorizeInner)                        \
+  _(ReductionVectorizeRfactor)                      \
   _(TypeTest01)                                     \
   _(TypePropagation)                                \
   _(Cond01)                                         \
@@ -307,14 +310,15 @@ namespace jit {
   _(BoundsInference_4)                              \
   _(BoundsInference_5)                              \
   _(BoundsInference_6)                              \
-  _(BoundsInferenceNonOverlapping)                  \
   _(BoundsInferenceAdjacent)                        \
-  _(MergeInferredBounds)                            \
-  _(MergeInferredLoadStoreDiff)                     \
-  _(MergeInferred2DBounds)                          \
-  _(MergeAdjacentBounds)                            \
-  _(MergeSymbolicBounds)                            \
-  _(MergeSymbolicAdjacent)                          \
+  _(BoundsInferenceMultipleTopLoopLoad)             \
+  _(BoundsInferenceMultipleTopLoopStore)            \
+  _(BoundsInferenceCacheReads)                      \
+  _(BoundsInferenceFlattened)                       \
+  _(GetPotentialHazards)                            \
+  _(GetPotentialHazardsLoopNoHazard)                \
+  _(GetPotentialHazardsLoopCall)                    \
+  _(GetPotentialHazardsLoopSplit)                   \
   _(BoundOverlap)                                   \
   _(BoundOverlapSymbolic)                           \
   _(BoundOverlapMultiDim)                           \
@@ -406,8 +410,11 @@ namespace jit {
   _(FuserPass_UnfusibleDevice)                      \
   _(FuserPass_UnknownShapes)                        \
   _(FuserPass_UnknownShapesIgnored)                 \
+  _(FuserPass_IgnoreUnknownShapeAtStart)            \
   _(FuserPass_Multidevice)                          \
   _(FuserPass_MergeGroups)                          \
+  _(FuserPass_Where)                                \
+  _(FuserPass_WhereList)                            \
   _(TrainBasic)                                     \
   _(Conv2D)
 
@@ -541,9 +548,9 @@ namespace jit {
   _(LLVMCondNestedTest)                    \
   _(LLVMVectorizerLoadStoreTest)           \
   _(LLVMSimpleReduction)                   \
-  _(LLVMRFactorReduction)
-
-// _(LLVMRFactorVectorizedReduction)
+  _(LLVMRFactorReduction)                  \
+  _(LLVMRFactorVectorizedReduction)        \
+  _(LLVMVectorizedGEMM)
 
 #define TH_FORALL_TENSOREXPR_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)                   \
@@ -560,6 +567,7 @@ namespace jit {
   _(CudaHalfCast)                          \
   _(CudaHalfSupport)                       \
   _(CudaHalfPropagation)                   \
+  _(CudaUnusedHalfArgument)                \
   _(CudaPrioritizeDependents)              \
   _(CudaMaskBlockDim)                      \
   _(CudaMaskThreadDim)                     \

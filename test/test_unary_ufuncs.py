@@ -9,7 +9,7 @@ import torch
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings,
-     TEST_NUMPY, make_tensor)
+     TEST_NUMPY, IS_MACOS, make_tensor)
 from torch.testing._internal.common_methods_invocations import \
     (unary_ufuncs)
 from torch.testing._internal.common_device_type import \
@@ -479,6 +479,16 @@ class TestUnaryUfuncs(TestCase):
             result = torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
+
+    @unittest.skipIf(IS_MACOS, "Skip Reference: https://github.com/pytorch/pytorch/issues/47500")
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_sqrt_complex_edge_values(self, device, dtype):
+        # Test Reference: https://github.com/pytorch/pytorch/pull/47424
+        x = torch.tensor(0. - 1.0000e+20j, dtype=dtype, device=device)
+        self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+
+        x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
+        self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 

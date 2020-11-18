@@ -259,6 +259,18 @@ TEST(IValueTest, ListNestedEquality) {
   EXPECT_NE(c2, c3);
 }
 
+TEST(IValueTest, StreamEquality) {
+  at::Device device1 =  at::Device(kCUDA, 0);
+  at::Device device2 = at::Device(kCUDA, 1);
+  c10::Stream stream1 = c10::Stream(c10::Stream::Default::DEFAULT, device1);
+  c10::Stream stream2 = c10::Stream(c10::Stream::Default::DEFAULT, device2);
+  IValue lhs(stream1);
+  IValue rhs_different(stream2);
+  IValue rhs_same(stream1);
+  EXPECT_FALSE(lhs.equals(rhs_different).toBool());
+  EXPECT_TRUE(lhs.equals(rhs_same).toBool());
+}
+
 TEST(IValueTest, EnumEquality) {
   auto cu = std::make_shared<CompilationUnit>();
   IValue int_ivalue_1(1);

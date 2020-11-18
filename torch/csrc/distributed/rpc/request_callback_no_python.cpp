@@ -171,6 +171,13 @@ void RequestCallbackNoPython::processPythonRemoteCall(
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
+void RequestCallbackNoPython::processRRefBackward(
+      RpcCommandBase& rpc,
+      const int64_t messageId,
+      const std::shared_ptr<FutureMessage>& responseFuture) const {
+  C10_THROW_ERROR(Error, "Python call not supported!");
+}
+
 void RequestCallbackNoPython::processScriptRemoteCall(
     ScriptRemoteCall& scriptRemoteCall,
     const std::function<void(void)>& postProcessing,
@@ -565,6 +572,10 @@ void RequestCallbackNoPython::processRpc(
         // Exiting the scope will disable the profiler on this thread with the
         // options specified above.
       }
+      return;
+    }
+    case MessageType::RREF_BACKWARD_REQ: {
+      processRRefBackward(rpc, messageId, responseFuture);
       return;
     }
     default: {
