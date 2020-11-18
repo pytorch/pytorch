@@ -150,12 +150,12 @@ Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<doub
   return result;
 }
 
-Tensor matrix_rank(const Tensor& self, double tol, bool hermitian) {
-  return at::linalg_matrix_rank(self, optional<double>(tol), hermitian);
+Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+  return at::linalg_matrix_rank(self, optional<double>(tol), symmetric);
 }
 
-Tensor matrix_rank(const Tensor& self, bool hermitian) {
-  return at::linalg_matrix_rank(self, c10::nullopt, hermitian);
+Tensor matrix_rank(const Tensor& self, bool symmetric) {
+  return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
