@@ -475,7 +475,7 @@ def transpose(g, self, dim0, dim1):
 
     # NB: Transpose in ONNX is actually a Permute
     rank = sym_help._get_tensor_rank(self)
-    if rank:
+    if rank is not None:
         axes = list(range(rank))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
         return g.op("Transpose", self, perm_i=axes)
@@ -640,7 +640,7 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = sym_help._get_tensor_rank(self)
-    if self_rank and self_rank > 2:
+    if self_rank is not None and self_rank > 2:
         weight = g.op("Unsqueeze", weight, axes_i=list(range(1, self_rank - 1)))
     return g.op("PRelu", self, weight)
 
@@ -881,7 +881,10 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         if output_size == [1] * len(output_size) and type == "AveragePool":
             return g.op("GlobalAveragePool", input)
         sizes = sym_help._get_tensor_sizes(input)
-        dim = sizes[2:] if sizes is not None else None
+        try:
+            dim = sizes[2:]
+        except:
+            dim = None
         if dim is None or any([i is None for i in dim]):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
@@ -1299,7 +1302,10 @@ def unfold(g, input, dimension, size, step):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
     sizes = sym_help._get_tensor_sizes(input)
-    sizedim = sizes[dimension] if sizes is not None else None
+    try:
+        sizedim = sizes[dimension]
+    except:
+        sizedim = None
     if sizedim is not None:
         low_indices = range(0, sizedim, step)
         hi_indices = range(size, sizedim + 1, step)
@@ -2237,7 +2243,7 @@ def scatter_add(g, self, dim, index, src):
         return _unimplemented("scatter_add", "input dtype not accessible")
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     dtype = sym_help.scalar_type_to_pytorch_type[dtype]
-    sizes = sym_help._get_tensor_sizes(self, allow_symbol=False)
+    sizes = sym_help._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
         to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
     else:

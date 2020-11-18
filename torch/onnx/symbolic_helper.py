@@ -182,11 +182,15 @@ def _get_tensor_rank(x):
         return None
     return x.type().dim()
 
-def _get_tensor_sizes(x, allow_symbol=True):
+def _get_tensor_sizes(x, allow_nonstatic=True):
     if not _is_tensor(x) or x.type() is None:
         return None
-    if allow_symbol:
+    if allow_nonstatic:
+        # Each individual symbol is returned as None.
+        # e.g. [1, 'a', 'b'] -> [1, None, None]
         return x.type().varyingSizes()
+    # returns None, if exists any symbol in sizes.
+    # e.g. [1, 'a', 'b'] -> None
     return x.type().sizes()
 
 def _unimplemented(op, msg):
