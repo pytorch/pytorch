@@ -123,6 +123,18 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool hermitian) {
 }
 
 Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
+  // Matrices or batch of matrices is allowed
+  TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
+
+  // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
+  // Let's output 0 for this case, since that kind of matrices have zero of non-zero rows, hence rank is 0.
+  if (self.numel() == 0) {
+    auto result_shape = self.sizes().vec();
+    result_shape.pop_back();
+    result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
+    return at::zeros(result_shape, self.options().dtype(ScalarType::Long));
+  }
+
   Tensor S = _matrix_rank_helper(self, hermitian);
 
   if (tol.has_value()) {
