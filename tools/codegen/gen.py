@@ -290,10 +290,10 @@ class RegisterDispatchKey:
                     prologue = "// TODO: consistency check assert"
                 elif k is SchemaKind.out:
                     # TODO: generalize this for multi-out
-                    assert len(f.func.out_arguments) == 1, "multi-out structured not supported yet"
+                    assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
                     # TODO: properly get the expression as it was brought into
                     # scope by sig
-                    out_expr = f.func.out_arguments[0].name
+                    out_expr = f.func.arguments.out[0].name
                     prologue = f"""
 // TODO: add a consistency check for meta_result
 {out_expr}.resize_(meta_result.sizes);
@@ -310,8 +310,8 @@ class RegisterDispatchKey:
                 if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
                     # TODO: avoid copypasting the computation of self_args,
                     # candidate_args and device_of
-                    self_args = (a for a in f.func.arguments if a.name == "self")
-                    candidate_args = itertools.chain(self_args, f.func.out_arguments, f.func.arguments)
+                    self_args = (a for a in f.func.arguments.positional if a.name == "self")
+                    candidate_args = itertools.chain(self_args, f.func.arguments.out, f.func.arguments.positional)
                     device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
 
                     device_guard = ''
@@ -369,11 +369,11 @@ class RegisterDispatchKey:
 
             cuda_guard = ""
             if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
-                self_args = (a for a in f.func.arguments if a.name == "self")
+                self_args = (a for a in f.func.arguments.positional if a.name == "self")
 
                 # There is precedence for which argument we use to do
                 # device guard.  This describes the precedence order.
-                candidate_args = itertools.chain(self_args, f.func.out_arguments, f.func.arguments)
+                candidate_args = itertools.chain(self_args, f.func.arguments.out, f.func.arguments.positional)
 
                 # Only tensor like arguments are eligible
                 device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
@@ -498,8 +498,8 @@ class ComputeTensorMethod:
             return None
 
         assert not f.func.is_out_fn()
-        assert len(f.func.arguments) > 0
-        assert sum(a.name == 'self' for a in f.func.arguments) == 1
+        assert len(f.func.arguments.positional) > 0
+        assert sum(a.name == 'self' for a in f.func.arguments.positional) == 1
 
         name = cpp.name(f.func)
 
@@ -768,7 +768,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
             # See Note [name and field_name]
             ret['field_name'] = r.name
             if f.func.is_out_fn():
-                name_to_field_name[f.func.out_arguments[i].name] = r.name
+                name_to_field_name[f.func.arguments.out[i].name] = r.name
 
         returns.append(ret)
 
@@ -828,8 +828,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
-    out_arg_set = set(a.name for a in f.func.out_arguments)
+    kwarg_only_set = set(a.name for a in f.func.arguments.kwarg_only)
+    out_arg_set = set(a.name for a in f.func.arguments.out)
 
     sig_group = CppSignatureGroup.from_schema(f.func, method=False)
     cpp_args = sig_group.signature.arguments()
