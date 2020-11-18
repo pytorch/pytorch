@@ -1550,7 +1550,7 @@ static const auto ProcessGroupNCCLTorchBind =
             });
 #endif
 
-static auto DistributedC10dFrontendTorchBind =
+static const auto DistributedC10dFrontendTorchBind =
     torch::class_<::c10d::DistributedC10d>("c10d", "frontend")
         .def(torch::init([]() {
           static c10::intrusive_ptr<::c10d::DistributedC10d>
