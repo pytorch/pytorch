@@ -229,7 +229,7 @@ Tensor& apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cuda_out(Tensor& result, const Tensor& self, int64_t dimension) {
-  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, ScalarType::Bool, self.scalar_type(), "diag_cuda", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;

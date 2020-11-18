@@ -16,6 +16,7 @@ bool canRunOutOfPlace(Node* n) {
                                                             "aten::addmm",
                                                             "aten::bmm",
                                                             "aten::sigmoid",
+                                                            "aten::leaky_relu",
                                                             "aten::cat"};
   auto str = std::string(n->kind().toQualString());
   return out_of_place_nodes.count(str) > 0;
@@ -41,6 +42,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::add_out(out_t, in0_t, in1_t, in2_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::mul")) {
@@ -51,6 +53,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::mul_out(out_t, in0_t, in1_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::addmm")) {
@@ -64,6 +67,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::addmm_cpu_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::clamp")) {
@@ -75,6 +79,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::clamp_out(out_t, in0_t, in1_s, in2_s);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::bmm")) {
@@ -85,6 +90,7 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::bmm_out_cpu(out_t, in0_t, in1_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::cat")) {
@@ -95,7 +101,18 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_tl[0]);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::tanh")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::tanh_out(out_t, in0_t);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::sigmoid")) {
     return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
@@ -104,10 +121,64 @@ getOutOfPlaceOperation(Node* n) {
         p_node->Output(0, reg) = create_empty_from(in0_t);
       }
       auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
       at::native::sigmoid_out(out_t, in0_t);
     };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::leaky_relu")) {
+    auto in1 = toIValue(n->inputs()[1]);
+    if (in1) {
+      auto in1_s = in1->toScalar();
+      return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+        auto in0_t = p_node->Input(0, reg).toTensor();
+        if (p_node->Output(0, reg).isNone()) {
+          p_node->Output(0, reg) = create_empty_from(in0_t);
+        }
+        auto out_t = p_node->Output(0, reg).toTensor();
+        at::native::leaky_relu_out(out_t, in0_t, in1_s);
+      };
+    } else {
+      return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+        auto in0_t = p_node->Input(0, reg).toTensor();
+        auto in1_s = p_node->Input(1, reg).toScalar();
+        if (p_node->Output(0, reg).isNone()) {
+          p_node->Output(0, reg) = create_empty_from(in0_t);
+        }
+        auto out_t = p_node->Output(0, reg).toTensor();
+        at::native::leaky_relu_out(out_t, in0_t, in1_s);
+      };
+    }
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::relu")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::threshold_out(out_t, in0_t, 0, 0);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::logit")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto in1_d = p_node->Input(1, reg).toDouble();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      out_t.resize_({0});
+      at::native::logit_out(out_t, in0_t, in1_d);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::clone")) {
+    return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
+      auto in0_t = p_node->Input(0, reg).toTensor();
+      if (p_node->Output(0, reg).isNone()) {
+        p_node->Output(0, reg) = create_empty_from(in0_t);
+      }
+      auto out_t = p_node->Output(0, reg).toTensor();
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
+      at::native::copy_(out_t, in0_t, false);
+    };
   }
-
   return [](const ProcessedNode*, std::vector<IValue>&) { TORCH_CHECK(0); };
 }
 

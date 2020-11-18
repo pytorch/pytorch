@@ -26,12 +26,8 @@ Tensor mul_scalar(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float other;
       } block {
-        v_output.extents().width,
-        v_output.extents().height,
-        v_output.extents().depth,
         other.to<float>(),
       };
 
@@ -80,12 +76,8 @@ Tensor& mul_scalar_(
   {
     if (v_self.has_image()) {
       const struct {
-        uint32_t width, height, channels;
         float other;
       } block {
-        v_self.extents().width,
-        v_self.extents().height,
-        v_self.extents().depth,
         other.to<float>(),
       };
 

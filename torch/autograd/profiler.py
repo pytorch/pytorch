@@ -151,7 +151,7 @@ class EventList(list):
     def cpu_children_populated(self):
         return self._cpu_children_populated
 
-    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
+    def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
         """Prints an EventList as a nicely formatted table.
 
         Arguments:
@@ -173,6 +173,7 @@ class EventList(list):
             self,
             sort_by=sort_by,
             row_limit=row_limit,
+            max_src_column_width=max_src_column_width,
             header=header,
             use_cuda=self._use_cuda,
             profile_memory=self._profile_memory,
@@ -420,11 +421,11 @@ class profile(object):
             raise RuntimeError("can't export a trace that didn't finish running")
         self.function_events.populate_cpu_children()
 
-    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
+    def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
         self._check_finish()
         assert self.function_events is not None
         return self.function_events.table(
-            sort_by=sort_by, row_limit=row_limit, header=header,
+            sort_by=sort_by, row_limit=row_limit, max_src_column_width=max_src_column_width, header=header,
             top_level_events_only=top_level_events_only
         )
     table.__doc__ = EventList.table.__doc__
@@ -1165,6 +1166,7 @@ def build_table(
         sort_by=None,
         header=None,
         row_limit=100,
+        max_src_column_width=75,
         use_cuda=True,
         profile_memory=False,
         top_level_events_only=False):
@@ -1195,7 +1197,7 @@ def build_table(
     has_stack = len(stacks) > 0
     if has_stack:
         src_column_width = max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
-        src_column_width = min(src_column_width, 75)
+        src_column_width = min(src_column_width, max_src_column_width)
 
     headers = [
         'Name',
