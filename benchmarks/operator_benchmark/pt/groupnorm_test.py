@@ -18,16 +18,18 @@ groupnorm_configs_short = op_bench.cross_product_configs(
 
 class GroupNormBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, dims, num_groups):
-        self.X = (torch.rand(*dims) - 0.5) * 256
-        self.num_groups = num_groups
         num_channels = dims[1]
-        self.weight = torch.rand(num_channels, dtype=torch.float)
-        self.bias = torch.rand(num_channels, dtype=torch.float)
-        self.eps = 1e-5
+        self.inputs = {
+            "input": (torch.rand(*dims) - 0.5) * 256,
+            "num_groups": num_groups,
+            "weight": torch.rand(num_channels, dtype=torch.float),
+            "bias": torch.rand(num_channels, dtype=torch.float),
+            "eps": 1e-5
+        }
 
-    def forward(self):
+    def forward(self, input, num_groups: int, weight, bias, eps: float):
         return F.group_norm(
-            self.X, self.num_groups, weight=self.weight, bias=self.bias, eps=self.eps)
+            input, num_groups, weight=weight, bias=bias, eps=eps)
 
 
 op_bench.generate_pt_test(groupnorm_configs_short, GroupNormBenchmark)

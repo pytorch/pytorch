@@ -11,6 +11,7 @@
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/MetaFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
@@ -33,21 +34,14 @@ $legacy_th_headers
 
 namespace at {
 
-/* example
-Tensor * ${Type}::add(Tensor & a, Tensor & b) {
-  std::cout << "add Tensor with backend ${Backend}\n";
-  return &a;
+namespace {
+
+${dispatch_definitions}
+
+TORCH_LIBRARY_IMPL(aten, ${DispatchKey}, m) {
+  ${dispatch_registrations}
 }
-*/
 
-namespace ${Type} {
-
-${type_derived_method_definitions}
-
-}  // namespace ${Type}
-
-TORCH_LIBRARY_IMPL(aten, ${Backend}, m) {
-  ${function_registrations}
-}
+} // anonymous namespace
 
 } // namespace at
