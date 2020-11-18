@@ -156,8 +156,6 @@ class CallbackManager {
     // case.
     CallbackHandles sorted_active_tls_handles;
     CallbackHandles sorted_active_global_handles;
-    ObserverContextList tls_ctx;
-    ObserverContextList global_ctx;
     size_t num_tls_callbacks = init_handles(sorted_active_tls_handles, rf_tls_.sorted_tls_callbacks_);
     size_t num_global_callbacks = init_handles(sorted_active_global_handles, sorted_global_callbacks_);
     if (!found_active_cb) {
@@ -374,10 +372,11 @@ void enableRecordFunction(bool enable) {
 
 RecordFunction::RecordFunction(RecordScope scope) {
   auto* rf_tls_ptr = &rf_tls_;
-  auto& m = manager();
-  if (rf_tls_ptr->tls_record_function_enabled_ &&
-      (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty())) {
-    m.init(*this, scope);
+  if (rf_tls_ptr->tls_record_function_enabled_) {
+    auto& m = manager();
+    if (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty()) {
+      m.init(*this, scope);
+    }
   }
 }
 
