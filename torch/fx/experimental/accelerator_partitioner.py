@@ -368,7 +368,6 @@ class Partitioner:
                             partition.logical_device_ids.append(device.logical_id)
                     partition.add_node(node)
                     partition_to_left_mem_bytes[partition] -= total_size_of_input_nodes
-                    partition.used_mem_bytes += total_size_of_input_nodes
                 # No device left, create single node partitions
                 else:
                     self.create_single_node_partition(node)
@@ -428,7 +427,6 @@ class Partitioner:
         """
         partition = self.create_partition()
         partition.add_node(node)
-        partition.recalculate_mem_size()
         return
 
     def sparse_nn_partition(self, available_mem_bytes: int) -> None:
@@ -551,7 +549,6 @@ class Partitioner:
                     if total_size_of_input_nodes > available_mem_bytes:
                         raise RuntimeError(node.target + 'is too large to fit into a device')
                 partition.add_node(node)
-                partition.used_mem_bytes += total_size_of_input_nodes
         reset_partition_in_sparse_nn(partition, new_partition=False)
         # Set parents and children for partitions
         set_parents_and_children(self.partitions)
