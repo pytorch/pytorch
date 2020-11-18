@@ -71,7 +71,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
     'cumsum', 'cumprod', 'prod',
-    'index_select' #  requires testing
+    'index_select'  #  requires testing
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
