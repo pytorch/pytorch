@@ -1304,7 +1304,8 @@ class DistributedTest:
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertEqual(e.count, 1)
-                    self.assertGreater(e.cpu_time, 0)
+                    print(f"Event {e} got cpu_time {e.cpu_time}")
+                    self.assertGreater(e.cpu_time, 0, f"Expected event {e.name} to have CPU time greater than 0, but got {e.cpu_time}")
             else:
                 self.assertEqual([], events)
 
@@ -2533,6 +2534,7 @@ class DistributedTest:
                     output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
                     expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
 
+                print(f"MULTIGPU test: expect_event will be {len(expected_output) == 1}")
                 self.call_dist_op(
                     "all_gather", False,
                     dist.all_gather_multigpu, output_tensors, tensors, group_id,
