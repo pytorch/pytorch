@@ -992,7 +992,7 @@ struct PythonPrintImpl {
       } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
-             << node->i(attr::end) << "]";
+             << node->i(attr::end) << ":" << node->i(attr::beg) << "]";
       } break;
       case prim::ListConstruct: {
         ListTypePtr list_type = node->output()->type()->expect<ListType>();

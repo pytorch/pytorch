@@ -629,9 +629,12 @@ class JitTestCase(TestCase):
 
         with freeze_rng_state():
             eager_out = nn_module(*args)
-
+        print("Eager: ", eager_out)
         with freeze_rng_state():
             script_out = sm(*args)
+
+
+        print("Script: ", script_out)
 
         self.assertEqual(eager_out, script_out)
         self.assertExportImportModule(sm, args)

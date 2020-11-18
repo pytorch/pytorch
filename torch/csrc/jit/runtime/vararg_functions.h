@@ -30,7 +30,7 @@ void createObject(Stack& stack, at::ClassTypePtr type);
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 
-void tupleSlice(Stack& stack, size_t begin, size_t end);
+void tupleSlice(Stack& stack, size_t begin, size_t end, int8_t step_size);
 
 void dequantize(Stack& stack);
 
