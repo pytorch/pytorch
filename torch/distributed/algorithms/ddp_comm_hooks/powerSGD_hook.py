@@ -77,7 +77,7 @@ def powerSGD_hook(
                 # Currently use the length of input tensor as the seed, which should be mostly different.
                 # TODO(wayi@): Should read the random seed from the state of this hook provided by the constructor.
                 torch.manual_seed(total_length)
-                memory.data[:] = torch.randn_like(memory)
+                memory[:] = torch.randn_like(memory)
         return memory.view(square_side_length, rank), memory
 
     p, p_memory = create_low_rank_tensor(fill_random_values=False)
