@@ -923,7 +923,7 @@ void CudaCodeGen::Initialize() {
   // Check whether the statement uses the Half type, if so add the
   // half_support_literal.
   Stmt* stmt_v = stmt();
-  HalfChecker halfChecker;
+  HalfChecker halfChecker(buffer_args());
   stmt_v->accept(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
