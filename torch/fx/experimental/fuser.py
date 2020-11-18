@@ -46,4 +46,4 @@ def fuse(model: torch.nn.Module) -> torch.nn.Module:
                 setattr(modules[parent_name], name, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 new_graph.erase_node(node)
-    return fx.GraphModule(model, new_graph)
+    return fx.GraphModule(dict(model.named_modules()), new_graph)
