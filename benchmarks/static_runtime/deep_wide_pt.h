@@ -134,3 +134,5 @@ torch::jit::Module getTrivialScriptModel();
 torch::jit::Module getLeakyReLUScriptModel();
 
 torch::jit::Module getLeakyReLUConstScriptModel();
+
+torch::jit::Module getLongScriptModel();

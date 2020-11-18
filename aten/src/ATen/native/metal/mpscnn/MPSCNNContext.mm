@@ -4,8 +4,10 @@
 #include <torch/script.h>
 #include <mutex>
 
-#if defined(C10_IOS)
+#if C10_IOS
 #import <UIKit/UIKit.h>
+#elif TARGET_OS_MAC
+#import <Foundation/NSProcessInfo.h>
 #endif
 
 @implementation MPSCNNContext {
@@ -31,10 +33,11 @@
 }
 
 - (BOOL)available {
-#if defined(C10_IOS)
-#if TARGET_IPHONE_SIMULATOR
+#if !defined(__APPLE__)
   return false;
-#else
+#elif TARGET_IPHONE_SIMULATOR
+  return false;
+#elif TARGET_OS_IPHONE
   if (!MPSSupportsMTLDevice(_device)) {
     return false;
   }
@@ -45,8 +48,23 @@
           supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
     return false;
   }
+#elif TARGET_OS_MAC
+  if (!MPSSupportsMTLDevice(_device)) {
+    return false;
+  }
+  NSOperatingSystemVersion supportedVer = {10, 13, 0};
+  if (![[NSProcessInfo processInfo]
+          isOperatingSystemAtLeastVersion:supportedVer]) {
+    return false;
+  }
+  if (![MTLCreateSystemDefaultDevice()
+          supportsFeatureSet:MTLFeatureSet_macOS_GPUFamily1_v3]) {
+    return false;
+  }
+#else
+  return false;
 #endif
-#endif
+
   return _device && _library && _commandQueue;
 }
 
