@@ -14,7 +14,7 @@ import tempfile
 
 import torch
 import torch._six
-from torch.utils import cpp_extensionp
+from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, FILE_SCHEMA
 import torch.distributed as dist
 from typing import Dict, Optional
