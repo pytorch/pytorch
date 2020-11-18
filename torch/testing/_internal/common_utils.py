@@ -21,6 +21,7 @@ import unittest
 import warnings
 import random
 import contextlib
+import shutil
 import socket
 import subprocess
 import time
@@ -316,6 +317,21 @@ else:
         with tempfile.NamedTemporaryFile(dir=dir) as f:
             yield f.name
 
+if IS_WINDOWS:
+    @contextmanager
+    def TemporaryDirectoryName(suffix=None):
+        # On Windows the directory created by TemporaryDirectory is likely to be removed prematurely,
+        # so we first create the directory using mkdtemp and then remove it manually
+        try:
+            dir_name = tempfile.mkdtemp(suffix=suffix)
+            yield dir_name
+        finally:
+            shutil.rmtree(dir_name)
+else:
+    @contextmanager  # noqa: T484
+    def TemporaryDirectoryName(suffix=None):
+        with tempfile.TemporaryDirectory(suffix=suffix) as d:
+            yield d.name
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**

@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
      skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
      skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC,
-     wrapDeterministicFlagAPITest, make_tensor, TemporaryFileName)
+     wrapDeterministicFlagAPITest, make_tensor, TemporaryFileName, TemporaryDirectoryName)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, \
@@ -3117,11 +3117,8 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            temp_dir = os.path.join(tempfile.gettempdir(), '中文')
-            os.mkdir(temp_dir)
-            with TemporaryFileName(dir=temp_dir.name) as fname:
+            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
-            os.rmdir(temp_dir)
 
         def test_torch_from_file(self):
             def assert_with_filename(filename):
@@ -3150,11 +3147,8 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            temp_dir = os.path.join(tempfile.gettempdir(), '中文')
-            os.mkdir(temp_dir)
-            with TemporaryFileName(dir=temp_dir.name) as fname:
+            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
-            os.rmdir(temp_dir)
 
         def test_print(self):
             default_type = torch.Tensor().type()
