@@ -4990,8 +4990,16 @@ class TestONNXRuntime(unittest.TestCase):
         ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
-
         [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
+        
+        model_export = torch.jit.script(MyModule())
+        ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
+                                   example_outputs=out,
+                                   training=torch.onnx.TrainingMode.TRAINING,
+                                   use_new_jit_passes=True, onnx_shape_inference=True)
+        ort_outs = run_ort(ort_sess, input=(x,))
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in
+         zip(pytorch_out, ort_outs)]
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training(self):
