@@ -276,7 +276,7 @@ class PartialBalancedBatchSampler(Sampler[List[int]]):
 
         len_classes_dataset = [len(i) for i in self.dataset.values()]
         if self.balanced_classes >= any(len_classes_dataset):
-            raise Exception('Number of balanced classes should be less than '+str(min(len_classes_dataset)))
+            raise Exception('Number of balanced classes should be less than ', str(min(len_classes_dataset)))
 
         rand_tensor = []
         while all(self.dataset.values()):
