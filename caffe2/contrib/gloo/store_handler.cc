@@ -5,12 +5,13 @@ namespace gloo {
 
 void StoreHandlerWrapper::set(
     const std::string& key,
-    const std::vector<char>& data) {
+    const std::vector<char>& data,
+    bool /* unused */) {
   std::string stringValue(data.data(), data.size());
   handler_.set(key, stringValue);
 }
 
-std::vector<char> StoreHandlerWrapper::get(const std::string& key) {
+std::vector<char> StoreHandlerWrapper::get(const std::string& key, bool /* unused */) {
   std::string str = handler_.get(key);
   return std::vector<char>(str.begin(), str.end());
 }
