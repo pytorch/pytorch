@@ -258,6 +258,11 @@ struct _if_constexpr<false> final {
  * Note: In Example 3, both branches return int, so func() returns int. This is not necessary.
  *       If func() had a return type of "auto", then both branches could return different
  *       types, say func<MyClass1>() could return int and func<MyClass2>() could return string.
+ *
+ * Note: if_constexpr<cond, t, f> is *eager* w.r.t. template expansion - meaning this
+ *       polyfill does not behave like a true "if statement at compilation time".
+ *       The `_` trick above only defers typechecking, which happens after templates
+ *       have been expanded. (Of course this is all that's necessary for many use cases).
  */
 template<bool Condition, class ThenCallback, class ElseCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {

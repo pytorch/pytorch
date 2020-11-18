@@ -455,8 +455,6 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
 endif()
 
 # ---[ Utils
-# TODO: merge the following 3 files into cmake/public/utils.cmake.
-include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
@@ -722,6 +720,8 @@ endif()
 if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
   if(CMAKE_COMPILER_IS_GNUCXX)
     string(APPEND CMAKE_CXX_FLAGS " -s")
+  elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_CXX_FLAGS " -g0")
   else()
     string(APPEND CMAKE_EXE_LINKER_FLAGS " -s")
   endif()
