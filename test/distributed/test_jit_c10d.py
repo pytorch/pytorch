@@ -95,7 +95,7 @@ class ProcessGroupNCCLJitTest(TestCase):
 
         @torch.jit.script
         def run_pg_nccl_alltoall(
-            pg: torch.classes.dist_c10d.ProcessGroupNCCL,
+            pg: torch.classes.dist_c10d.ProcessGroup,
             output: torch.Tensor,
             input: torch.Tensor
         ):
