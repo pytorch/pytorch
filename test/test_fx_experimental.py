@@ -248,7 +248,6 @@ class TestFXExperimental(JitTestCase):
 
         self.assertEqual(fused(inp), rn18(inp))
 
-
     def test_call_to_assert_no_msg(self):
 
         class M(torch.nn.Module):
