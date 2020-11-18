@@ -186,6 +186,10 @@ int64_t DistributedC10d::getGroupSize(
   return it->second.size();
 }
 
+void DistributedC10d::checkDefaultPg() const {
+  TORCH_CHECK(default_pg_, "Default process group is not initialized");
+}
+
 c10::intrusive_ptr<ProcessGroup> DistributedC10d::worldProcessGroup() {
   checkDefaultPg();
   return default_pg_;
