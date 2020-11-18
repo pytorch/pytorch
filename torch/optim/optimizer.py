@@ -35,18 +35,6 @@ class Optimizer(object):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
-        def _step_with_profile(func, class_name):
-            """Wrap self.step under profiler. In order to avoid of instrumenting each sub-class."""
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                name = str.format("{}#{}.{}", "Optimizer.step", class_name, "step")
-                with torch.autograd.profiler.record_function(name):
-                    return func(*args, **kwargs)
-            return wrapper
-        # Using this way could elegantly wrap self.step as a method not function,
-        # which don't influence re-wrapped by _LRScheduler and deepcopy.
-        self.__class__.step = _step_with_profile(self.__class__.step, self.__class__.__name__)
-
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
                             "an iterable of Tensors or dicts, but got " +
@@ -63,6 +51,30 @@ class Optimizer(object):
 
         for param_group in param_groups:
             self.add_param_group(param_group)
+
+    def __new__(cls, *args, **kwargs):
+        self = super(Optimizer, cls).__new__(cls)
+
+        def hook(func_to_hook, profile_type, func_name):
+            profile_name = "{}#{}.{}".format(profile_type, self.__class__.__name__, func_name)
+
+            def _step_with_profile(func, name):
+                @functools.wraps(func)
+                def wrapper(*args, **kwargs):
+                    with torch.autograd.profiler.record_function(name):
+                        return func(*args, **kwargs)
+                return wrapper
+            # Replace method's function, which don't influence re-wrapped by _LRScheduler.
+            return _step_with_profile(func_to_hook, profile_name)
+        if not getattr(self.__class__.step, "hooked", None):  # Each sub class is hooked only once.
+            self.__class__.step = hook(self.__class__.step, "Optimizer.step", "step")
+            self.__class__.step.hooked = True
+        if not getattr(self.__class__.zero_grad, "hooked", None):  # Each sub class is hooked only once.
+            self.__class__.zero_grad = hook(self.__class__.zero_grad, "Optimizer.zero_grad", "zero_grad")
+            self.__class__.zero_grad.hooked = True
+
+        return self
+
 
     def __getstate__(self):
         return {
@@ -192,19 +204,17 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        name = str.format("{}#{}.{}", "Optimizer.zero_grad", self.__class__.__name__, "zero_grad")
-        with torch.autograd.profiler.record_function(name):
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is not None:
-                        if set_to_none:
-                            p.grad = None
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is not None:
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        if p.grad.grad_fn is not None:
+                            p.grad.detach_()
                         else:
-                            if p.grad.grad_fn is not None:
-                                p.grad.detach_()
-                            else:
-                                p.grad.requires_grad_(False)
-                            p.grad.zero_()
+                            p.grad.requires_grad_(False)
+                        p.grad.zero_()
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
