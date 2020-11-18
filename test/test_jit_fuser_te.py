@@ -119,10 +119,15 @@ class TestTEFuser(JitTestCase):
         def func(x):
             return x.sum((0, )) * 2
 
+        def func_neg(x):
+            return x.sum((-2, )) * 2
+
         with texpr_reductions_enabled():
             a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
+            self.assertLastGraphAllFused()
+            scripted = self.checkScript(func_neg, (a,))
             self.assertLastGraphAllFused()
 
     def test_sum_keepdim_cast(self):
