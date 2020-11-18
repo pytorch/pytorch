@@ -1648,6 +1648,13 @@ class TestLinalg(TestCase):
                 self.assertEqual(matrix_rank(aaH, 0.01, True),
                                     np.linalg.matrix_rank(aaH.cpu().numpy(), 0.01, True))
 
+            # check out= variant
+            result = matrix_rank(a)
+            out = torch.empty(a.shape[:-2], dtype=torch.int64, device=device)
+            ans = matrix_rank(a, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
         shapes = (3, 13)
         batches = ((), (4, ), (3, 5, ))
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
