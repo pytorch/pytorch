@@ -327,7 +327,7 @@ Example:
     tensor([ 6.+0.j, -2.+2.j, -2.+0.j, -2.-2.j])
 
     Notice that the symmetric element ``T[-1] == T[1].conj()`` is omitted.
-    At the Nyquist frequency ``T[-2] == T[2]`` is it's own symmetric pair,
+    At the Nyquist frequency ``T[-2] == T[2]`` is its own symmetric pair,
     and therefore must always be real-valued.
 """)
 

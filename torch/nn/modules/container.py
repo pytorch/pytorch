@@ -19,7 +19,7 @@ class Container(Module):
     def __init__(self, **kwargs: Any) -> None:
         super(Container, self).__init__()
         # DeprecationWarning is ignored by default <sigh>
-        warnings.warn("nn.Container is deprecated. All of it's functionality "
+        warnings.warn("nn.Container is deprecated. All of its functionality "
                       "is now implemented in nn.Module. Subclass that instead.")
         for key, value in kwargs.items():
             self.add_module(key, value)
@@ -243,9 +243,9 @@ class ModuleDict(Module):
 
     * the order of insertion, and
 
-    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged 
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
       ``OrderedDict``, ``dict`` (started from Python 3.6) or another
-      :class:`~torch.nn.ModuleDict` (the argument to 
+      :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
