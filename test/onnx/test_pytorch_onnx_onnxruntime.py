@@ -3240,6 +3240,28 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_chunk(self):
+        class ChunkModel(torch.nn.Module):
+            def __init__(self):
+                super(ChunkModel, self).__init__()
+
+            def forward(self, x):
+                return torch.chunk(x, 3, dim=1)
+
+        model = ChunkModel()
+        model.eval()
+        f = io.BytesIO()
+        x = torch.randn(1, 18)
+
+        ort_sess = convert_to_onnx(model, input=(x,), opset_version=self.opset_version, input_names=['x'],
+            dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
+        for dim_size_ in range(13, 16):
+            y = torch.randn(1, dim_size_)
+            pytorch_out = model(y)
+            ort_outs = run_ort(ort_sess, input=(y,))
+            [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
+
     def test_concat(self):
         class ConcatModel(torch.nn.Module):
             def forward(self, x, y, z):
