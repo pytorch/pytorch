@@ -49,11 +49,11 @@ void assertReduceOpSupportsComplexTensor(ReduceOp op) {
 }  // namespace anonymous
 
 std::string Backend::get(const std::string& backend_type) {
-	return backend_type;
+  return backend_type;
 }
 
 void Backend::registerBackend() {
-	TORCH_CHECK(false, "Registering third-party backend is currently not supported by TorchScript-friendly c10d");
+  TORCH_CHECK(false, "Registering third-party backend is currently not supported by TorchScript-friendly c10d");
 }
 
 // Note: We assume that group.WORLD equates default_pg_. Otherwise,
