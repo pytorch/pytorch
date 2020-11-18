@@ -35,7 +35,7 @@ namespace native {
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
-static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
+static inline void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
   offset2bag.index_add_(
       0, offsets, at::ones_like(offsets, LEGACY_CONTIGUOUS_MEMORY_FORMAT)); // offset2bag = [1 0 1 0 1]
   offset2bag[0] -= 1;                     // offset2bag = [0 0 1 0 1]
@@ -79,7 +79,7 @@ bool is_fast_path(const Tensor& src, const c10::optional<Tensor>& scale, Tensor&
 
 // This function combines index_select (using select_indices as the index) and
 // index_add (using add_indices as the index), without creating an intermediary
-// tensor to hold the selected embeddings
+// tensor to hold the selected embeddings.
 template<typename data_t, typename index_t>
 typename std::enable_if<!std::is_same<data_t, float>::value, void>::type
 index_select_add(const Tensor &select_indices,
@@ -791,6 +791,134 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
       /*requires_grad=*/true);
 }
 
+inline Tensor _embedding_bag_sparse_backward_cpu_sum_fast(const Tensor grad, const Tensor indices,
+  const Tensor offsets, int64_t num_weights, int64_t mode) {
+
+  AT_ASSERT((mode == MODE_SUM) && (grad.scalar_type() == kFloat) && (grad.stride(1) == 1));
+
+  int64_t indices_size0 = indices.size(0);
+  int64_t ddim = grad.size(1);
+  Tensor index_grad = at::empty({indices_size0, ddim}, grad.options());
+  float* gradout_data = index_grad.data_ptr<float>();
+
+  auto offsets_accessor = offsets.accessor<int64_t, 1>();
+  int64_t offset_numel = offsets.numel();
+
+  float* grad_data = grad.data_ptr<float>();
+  int grad_stride0 = grad.stride(0);
+  at::parallel_for(0, offset_numel, 0, [&](int64_t start, int64_t end) {
+    for(auto mb = start; mb < end; mb++) {
+      int64_t select_off_start = offsets_accessor[mb];
+      int64_t select_off_end = (mb < (offset_numel - 1) ? offsets_accessor[mb + 1] : indices_size0);
+      float* grad_block = grad_data + grad_stride0 * mb;;
+      for (int64_t s = select_off_start; s < select_off_end; s++) {
+        at::native::cpublas::copy<float>(ddim, grad_block, 1, gradout_data + ddim * s, 1);
+      }
+   }
+  });
+
+  int64_t num_features = index_grad.size(-1);
+  auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
+  auto dense_options = index_grad.options();
+  if (index_grad.numel() == 0) {
+    return at::_sparse_coo_tensor_unsafe(at::empty({1, 0}, indices.options()),
+                                         at::empty({0, num_features}, dense_options),
+                                         weight_size);
+  }
+
+  auto index = indices.reshape({1, -1});
+  auto values = index_grad.reshape({-1, num_features});
+  return at::_sparse_coo_tensor_unsafe(index, values, weight_size);
+}
+
+static inline int64_t
+count_and_map_uniq(TensorAccessor<int64_t, 1>& indices_accessor, int64_t indices_length, int64_t* indices_to_index) {
+  int64_t u = 0;
+  for (int64_t i = 0; i < indices_length; i++) {
+    int64_t indices = indices_accessor[i];
+    if (indices_to_index[indices] == -1ull) {
+      indices_to_index[indices] = u;
+      u++;
+    }
+  }
+  return u;
+}
+
+Tensor _embedding_bag_dense_backward_cpu_sum_fast(const Tensor grad, const Tensor indices,
+  const Tensor offsets, int64_t num_weights, int64_t mode) {
+
+  int64_t indices_numel = indices.numel();
+  AT_ASSERT((mode == MODE_SUM) && (grad.scalar_type() == kFloat) && (grad.stride(1) == 1) && indices_numel > 0);
+
+  int64_t offset_numel = offsets.numel();
+  auto indices_accessor = indices.accessor<int64_t, 1>();
+  at::Tensor offset2bag_ ;
+  if (offset_numel != indices_numel) {
+    offset2bag_ = at::zeros({indices.sizes()[0] + 1}, offsets.options());
+    make_offset2bag(offsets, offset2bag_);
+    offset2bag_.resize_({indices.sizes()[0]});
+  } else {
+    offset2bag_ = offsets;
+  }
+
+  std::vector<int64_t> indices_to_index(num_weights, -1ull);
+  int64_t unique_indices = count_and_map_uniq(indices_accessor, indices_numel, indices_to_index.data());
+
+  int max_threads = at::get_num_threads();
+  max_threads = (unique_indices < max_threads) ? unique_indices : max_threads;
+  int64_t avg_chunk_down = unique_indices / max_threads;
+  int64_t chuck_size[max_threads];
+  for (auto i = 0; i < max_threads; i++) {
+    chuck_size[i] = avg_chunk_down;
+  }
+  //make chunk balance among threads as 211
+  for (auto i = 0 ; i < unique_indices % max_threads ; i++) {
+    chuck_size[i] += 1;
+  }
+
+  int64_t chuck_sum_size[max_threads + 1];
+  chuck_sum_size[0] = 0;
+  for (auto i = 1; i < max_threads; i++) {
+    chuck_sum_size[i] = chuck_sum_size[i - 1] + chuck_size[i - 1];
+  }
+  chuck_sum_size[max_threads] = unique_indices;
+
+  int64_t ddim = grad.size(1);
+  Tensor index_grad_weight = at::zeros({num_weights, ddim}, grad.options());
+  auto offset2bag_accessor = offset2bag_.accessor<int64_t, 1>();
+  float* grad_data = grad.data_ptr<float>();
+  float* gradout_data = index_grad_weight.data_ptr<float>();
+  at::parallel_for(0, max_threads, 0, [&](int64_t start, int64_t end) {
+    for(int k = start; k < end; k++) {
+      int64_t chunk_start = chuck_sum_size[k];
+      int64_t chunk_end = chuck_sum_size[k + 1];
+      for (int64_t mb = 0; mb < indices_numel; mb++) {
+        int64_t indices_num = indices_accessor[mb];
+        int64_t index = indices_to_index[indices_num];
+        if (index >= chunk_start && index < chunk_end) {
+          int64_t s = offset2bag_accessor[mb];
+          at::native::cpublas::axpy<float>(ddim, 1.0, grad_data + ddim * s, 1, gradout_data + ddim * indices_num, 1);
+        }
+      }
+    }
+  });
+
+  return index_grad_weight;
+}
+
+// To save compute, if we are going to go down the fast path case for the 'sum'
+// mode, we skip calculating offset2bag, since it is not going to be used.
+static inline bool _embedding_bag_fast_path_sum(const Tensor grad, const Tensor indices,
+  const Tensor offset2bag, const Tensor per_sample_weights, bool scale_grad_by_freq, int64_t mode) {
+
+  if (grad.device().type() != kCPU || (at::get_num_threads() == 1)) return false;
+  if ((mode != MODE_SUM) || (grad.scalar_type() != kFloat)) return false;
+  if ((offset2bag.numel() != 0) || (indices.numel() < 1)) return false;
+  if ((grad.stride(1) != 1) || per_sample_weights.defined() || scale_grad_by_freq) return false;
+
+  return true;
+}
+
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
@@ -815,6 +943,14 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
   checkScalarTypes("embedding_bag", offsets_arg, {kLong, kInt});
   checkSameType("embedding_bag", indices_arg, offsets_arg);
   checkContiguous("embedding_bag", offsets_arg);
+
+  if (_embedding_bag_fast_path_sum(grad, indices, offset2bag, per_sample_weights, scale_grad_by_freq, mode)) {
+    if (sparse) {
+      return _embedding_bag_sparse_backward_cpu_sum_fast(grad, indices, offsets, num_weights, mode);
+    } else {
+      return _embedding_bag_dense_backward_cpu_sum_fast(grad.contiguous(), indices, offsets, num_weights, mode);
+    }
+  }
 
   Tensor offset2bag_;
   if (indices.numel() != 0 && offset2bag.numel() == 0) {
