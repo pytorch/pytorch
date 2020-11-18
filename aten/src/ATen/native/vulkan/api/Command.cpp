@@ -71,15 +71,13 @@ VkCommandBuffer allocate_command_buffer(
 } // namespace
 
 Command::Buffer::Buffer()
-  : command_buffer_(VK_NULL_HANDLE),
-    bound_{} {
+  : command_buffer_(VK_NULL_HANDLE) {
 }
 
 Command::Buffer::Buffer(
     const VkDevice device,
     const VkCommandPool command_pool)
-  : command_buffer_(allocate_command_buffer(device, command_pool)),
-    bound_{} {
+  : command_buffer_(allocate_command_buffer(device, command_pool)) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "Invalid Vulkan command buffer!");
@@ -103,6 +101,7 @@ void Command::Buffer::Buffer::begin() {
       &command_buffer_begin_info));
 
   // Reset
+  barriers_ = {};
   bound_ = {};
 }
 
@@ -115,70 +114,82 @@ void Command::Buffer::Buffer::end() {
   VK_CHECK(vkEndCommandBuffer(command_buffer_));
 }
 
-void Command::Buffer::barrier(
-    const Pipeline::Barrier& barrier) {
+void Command::Buffer::barrier() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
-  c10::SmallVector<VkMemoryBarrier, 1u> global_memory_barriers;
-  c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
+  if (barriers_.stage) {
+    c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
 
-  if (!barrier.buffers.empty()) {
-    // Using global memory barriers instead of buffer memory barriers for
-    // buffers.  The consensus seems to be that there is no advantage in
-    // using the latter in favor of the former.
-
-    VkMemoryBarrier global_memory_barrier{
-      VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-      nullptr,
-      0u,
-      0u,
-    };
-
-    // Coalesce all buffer memory barriers into one global memory barrier.
-
-    for (const Resource::Buffer::Barrier& barrier : barrier.buffers) {
-      global_memory_barrier.srcAccessMask |= barrier.memory.src;
-      global_memory_barrier.dstAccessMask |= barrier.memory.dst;
+    for (const Resource::Buffer::Barrier& barrier : barriers_.buffers) {
+      buffer_memory_barriers.push_back({
+            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            nullptr,
+            barrier.memory.src,
+            barrier.memory.dst,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            barrier.object.handle,
+            barrier.object.offset,
+            barrier.object.range,
+          });
     }
 
-    global_memory_barriers.push_back(global_memory_barrier);
+    c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
+
+    for (const Resource::Image::Barrier& barrier : barriers_.images) {
+      image_memory_barriers.push_back({
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            barrier.memory.src,
+            barrier.memory.dst,
+            barrier.layout.src,
+            barrier.layout.dst,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            barrier.object.handle,
+            VkImageSubresourceRange{
+              VK_IMAGE_ASPECT_COLOR_BIT,
+              0u,
+              VK_REMAINING_MIP_LEVELS,
+              0u,
+              VK_REMAINING_ARRAY_LAYERS,
+            },
+          });
+    }
+
+    vkCmdPipelineBarrier(
+        command_buffer_,
+        barriers_.stage.src,
+        barriers_.stage.dst,
+        0u,
+        0u,
+        nullptr,
+        buffer_memory_barriers.size(),
+        buffer_memory_barriers.data(),
+        image_memory_barriers.size(),
+        image_memory_barriers.data());
   }
 
-  for (const Resource::Image::Barrier& barrier : barrier.images) {
-    image_memory_barriers.push_back({
-          VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-          nullptr,
-          barrier.memory.src,
-          barrier.memory.dst,
-          barrier.layout.src,
-          barrier.layout.dst,
-          VK_QUEUE_FAMILY_IGNORED,
-          VK_QUEUE_FAMILY_IGNORED,
-          barrier.object.handle,
-          VkImageSubresourceRange{
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0u,
-            VK_REMAINING_MIP_LEVELS,
-            0u,
-            VK_REMAINING_ARRAY_LAYERS,
-          },
-        });
-  }
+  // Reset
+  barriers_ = {};
+}
 
-  vkCmdPipelineBarrier(
-      command_buffer_,
-      barrier.stage.src,
-      barrier.stage.dst,
-      0u,
-      global_memory_barriers.size(),
-      global_memory_barriers.data(),
-      0u,
-      nullptr,
-      image_memory_barriers.size(),
-      image_memory_barriers.data());
+void Command::Buffer::barrier(const Pipeline::Barrier& barrier) {
+  barriers_.stage.src |= barrier.stage.src;
+  barriers_.stage.dst |= barrier.stage.dst;
+
+  barriers_.buffers.insert(
+      barriers_.buffers.end(),
+      barrier.buffers.begin(),
+      barrier.buffers.end());
+
+  barriers_.images.insert(
+      barriers_.images.end(),
+      barrier.images.begin(),
+      barrier.images.end());
 }
 
 void Command::Buffer::bind(
@@ -246,6 +257,9 @@ void Command::Buffer::copy(
       destination,
       "Invalid Vulkan destination buffer!");
 
+  // Flush pending barriers.
+  barrier();
+
   const VkBufferCopy buffer_copy{
     0u,
     0u,
@@ -266,6 +280,9 @@ void Command::Buffer::dispatch(
       command_buffer_,
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
+
+  // Flush pending barriers.
+  barrier();
 
   vkCmdDispatch(
       command_buffer_,

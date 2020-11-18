@@ -6,29 +6,6 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-VkDeviceSize bytes(
-    const IntArrayRef sizes,
-    const caffe2::TypeMeta dtype) {
-  VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
-
-  // Forward declaration
-  bool requires_image(IntArrayRef);
-
-  if (requires_image(sizes)) {
-    // Forward declaration
-    VkExtent3D image_extents(IntArrayRef);
-
-    const VkExtent3D extents = image_extents(sizes);
-    size *= extents.width * extents.height * (4u * extents.depth);
-  }
-  else {
-    size *= prod_intlist(sizes);
-  }
-
-  return size;
-}
-
-
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -162,6 +139,28 @@ VkPipelineStageFlags vk_stage(
   return vk_stage;
 }
 
+VkDeviceSize buffer_bytes(
+    const IntArrayRef sizes,
+    const caffe2::TypeMeta dtype) {
+  VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
+
+  // Forward declaration
+  bool requires_image(IntArrayRef);
+
+  if (requires_image(sizes)) {
+    // Forward declaration
+    VkExtent3D image_extents(IntArrayRef);
+
+    const VkExtent3D extents = image_extents(sizes);
+    size *= extents.width * extents.height * (4u * extents.depth);
+  }
+  else {
+    size *= prod_intlist(sizes);
+  }
+
+  return size;
+}
+
 vTensor::Buffer allocate_buffer(
     const api::Adapter* const adapter,
     api::Resource::Pool* const pool,
@@ -203,7 +202,7 @@ vTensor::Buffer allocate_buffer(
   }();
 
   return pool->buffer({
-      bytes(sizes, options.dtype()),
+      buffer_bytes(sizes, options.dtype()),
       // Usage
       {
         usage,
@@ -320,7 +319,7 @@ vTensor::Buffer allocate_staging(
   verify(options);
 
   return pool->buffer({
-      bytes(sizes, options.dtype()),
+      buffer_bytes(sizes, options.dtype()),
       // Usage
       {
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -582,9 +581,10 @@ class vTensor::View::CMD final {
     External,
   } type;
 
-  union {
+  union _ final {
     api::Command::Buffer internal;
     api::Command::Buffer* external;
+    ~_() {}
   } command_buffer_;
 };
 
@@ -1185,7 +1185,7 @@ vTensor::View::State::transition(const Bundle bundle) {
     to.image = bundle.image;
   }
 
-#ifdef DEBUG
+// #ifdef DEBUG
   // Forward declaration
   std::ostream& operator<<(
       std::ostream&,
@@ -1193,7 +1193,7 @@ vTensor::View::State::transition(const Bundle bundle) {
 
   std::cout << "From:" << std::endl << from << std::endl;
   std::cout << "To:" << std::endl << to << std::endl;
-#endif /* DEBUG */
+// #endif /* DEBUG */
 
   return Transition{
     from,
