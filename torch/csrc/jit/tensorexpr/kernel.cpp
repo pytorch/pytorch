@@ -144,15 +144,13 @@ ExprHandle TensorExprKernel::chunk(
     int64_t dim,
     int64_t chunks,
     const std::vector<ExprHandle>& axes) {
-  if (dim < 0) {
-    dim = axes.size() + dim;
-  }
+  auto norm_dim = normalizeAndCheckIndex(dim, axes.size());
   auto sizes = bufferSizes(t);
-  size_t step = sizes[dim] / chunks;
+  size_t step = sizes[norm_dim] / chunks;
 
   std::vector<ExprHandle> indices;
   for (size_t i = 0; i < axes.size(); ++i) {
-    if (i == dim) {
+    if (i == norm_dim) {
       indices.push_back(axes[i] + IntImm::make((int)chunkIdx * (int)step));
     } else {
       indices.push_back(axes[i]);
