@@ -1,5 +1,5 @@
 import torch.fx as fx
-from torch.nn.utils.fusion import fuse_conv_bn_eval
+from torch.nn.utils.fusion import fuse_conv_bn_weights
 from typing import Type, Dict, Any, Tuple, Iterable
 import torch
 import copy
@@ -31,19 +31,26 @@ def matches_module_pattern(pattern: Iterable[Type], node: fx.Node, modules: Dict
     return True
 
 
-def fuse(model: torch.nn.Module) -> torch.nn.Module:
+def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
     patterns = [(torch.nn.Conv1d, torch.nn.BatchNorm1d), (torch.nn.Conv2d, torch.nn.BatchNorm2d), (torch.nn.Conv3d, torch.nn.BatchNorm3d)]
-    model = fx.symbolic_trace(model)
+    if not inplace:
+        model = copy.deepcopy(model)
+    fx_model = fx.symbolic_trace(model)
     modules = dict(model.named_modules())
-    new_graph = copy.deepcopy(model.graph)
+
+    def fuse_conv_bn(conv, bn):
+        return fuse_conv_bn_weights(conv.weight, conv.bias,
+                                    bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
     for pattern in patterns:
-        for node in new_graph.nodes:
+        for node in fx_model.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
                     continue
-                fused_conv = fuse_conv_bn_eval(modules[node.args[0].target], modules[node.target])
-                parent_name, name = _parent_name(node.args[0].target)
-                setattr(modules[parent_name], name, fused_conv)
-                node.replace_all_uses_with(node.args[0])
-                new_graph.erase_node(node)
-    return fx.GraphModule(dict(model.named_modules()), new_graph)
+                conv = modules[node.args[0].target]
+                bn = modules[node.target]
+                weight, bias = fuse_conv_bn(conv, bn)
+                modules[node.args[0].target].weight = weight
+                modules[node.args[0].target].bias = bias
+                parent_name, name = _parent_name(node.target)
+                setattr(modules[parent_name], name, torch.nn.Identity())
+    return model
