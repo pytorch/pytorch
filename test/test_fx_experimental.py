@@ -607,6 +607,7 @@ terrible spacing
         a, b, c, d = torch.ones(4), torch.ones(4), torch.ones(4), torch.ones(4)
         mm = MyModule()
         traced = symbolic_trace(mm)
+
         def split_cb(node : torch.fx.Node):
             if node.name == 'a' or node.name == 'b' or node.name == 'add_1':
                 return 0
