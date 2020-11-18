@@ -845,15 +845,16 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
   // 1’s to it to keep the same behaviour as `numpy.tile`.
   // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
   // as (1, 1, 2, 2).
-  int64_t size_diff = self.dim() - (int64_t)reps.size();
+  const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
   if (size_diff > 0){
     std::vector<int64_t> new_reps(size_diff, 1);
-    for(int i = 0; i < reps.size(); ++i)
+    for(auto i = decltype(reps.size()){0}; i < reps.size(); ++i){
       new_reps.emplace_back(reps[i]);
-    reps = IntArrayRef(&new_reps[0], (size_t)self.dim());
+    }
+    return at::native::repeat(self, IntArrayRef(new_reps));
   }
   // `torch.tile` is equivalent to the already implemented `torch.Tensor.repeat`
-  return repeat(self, reps);
+  return at::native::repeat(self, reps);
 }
 
 Tensor alias_with_sizes_and_strides(

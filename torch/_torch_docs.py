@@ -9904,18 +9904,16 @@ add_docstr(torch.tile,
            r"""
 tile(input, reps) -> Tensor
 
-Construct a Tensor by repeating the elements of the input tensor the number of times given by reps.
+Constructs a tensor by repeating the elements of an :attr:`input`'s dimension 
+the number of times given by the value of :attr:`reps`'s dimension.
 
 .. note::
 
-    This is similar to ``numpy.tile``.
+    This function is similar to NumPy's tile function.
 
 Args:
-    input (Tensor): A tensor whose elements to repeat.
-    reps (tuple): The number of repetitions per dimension.
-
-Returns:
-    Tensor: Tiled tensor.
+    input (Tensor): the tensor whose elements to repeat.
+    reps (tuple): the number of repetitions per axis.
 
 Example::
 

@@ -2435,21 +2435,6 @@ class AbstractTestCases:
                     self.assertEqual(tensor.repeat(*repeat).numpy(),
                                      np.tile(tensor.numpy(), repeat))
 
-        @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-        def test_tile(self):
-            initial_shape = (8, 4, 3)
-            reps = ((3, 1, 1),
-                    (3, 3, 3),
-                    (1, 2, 1),
-                    (2, 2, 2, 2),
-                    (2, 2),
-                    (2,),
-                    (1, 2, 0))
-            tensor = torch.from_numpy(np.random.random(initial_shape))
-            for dims in reps:
-                self.assertEqual(torch.tile(tensor, dims).numpy(),
-                                 np.tile(tensor.numpy(), dims))
-
         def test_is_same_size(self):
             t1 = torch.Tensor(3, 4, 9, 10)
             t2 = torch.Tensor(3, 4)
@@ -6059,6 +6044,27 @@ class TestTorchDeviceType(TestCase):
         expected = xp.numpy().diagonal(0, -2, -1)
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
+
+    @onlyOnCPUAndCUDA
+    def test_tile(self, device):
+        shapes = ((6, 4, 3),
+                  (1,),
+                  ())
+        reps = ((1, 10, 10, 99),
+                (25, 1, 1),
+                (3, 3, 3),
+                (1, 2, 0),
+                (2, 2),
+                (2,),
+                (1,),
+                ())
+        for shape in shapes:
+            tensor = torch.randn(shape, device=device)
+            for t in (tensor, tensor.T):
+                for dims in reps:
+                    expected = np.tile(t.numpy(), dims)
+                    result = torch.tile(t, dims).numpy()
+                    self.assertEqual(expected, result)
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
