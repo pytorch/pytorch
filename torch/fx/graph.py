@@ -13,7 +13,7 @@ def _shadows_builtin_name(name: str) -> bool:
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
 
-def snake_case(s: str) -> str:
+def _snake_case(s: str) -> str:
     return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
 
 def get_qualified_name(func: Callable[..., Any]) -> str:
@@ -108,6 +108,69 @@ class _node_list:
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
 
 class Graph:
+    """
+    `Graph` is the main data structure used in the FX Intermediate Representation.
+    It consists of a series of `Node`s, each representing callsites (or other
+    syntactic constructs). The list of `Node`s, taken together, constitute a
+    valid Python function.
+
+    For example, the following code
+
+    ```
+    import torch
+    from torch.fx import symbolic_trace
+
+    class MyModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.param = torch.nn.Parameter(torch.rand(3, 4))
+            self.linear = torch.nn.Linear(4, 5)
+
+        def forward(self, x):
+            return torch.topk(torch.sum(self.linear(x + self.linear.weight).relu(), dim=-1), 3)
+
+    m = MyModule()
+    gm = symbolic_trace(m)
+    ```
+
+    Will produce the following Graph:
+
+    ```
+    print(gm.graph)
+    ```
+
+    ```
+    graph(x):
+        %linear_weight : [uses=1] = self.linear.weight
+        %add_1 : [uses=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
+        %linear_1 : [uses=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
+        %relu_1 : [uses=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
+        %sum_1 : [uses=1] = call_function[target=<built-in method sum of type object at 0x7fad0a3c16a0>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
+        %topk_1 : [uses=1] = call_function[target=<built-in method topk of type object at 0x7fad0a3c16a0>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
+        return topk_1
+    ```
+
+    The Node semantics are as follows:
+
+    - `placeholder` represents a function input. The `name` attribute specifies the name this value will take on.
+    `target` is similarly the name of the argument. `args` holds either: 1) nothing, or 2) a single argument
+    denoting the default parameter of the function input. `kwargs` is don't-care. Placeholders correspond to
+    the function parameters (e.g. `x`) in the graph printout.
+    - `get_attr` retrieves a parameter from the module hierarchy. `name` is similarly the name the result of the
+    fetch is assigned to. `target` is the fully-qualified name of the parameter's position in the module hierarchy.
+    `args` and `kwargs` are don't-care
+    - `call_function` applies a free function to some values. `name` is similarly the name of the value to assign
+    to. `target` is the function to be applied. `args` and `kwargs` represent the arguments to the function,
+    following the Python calling convention
+    - `call_module` applies a module in the module hierarchy's `forward()` method to given arguments. `name` is
+    as previous. `target` is the fully-qualified name of the module in the module hierarchy to call.
+    `args` and `kwargs` represent the arguments to invoke the module on, _including the self argument_.
+    - `call_method` calls a method on a value. `name` is as similar. `target` is the string name of the method
+    to apply to the `self` argument. `args` and `kwargs` represent the arguments to invoke the module on,
+    _including the self argument_.
+    - `output` contains the output of the traced function in its `args[0]` attribute. This corresponds to the "return" statement
+    in the Graph printout.
+    """
     def __init__(self):
         """
         Construct an empty Graph.
@@ -118,7 +181,13 @@ class Graph:
         self._len = 0
 
     @property
-    def nodes(self):
+    def nodes(self) -> _node_list:
+        """
+        Get the list of `Node`s that constitute this Graph.
+
+        Note that this `Node` list representation is a doubly-linked list. Mutations
+        during iteration (e.g. delete a Node, add a Node) are safe.
+        """
         return _node_list(self)
 
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Optional[Argument]:
@@ -156,6 +225,21 @@ class Graph:
                     kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None,
                     type_expr: Optional[Any] = None) -> Node:
+        """
+        Create a `Node` and add it to the `Graph` at the current insert-point.
+        Note that the current insert-point can be set via `Graph.inserting_before`
+        and `Graph.inserting_after`.
+
+        - op is the opcode for this Node. One of 'call_function', 'call_method', 'get_attr',
+          'call_module', 'placeholder', or 'output'. The semantics of these opcodes are
+          described in the `Graph` docstring.
+        - args is a tuple of arguments to this node.
+        - kwargs is a dict from string to argument, representing the kwargs of this Node
+        - name is an optional string name for the `Node`. This will influence the name
+          of the value assigned to in the Python generated code.
+        - type_expr is an optional type annotation representing the Python type
+          the output of this node will have.
+        """
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
@@ -177,6 +261,15 @@ class Graph:
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
+
+        # Null out this Node's argument nodes so that the Nodes referred to
+        # can update their `users` accordingly
+        new_args = map_arg(to_erase.args, lambda n: None)
+        assert isinstance(new_args, tuple)
+        to_erase.args = new_args
+        new_kwargs = map_arg(to_erase.kwargs, lambda n: None)
+        assert isinstance(new_kwargs, dict)
+        to_erase.kwargs = new_kwargs
 
     def inserting_before(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
@@ -224,16 +317,49 @@ class Graph:
 
     # sugar for create_node when you know the op
     def placeholder(self, name: str, type_expr: Optional[Any] = None) -> Node:
+        """
+        Insert a `placeholder` node into the Graph. A `placeholder` represents
+        a function input. This function takes a string `name` for the input
+        value as well as an optional `type_expr`, which is a type expression
+        describing the type of value this input will take. The type expression
+        is needed in some cases for proper code generation.
+
+        The same insertion point rules apply for this method as `Graph.create_node`.
+        """
         return self.create_node('placeholder', name, type_expr=type_expr)
 
-    def get_attr(self, name: str, type_expr: Optional[Any] = None) -> Node:
-        return self.create_node('get_attr', name, type_expr=type_expr)
+    def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
+        """
+        Insert a `get_attr` node into the Graph. A `get_attr` `Node` represents the
+        fetch of an attribute from the `Module` hierarchy. `qualified_name` is the
+        fully-qualified name of the attribute to be retrieved. For example, if
+        the traced Module has a submodule named `foo`, which has a submodule named
+        `bar`, which has an attribute named `baz`, the qualified name `foo.bar.baz`
+        should be passed as `qualified_name`.
+
+        The same insertion point and type expression rules apply for this method
+        as `Graph.create_node`.
+        """
+        return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
     def call_module(self,
                     module_name: str,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
                     type_expr: Optional[Any] = None) -> Node:
+        """
+        Insert a `call_module` `Node` into the `Graph`. A `call_module` node
+        represents a call to the forward() function of a `Module` in the `Module`
+        hierarchy. For example, if the traced `Module` has a submodule named `foo`,
+        which has a submodule named `bar`, the qualified name `foo.bar` should
+        be passed as `module_name` to call that module.
+
+        `args` and `kwargs` represent the args and kwargs passed to the called
+        `Module`, respectively.
+
+        The same insertion point and type expression rules apply for this method
+        as `Graph.create_node`.
+        """
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
     def call_method(self,
@@ -241,6 +367,18 @@ class Graph:
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
                     type_expr: Optional[Any] = None) -> Node:
+        """
+        Insert a `call_method` `Node` into the `Graph`. A `call_method` node
+        represents a call to a given method on the 0th element of `args.
+        For example, if args[0] is a `Node` representing a `Tensor`, then to call
+        `relu()` on that `Tensor`, pass `relu` to `method_name`.
+
+        `args` and `kwargs` represent the args and kwargs passed to the called
+        method, respectively.
+
+        The same insertion point and type expression rules apply for this method
+        as `Graph.create_node`.
+        """
         return self.create_node('call_method', method_name, args, kwargs, type_expr=type_expr)
 
     def call_function(self,
@@ -248,10 +386,22 @@ class Graph:
                       args: Optional[Tuple[Argument, ...]] = None,
                       kwargs: Optional[Dict[str, Argument]] = None,
                       type_expr: Optional[Any] = None) -> Node:
+        """
+        Insert a `call_function` `Node` into the `Graph`. A `call_function` node
+        represents a call to a Python callable, specified by `the_function`. `the_function`
+        can be any PyTorch operator, Python function, or member of the `builtins`
+        or `operator` namespaces.
+
+        `args` and `kwargs` represent the args and kwargs passed to the called
+        method, respectively.
+
+        The same insertion point and type expression rules apply for this method
+        as `Graph.create_node`.
+        """
         return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
     def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x) -> Node:
-        """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
+        """ Copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
             to the graph of self. Example:
 
             g : torch.fx.Graph = ...
@@ -281,6 +431,14 @@ class Graph:
         return self.create_node(node.op, node.target, args, kwargs, name, node.type)
 
     def output(self, result: Argument, type_expr: Optional[Any] = None):
+        """
+        Insert an `output` `Node` into the `Graph`. An `output` node represents
+        a `return` statement in the Python code. `result` is the value that should
+        be returned.
+
+        The same insertion point and type expression rules apply for this method
+        as `Graph.create_node`.
+        """
         return self.create_node(op='output', target='output', args=(result,), type_expr=type_expr)
 
     def _name(self, target: Target) -> str:
@@ -294,7 +452,7 @@ class Graph:
         op = op.replace('.', '_')
         # delete all characters that are illegal in a Python identifier
         op = re.sub('[^0-9a-zA-Z_]+', '_', op)
-        op = snake_case(op)
+        op = _snake_case(op)
         if op[0].isdigit():
             op = f'_{op}'
 
@@ -318,6 +476,9 @@ class Graph:
         return f'{op}_{i}'
 
     def python_code(self, root_module: str) -> str:
+        """
+        Turn this `Graph` into valid Python code.
+        """
         free_vars: List[str] = []
         modules_used : Set[str] = set()
         body: List[str] = []
@@ -385,7 +546,7 @@ class Graph:
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {node.args[0]}')
+                body.append(f'return {repr(node.args[0])}')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
@@ -405,6 +566,10 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
         return fn_code
 
     def __str__(self) -> str:
+        """
+        Print a human-readable (not machine-readable) string representation
+        of this Graph
+        """
         placeholder_names : List[str] = []
         # This is a one-element array just so `format_node` can modify the closed
         # over value
