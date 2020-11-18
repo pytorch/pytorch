@@ -228,6 +228,26 @@ def can_compile_class(cls):
     return all(has_code)
 
 
+def get_annotation_str(annotation):
+    """
+    Convert an AST node containing a type annotation to the string present in the source
+    that represents the same annotation.
+    """
+    if isinstance(annotation, ast.Name):
+        return annotation.id
+    elif isinstance(annotation, ast.Attribute):
+        return '.'.join([get_annotation_str(annotation.value), annotation.attr])
+    elif isinstance(annotation, ast.Subscript):
+        return f"{annotation.value}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
+    elif isinstance(annotation, ast.Tuple):
+        return ','.join([get_annotation_str(elt) for elt in annotation.elts])
+    elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
+        return f"{annotation.value}"
+
+    # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
+    return None
+
+
 def get_type_hint_captures(fn):
     """
     Get a dictionary containing type resolution mappings necessary to resolve types
@@ -240,9 +260,19 @@ def get_type_hint_captures(fn):
         A Dict[str, Any] containing a mapping from the literal annotations used on
         fn to the Python objects they refer to.
     """
+    # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
+    # types are strings. These are only understood by TorchScript in the context of a type annotation
+    # that refers to a class in its own definition, but trying to include a mapping for this in the result
+    # function would cause infinite recursion because the class is currently being compiled.
+    # In addition, there is logic in ScriptTypeParser to handle this.
     signature = inspect.signature(fn)
+    name_to_type = {
+        name: parameter.annotation
+        for name, parameter in signature.parameters.items()
+        if parameter.annotation is not inspect.Parameter.empty and not isinstance(parameter.annotation, str)
+    }
 
-    # First, get the literal type annotations from the function declaration
+    # Then, get the literal type annotations from the function declaration
     # by source inspection. This accounts for the case in which aliases are used
     # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
     src = inspect.getsource(fn)
@@ -253,46 +283,27 @@ def get_type_hint_captures(fn):
         raise RuntimeError(f"Expected {fn} to be a function")
     f = a.body[0]
 
-    # This function converts ast.Name and ast.Attribute nodes to strings.
-    # The latter is how annotations like torch.device are represented; the Attribute
-    # node contains the value "device" and a reference to an ast.Name node containing "torch".
-    def get_annotation_str(annotation):
-        if isinstance(annotation, ast.Name):
-            return annotation.id
-        elif isinstance(annotation, ast.Attribute):
-            return '.'.join([get_annotation_str(annotation.value), annotation.attr])
-        elif isinstance(annotation, ast.Subscript):
-            return f"{annotation.value}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
-        elif isinstance(annotation, ast.Tuple):
-            return ','.join([get_annotation_str(elt) for elt in annotation.elts])
-        elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
-            return f"{annotation.value}"
+    # Prepare a dictionary of source annotation -> type, which will be the final result of this function,
+    # by using the parsed AST (f) to reconstruct source annotations as strings for each parameter and mapping
+    # them to the type object corresponding to the annotation via name_to_type using the parameter name.
+    annotation_to_type = {}
 
-        # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
-        return None
+    for arg in f.args.args:
+        # Get the source type annotation string for this argument if possible.
+        arg_annotation_str = get_annotation_str(arg.annotation) if arg.annotation else None
 
-    # Gather a dictionary of parameter name -> literal annotation, skipping any
-    # that cannot be converted to a string name. They will likely be handled by
-    # ScriptTypeParser.
-    name_to_annotation = {
-        arg.arg: get_annotation_str(arg.annotation)
-        for arg in f.args.args
-        if arg.annotation and get_annotation_str(arg.annotation) is not None
-    }
+        # If the argument has no annotation or get_annotation_str cannot convert it to a string,
+        # arg_annotation_str will be None. Skip this arg; ScriptTypeParser will probably handle
+        # this in the latter case.
+        if arg_annotation_str is None:
+            continue
 
-    # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
-    # types are strings. These are only understood by TorchScript in the context of a type annotation
-    # that refers to a class in its own definition, but trying to include a mapping for this in the result
-    # function would cause infinite recursion because the class is currently being compiled.
-    # In addition, there is logic in ScriptTypeParser to handle this.
-    name_to_type = {
-        name: parameter.annotation
-        for name, parameter in signature.parameters.items()
-        if parameter.annotation is not inspect.Parameter.empty and not isinstance(parameter.annotation, str)
-    }
-
-    # Join the two dictionaries above by key to get a dictionary from literal annotation -> type.
-    annotation_to_type = {annotation: name_to_type[name] for name, annotation in name_to_annotation.items()}
+        # Insert {arg_annotation_str: type} into annotation_to_type if possible. One reason arg_name may not
+        # be present in name_to_type is that the annotation itself is a string and not a type object
+        # (common for self-refential annotations in classes). Once again, let ScriptTypeParser handle this.
+        arg_name = arg.arg
+        if arg_name in name_to_type:
+            annotation_to_type[arg_annotation_str] = name_to_type[arg_name]
 
     # If there is a valid return annotation, include it in annotation_to_type. As with argument annotations,
     # the literal annotation has to be convertible to a string by get_annotation_str, and the actual type

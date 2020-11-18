@@ -1317,27 +1317,48 @@ class TestClassType(JitTestCase):
         # but is used in g() below.
         tensor_t = torch.Tensor
         device_t = torch.device
+        device_ty = torch.device
 
         class A(object):
             def __init__(self):
                 pass
 
-            def f(self, x: tensor_t, y: torch.device):
+            def f(self, x: tensor_t, y: torch.device) -> tensor_t:
                 return x.to(device=y)
 
-            def h(self, x: device_t) -> device_t:
+            def g(self, x: device_t) -> device_ty:
                 return x
 
-            def i(self) -> 'A':
+            def h(self, a: 'A') -> 'A':
                 return A()
 
-            def j(self, a: List[int]):
-                pass
+            def i(self, a: List[int]) -> int:
+                return a[0]
 
-        def g():
+            def j(self, l: List[device_t]) -> device_ty:
+                return l[0]
+
+        def k():
             a = A()
             return a.f(torch.tensor([1]), torch.device("cpu"))
 
-        self.checkScript(g, ())
-        s = self.getExportImportCopy(torch.jit.script(g))
-        self.assertEqual(s(), g())
+        def l():
+            a = A()
+            return a.g(torch.device("cpu"))
+
+        def m():
+            a = A()
+            return a.h(a)
+
+        def n():
+            a = A()
+            return a.i([3])
+
+        def o():
+            a = A()
+            return a.j([torch.device("cpu"), torch.device("cpu")])
+
+        for fn in [k, l, n, o]:
+            self.checkScript(fn, ())
+            s = self.getExportImportCopy(torch.jit.script(fn))
+            self.assertEqual(s(), fn())
