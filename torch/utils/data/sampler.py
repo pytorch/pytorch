@@ -263,12 +263,10 @@ class PartialBalancedBatchSampler(Sampler[List[int]]):
 
     def __init__(self, dataset, balanced_classes, num_classes):
         self.dataset = dict()
-        self.d=dataset
-        self.balanced_classes=balanced_classes
-        self.num_cl_list=[i for i in range(num_classes)]
+        self.d = dataset
+        self.balanced_classes = balanced_classes
+        self.num_cl_list = [i for i in range(num_classes)]
         self.train_idx = [i for i in range(len(dataset))]
-
-
 
     def __iter__(self):
         for idx in self.train_idx:
@@ -277,18 +275,17 @@ class PartialBalancedBatchSampler(Sampler[List[int]]):
                 self.dataset[label] = list()
             self.dataset[label].append(idx)
 
-        len_classes_dataset=[len(i) for i in self.dataset.values()]
+        len_classes_dataset = [len(i) for i in self.dataset.values()]
         if self.balanced_classes >= any(len_classes_dataset):
             raise Exception('Number of balanced classes should be less than '+str(min(len_classes_dataset)))
 
-
-        rand_tensor=[]
+        rand_tensor = []
         while all(self.dataset.values()):
             random.shuffle(self.num_cl_list)
             for i in self.num_cl_list:
-                stack_class=len(self.dataset[i])
+                stack_class = len(self.dataset[i])
                 if self.balanced_classes < stack_class:
-                    r_values=random.sample(self.dataset[i], k=self.balanced_classes)
+                    r_values = random.sample(self.dataset[i], k=self.balanced_classes)
                     rand_tensor.append(r_values)
                     for j in r_values:
                         self.dataset[i].remove(j)

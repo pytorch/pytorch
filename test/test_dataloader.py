@@ -1109,8 +1109,8 @@ except RuntimeError as e:
                 self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
             for _ in range(3):
                 with self.assertWarnsRegex(
-                    UserWarning,
-                    r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
+                        UserWarning,
+                        r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
                         msg="Should always warn after exceeding length"):
                     next(it)
         # [no auto-batching] test that workers exit gracefully
@@ -1242,10 +1242,10 @@ except RuntimeError as e:
                 # Random Seed for single process
                 random.seed(123)
                 fetched_seed1 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
-                                     worker_init_fn=shuffle_ds_init_fn))
+                                                           worker_init_fn=shuffle_ds_init_fn))
                 random.seed(123)
                 fetched_seed2 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
-                                     worker_init_fn=shuffle_ds_init_fn))
+                                                           worker_init_fn=shuffle_ds_init_fn))
                 self.assertEqual(len(fetched_seed1), len(fetched_seed2))
                 for d1, d2 in zip(fetched_seed1, fetched_seed2):
                     self.assertIsInstance(d1, torch.Tensor)
@@ -1323,8 +1323,8 @@ except RuntimeError as e:
 
     def test_shuffle_reproducibility(self):
         for fn in (
-            lambda: DataLoader(self.dataset, shuffle=True, num_workers=0, generator=torch.Generator().manual_seed(42)),
-            lambda: DataLoader(self.dataset, shuffle=True, num_workers=2, generator=torch.Generator().manual_seed(42)),
+                lambda: DataLoader(self.dataset, shuffle=True, num_workers=0, generator=torch.Generator().manual_seed(42)),
+                lambda: DataLoader(self.dataset, shuffle=True, num_workers=2, generator=torch.Generator().manual_seed(42)),
         ):
             self.assertEqual(list(fn()), list(fn()))
 
@@ -1430,11 +1430,11 @@ except RuntimeError as e:
 
         weights = [0.1, 0.9, 0.4, 0.7, 3.0, 0.6]
         for fn in (
-            lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
-            lambda: RandomSampler(self.dataset, replacement=False, generator=torch.Generator().manual_seed(42)),
-            lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
-            lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False, generator=torch.Generator().manual_seed(42)),
-            lambda: SubsetRandomSampler(range(10), generator=torch.Generator().manual_seed(42)),
+                lambda: RandomSampler(self.dataset, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
+                lambda: RandomSampler(self.dataset, replacement=False, generator=torch.Generator().manual_seed(42)),
+                lambda: WeightedRandomSampler(weights, num_samples=5, replacement=True, generator=torch.Generator().manual_seed(42)),
+                lambda: WeightedRandomSampler(weights, num_samples=5, replacement=False, generator=torch.Generator().manual_seed(42)),
+                lambda: SubsetRandomSampler(range(10), generator=torch.Generator().manual_seed(42)),
         ):
             self.assertEqual(list(fn()), list(fn()))
 
@@ -1844,7 +1844,7 @@ except RuntimeError as e:
 
     def test_excessive_thread_creation_warning(self):
         with self.assertWarnsRegex(
-            UserWarning,
+                UserWarning,
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
@@ -2195,8 +2195,6 @@ class TestSetAffinity(TestCase):
             self.assertEqual(sample, [2])
 
 
-
-
 class CustomDataset(torchvision.datasets.ImageFolder):
     def __init__(self, test_object, x):
         self.imgs = x
@@ -2215,37 +2213,37 @@ class CustomDataset(torchvision.datasets.ImageFolder):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestPartialBalancedBatchSampler(TestCase):
     def test_iter(self):
-        x = [[1,1], [2,1], [3,0], [4,0], [5,1]]
+        x = [[1, 1], [2, 1], [3, 0], [4, 0], [5, 1]]
         dataset = CustomDataset(self, x)
-        b_balanced=torch.utils.data.PartialBalancedBatchSampler(dataset, balanced_classes=2,num_classes=2)
-        a=b_balanced.__iter__()
+        b_balanced = torch.utils.data.PartialBalancedBatchSampler(dataset, balanced_classes=2, num_classes=2)
+        a = b_balanced.__iter__()
         class_instances = [i for i in a]
-        self.assertEqual(len(class_instances),4)
+        self.assertEqual(len(class_instances), 4)
         self.assertEqual(x[class_instances[0]][1], 0)
         self.assertEqual(x[class_instances[1]][1], 0)
         self.assertEqual(x[class_instances[2]][1], 1)
         self.assertEqual(x[class_instances[3]][1], 1)
 
     def test_balanced_data_loader(self):
-        tmp_label=[]
-        x = [[1, 1], [2, 1], [3, 0], [4, 0], [5, 1],[6, 0], [7, 1]]
+        tmp_label = []
+        x = [[1, 1], [2, 1], [3, 0], [4, 0], [5, 1], [6, 0], [7, 1]]
         dataset = CustomDataset(self, x)
-        b_balanced = torch.utils.data.PartialBalancedBatchSampler(dataset, balanced_classes=1,num_classes=2)
-        train_loader = torch.utils.data.DataLoader(dataset,sampler=b_balanced,batch_size=2, shuffle=False, num_workers=16,pin_memory=True)
+        b_balanced = torch.utils.data.PartialBalancedBatchSampler(dataset, balanced_classes=1, num_classes=2)
+        train_loader = torch.utils.data.DataLoader(dataset, sampler=b_balanced, batch_size=2, shuffle=False, num_workers=16, pin_memory=True)
 
-        for data,label in train_loader:
+        for data, label in train_loader:
             tmp_label.append(label)
 
-        self.assertEqual(set(tmp_label[0].tolist()), set([0,1]))
-        self.assertEqual(set(tmp_label[1].tolist()), set([0,1]))
+        self.assertEqual(set(tmp_label[0].tolist()), set([0, 1]))
+        self.assertEqual(set(tmp_label[1].tolist()), set([0, 1]))
 
     def test_wrong_n_balanced_classes_DataLoader(self):
-        x = [[1, 1], [2, 1], [3, 0], [4, 0], [5, 1],[6, 0], [7, 1]]
+        x = [[1, 1], [2, 1], [3, 0], [4, 0], [5, 1], [6, 0], [7, 1]]
         dataset = CustomDataset(self, x)
         with self.assertRaises(Exception) as e:
             torch.utils.data.PartialBalancedBatchSampler(dataset, balanced_classes=5, num_classes=2).__iter__()
-
         self.assertEqual(str(e.exception), "Number of balanced classes should be less than 3",)
+
 
 if __name__ == '__main__':
     run_tests()
