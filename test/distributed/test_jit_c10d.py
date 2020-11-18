@@ -32,10 +32,6 @@ class ProcessGroupNCCLJitTest(TestCase):
     def setUp(self):
         self.rank = self.MAIN_PROCESS_RANK
         self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)
-        self.num_gpus = torch.cuda.device_count()
-        if self.num_gpus < 2:
-            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     def _create_nccl_pg(self):
         addr = "localhost"

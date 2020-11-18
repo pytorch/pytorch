@@ -1217,6 +1217,7 @@ Arguments:
       py::call_guard<py::gil_scoped_release>());
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
+  module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   Py_RETURN_TRUE;
 }
@@ -1263,7 +1264,7 @@ static const auto ProcessGroupTorchBind =
 #ifdef USE_C10D_NCCL
 
 // XXX: Ideally the Options of ProcessGroupNCCL should be
-// binded using `def_readwrite` like in pybind11, but we
+// bound using `def_readwrite` like in pybind11, but we
 // didn't do that because: 1. no milisecond support yet
 // 2. no def_readwrite or property support yet.
 // TODO: make this binding the same as pybind11
