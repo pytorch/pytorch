@@ -19242,13 +19242,22 @@ else:
             np_fn = partial(np.any, axis=dim)
             self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
 
-        if dtype.is_complex and self.device_type == 'cuda':
-            x = torch.randn(3, 3, dtype=dtype, device=device)
-            with self.assertRaises(RuntimeError):
-                x.all()
-            with self.assertRaises(RuntimeError):
-                x.any()
-            return
+        def _test_out_variant(x, dim):
+            out = torch.empty_like(x)
+            if dtype == torch.bool:
+                expected = torch.all(x, dim)
+                torch.all(x, dim, out=out)
+                self.assertEqual(expected, out)
+
+                expected = torch.any(x, dim)
+                torch.any(x, dim, out=out)
+                self.assertEqual(expected, out)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "all only supports bool tensor"):
+                    torch.all(x, dim, out=out)
+
+                with self.assertRaisesRegex(RuntimeError, "any only supports bool tensor"):
+                    torch.any(x, dim, out=out)
 
         for ndim in range(5):
             shape = self._rand_shape(ndim, 1, 5)
@@ -19277,21 +19286,25 @@ else:
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
 
                 x = self._generate_input(shape, dtype, device, with_extremal=True)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
 
                 x = torch.zeros_like(x)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
 
                 x = torch.ones_like(x)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
 
     @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):
