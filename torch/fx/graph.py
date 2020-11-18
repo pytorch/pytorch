@@ -446,9 +446,9 @@ class Graph:
 
         def illegal_shadowing_name(name : str) -> bool:
             return hasattr(torch, name) or \
-                   hasattr(torch.nn.functional, name) or \
-                   hasattr(torch.nn, name) or \
-                   _shadows_builtin_name(name)
+                hasattr(torch.nn.functional, name) or \
+                hasattr(torch.nn, name) or \
+                _shadows_builtin_name(name)
 
         while candidate in self._used_names or illegal_shadowing_name(candidate):
             match = re.match(r"(.*)_(\d+)", candidate)
