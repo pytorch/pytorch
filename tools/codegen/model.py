@@ -112,6 +112,19 @@ class NativeFunction:
     # defined.  This is for conveniently reporting error messages!
     loc: 'Location'
 
+    # Whether or not this out functions is a "structured kernel".  Structured
+    # kernels are defined a little differently from normal kernels; in
+    # particular, their shape checking logic is defined separately from
+    # the kernel.  Only out functions can be structured; other functions
+    # delegate to the out function using the structured_delegate keyword.
+    # Every structured kernel must have at least an out and a functional
+    # variant.
+    structured: bool
+
+    # Whether or not this non-out function is a structured kernel, defined
+    # in terms of the out kernel referenced by the string here.
+    structured_delegate: Optional['OperatorName']
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -156,6 +169,15 @@ class NativeFunction:
         device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
+        structured = e.pop('structured', False)
+        assert isinstance(structured, bool), f'not a bool: {structured}'
+
+        structured_delegate_s = e.pop('structured_delegate', None)
+        assert structured_delegate_s is None or isinstance(structured_delegate_s, str), f'not a str: {structured_delegate}'
+        structured_delegate: Optional[OperatorName] = None
+        if structured_delegate_s is not None:
+            structured_delegate = OperatorName.parse(structured_delegate_s)
+
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
 
@@ -189,6 +211,8 @@ class NativeFunction:
             func=func,
             use_c10_dispatcher=use_c10_dispatcher,
             variants=variants,
+            structured=structured,
+            structured_delegate=structured_delegate,
             manual_kernel_registration=manual_kernel_registration,
             python_module=python_module,
             category_override=category_override,
@@ -196,6 +220,14 @@ class NativeFunction:
             device_guard=device_guard,
             loc=loc,
         )
+
+    def validate_unstructured(self) -> None:
+        # TODO: probably better to accumulate these errors and report them all
+        # at once
+        assert not self.structured, "This function is structured, but there was " \
+            "no valid functional variant of it."
+        assert self.structured_delegate, "This function delegates to another structured out function, " \
+            "but no valid function was found (the delegate may not exist, or it has the wrong type)"
 
     # __post_init__ functions in dataclasses can be used to do extra
     # validation after construction.
@@ -210,52 +242,65 @@ class NativeFunction:
                 "be declared with only function variant; e.g., variants: function; " \
                 "otherwise you will tickle a Python argument binding bug " \
                 "(which usually manifests itself as the result variable being undefined.)"
+        if self.structured:
+            assert self.func.kind() == SchemaKind.out, "Put structured field on the out= " \
+                "variant of a function; did you mean structured_delegate?"
+        if self.structured_delegate:
+            assert self.func.kind() != SchemaKind.out, "structured_delegate field not allowed " \
+                "on out= functions; did you mean structured?"
+        # Technically, with the asserts above, this assert is impossible to
+        # happen
+        assert not (self.structured and self.structured_delegate), \
+            "Cannot have both structured and structured_delegate on function"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
-# Represents a bundle of native functions that are semantically related.
+# A structured kernel is guaranteed to have a functional and out variant, and
+# optionally an inplace variant.
 @dataclass(frozen=True)
-class NativeFunctionGroup:
-    functional: Optional[NativeFunction]
+class StructuredNativeFunctions:
+    functional: NativeFunction
     inplace: Optional[NativeFunction]
-    out: Optional[NativeFunction]
+    out: NativeFunction
 
     def __post_init__(self) -> None:
-        test_sig: Optional[FunctionSchema] = None
+        test_sig: FunctionSchema = self.functional.func.signature()
         for f in self.functions():
-            if test_sig is None:
-                test_sig = f.func.signature()
-            else:
-                if test_sig != f.func.signature():
-                    raise AssertionError(
-                        "NativeFunctionGroup constructed from two NativeFunctions "
-                        f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
-                    )
+            if test_sig != f.func.signature():
+                raise AssertionError(
+                    "StructuredNativeFunctions constructed from two NativeFunctions "
+                    f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                )
+        assert self.functional.func.kind() == SchemaKind.functional
+        assert self.functional.structured_delegate == self.out.func.name, \
+            f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
+            f"but its actual delegate is {self.out.func.name}"
+        assert self.out.func.kind() == SchemaKind.out
+        assert self.out.structured
+        # For now, structured composite kernels are not supported (need some
+        # design work to figure out how to make the composite case work)
+        assert self.out.dispatch.keys() != {'Math'}
+        if self.inplace is not None:
+            assert self.inplace.func.kind() == SchemaKind.inplace
+            assert self.inplace.structured_delegate == self.out.func.name
 
     def signature(self) -> 'FunctionSchema':
-        if self.out is not None:
-            return self.out.func.signature()
-        elif self.functional is not None:
-            return self.functional.func.signature()
-        elif self.inplace is not None:
-            return self.inplace.func.signature()
-        else:
-            raise AssertionError("invalid NativeFunctionGroup has no NativeFunctions")
+        return self.out.func.signature()
 
     def functions(self) -> Iterator[NativeFunction]:
-        if self.out is not None:
-            yield self.out
-        if self.functional is not None:
-            yield self.functional
+        yield self.out
+        yield self.functional
         if self.inplace is not None:
             yield self.inplace
 
     @staticmethod
-    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> 'NativeFunctionGroup':
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['StructuredNativeFunctions']:
         functional = d.get(SchemaKind.functional)
         inplace = d.get(SchemaKind.inplace)
         out = d.get(SchemaKind.out)
-        return NativeFunctionGroup(
+        if functional is None or out is None or not out.structured:
+            return None
+        return StructuredNativeFunctions(
             functional=functional,
             inplace=inplace,
             out=out,
@@ -391,6 +436,29 @@ class FunctionSchema:
                     '_foreach_div_.List',
                     '_foreach_exp_',
                     '_foreach_sqrt_',
+                    '_foreach_abs_',
+                    '_foreach_acos_',
+                    '_foreach_asin_',
+                    '_foreach_atan_',
+                    '_foreach_ceil_',
+                    '_foreach_cos_',
+                    '_foreach_cosh_',
+                    '_foreach_erf_',
+                    '_foreach_erfc_',
+                    '_foreach_expm1_',
+                    '_foreach_floor_',
+                    '_foreach_log_',
+                    '_foreach_log10_',
+                    '_foreach_log1p_',
+                    '_foreach_log2_',
+                    '_foreach_neg_',
+                    '_foreach_tan_',
+                    '_foreach_tanh_',
+                    '_foreach_sin_',
+                    '_foreach_sinh_',
+                    '_foreach_round_',
+                    '_foreach_lgamma_',
+                    '_foreach_frac_',
                     '_foreach_addcmul_.Scalar',
                     '_foreach_addcdiv_.Scalar',
                     '_foreach_addcmul_.ScalarList',
