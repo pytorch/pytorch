@@ -19256,6 +19256,7 @@ else:
 
             torch_fn = partial(torch.any, dim=dim, keepdim=keepdim)
             np_fn = partial(np.any, axis=dim, keepdims=keepdim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
 
         for ndim in range(5):
             shape = self._rand_shape(ndim, 1, 5)
@@ -19285,32 +19286,32 @@ else:
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
                 x = self._generate_input(shape, dtype, device, with_extremal=True)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
                 x = torch.zeros_like(x)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
                 x = torch.ones_like(x)
                 _test_all_any_with_dim(x, dim)
                 _test_all_any_with_dim(x.T, dim)
                 _test_all_any_with_dim(x[..., ::2], dim)
                 _test_out_variant(x, dim)
-                _test_all_any_with_dim(x[..., ::2], dim)
-                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
     @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):
