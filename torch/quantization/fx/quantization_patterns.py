@@ -15,6 +15,7 @@ from ..quantization_mappings import (
 )
 from .pattern_utils import (
     register_quant_pattern,
+    mark_input_output_not_observed,
 )
 from .utils import (
     _parent_name,
@@ -30,6 +31,7 @@ from .utils import (
 
 from abc import ABC, abstractmethod
 import operator
+import warnings
 
 # -------------------------
 # Pattern Registrations
@@ -418,6 +420,7 @@ class BatchNorm(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
+@mark_input_output_not_observed()
 class Embedding(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -437,8 +440,13 @@ class Embedding(QuantizeHandler):
         emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
-            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Embedding/EmbeddingBag, "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
