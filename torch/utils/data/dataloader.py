@@ -498,6 +498,7 @@ class _BaseDataLoaderIter(object):
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
+        self._profile_name = "{}#{}.{}".format("enumerate(DataLoader)", self.__class__.__name__, "__next__")
 
     def __iter__(self) -> '_BaseDataLoaderIter':
         return self
@@ -514,8 +515,7 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError
 
     def __next__(self) -> Any:
-        name = str.format("{}#{}.{}", "enumerate(DataLoader)", self.__class__.__name__, "__next__")
-        with torch.autograd.profiler.record_function(name):
+        with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
                 self._reset()
             data = self._next_data()

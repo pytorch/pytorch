@@ -9,6 +9,8 @@ import torch.utils.data
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
 from torch.autograd.profiler import profile
+import pickle
+import multiprocessing
 
 try:
     import psutil
@@ -46,6 +48,17 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
+
+def process_main(obj_bytes, ret):
+    optimizer = pickle.loads(obj_bytes)
+    with profile() as prof:
+        optimizer.step()
+    count = 0
+    for e in prof.function_events:
+        if e.name == "Optimizer.step#SGD.step":
+            count += 1
+    ret.value = count
+    return
 
 class TestProfiler(TestCase):
     def test_source(self):
@@ -143,6 +156,10 @@ class TestProfiler(TestCase):
         ds = RepeatedDataset(N, D_in, D_out)
         dataloader = torch.utils.data.DataLoader(ds, batch_size=1)
 
+        # Test for checking re-hook.
+        optimizer_useless = torch.optim.SGD(model.parameters(), lr=1e-4)
+        dataloader_useless = torch.utils.data.DataLoader(ds, batch_size=1)
+
         try:
             train()
         except Exception:
@@ -165,6 +182,12 @@ class TestProfiler(TestCase):
                     actual_event_count[key] = actual_event_count.setdefault(key, 0) + 1
         for key, count in expected_event_count.items():
             self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
+
+        ret = multiprocessing.Value("i", 0)
+        p = multiprocessing.Process(target=process_main, args=(pickle.dumps(optimizer), ret))
+        p.start()
+        p.join()
+        self.assertTrue(ret.value == 1)
 
 if __name__ == '__main__':
     run_tests()
