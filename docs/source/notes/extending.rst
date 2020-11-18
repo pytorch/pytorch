@@ -247,6 +247,8 @@ This is how a ``Linear`` module can be implemented::
                 self.input_features, self.output_features, self.bias is not None
             )
 
+.. _extending-torch:
+
 Extending :mod:`torch`
 ----------------------
 

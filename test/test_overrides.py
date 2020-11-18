@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import TestCase
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
-    get_overridable_functions,
+    _get_overridable_functions,
     get_testing_overrides,
     is_tensor_method_or_property
 )
@@ -315,7 +315,7 @@ def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
     testing_overrides = get_testing_overrides()
-    for namespace, funcs in get_overridable_functions().items():
+    for namespace, funcs in _get_overridable_functions().items():
         for func in funcs:
             if func not in testing_overrides:
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
@@ -822,7 +822,7 @@ class TestGradCheckOverride(TestCase):
         })
 
 class TestNamedTuple(TestCase):
-    "Regression test for gh-47090"
+    """ Regression test for gh-47090 """
     def test_max(self):
         x = torch.tensor([1, 2])
         xs = x.as_subclass(SubTensor2)
@@ -837,6 +837,22 @@ class TestGradNewOnesOverride(TestCase):
         t = torch.tensor([1, 2]).as_subclass(SubTensor2)
         n = t.new_ones((1, 2))
         self.assertEqual(type(n), SubTensor2)
+
+class TestWrapTorchFunction(TestCase):
+    def test_wrap_torch_function(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs):
+                return -1
+
+        def dispatcher(a):
+            return (a,)
+
+        @torch.overrides.wrap_torch_function(dispatcher)
+        def f(a):
+            return a
+
+        self.assertEqual(f(A()), -1)
 
 if __name__ == '__main__':
     unittest.main()

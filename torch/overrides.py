@@ -1,14 +1,16 @@
 """
-Python implementation of __torch_function__
+Python implementation of ``__torch_function__``
 
-While most of the torch API and handling for __torch_function__ happens
+While most of the torch API and handling for ``__torch_function__`` happens
 at the C++ level, some of the torch API is written in Python so we need
-python-level handling for __torch_function__ overrides as well. The main
+python-level handling for ``__torch_function__`` overrides as well. The main
 developer-facing functionality in this file are handle_torch_function and
 has_torch_function. See torch/functional.py and test/test_overrides.py
 for usage examples.
 
-NOTE: heavily inspired by NumPy's ``__array_function__`` (see:
+Note
+----
+heavily inspired by NumPy's ``__array_function__`` (see:
 https://github.com/pytorch/pytorch/issues/24015 and
 https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 )
@@ -28,15 +30,34 @@ from typing import Dict, Set, List, Any, Callable, Iterable
 import torch
 from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
 
+__all__ = [
+    "get_ignored_functions",
+    "get_testing_overrides",
+    "handle_torch_function",
+    "has_torch_function",
+    "is_tensor_like",
+    "is_tensor_method_or_property",
+    "wrap_torch_function",
+]
+
 @functools.lru_cache(None)
 def get_ignored_functions() -> Set[Callable]:
-    """Return public functions that cannot be overridden by __torch_function__
+    """
+    Return public functions that cannot be overridden by ``__torch_function__``.
 
     Returns
     -------
-    A tuple of functions that are publicly available in the torch API but cannot
-    be overridden with __torch_function__. Mostly this is because none of the
-    arguments of these functions are tensors or tensor-likes.
+    Tuple[Callable]
+        A tuple of functions that are publicly available in the torch API but cannot
+        be overridden with ``__torch_function__``. Mostly this is because none of the
+        arguments of these functions are tensors or tensor-likes.
+
+    Examples
+    --------
+    >>> torch.Tensor.as_subclass in torch.overrides.get_ignored_functions()
+    True
+    >>> torch.add in torch.overrides.get_ignored_functions()
+    False
     """
     Tensor = torch.Tensor
     return {
@@ -188,12 +209,20 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
 
     Returns
     -------
-    A dictionary that maps overridable functions in the PyTorch API to
-    lambda functions that have the same signature as the real function
-    and unconditionally return -1. These lambda functions are useful
-    for testing API coverage for a type that defines __torch_function__.
+    Dict[Callable, Callable]
+        A dictionary that maps overridable functions in the PyTorch API to
+        lambda functions that have the same signature as the real function
+        and unconditionally return -1. These lambda functions are useful
+        for testing API coverage for a type that defines ``__torch_function__``.
+
+    Examples
+    --------
+    >>> import inspect
+    >>> my_lambda = torch.overrides.get_testing_overrides()[torch.add]
+    >>> inspect.getfullargspec(my_lambda)
+    FullArgSpec(...)
     """
-    # Every function in the PyTorch API that can be overriden needs an entry
+    # Every function in the PyTorchAPI that can be overriden needs an entry
     # in this dict.
     #
     # Optimally we would use inspect to get the function signature and define
@@ -976,6 +1005,34 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     ret.update(ret2)
     return ret
 
+def wrap_torch_function(dispatcher: Callable):
+    """Wraps a given function with ``__torch_function__`` -related functionality.
+
+    Parameters
+    ----------
+    dispatcher: Callable
+        A callable that returns an iterable of Tensor-likes passed into the function.
+
+    Examples
+    --------
+    >>> def dispatcher(a): # Must have the same signature as func
+    ...     return (a,)
+    >>> @torch.overrides.wrap_torch_function(dispatcher)
+    >>> def func(a): # This will make func dispatchable by __torch_function__
+    ...     return a + 0
+    """
+    def inner(func):
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs):
+            relevant_args = dispatcher(*args, **kwargs)
+            if has_torch_function(relevant_args):
+                return handle_torch_function(func, relevant_args, *args, **kwargs)
+
+            return func(*args, **kwargs)
+
+        return wrapped
+
+    return inner
 
 def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
@@ -1001,8 +1058,6 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
 
     Returns
     -------
-    overloaded_types : collection of types
-        Types of arguments from relevant_args with __torch_function__ methods.
     overloaded_args : list
         Arguments from relevant_args on which to call __torch_function__
         methods, in the order in which they should be called.
@@ -1012,7 +1067,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
 
     """
     # Runtime is O(num_arguments * num_unique_types)
-    overloaded_types = []
+    overloaded_types = set()
     overloaded_args = []
     for arg in relevant_args:
         arg_type = type(arg)
@@ -1023,7 +1078,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
             # Create lists explicitly for the first type (usually the only one
             # done) to avoid setting up the iterator for overloaded_args.
             if overloaded_types:
-                overloaded_types.append(arg_type)
+                overloaded_types.add(arg_type)
                 # By default, insert argument at the end, but if it is
                 # subclass of another argument, insert it before that argument.
                 # This ensures "subclasses before superclasses".
@@ -1034,7 +1089,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
                         break
                 overloaded_args.insert(index, arg)
             else:
-                overloaded_types = [arg_type]
+                overloaded_types = {arg_type}
                 overloaded_args = [arg]
 
     return overloaded_args
@@ -1042,7 +1097,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
 
 def handle_torch_function(
         public_api: Callable, relevant_args: Iterable[Any], *args, **kwargs) -> Any:
-    """Implement a function with checks for __torch_function__ overrides.
+    """Implement a function with checks for ``__torch_function__`` overrides.
 
     See torch::autograd::handle_torch_function for the equivalent of this
     function in the C++ implementation.
@@ -1062,13 +1117,13 @@ def handle_torch_function(
 
     Returns
     -------
-    Result from calling `implementation()` or an `__torch_function__`
-    method, as appropriate.
+    object
+        Result from calling ``implementation`` or an ``__torch_function__``
+        method, as appropriate.
 
     Raises
     ------
     TypeError : if no implementation is found.
-
     """
     # Check for __torch_function__ methods.
     overloaded_args = _get_overloaded_args(relevant_args)
@@ -1090,7 +1145,9 @@ def handle_torch_function(
                     .format(func_name, [type(arg) for arg in overloaded_args]))
 
 def has_torch_function(relevant_args: Iterable[Any]) -> bool:
-    """Check for __torch_function__ implementations in the elements of an iterable
+    """Check for __torch_function__ implementations in the elements of an iterable.
+
+    Considers exact ``Tensor`` s non-dispatchable.
 
     Arguments
     ---------
@@ -1099,8 +1156,14 @@ def has_torch_function(relevant_args: Iterable[Any]) -> bool:
 
     Returns
     -------
-    True if any of the elements of relevant_args have __torch_function__
-    implementations, False otherwise.
+    bool
+        True if any of the elements of relevant_args have __torch_function__
+        implementations, False otherwise.
+
+    See Also
+    ________
+    torch.is_tensor_like
+        Checks if something is a Tensor-like, including an exact ``Tensor``.
     """
     return _is_torch_function_enabled() and any(
         type(a) is not torch.Tensor and
@@ -1110,13 +1173,14 @@ def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     )
 
 @functools.lru_cache(None)
-def get_overridable_functions() -> Dict[Any, List[Callable]]:
+def _get_overridable_functions() -> Dict[Any, List[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns
     -------
-    A dictionary that maps namespaces that contain overridable functions
-    to functions in that namespace that can be overridden.
+    Dict[Any, List[Callable]]
+        A dictionary that maps namespaces that contain overridable functions
+        to functions in that namespace that can be overridden.
     """
     overridable_funcs = collections.defaultdict(list)
     tested_namespaces = [
@@ -1172,9 +1236,9 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
     return overridable_funcs
 
 @functools.lru_cache(None)
-def get_tensor_methods() -> Set[Callable]:
+def _get_tensor_methods() -> Set[Callable]:
     """ Returns a set of the overridable methods on ``torch.Tensor`` """
-    overridable_funcs = get_overridable_functions()
+    overridable_funcs = _get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
     return methods
 
@@ -1192,14 +1256,47 @@ def is_tensor_method_or_property(func: Callable) -> bool:
     1. Methods/properties sometimes don't contain a `__module__` slot.
     2. They require that the first passed-in argument is an instance
        of ``torch.Tensor``.
+
+    Examples
+    --------
+    >>> is_tensor_method_or_property(torch.Tensor.add)
+    True
+    >>> is_tensor_method_or_property(torch.add)
+    False
     """
-    return func in get_tensor_methods() or func.__name__ == "__get__"
+    return func in _get_tensor_methods() or func.__name__ == "__get__"
 
 def is_tensor_like(inp):
     """
-    Returns ``True`` if the passed-in input is a tensor-like.
+    Returns ``True`` if the passed-in input is a Tensor-like.
 
     Currently, this occurs whenever there's a ``__torch_function__``
-    attribute on the input.
+    attribute on the type of the input.
+
+    Examples
+    --------
+    A subclass of tensor is generally a Tensor-like.
+
+    >>> class SubTensor(torch.Tensor): ...
+    >>> is_tensor_like(SubTensor([0]))
+    True
+
+    Built-in or user types aren't usually Tensor-like.
+
+    >>> is_tensor_like(6)
+    False
+    >>> is_tensor_like(None)
+    False
+    >>> class NotATensor: ...
+    >>> is_tensor_like(NotATensor())
+    False
+
+    But, they can be made Tensor-like by implementing __torch_function__.
+
+    >>> class TensorLike:
+    ...     def __torch_function__(self, func, types, args, kwargs):
+    ...         return -1
+    >>> is_tensor_like(TensorLike())
+    True
     """
-    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")
+    return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
