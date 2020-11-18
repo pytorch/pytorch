@@ -48,9 +48,16 @@ void maybePreprocessComplexTensor(std::vector<std::vector<at::Tensor>>& tensors_
 }
 
 void assertReduceOpSupportsComplexTensor(ReduceOp op) {
-  const static std::unordered_set<ReduceOp> deny_list({ReduceOp::MAX, ReduceOp::MIN, ReduceOp::PRODUCT});
-  TORCH_CHECK(deny_list.count(op) == 0,
-    "all_reduce does not support requested Reduce op on complex tensors")
+  switch (op) {
+    case ReduceOp::MAX:
+    case ReduceOp::MIN:
+    case ReduceOp::PRODUCT:
+      TORCH_CHECK(
+          false,
+          "all_reduce does not support requested Reduce op on complex tensors");
+    default:
+      return;
+  }
 }
 
 }  // namespace anonymous
