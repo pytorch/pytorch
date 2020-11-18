@@ -108,7 +108,7 @@ Tensor pinverse(const Tensor& self, double rcond) {
 }
 
 Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
-  // Matrices or batch of matrices is allowed
+  // Matrices or batch of matrices are allowed
   TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
@@ -120,6 +120,7 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
     return at::zeros(result_shape, self.options().dtype(ScalarType::Long));
   }
 
+  // We compute matrix rank as the number of singular or absolute eigen values above 'tol' threshold
   Tensor S;
   if (!hermitian) {
     Tensor U, V;
