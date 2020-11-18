@@ -1,5 +1,4 @@
 import unittest
-import tempfile
 from sys import platform
 import torch
 import torch.distributed as c10d
