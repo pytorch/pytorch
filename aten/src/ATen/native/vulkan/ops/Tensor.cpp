@@ -6,6 +6,46 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+VkDeviceSize bytes(
+    const IntArrayRef sizes,
+    const caffe2::TypeMeta dtype) {
+  VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
+
+  // Forward declaration
+  bool requires_image(IntArrayRef);
+
+  if (requires_image(sizes)) {
+    // Forward declaration
+    VkExtent3D image_extents(IntArrayRef);
+
+    const VkExtent3D extents = image_extents(sizes);
+    size *= extents.width * extents.height * (4u * extents.depth);
+  }
+  else {
+    size *= prod_intlist(sizes);
+  }
+
+  return size;
+}
+
+VkFormat format(const caffe2::TypeMeta dtype) {
+  switch (c10::typeMetaToScalarType(dtype)) {
+    case kFloat:
+    #ifdef USE_VULKAN_FP16_INFERENCE
+      return VK_FORMAT_R16G16B16A16_SFLOAT;
+    #else
+      return VK_FORMAT_R32G32B32A32_SFLOAT;
+    #endif /* USE_VULKAN_FP16_INFERENCE */
+
+    default:
+      TORCH_CHECK(
+        false,
+        "Vulkan tensor format not supported!");
+  }
+
+  return VK_FORMAT_UNDEFINED;
+}
+
 VkAccessFlags access(
     const vTensor::Stage::Flags stage,
     const vTensor::Access::Flags access) {
@@ -68,46 +108,6 @@ vTensor::Access::Flags access(
   }
 
   return access;
-}
-
-VkDeviceSize bytes(
-    const IntArrayRef sizes,
-    const caffe2::TypeMeta dtype) {
-  VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
-
-  // Forward declaration
-  bool requires_image(IntArrayRef);
-
-  if (requires_image(sizes)) {
-    // Forward declaration
-    VkExtent3D image_extents(IntArrayRef);
-
-    const VkExtent3D extents = image_extents(sizes);
-    size *= extents.width * extents.height * (4u * extents.depth);
-  }
-  else {
-    size *= prod_intlist(sizes);
-  }
-
-  return size;
-}
-
-VkFormat format(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
-    case kFloat:
-    #ifdef USE_VULKAN_FP16_INFERENCE
-      return VK_FORMAT_R16G16B16A16_SFLOAT;
-    #else
-      return VK_FORMAT_R32G32B32A32_SFLOAT;
-    #endif /* USE_VULKAN_FP16_INFERENCE */
-
-    default:
-      TORCH_CHECK(
-        false,
-        "Vulkan tensor format not supported!");
-  }
-
-  return VK_FORMAT_UNDEFINED;
 }
 
 VkImageLayout layout(
@@ -789,6 +789,8 @@ void vTensor::View::CMD::copy_staging_to_buffer(
     return;
   }
 
+  std::cout << "copy_staging_to_buffer: " << std::endl;
+
   barrier(
       state.transition({
           // Staging
@@ -950,7 +952,7 @@ vTensor::Buffer& vTensor::View::buffer(
           // Buffer
           {
             ops::stage(stage),
-            ops::access(access),
+            ops::access(stage, access),
           },
           // Image
           {},
@@ -1070,7 +1072,7 @@ vTensor::Buffer& vTensor::View::staging(
           // Staging
           {
             ops::stage(stage),
-            ops::access(access),
+            ops::access(stage, access),
           },
           // Buffer
           {},
@@ -1148,15 +1150,16 @@ vTensor::View::State::transition(const Bundle bundle) {
     to.image = bundle.image;
   }
 
-#ifdef DEBUG
+// #ifdef DEBUG
   // Forward declaration
   std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
 
   std::cout << "From:" << std::endl << from << std::endl;
+  std::cout << "bundle:" << std::endl << bundle_ << std::endl;
   std::cout << "To:" << std::endl << to << std::endl;
-#endif /* DEBUG */
+// #endif /* DEBUG */
 
   return Transition{
     from,

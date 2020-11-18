@@ -31,9 +31,13 @@ Tensor clamp(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
+        VkExtent3D extents;
+        uint32_t padding;
         float min_value;
         float max_value;
       } block {
+        v_output.extents(),
+        0u,
         min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
         max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
       };
@@ -93,9 +97,13 @@ Tensor& clamp_(
   {
     if (v_self.has_image()) {
       const struct {
+        VkExtent3D extents;
+        uint32_t padding;
         float min_value;
         float max_value;
       } block {
+        v_self.extents(),
+        0u,
         min_value ? min_value->to<float>() : -std::numeric_limits<float>::infinity(),
         max_value ? max_value->to<float>() : std::numeric_limits<float>::infinity(),
       };
