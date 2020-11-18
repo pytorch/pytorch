@@ -447,7 +447,10 @@ def has_tensor_options(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def argument_type_str(t: Type) -> str:
+# 'simple_type' was introduced by the old codegen, which is slightly
+# different from the python schema type, e.g.: doesn't have '?' suffix
+# for optional Tensor/TensorList; doesn't have '[size]' suffix for list type.
+def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             return 'Tensor'
@@ -465,7 +468,13 @@ def argument_type_str(t: Type) -> str:
             return t.name.name
 
     elif isinstance(t, OptionalType):
-        elem = argument_type_str(t.elem)
+        if str(t.elem) == 'Tensor':
+            if not simple_type or local.use_c10_dispatcher().dispatcher_uses_new_style():
+                # Is it desired to keep '?' for simple_type with new style dispatcher?
+                return 'Tensor?'
+            else:
+                return 'Tensor'
+        elem = argument_type_str(t.elem, simple_type=simple_type)
         if elem == 'Layout':
             # TODO: fix this special case in PythonArgParser?
             return 'Layout'
@@ -473,22 +482,33 @@ def argument_type_str(t: Type) -> str:
             return f'{elem}?'
 
     elif isinstance(t, ListType):
+        size = t.size if not simple_type else None
         if str(t.elem) == 'bool':
             assert t.size is not None
             return f'std::array<bool,{t.size}>'
         elif str(t.elem) == 'int':
-            return f'IntArrayRef[{t.size}]' if t.size is not None else 'IntArrayRef'
+            return f'IntArrayRef[{size}]' if size is not None else 'IntArrayRef'
         elif str(t.elem) == 'Tensor':
-            return f'TensorList[{t.size}]' if t.size is not None else 'TensorList'
+            return f'TensorList[{size}]' if size is not None else 'TensorList'
         elif str(t.elem) == 'Tensor?':
-            # TODO: clone the old codegen behavior but does it make sense?
-            return 'TensorList?'
+            if simple_type:
+                return 'TensorList'
+            else:
+                # TODO: clone the old codegen behavior but does it make sense?
+                return 'TensorList?'
         elif str(t.elem) == 'Dimname':
-            return f'DimnameList[{t.size}]' if t.size is not None else 'DimnameList'
-        elem = argument_type_str(t.elem)
+            return f'DimnameList[{size}]' if size is not None else 'DimnameList'
+        elem = argument_type_str(t.elem, simple_type=simple_type)
         return f'ArrayRef<{elem}>'
 
     raise RuntimeError(f'unrecognized type {repr(t)}')
+
+def argument_type_size(t: Type) -> Optional[int]:
+    l = t.is_list_like()
+    if l is not None and str(l.elem) != 'bool':
+        return l.size
+    else:
+        return None
 
 def argument(cpp_arg: CppArgument) -> PythonArgument:
     a = cpp_arg.argument

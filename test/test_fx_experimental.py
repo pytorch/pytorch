@@ -4,8 +4,8 @@ from typing import Dict
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.experimental import GraphManipulation
-from torch.fx.experimental.Partitioner import Partitioner
+from torch.fx.experimental import graph_manipulation
+from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -55,7 +55,7 @@ class TestFXExperimental(JitTestCase):
         a = torch.rand(4)
         b = torch.rand(4)
         c = torch.rand(3, 3, 2, 2)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b, c])
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b, c])
 
         partitioner = Partitioner()
         devices = [Device("dev_0", 5000, 0), Device("dev_1", 125, 1)]
@@ -76,8 +76,8 @@ class TestFXExperimental(JitTestCase):
             node.shape = a.shape
             node.dtype = a.dtype
 
-        agm1 = GraphManipulation.AcceleratedGraphModule(traced)
-        agm2 = GraphManipulation.AcceleratedGraphModule(module_with_submodules)
+        agm1 = graph_manipulation.AcceleratedGraphModule(traced)
+        agm2 = graph_manipulation.AcceleratedGraphModule(module_with_submodules)
         assert len(agm1.weights) == 4
         assert len(agm2.weights) == 4
         assert len(agm1.serialized_graph["nodes"]) == 10
@@ -108,8 +108,8 @@ class TestFXExperimental(JitTestCase):
         q_tensor_channel = torch.quantize_per_channel(
             x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
         )
-        result = GraphManipulation.serialize_tensor_quantization(q_tensor)
-        result2 = GraphManipulation.serialize_tensor_quantization(q_tensor_channel)
+        result = graph_manipulation.serialize_tensor_quantization(q_tensor)
+        result2 = graph_manipulation.serialize_tensor_quantization(q_tensor_channel)
         assert result["q_scheme"] == "torch.per_tensor_affine"
         assert result["q_scale"] == 1.0
         assert result2["q_scheme"] == "torch.per_channel_affine"
@@ -124,7 +124,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         a = torch.rand(1)
         b = torch.rand(1)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b])
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
         partitioner = Partitioner()
         devices = [
             Device("dev_0", 125, 0),
@@ -137,6 +137,33 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         assert dag.nodes[0].logical_device_ids == [0]
+
+    def test_partition_node_manipulation(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, a, b):
+                add_1 = a + b
+                add_2 = add_1 + torch.rand(4)
+                add_3 = add_2 + torch.rand(4)
+                return add_3
+
+        m = TestModule()
+        traced = symbolic_trace(m)
+        a, b = torch.rand(4), torch.rand(4)
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
+        partitioner = Partitioner()
+        devices = [Device('dev_0', 1000, 0)]
+        partitioner_config = PartitionerConfig(devices)
+        ret = partitioner.partition_graph(traced, m, partitioner_config)
+        partition = partitioner.partitions[0]
+        assert partition.used_mem_bytes == 112
+        # Select add_3 node to remove
+        selected_node = None
+        for node in partition.nodes:
+            if node.name == 'add_3':
+                selected_node = node
+        partition.remove_node(selected_node)
+        assert(partition.used_mem_bytes == 80)
+
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -155,7 +182,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         a = torch.rand(4)
         b = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b])
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b])
         partitioner = Partitioner()
         devices = [
             Device("dev_0", 125, 0),
@@ -187,7 +214,7 @@ class TestFXExperimental(JitTestCase):
         m = TestModule()
         traced = symbolic_trace(m)
         a = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a])
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
         partitioner = Partitioner()
         devices = [Device("dev_0", 120, 0), Device("dev_1", 160, 1)]
         partitioner_config = PartitionerConfig(devices, is_sparse_nn=False)
@@ -249,7 +276,7 @@ class TestFXExperimental(JitTestCase):
         b = torch.randint(10, (8,))
         offset = torch.randint(1, (2,))
         traced = symbolic_trace(m)
-        GraphManipulation.get_size_of_all_nodes(traced, [a, b, offset])
+        graph_manipulation.get_size_of_all_nodes(traced, [a, b, offset])
         devices = [
             Device("dev_0", 33000000, 0),
             Device("dev_1", 33000000, 1),
@@ -297,7 +324,7 @@ class TestFXExperimental(JitTestCase):
         m = TestModule()
         traced = symbolic_trace(m)
         a = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a])
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
         node_to_latency_mapping = get_node_to_latency_mapping(traced)
         devices = [Device("dev_0", 200, 0), Device("dev_1", 200, 1)]
         partitioner = Partitioner()
@@ -314,7 +341,7 @@ class TestFXExperimental(JitTestCase):
                 assert partition_to_latency_mapping[p] == (128.0, 80.0, 160.0)
             else:
                 assert partition_to_latency_mapping[p] == (16.0, 32.0, 32.0)
-        transfer_rate_bytes_per_sec = 0.5
+        transfer_rate_bytes_per_sec = 2
         critical_path_latency_sec = get_latency_of_partitioned_graph(
             partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
@@ -348,7 +375,7 @@ class TestFXExperimental(JitTestCase):
         m = MyModule()
         traced = symbolic_trace(m)
         a = torch.rand(4)
-        GraphManipulation.get_size_of_all_nodes(traced, [a])
+        graph_manipulation.get_size_of_all_nodes(traced, [a])
         devices = [
             Device('dev_0', 125, 0),
             Device('dev_1', 125, 1),
@@ -360,7 +387,7 @@ class TestFXExperimental(JitTestCase):
             devices,
             is_sparse_nn=False,
             is_cost_aware=True,
-            transfer_rate_bytes_per_sec=0.5,
+            transfer_rate_bytes_per_sec=2,
             node_to_latency_mapping=node_to_latency_mapping
         )
         partitioner = Partitioner()
@@ -377,6 +404,24 @@ class TestFXExperimental(JitTestCase):
         )
         assert critical_path_latency_sec == 160.
 
+        def test_replace_target_nodes_with(self):
+            class testModule(torch.nn.Module):
+                def forward(self, a, b):
+                    return a + b
+            m = testModule()
+            traced = symbolic_trace(m)
+            input1 = torch.randn(1)
+            input2 = torch.randn(1)
+            assert (input1 + input2) == traced(input1, input2)
+            graph_manipulation.replace_target_nodes_with(
+                fx_module=traced,
+                old_op="call_function",
+                old_target=operator.add,
+                new_op="call_function",
+                new_target=operator.mul,
+            )
+            assert (input1 * input2) == traced(input1, input2)
+
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -392,7 +437,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -420,7 +465,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -448,7 +493,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -480,7 +525,7 @@ terrible spacing
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch.Assert
+                node.op == "call_function" and node.target == torch._assert
                 for node in traced.graph.nodes
             )
         )
