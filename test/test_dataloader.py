@@ -1438,7 +1438,6 @@ except RuntimeError as e:
         ):
             self.assertEqual(list(fn()), list(fn()))
 
-
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
         dl = self._get_data_loader(self.dataset, sampler=indices, batch_size=2, **kwargs)
@@ -1849,8 +1848,6 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
-
-
 class StringDataset(Dataset):
     def __init__(self):
         self.s = '12345'
@@ -2009,7 +2006,6 @@ except RuntimeError as e:
             # cached by the workers. since they are not recreated between epochs
             # and can cache values safely
             dataset.start = i
-
 
 
 class NamedTupleDataset(Dataset):
@@ -2206,6 +2202,8 @@ class CustomDataset(torchvision.datasets.ImageFolder):
 
     def __len__(self):
         return len(self.imgs)
+
+
 #
 @unittest.skipIf(
     TEST_WITH_TSAN,
