@@ -3117,9 +3117,11 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            temp_dir = tempfile.TemporaryDirectory(suffix='中文'.encode('utf-8'))
+            temp_dir = os.path.join(tempfile.gettempdir(), '中文')
+            os.mkdir(temp_dir)
             with TemporaryFileName(dir=temp_dir.name) as fname:
-                assert_with_filename(str(fname))
+                assert_with_filename(fname)
+            os.rmdir(temp_dir)
 
         def test_torch_from_file(self):
             def assert_with_filename(filename):
@@ -3148,9 +3150,11 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            temp_dir = tempfile.TemporaryDirectory(suffix='中文'.encode('utf-8'))
+            temp_dir = os.path.join(tempfile.gettempdir(), '中文')
+            os.mkdir(temp_dir)
             with TemporaryFileName(dir=temp_dir.name) as fname:
-                assert_with_filename(str(fname))
+                assert_with_filename(fname)
+            os.rmdir(temp_dir)
 
         def test_print(self):
             default_type = torch.Tensor().type()
