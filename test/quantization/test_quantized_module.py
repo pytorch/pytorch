@@ -39,7 +39,7 @@ test please see `caffe2/test/test_quantized_op.py`.
 
 class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
-        relu_module = nnq.ReLU()
+        relu_module = nn.ReLU()
         relu6_module = nnq.ReLU6()
 
         x = torch.arange(-10, 10, dtype=torch.float)
@@ -304,10 +304,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             check_save_load=True)
 
         # Test from_float
-        conv_module.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(conv_module, inplace=True)
-        conv_module(X.float())
-        converted_qconv_module = torch.nn.Sequential(conv_module)
+        fused_conv_module = torch.nn.intrinsic._FusedModule(conv_module)
+        fused_conv_module.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(fused_conv_module, inplace=True)
+        fused_conv_module(X.float())
+        converted_qconv_module = fused_conv_module
         torch.quantization.convert(converted_qconv_module, inplace=True)
 
         # Smoke test to make sure the module actually runs
@@ -707,6 +708,21 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                          msg="{} module API failed, qY_ref\n{} vs qY\n{}"
                          .format(name, qY_ref, qY))
 
+    def _test_leaky_relu_serialization(self):
+        scale_original = 10.0 / 256
+        zero_point_original = 1.0
+
+        quant_mod_original = nnq.LeakyReLU(scale_original, zero_point_original)
+        state_dict = quant_mod_original.state_dict()
+
+        scale_new = 5.0 / 256
+        zero_point_new = 2.0
+        quant_mod_new = nnq.LeakyReLU(scale_new, zero_point_new)
+        quant_mod_new.load_state_dict(state_dict)
+
+        self.assertEqual(quant_mod_original.scale, quant_mod_new.scale)
+        self.assertEqual(quant_mod_original.zero_point, quant_mod_new.zero_point)
+
     def test_elu(self):
         """Tests the correctness of the ELU module.
         The correctness is defined against the functional implementation.
@@ -715,6 +731,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
     def test_leaky_relu(self):
         self._test_activation_module_impl("LeakyReLU", nn.LeakyReLU, nnq.LeakyReLU, {"negative_slope": 0.2})
+        self._test_leaky_relu_serialization()
 
     def test_sigmoid(self):
         self._test_activation_module_impl("Sigmoid", nn.Sigmoid, nnq.Sigmoid, {})
@@ -724,6 +741,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
         set_qconfig=st.booleans(),
     )
+    @skipIfNoFBGEMM
     def test_embedding_api(self, num_embeddings, embedding_dim, set_qconfig):
         num_lengths = np.random.randint(1, 6)
         lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)

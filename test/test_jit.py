@@ -7417,6 +7417,19 @@ dedent """
         self.assertEqual(any_refinement2(3), torch.tensor(3))
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
 
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "bug persists in deprecated executor")
+    def test_unspecialized_any_binding(self):
+        # any binding will infer the type, if it infers
+        # a specialized tensor type `x` Dict type will fail isinstance check
+
+        @torch.jit.script
+        def foo(x: Any):
+            assert isinstance(x, Dict[str, torch.Tensor])
+
+        foo({"1": torch.tensor(3)})
+        with self.assertRaises(Exception):
+            foo(2)
+
     def test_isinstance(self):
         # test isinstance operator for static type checking
         template = dedent('''
@@ -15412,6 +15425,18 @@ dedent """
         test = torch._C._jit_interpret_graph(graph, (a, b))
         ref = a * b
         self.assertEqual(test, ref)
+
+    def test_signed_float_zero(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return torch.div(x, -0.)
+
+        inp = torch.ones(1)
+        self.checkModule(MyModule(), inp)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {

@@ -762,6 +762,36 @@ TEST(CustomAutogradTest, HookNone) {
   ASSERT_TRUE(was_called);
 }
 
+TEST(CustomAutogradTest, BackwardWithInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+
+  z.backward(torch::ones({5, 5}), false, false, {x});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
+}
+
+TEST(CustomAutogradTest, BackwardWithEmptyInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x + x * y + y * y;
+  Variable x_grad_expected = 2 * x + y;
+  Variable y_grad_expected = x + 2 * y;
+  ASSERT_THROWS_WITH(z.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{}), "cannot be empty");
+}
+
+TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
+  Variable x = torch::randn({5,5}, torch::requires_grad());
+  Variable y = torch::randn({5,5}, torch::requires_grad());
+  Variable z = x * x;
+  Variable w = z + x * y + y * y;
+  ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
+}
+
 // TODO add these tests if needed
 // test_once_differentiable
 // test_sparse_backward

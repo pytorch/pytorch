@@ -93,6 +93,12 @@ variable_list run_backward(
       if (!grad_fn) {
         grad_fn = impl::try_get_grad_accumulator(input);
       }
+      if (accumulate_grad) {
+        TORCH_CHECK(
+          input.is_leaf(),
+          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor"
+        )
+      }
       TORCH_CHECK(
           input.requires_grad(),
           "One of the differentiated Tensors does not require grad");
@@ -125,12 +131,13 @@ void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors,
     c10::optional<bool> retain_graph,
-    bool create_graph) {
+    bool create_graph,
+    const variable_list& inputs) {
   variable_list gradients = _make_grads(tensors, grad_tensors);
   if (!retain_graph) {
     retain_graph = create_graph;
   }
-  run_backward(tensors, gradients, retain_graph.value(), create_graph, {}, /*allow_unused=*/true, /*accumulate_grad=*/true);
+  run_backward(tensors, gradients, retain_graph.value(), create_graph, inputs, /*allow_unused=*/true, /*accumulate_grad=*/true);
 }
 
 variable_list grad(
