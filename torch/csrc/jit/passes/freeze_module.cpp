@@ -82,7 +82,8 @@ class AttributePropagator {
       ClearProfilingInformation(subgraph);
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
-      runOptimization(subgraph, /* unroll? */ false);
+      runOptimization(
+          subgraph, /* unroll? */ false, /* const_prop_user_classes? */ false);
     };
 
     for (auto function : preservedMethods_) {
@@ -315,6 +316,15 @@ class AttributePropagator {
         val = overrideGradient(val);
       }
       attr = std::move(dict);
+    } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
+      auto obj_type = attr.type()->expect<ClassType>();
+      auto obj_value = std::move(attr).toObject();
+      auto sub_attributes = obj_type->getAttributes();
+      for (const auto& sub_attr : sub_attributes) {
+        auto sub_attr_val = obj_value->getAttr(sub_attr.getName());
+        sub_attr_val = overrideGradient(sub_attr_val);
+      }
+      return obj_value;
     }
 
     return attr;
