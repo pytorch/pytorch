@@ -452,6 +452,7 @@ class QuantizationTestCase(TestCase):
                 self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
 
     def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
+        print('orig_mod:', orig_mod, type(orig_mod))
         scripted = torch.jit.script(orig_mod)
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 

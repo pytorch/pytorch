@@ -319,6 +319,8 @@ def create_methods_and_properties_from_stubs(concrete_type, method_stubs, proper
     property_defs = [p.def_ for p in property_stubs]
     property_rcbs = [p.resolution_callback for p in property_stubs]
 
+    print('concrete type:', concrete_type)
+    print('create methods:', method_defs)
     concrete_type._create_methods_and_properties(property_defs, property_rcbs, method_defs, method_rcbs, method_defaults)
 
 
@@ -616,6 +618,7 @@ def infer_methods_to_compile(nn_module):
     stubs = []
     for method in uniqued_methods:
         stubs.append(make_stub_from_method(nn_module, method))
+    print('result:', overload_stubs + stubs)
     return overload_stubs + stubs
 
 

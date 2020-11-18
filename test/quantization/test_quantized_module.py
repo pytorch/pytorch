@@ -4,6 +4,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nnq_fused
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+import torch.nn.functional as F
 import torch.quantization
 
 from torch.quantization import (
@@ -30,12 +31,12 @@ hu.assert_deadline_disabled()
 import io
 import numpy as np
 
-'''
+"""
 Note that tests in this file are just API test, to make sure we wrapped the
 quantized operator implementations correctly in the user facing APIs, these are
 not correctness test for the underlying quantized operators. For correctness
-test please see `caffe2/test/test_quantized_op.py`.
-'''
+test please see `test/quantization/test_quantized_op.py`.
+"""
 
 class TestStaticQuantizedModule(QuantizationTestCase):
     def test_relu(self):
@@ -62,10 +63,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         out_features=st.integers(4, 8),
         use_bias=st.booleans(),
         use_fused=st.booleans(),
-        per_channel=st.booleans()
+        per_channel=st.booleans(),
+        backend_independent=st.booleans(),
     )
     @override_qengines
-    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel):
+    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, backend_independent):
         """test API functionality for nn.quantized.linear and nn.intrinsic.quantized.linear_relu"""
         if torch.backends.quantized.engine == 'qnnpack':
             per_channel = False
@@ -87,9 +89,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         scale = 0.5
         zero_point = 3
         if use_fused:
-            qlinear = nnq_fused.LinearReLU(in_features, out_features)
+            qlinear = nnq_fused.LinearReLU(in_features, out_features, backend_independent=backend_independent)
         else:
-            qlinear = nnq.Linear(in_features, out_features)
+            qlinear = nnq.Linear(in_features, out_features, backend_independent=backend_independent)
 
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -98,22 +100,33 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qlinear.set_weight_bias(W_q, B)
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q, atol=1e-5, rtol=0)
-        W_pack = qlinear._packed_params._packed_params
 
+        # testing packed param implementation
         qlinear.scale = float(scale)
         qlinear.zero_point = int(zero_point)
         Z_q = qlinear(X_q)
+
         # Check if the module implementation matches calling the
         # ops directly
-        if use_fused:
-            Z_ref = torch.ops.quantized.linear_relu(X_q, W_pack, scale, zero_point)
-
-            self.assertTrue('QuantizedLinearReLU' in str(qlinear))
+        if backend_independent:
+            weight = qlinear._qweight
+            bias = qlinear._bias
+            weight_dequant = weight.dequantize()
+            X_q_dq = X_q.dequantize()
+            Z_ref = F.linear(X_q_dq, weight_dequant, bias)
+            if use_fused:
+                Z_ref = F.relu(Z_ref, inplace=True)
+            Z_ref = torch.quantize_per_tensor(Z_ref, scale, zero_point, torch.quint8)
         else:
-            Z_ref = torch.ops.quantized.linear(X_q, W_pack, scale, zero_point)
+            W_pack = qlinear._packed_params._packed_params
+            if use_fused:
+                Z_ref = torch.ops.quantized.linear_relu(X_q, W_pack, scale, zero_point)
+            else:
+                Z_ref = torch.ops.quantized.linear(X_q, W_pack, scale, zero_point)
 
-            self.assertTrue('QuantizedLinear' in str(qlinear))
         self.assertEqual(Z_ref, Z_q)
+        self.assertTrue(
+            ("QuantizedLinearReLU" if use_fused else "QuantizedLinear") in str(qlinear))
 
         # Test serialization of quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
@@ -131,25 +144,27 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             else:
                 self.assertEqual(model_dict[key], loaded_dict[key])
         if use_fused:
-            loaded_qlinear = nnq_fused.LinearReLU(in_features, out_features)
+            loaded_qlinear = nnq_fused.LinearReLU(
+                in_features, out_features, backend_independent=backend_independent)
         else:
-            loaded_qlinear = nnq.Linear(in_features, out_features)
+            loaded_qlinear = nnq.Linear(
+                in_features, out_features, backend_independent=backend_independent)
         loaded_qlinear.load_state_dict(loaded_dict)
 
-        linear_unpack = torch.ops.quantized.linear_unpack
-        self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
-                         linear_unpack(loaded_qlinear._packed_params._packed_params))
-        if use_bias:
-            self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
+        self.assertEqual(loaded_qlinear.backend_independent, backend_independent)
+        if backend_independent:
+            self.assertEqual(qlinear._qweight, loaded_qlinear._qweight)
+            self.assertEqual(qlinear._bias, loaded_qlinear._bias)
+        else:
+            linear_unpack = torch.ops.quantized.linear_unpack
+            self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                            linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
-        self.assertTrue(hasattr(qlinear, '_packed_params'))
-        self.assertTrue(hasattr(loaded_qlinear, '_packed_params'))
-        self.assertTrue(hasattr(qlinear, '_weight_bias'))
-        self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
+        if not backend_independent:
+            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_q2 = loaded_qlinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
@@ -162,6 +177,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
+        print('qlinear:', qlinear, ' type:', type(qlinear), ' backend independent:', backend_independent)
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
 
         # Test from_float.
