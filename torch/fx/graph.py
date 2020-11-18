@@ -470,16 +470,20 @@ class Graph:
         used_names = set()
         unique_name_remap : Dict[Node, str] = {}
 
+        def unique_str(base_name : str) -> str:
+            name = base_name
+            idx = 1
+            while name in used_names or _shadows_builtin_name(name):
+                name = f'{base_name}_{idx}'
+                idx = idx + 1
+            used_names.add(name)
+            return name
+
         def unique_name(n : Node) -> str:
             if n in unique_name_remap:
                 return unique_name_remap[n]
 
-            name = n.name
-            idx = 0
-            while name in used_names or _shadows_builtin_name(name):
-                name = f'{n.name}_{idx}'
-                idx = idx + 1
-            used_names.add(name)
+            name = unique_str(n.name)
 
             unique_name_remap[n] = name
             return unique_name_remap[n]
@@ -497,22 +501,13 @@ class Graph:
 
         module_names_used : Dict[str, Dict[str, Optional[str]]] = {}
 
-        def dumb(base_name : str) -> str:
-            name = base_name
-            idx = 0
-            while name in used_names or _shadows_builtin_name(name):
-                name = f'{base_name}_{idx}'
-                idx = idx + 1
-            used_names.add(name)
-            return name
-
         def register_modules_used(qualified_name : str) -> str:
             if '.' in qualified_name:
                 if qualified_name.startswith('torch.ops'):
                     _, _, tail = qualified_name.split('.', maxsplit=2)
                     module_names_used.setdefault('torch', dict())
                     if 'ops' not in module_names_used['torch']:
-                        module_names_used['torch']['ops'] =  dumb('ops')
+                        module_names_used['torch']['ops'] = unique_str('ops')
                     entry = module_names_used['torch']['ops']
                     uniqued = entry if entry else 'ops'
                     return f'{uniqued}.{tail}'
@@ -520,7 +515,7 @@ class Graph:
                 module_path, name = qualified_name.rsplit('.', maxsplit=1)
                 module_names_used.setdefault(module_path, dict())
                 if name not in module_names_used[module_path]:
-                    module_names_used[module_path][name] = dumb(name)
+                    module_names_used[module_path][name] = unique_str(name)
                 entry = module_names_used[module_path][name]
                 return entry if entry else name
             else:
