@@ -104,7 +104,7 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
   std::string backend = Backend::get(backend_str);
   if (backend == "mpi") {
 #ifdef USE_C10D_MPI
-    pg = ProcessGruopMPI::createProcessGroupMPI(group_ranks);
+    pg = ProcessGroupMPI::createProcessGroupMPI(group_ranks);
 #else
     throw std::runtime_error(
         "Distributed package doesn't have MPI built in."
@@ -124,34 +124,34 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
 
     if (backend == "gloo") {
 #ifdef USE_C10D_GLOO
-      auto options = ProcessGroupGloo::Options();
+      auto options = c10::make_intrusive<ProcessGroupGloo::Options>();
 
       // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
       char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
       if (ifnameEnv) {
         for (const auto& iface : split(',', ifnameEnv)) {
-          options.devices.push_back(
+          options->devices.push_back(
               ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
         }
       } else {
         // If no hostname is specified, this function looks up
         // the machine's hostname and returns a device instance
         // associated with the address that the hostname resolves to.
-        options.devices.push_back(
+        options->devices.push_back(
             ::c10d::ProcessGroupGloo::createDefaultDevice());
       }
 
-      options.timeout = timeout;
-      options.threads = options.devices.size() * 2;
+      options->timeout = timeout;
+      options->threads = options->devices.size() * 2;
        pg = c10::make_intrusive<ProcessGroupGloo>(
           prefix_store, rank, world_size, options);
 #endif
     } else if (backend == "nccl") {
 #ifdef USE_C10D_NCCL
-      auto options = ProcessGroupNCCL::Options();
+      auto options = c10::make_intrusive<ProcessGroupNCCL::Options>();
 
-      options.isHighPriorityStream = false;
-      options.opTimeout = timeout;
+      options->isHighPriorityStream = false;
+      options->opTimeout = timeout;
       pg = c10::make_intrusive<ProcessGroupNCCL>(
           prefix_store, rank, world_size, options);
 #endif
