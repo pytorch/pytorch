@@ -3225,6 +3225,8 @@ A, in order as a namedtuple `solution, LU`.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
+Supports real-valued and complex-valued inputs.
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
@@ -5646,6 +5648,66 @@ Examples::
             [[-0.8437,  0.1727, -0.1398]]])
 """.format(**common_args))
 
+add_docstr(torch.swapdims, r"""
+swapdims(input, dim0, dim1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
+add_docstr(torch.swapaxes, r"""
+swapaxes(input, axis0, axis1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor
@@ -6785,6 +6847,10 @@ numbers. The remainder has the same sign as the divisor :attr:`other`.
 
 When :attr:`other` is a tensor, the shapes of :attr:`input` and
 :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+
+Note:
+    Complex inputs are not supported. In some cases, it is not mathematically
+    possible to satisfy the definition of a modulo operation with complex numbers.
 
 Args:
     input (Tensor): the dividend
@@ -8137,7 +8203,7 @@ transpose(input, dim0, dim1) -> Tensor
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
 
-The resulting :attr:`out` tensor shares it's underlying storage with the
+The resulting :attr:`out` tensor shares its underlying storage with the
 :attr:`input` tensor, so changing the content of one would change the content
 of the other.
 

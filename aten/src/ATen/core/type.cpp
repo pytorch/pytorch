@@ -517,7 +517,7 @@ const char * typeKindToString(TypeKind kind) {
   return "";
 }
 
-bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
@@ -739,7 +739,7 @@ TupleType::TupleType(
   }
 }
 
-bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
@@ -774,7 +774,7 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   });
 }
 
-bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const {
   if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
   }
@@ -1017,7 +1017,7 @@ const SymbolicShape& TensorType::symbolic_sizes() const {
   return sizes_;
 }
 
-bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool TensorType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (auto rhs_p = rhs->cast<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
     if (this == rhs_p.get()) {
@@ -1098,7 +1098,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->cast<AnyClassType>()) {
     return true;
   }
@@ -1182,7 +1182,7 @@ bool InterfaceType::isSubTypeImpl(
     return true;
 }
 
-bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool InterfaceType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
@@ -1440,7 +1440,7 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
   return SymbolicShape(std::move(dims));
 }
 
-bool EnumType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   return rhs->kind() == TypeKind::AnyType ||
       rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
 }

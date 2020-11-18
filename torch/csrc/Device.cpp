@@ -65,11 +65,6 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     int32_t device_index = -1;
     if (!r.isNone(1)) {
       device_index = r.toInt64(1);
-      // -1 is allowed in ATen/C++, to mean the default device, but not in
-      // Python.
-      TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-      TORCH_CHECK(!as_device.is_cpu() || device_index <= 0,
-        "CPU device index must be -1 or zero, got ", device_index);
     }
     at::Device device(as_device.type(), device_index);
     return THPDevice_New(device);

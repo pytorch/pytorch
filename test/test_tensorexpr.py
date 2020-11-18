@@ -1307,6 +1307,21 @@ class TestTensorExprFuser(BaseTestClass):
             x = warmup_and_run_forward(traced, a, b)
             self.assertLastGraphAllFused()
 
+    def test_exp_pow(self):
+        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
+        @torch.jit.script
+        def do_exp(x, y, z):
+            return ((x * y) * 2) * torch.pow(z, 2)
+
+        for device in devices:
+            x = torch.rand(10, dtype=torch.double, device=device)
+            y = torch.rand(10, dtype=torch.double, device=device)
+            z = torch.rand(10, dtype=torch.double, device=device)
+            traced = torch.jit.trace(do_exp, (x, y, z))
+            x = warmup_and_run_forward(traced, x, y, z)
+            self.assertLastGraphAllFused()
+
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
