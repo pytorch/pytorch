@@ -1530,9 +1530,6 @@ def method_tests():
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
         ('triangular_solve', (S, M), ((S, S), ), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('linalg.tensorinv', lambda dtype, device:
-         random_fullrank_matrix_distinct_singular_value(2 * S, dtype=dtype).reshape(2, S, M),
-         (), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('kron', (S, S), ((M, L),))
     ]
 
@@ -1827,7 +1824,5 @@ def exclude_tensor_method(name, test_name):
     if not is_inplace and name in exclude_outplace_tensor_method:
         return True
     if 'fft.' in name:
-        return True
-    if 'linalg.' in name:
         return True
     return False
