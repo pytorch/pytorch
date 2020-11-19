@@ -15,6 +15,7 @@ from ..quantization_mappings import (
 )
 from .pattern_utils import (
     register_quant_pattern,
+    mark_input_output_not_observed,
 )
 from .utils import (
     _parent_name,
@@ -30,6 +31,7 @@ from .utils import (
 
 from abc import ABC, abstractmethod
 import operator
+import warnings
 
 # -------------------------
 # Pattern Registrations
@@ -292,8 +294,13 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
-            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Linear "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':
@@ -418,27 +425,33 @@ class BatchNorm(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
+@mark_input_output_not_observed()
 class Embedding(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # Supported combinations are:
-        # quant_type  | activation (compute_type) | weight
-        # weight_only |  float32 (torch.uint8)    | quint8
-        # weight_only |  float32 (torch.uint8)    | quint4x2
+        # quant_type  | activation | weight | activation_compute_type
+        # weight_only |  float32   | quint8 | None
+        # weight_only |  float32   | quint4x2 | None
         # tuple (activation_dtype, weight_dtype, compute_dtype)
         supported_dtypes = [
-            (torch.float32, torch.quint8, torch.quint8),
-            (torch.float32, torch.quint4x2, torch.quint8),
+            (torch.float32, torch.quint8, None),
+            (torch.float32, torch.quint4x2, None),
         ]
         assert node.op == 'call_module'
         emb_node = node
         emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
-            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Embedding/EmbeddingBag, "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)

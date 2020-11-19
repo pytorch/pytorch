@@ -90,6 +90,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install magma-cuda102 -c pytorch
   elif [[ "$CUDA_VERSION" == 11.0* ]]; then
     conda_install magma-cuda110 -c pytorch
+  elif [[ "$CUDA_VERSION" == 11.1* ]]; then
+    conda_install magma-cuda111 -c pytorch
   fi
 
   # TODO: This isn't working atm
