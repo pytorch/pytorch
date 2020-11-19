@@ -469,6 +469,8 @@ CUSTOM_HANDLERS = {
     'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
     'distributed/test_distributed_fork': test_distributed,
     'distributed/test_distributed_spawn': test_distributed,
+    'distributed/rpc/test_process_group_agent': test_rpc,
+    'distributed/rpc/test_tensorpipe_agent': test_rpc,
 }
 
 

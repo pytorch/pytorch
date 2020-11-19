@@ -1,5 +1,5 @@
-from abc import ABC, abstractmethod
 import os
+from abc import ABC, abstractmethod
 
 import torch.testing._internal.dist_utils
 
@@ -12,9 +12,9 @@ class RpcAgentTestFixture(ABC):
     @property
     def init_method(self):
         use_tcp_init = os.environ.get("RPC_INIT_WITH_TCP", None)
-        if use_tcp_init== "1":
+        if use_tcp_init == "1":
             # os.environ["MASTER_ADDR"] = '127.0.0.1'
-            assert os.environ["MASTER_ADDR"] == '127.0.0.1'
+            assert os.environ["MASTER_ADDR"] == "127.0.0.1"
             assert os.environ["MASTER_PORT"] is not None
             print(f"Rank {self.rank} ---- USING TCP INIT ---")
             master_addr = os.environ["MASTER_ADDR"]
@@ -27,8 +27,8 @@ class RpcAgentTestFixture(ABC):
     @property
     def file_init_method(self):
         return torch.testing._internal.dist_utils.INIT_METHOD_TEMPLATE.format(
-                file_name=self.file_name
-            )
+            file_name=self.file_name
+        )
 
     @property
     @abstractmethod
