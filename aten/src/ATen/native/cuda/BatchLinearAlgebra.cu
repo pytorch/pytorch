@@ -1240,19 +1240,38 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
 #endif
 }
 
-// result should be in column major order and contain matrices to invert
-// the content of result is overriden by 'apply_inverse'
+Tensor& _inverse_out_helper_cuda_legacy(Tensor& result) {
+  // assuming result is in column major order and contains the matrices to invert
+  if (result.dim() > 2) {
+    std::vector<int64_t> infos(batchCount(result), 0);
+    auto input_working_copy = cloneBatchedColumnMajor(result);
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+      apply_batched_inverse<scalar_t>(
+        input_working_copy, result, infos);
+    });
+    batchCheckErrors(infos, "inverse_cuda");
+  } else {
+    int64_t info = 0;
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+      apply_single_inverse<scalar_t>(result, info);
+    });
+    singleCheckErrors(info, "inverse_cuda");
+  }
+  return result;
+}
+
 Tensor& _inverse_out_helper_cuda(Tensor &result) {
-// #ifdef USE_CUSOLVER
-//   if ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2) || !use_magma_) {
-//     return _inverse_helper_cuda_lib(self);    // cusolver or cublas
-//   } else {
-//     return _inverse_helper_cuda_legacy(self); // magma-cuda
-//   }
-// #else
-//   return _inverse_helper_cuda_legacy(self); // magma-cuda
-// #endif
-  TORCH_CHECK(false, "_inverse_out_helper_cuda: not implemented!")
+  // This function calculates the inverse matrix in-place
+  // result should be in column major order and contain matrices to invert
+#ifdef USE_CUSOLVER
+  if ((result.dim() == 2) || (/* result.dim() > 2 && */ batchCount(result) <= 2) || !use_magma_) {
+    return _inverse_out_helper_cuda_lib(result);    // cusolver or cublas
+  } else {
+    return _inverse_out_helper_cuda_legacy(result); // magma-cuda
+  }
+#else
+  return _inverse_out_helper_cuda_legacy(result); // magma-cuda
+#endif
   return result;
 }
 

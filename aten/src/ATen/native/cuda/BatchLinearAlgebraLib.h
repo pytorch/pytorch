@@ -18,6 +18,7 @@ namespace at {
 namespace native {
 
 Tensor _inverse_helper_cuda_lib(const Tensor& self);
+Tensor& _inverse_out_helper_cuda_lib(Tensor& result);
 
 }}  // namespace at::native
 

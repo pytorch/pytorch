@@ -105,6 +105,35 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, Tenso
     self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), info.data_ptr<int>(), n);
 }
 
+Tensor& _inverse_out_helper_cuda_lib(Tensor& result) {
+  // assuming result is in column major order and contains the matrices to invert
+  Tensor input_working_copy = cloneBatchedColumnMajor(result);
+
+  // for getrf + getrs (cusolver path)
+  // result should be filled with identity matrices
+  result.zero_();
+  result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+
+  const int batch_size = cuda_int_cast(batchCount(result), "batchCount");
+
+  if (result.dim() > 2 && batch_size > 1) {
+    Tensor infos = at::zeros({batchCount(result) * 2}, result.options().dtype(kInt));
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+      apply_batched_inverse_lib<scalar_t>(
+        input_working_copy, result, infos);
+    });
+    batchCheckErrors(infos, "inverse_cuda", false, 2);
+  } else {
+    Tensor info = at::zeros({2}, result.options().dtype(at::kInt));
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+      apply_single_inverse_lib<scalar_t>(input_working_copy, result, info);
+    });
+    batchCheckErrors(info, "inverse_cuda", false, 2);
+  }
+
+  return result;
+}
+
 Tensor _inverse_helper_cuda_lib(const Tensor& self) {
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   Tensor self_inv_working_copy = column_major_identity_matrix_like(self_working_copy);
