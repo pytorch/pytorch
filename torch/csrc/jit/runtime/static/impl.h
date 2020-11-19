@@ -273,6 +273,11 @@ class ProcessedNode {
     return output_regs_;
   }
 
+  const TypePtr& get_output_type(size_t i) const {
+    DCHECK_LT(i, output_regs().size());
+    return node_->outputs()[i]->type();
+  }
+
  private:
   Node* node_;
   c10::optional<Operation> op_;

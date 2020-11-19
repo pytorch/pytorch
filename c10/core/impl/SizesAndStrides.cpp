@@ -3,7 +3,7 @@
 namespace c10 {
 namespace impl {
 
-void SizesAndStrides::resize(const size_t newSize) {
+void SizesAndStrides::resize(const size_t newSize) noexcept {
   const auto oldSize = size();
   if (newSize == oldSize) {
     return;
@@ -34,6 +34,7 @@ void SizesAndStrides::resize(const size_t newSize) {
       // CANNOT USE allocateOutOfLineStorage(newSize) HERE! WOULD
       // OVERWRITE inlineStorage_!
       int64_t* tempStorage = static_cast<int64_t *>(malloc(storageBytes(newSize)));
+      TORCH_CHECK(tempStorage, "Could not allocate memory to change Tensor SizesAndStrides!");
       const auto bytesToCopy = oldSize * sizeof(inlineStorage_[0]);
       const auto bytesToZero = (newSize > oldSize) ? (newSize - oldSize) * sizeof(tempStorage[0]) : 0;
       memcpy(&tempStorage[0], &inlineStorage_[0], bytesToCopy);

@@ -25,7 +25,9 @@ from ..quantize import (
 )
 
 from ..utils import (
-    get_combined_dict
+    get_combined_dict,
+    get_swapped_custom_module_class,
+    activation_is_statically_quantized,
 )
 
 from .pattern_utils import (
@@ -48,8 +50,6 @@ from .utils import (
     _parent_name,
     quantize_node,
     get_custom_module_class_keys,
-    get_swapped_custom_module_class,
-    activation_is_statically_quantized,
 )
 
 from collections import OrderedDict

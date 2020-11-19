@@ -38,7 +38,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  SizesAndStrides(const SizesAndStrides& rhs) : size_(rhs.size_) {
+  SizesAndStrides(const SizesAndStrides& rhs) noexcept : size_(rhs.size_) {
     if (C10_LIKELY(rhs.isInline())) {
       copyDataInline(rhs);
     } else {
@@ -47,7 +47,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  SizesAndStrides& operator=(const SizesAndStrides& rhs) {
+  SizesAndStrides& operator=(const SizesAndStrides& rhs) noexcept {
     if (this == &rhs) {
       return *this;
     }
@@ -69,7 +69,7 @@ class C10_API SizesAndStrides {
   }
 
   // Move from rhs. rhs.size() == 0 afterwards.
-  SizesAndStrides(SizesAndStrides&& rhs) : size_(rhs.size_) {
+  SizesAndStrides(SizesAndStrides&& rhs) noexcept : size_(rhs.size_) {
     if (C10_LIKELY(isInline())) {
       memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
     } else {
@@ -81,7 +81,7 @@ class C10_API SizesAndStrides {
   }
 
   // Move from rhs. rhs.size() == 0 afterwards.
-  SizesAndStrides& operator=(SizesAndStrides&& rhs) {
+  SizesAndStrides& operator=(SizesAndStrides&& rhs) noexcept {
     if (this == &rhs) {
       return *this;
     }
@@ -104,11 +104,11 @@ class C10_API SizesAndStrides {
     return *this;
   }
 
-  size_t size() const {
+  size_t size() const noexcept {
     return size_;
   }
 
-  const int64_t* sizes_data() const {
+  const int64_t* sizes_data() const noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[0];
     } else {
@@ -116,7 +116,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  int64_t* sizes_data() {
+  int64_t* sizes_data() noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[0];
     } else {
@@ -124,32 +124,32 @@ class C10_API SizesAndStrides {
     }
   }
 
-  sizes_const_iterator sizes_begin() const {
+  sizes_const_iterator sizes_begin() const noexcept {
     return sizes_data();
   }
 
-  sizes_iterator sizes_begin()  {
+  sizes_iterator sizes_begin() noexcept {
     return sizes_data();
   }
 
-  sizes_const_iterator sizes_end() const {
+  sizes_const_iterator sizes_end() const noexcept {
     return sizes_begin() + size();
   }
 
-  sizes_iterator sizes_end() {
+  sizes_iterator sizes_end() noexcept {
     return sizes_begin() + size();
   }
 
-  IntArrayRef sizes_arrayref() const {
+  IntArrayRef sizes_arrayref() const noexcept {
     return IntArrayRef{sizes_data(), size()};
   }
 
-  void set_sizes(IntArrayRef newSizes) {
+  void set_sizes(IntArrayRef newSizes) noexcept {
     resize(newSizes.size());
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
 
-  const int64_t* strides_data() const {
+  const int64_t* strides_data() const noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
@@ -157,7 +157,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  int64_t* strides_data() {
+  int64_t* strides_data() noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
@@ -165,7 +165,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  strides_const_iterator strides_begin() const {
+  strides_const_iterator strides_begin() const noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
@@ -173,7 +173,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  strides_iterator strides_begin() {
+  strides_iterator strides_begin() noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[MAX_INLINE_SIZE];
     } else {
@@ -181,87 +181,89 @@ class C10_API SizesAndStrides {
     }
   }
 
-  strides_const_iterator strides_end() const {
+  strides_const_iterator strides_end() const noexcept {
     return strides_begin() + size();
   }
 
-  strides_iterator strides_end() {
+  strides_iterator strides_end() noexcept {
     return strides_begin() + size();
   }
 
-  IntArrayRef strides_arrayref() const {
+  IntArrayRef strides_arrayref() const noexcept {
     return IntArrayRef{strides_data(), size()};
   }
 
   // Size accessors.
-  int64_t size_at(size_t idx) const {
+  int64_t size_at(size_t idx) const noexcept {
     assert(idx < size());
     return sizes_data()[idx];
   }
 
-  int64_t& size_at(size_t idx) {
+  int64_t& size_at(size_t idx) noexcept {
     assert(idx < size());
     return sizes_data()[idx];
   }
 
-  int64_t size_at_unchecked(size_t idx) const {
+  int64_t size_at_unchecked(size_t idx) const noexcept {
     return sizes_data()[idx];
   }
 
-  int64_t& size_at_unchecked(size_t idx) {
+  int64_t& size_at_unchecked(size_t idx) noexcept {
     return sizes_data()[idx];
   }
 
   // Size accessors.
-  int64_t stride_at(size_t idx) const {
+  int64_t stride_at(size_t idx) const noexcept {
     assert(idx < size());
     return strides_data()[idx];
   }
 
-  int64_t& stride_at(size_t idx) {
+  int64_t& stride_at(size_t idx) noexcept {
     assert(idx < size());
     return strides_data()[idx];
   }
 
-  int64_t stride_at_unchecked(size_t idx) const {
+  int64_t stride_at_unchecked(size_t idx) const noexcept {
     return strides_data()[idx];
   }
 
-  int64_t& stride_at_unchecked(size_t idx) {
+  int64_t& stride_at_unchecked(size_t idx) noexcept {
     return strides_data()[idx];
   }
 
-  void resize(size_t newSize);
+  void resize(size_t newSize) noexcept;
 
  private:
-  bool isInline() const {
+  bool isInline() const noexcept {
     return size_ <= MAX_INLINE_SIZE;
   }
 
-  void copyDataInline(const SizesAndStrides& rhs) {
+  void copyDataInline(const SizesAndStrides& rhs) noexcept {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.isInline());
     memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
   }
 
-  static size_t storageBytes(size_t size) {
+  static size_t storageBytes(size_t size) noexcept {
     return size * 2 * sizeof(int64_t);
   }
 
-  void allocateOutOfLineStorage(size_t size) {
+  void allocateOutOfLineStorage(size_t size) noexcept {
     outOfLineStorage_ = static_cast<int64_t *>(malloc(storageBytes(size)));
+    TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!");
   }
 
-  void resizeOutOfLineStorage(size_t newSize) {
+  void resizeOutOfLineStorage(size_t newSize) noexcept {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     outOfLineStorage_ = static_cast<int64_t *>(realloc(outOfLineStorage_, storageBytes(newSize)));
+    TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!");
   }
 
-  void freeOutOfLineStorage() {
+  void freeOutOfLineStorage() noexcept {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     free(outOfLineStorage_);
   }
 
-  void copyDataOutline(const SizesAndStrides& rhs) {
+  void copyDataOutline(const SizesAndStrides& rhs) noexcept {
     memcpy(outOfLineStorage_, rhs.outOfLineStorage_, storageBytes(rhs.size_));
   }
 
@@ -270,7 +272,7 @@ class C10_API SizesAndStrides {
   size_t size_;
   union {
     int64_t *outOfLineStorage_;
-    int64_t inlineStorage_[MAX_INLINE_SIZE * 2];
+    int64_t inlineStorage_[MAX_INLINE_SIZE * 2]{};
   };
 
 };
