@@ -4991,7 +4991,7 @@ class TestONNXRuntime(unittest.TestCase):
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
         [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
-        
+
         model_export = torch.jit.script(MyModule())
         ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
                                    example_outputs=out,
@@ -5021,7 +5021,7 @@ class TestONNXRuntime(unittest.TestCase):
                                    training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
-        
+
         script_model = torch.jit.script(model)
         output = model(x)
         ort_sess = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
@@ -5065,7 +5065,7 @@ class TestONNXRuntime(unittest.TestCase):
         ratio_ort = np.sum(ort_mask) / nb_elements
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
-        
+
         script_model = torch.jit.script(model)
         y = model(input)
         output = y.cpu().numpy()
