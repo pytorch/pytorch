@@ -105,6 +105,8 @@ is the epsilon value for the datatype of :attr:`input`.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
 
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
 Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
                     where `*` is one or more batch dimensions.
