@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Set, List, Tuple, Dict
+from typing import Optional, Sequence, List, Tuple
 
 from tools.codegen.api.types import *
 from tools.codegen.model import *

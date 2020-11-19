@@ -46,6 +46,12 @@ from tools.codegen.utils import *
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
+try:
+    # use faster C loader if available
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader  # type: ignore
+
 #
 # declarations blocklist
 # We skip codegen for these functions, for various reasons.
@@ -248,7 +254,7 @@ def load_deprecated_signatures(
     results: List[PythonSignatureNativeFunctionPair] = []
 
     with open(deprecated_yaml_path, 'r') as f:
-        deprecated_defs = yaml.load(f, Loader=YamlLoader)
+        deprecated_defs = yaml.load(f, Loader=Loader)
 
     for deprecated in deprecated_defs:
         _, params = split_name_params(deprecated['name'])

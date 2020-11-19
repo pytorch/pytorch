@@ -14,9 +14,15 @@ from tools.codegen.gen import parse_native_yaml, with_native_function
 from tools.codegen.model import *
 from tools.codegen.utils import *
 
+try:
+    # use faster C loader if available
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader  # type: ignore
+
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     with open(derivatives_yaml_path, 'r') as f:
-        definitions = yaml.load(f, Loader=YamlLoader)
+        definitions = yaml.load(f, Loader=Loader)
 
     functions = parse_native_yaml(native_yaml_path)
 

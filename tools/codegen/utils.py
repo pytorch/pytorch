@@ -1,12 +1,6 @@
 import re
 from typing import Tuple, List
 
-try:
-    # use faster C loader if available
-    from yaml import CLoader as YamlLoader
-except ImportError:
-    from yaml import YamlLoader  # type: ignore
-
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurrence of a parameter in the derivative formula
 IDENT_REGEX = r'(^|\W){}($|\W)'
