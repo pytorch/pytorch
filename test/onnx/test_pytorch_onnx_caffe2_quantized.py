@@ -280,11 +280,7 @@ class TestQuantizedOps(unittest.TestCase):
                 return x
 
         x = np.random.rand(2, 3, 10, 10).astype("float32")
-        try:
-            self.generic_test(SimpleModel(), (x,), input_names=["x"], relaxed_check=True)
-        except RuntimeError:
-            import warnings
-            warnings.warn("Test skipped as Inferred shape and existing shape differ in rank")
+        self.generic_test(SimpleModel(), (x,), input_names=["x"], relaxed_check=True)
 
     def test_sequential(self):
         class ConvBNReLUModule(nn.Sequential):
