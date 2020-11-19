@@ -555,7 +555,7 @@ class TestScriptPy3(JitTestCase):
             @torch.jit.script
             def foo():
                 x = 5
-                if True:
+                if 1 == 1:
                     x : Optional[int] = 7
 
     def test_module_inplace_construct(self):
