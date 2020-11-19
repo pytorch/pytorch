@@ -1052,7 +1052,8 @@ bool Node::isNondeterministic() const {
     return false;
   }
   // Dropout with train = False is deterministic
-  if (matches("aten::dropout(Tensor input, float p, bool train, Generator? generator) -> Tensor") &&
+  if (matches(
+          "aten::dropout(Tensor input, float p, bool train, Generator? generator) -> Tensor") &&
       is_constant(attr::train) && !get<bool>(attr::train).value()) {
     return false;
   }
