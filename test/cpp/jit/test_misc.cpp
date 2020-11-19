@@ -779,6 +779,11 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
+static bool should_run = false;
+static bool shouldRunCallback(const RecordFunctionCallback&) {
+  return should_run;
+}
+
 TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1058,14 +1063,12 @@ TEST(RecordFunctionTest, Basic) {
   // test should_run
 
   bool ran = false;
-  bool should_run = false;
+  should_run = false;
   addGlobalCallback(
       RecordFunctionCallback(
           [&ran](const RecordFunction& fn) { ran = true; },
           [](const RecordFunction&) {})
-          .setShouldRun([&should_run](const RecordFunctionCallback&) {
-            return should_run;
-          }));
+        .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
 
