@@ -25,7 +25,7 @@ def _orthogonalize(matrix, epsilon=1e-8):
 
 
 def powerSGD_hook(
-    process_group: object, bucket: dist._GradBucket, rank: int = 1
+    process_group: object, bucket: dist._GradBucket, matrix_approximation_rank: int = 1
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
@@ -45,6 +45,17 @@ def powerSGD_hook(
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
     For warm start, can take one such step at a time, and alternate between them.
+
+    Arguments:
+        process_group (object): Process group to communicate.
+        bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
+            Note that since DDP comm hook only supports single process single device mode at this time,
+            only exactly one tensor is stored in this bucket.
+        matrix_approximation_rank (int): The low rank for matrix approximation.
+            Typically only 1 or 2 is used. See https://arxiv.org/pdf/1905.13727.pdf.
+
+    Returns:
+        Future handler of the communication, which updates the gradients in place.
 
     Example::
         PowerSGDState state(process_group, 1)
@@ -68,41 +79,43 @@ def powerSGD_hook(
     matrix = input_tensor.view(square_side_length, square_side_length)
 
     def create_low_rank_tensor(fill_random_values):
-        "Returns a low-rank 2D tensor and the allocated contiguous memory."
-        memory = torch.empty(square_side_length * rank, device=device)
+        "Returns a low-rank 2D tensor of square_side_length * matrix_approximation_rank."
         if fill_random_values:
-            with torch.random.fork_rng():
+            with torch.random.fork_rng(devices=[device]):
                 # The seed makes sure that the initial random values are the same across all the DDP replicas.
                 # Such seed should differ at every step.
                 # Currently use the length of input tensor as the seed, which should be mostly different.
                 # TODO(wayi@): Should read the random seed from the state of this hook provided by the constructor.
                 torch.manual_seed(total_length)
-                memory[:] = torch.randn_like(memory)
-        return memory.view(square_side_length, rank), memory
+                return torch.randn(
+                    square_side_length, matrix_approximation_rank, device=device
+                )
+        else:
+            return torch.empty(
+                square_side_length, matrix_approximation_rank, device=device
+            )
 
-    p, p_memory = create_low_rank_tensor(fill_random_values=False)
-    q, q_memory = create_low_rank_tensor(fill_random_values=True)
+    p = create_low_rank_tensor(fill_random_values=False)
+    q = create_low_rank_tensor(fill_random_values=True)
     _orthogonalize(q, 0)
 
     torch.matmul(matrix, q, out=p)
-    allreduce_p_fut = dist.all_reduce(
-        p_memory, group=group_to_use, async_op=True
-    ).get_future()
+    allreduce_p_fut = dist.all_reduce(p, group=group_to_use, async_op=True).get_future()
 
     def compute_q(fut):
-        p_memory = fut.value()[0]
+        p = fut.value()[0]
         _orthogonalize(p, 0)
 
         torch.matmul(matrix.t(), p, out=q)
 
         return [
-            dist.all_reduce(q_memory, group=group_to_use, async_op=True)
+            dist.all_reduce(q, group=group_to_use, async_op=True)
             .get_future()
             .value()[0]
         ]
 
     def decompress(fut):
-        q_memory = fut.value()[0].div_(world_size)
+        q = fut.value()[0].div_(world_size)
         torch.matmul(p, q.t(), out=matrix)
 
         ret = input_tensor.resize_(total_length)

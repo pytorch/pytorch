@@ -37,7 +37,8 @@ class DDPCommHookType(Enum):
     # Rank-2 PowerSGD can give a higher accuracy than the default rank-1 version,
     # but it runs slower and consumes more memory.
     POWER_SGD_RANK2 = partial(
-        _ddp_comm_hook_wrapper, comm_hook=partial(powerSGD.powerSGD_hook, rank=2)
+        _ddp_comm_hook_wrapper,
+        comm_hook=partial(powerSGD.powerSGD_hook, matrix_approximation_rank=2),
     )
 
 
