@@ -7805,36 +7805,49 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
     @onlyOnCPUAndCUDA
-    def test_view_dtype(self, device):
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False), torch.complex64)
+    def test_view_dtype(self, device, dtype):
+        int_dtype = {
+            torch.half: torch.int16,
+            torch.bfloat16: torch.int16,
+            torch.float: torch.int,
+            torch.double: torch.long,
+            torch.complex64: torch.long,
+        }[dtype]
+        numpy_dtype = {
+            torch.half: np.int16,
+            torch.bfloat16: np.int16,
+            torch.float: np.int32,
+            torch.double: np.int64,
+            torch.complex64: np.int64,
+        }[dtype]
+
         def generate_inputs():
-            yield make_tensor((5, 5, 5), device, torch.float32, low=-5, high=5)
-            yield make_tensor((5, 5, 5), device, torch.float32, low=-5, high=5).permute(2, 0, 1)
-            yield make_tensor((1, 5, 1), device, torch.float32, low=-5, high=5).expand(5, 5, 5)
-            yield make_tensor((10, 5, 10), device, torch.float32, low=-5, high=5)[::2, :, ::2]
-            yield make_tensor((0, 5, 10), device, torch.float32, low=-5, high=5)
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5)
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5).permute(2, 0, 1)
+            yield make_tensor((1, 5, 1), device, dtype, low=-5, high=5).expand(5, 5, 5)
+            yield make_tensor((10, 5, 10), device, dtype, low=-5, high=5)[::2, :, ::2]
+            yield make_tensor((0, 5, 10), device, dtype, low=-5, high=5)
             # commented out due to https://github.com/pytorch/pytorch/issues/47948
-            # yield make_tensor((), device, torch.float32, low=-5, high=5)
+            # yield make_tensor((), device, dtype, low=-5, high=5)
 
-        def run_test(f32):
-            self.assertRaises(RuntimeError, lambda: f32.view(torch.int64))
-            self.assertRaises(RuntimeError, lambda: f32.view(torch.int8))
+        def run_test(fp_tensor):
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.complex128))
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.int8))
 
-            i32 = f32.view(torch.int32)
-            self.assertEqual(i32.dtype, torch.int32)
-            self.assertEqual(i32.shape, f32.shape)
-            self.assertEqual(i32.stride(), f32.stride())
+            int_tensor = fp_tensor.view(int_dtype)
+            self.assertEqual(int_tensor.dtype, int_dtype)
+            self.assertEqual(int_tensor.shape, fp_tensor.shape)
+            self.assertEqual(int_tensor.stride(), fp_tensor.stride())
 
-            self.assertEqual(f32, i32.view(torch.float32), rtol=0, atol=0)
-            self.assertEqual(f32.cpu().numpy().view(np.int32), i32, rtol=0, atol=0)
+            self.assertEqual(fp_tensor, int_tensor.view(dtype), rtol=0, atol=0)
+            self.assertEqual(fp_tensor.cpu().numpy().view(numpy_dtype), int_tensor, rtol=0, atol=0)
 
-            i32.zero_()
-            self.assertEqual(f32, torch.zeros_like(f32), rtol=0, atol=0)
+            fp_tensor.zero_()
+            self.assertEqual(fp_tensor, torch.zeros_like(fp_tensor), rtol=0, atol=0)
 
-            i32.fill_(7039851)  # 0x006b6b6b
-            self.assertEqual(f32, torch.full_like(f32, 9.86493239538e-39), rtol=0, atol=0)
-
-        for f32 in generate_inputs():
-            run_test(f32)
+        for fp_tensor in generate_inputs():
+            run_test(fp_tensor)
 
     def test_flip(self, device):
         data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=device).view(2, 2, 2)

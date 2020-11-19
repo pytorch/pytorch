@@ -4106,17 +4106,13 @@ Example::
 view(dtype) -> Tensor
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
-different :attr:`dtype`.
-
-The returned tensor shares the same data and must have the same number
-of elements, but may have a different dtype. For a tensor to be viewed, the new
-dtype must have the same number of bytes with its original dtype.
+different :attr:`dtype`. :attr:`dtype` must have the same number of bytes per
+element as :attr:`self`'s dtype.
 
 .. warning::
 
-    This overload is not supported by TorchScript yet. Confusing error message
-    like `RuntimeError: shape '[3]' is invalid for input of size 125` or silent
-    wrong result might be produced if you try to use this operator in TorchScript
+    This overload is not supported by TorchScript, and using it in a Torchscript
+    program will cause undefined behavior.
 
 
 Args:
@@ -4126,51 +4122,31 @@ Example::
 
     >>> x = torch.randn(4, 4)
     >>> x
-    tensor([[-0.3113, -1.6569,  0.5822,  0.0424],
-            [ 1.1197, -1.5123, -0.8537, -1.9865],
-            [ 1.0786,  1.4348,  0.1338,  0.0893],
-            [-0.3087,  1.3192,  0.3953, -0.6418]])
+    tensor([[ 0.9482, -0.0310,  1.4999, -0.5316],
+            [-0.1520,  0.7472,  0.5617, -0.8649],
+            [-2.4724, -0.0334, -0.2976, -0.8499],
+            [-0.2109,  1.9913, -0.9607, -0.6123]])
     >>> x.dtype
     torch.float32
-    >>> x.size()
-    torch.Size([4, 4])
-    >>> x.stride()
-    (4, 1)
 
-    >>> z = x.view(torch.int32)
-    >>> z
-    tensor([[-1096850773, -1076619988,  1058343474,  1026415044],
-            [ 1066357317, -1077832550, -1084584289, -1073854989],
-            [ 1066012529,  1069000315,  1040774669,  1035397278],
-            [-1096937622,  1068030568,  1053450185, -1088139960]],
-           dtype=torch.int32)
-    >>> z.dtype
-    torch.int32
-    >>> z.size()
-    torch.Size([4, 4])
-    >>> z.stride()
-    (4, 1)
-    >>> z.view(torch.float32)
-    tensor([[-0.3113, -1.6569,  0.5822,  0.0424],
-            [ 1.1197, -1.5123, -0.8537, -1.9865],
-            [ 1.0786,  1.4348,  0.1338,  0.0893],
-            [-0.3087,  1.3192,  0.3953, -0.6418]])
+    >>> y = x.view(torch.int32)
+    >>> y
+    tensor([[ 1064483442, -1124191867,  1069546515, -1089989247],
+            [-1105482831,  1061112040,  1057999968, -1084397505],
+            [-1071760287, -1123489973, -1097310419, -1084649136],
+            [-1101533110,  1073668768, -1082790149, -1088634448]],
+        dtype=torch.int32)
+    >>> y[0, 0] = 1000000000
+    >>> x
+    tensor([[ 0.0047, -0.0310,  1.4999, -0.5316],
+            [-0.1520,  0.7472,  0.5617, -0.8649],
+            [-2.4724, -0.0334, -0.2976, -0.8499],
+            [-0.2109,  1.9913, -0.9607, -0.6123]])
 
     >>> x.view(torch.int16)
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
-    RuntimeError: Viewing a tensor as a new dtype with different bytes is not supported.
-
-    >>> z.zero_()
-    tensor([[0, 0, 0, 0],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0]], dtype=torch.int32)
-    >>> x
-    tensor([[0., 0., 0., 0.],
-            [0., 0., 0., 0.],
-            [0., 0., 0., 0.],
-            [0., 0., 0., 0.]])
+    RuntimeError: Viewing a tensor as a new dtype with a different number of bytes per element is not supported.
 """)
 
 add_docstr_all('view_as',

@@ -121,12 +121,13 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   if (self.scalar_type() == dtype) {
     return self;
   }
-  TORCH_CHECK(self.element_size() == c10::scalarTypeToTypeMeta(dtype).itemsize(),
-    "Viewing a tensor as a new dtype with different bytes is not supported.");
+  auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  TORCH_CHECK(self.element_size() == type_meta.itemsize(),
+    "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   Storage storage = self.storage();
   auto new_tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage), self.key_set(), scalarTypeToTypeMeta(dtype));
-  auto * impl = new_tensor.unsafeGetTensorImpl();
+      std::move(storage), self.key_set(), type_meta);
+  auto* impl = new_tensor.unsafeGetTensorImpl();
   impl->set_storage_offset(self.storage_offset());
   impl->set_sizes_and_strides(self.sizes(), self.strides());
   return new_tensor;
