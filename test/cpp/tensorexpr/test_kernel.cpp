@@ -378,9 +378,8 @@ void testKernel_4() {
       TensorExprKernel k(graph);
       k.getCodeGenStmt();
     };
-    ASSERT_THROWS_WITH(compile(ir_dim_99), "invalid 'dim' value in aten::cat");
-    ASSERT_THROWS_WITH(
-        compile(ir_dim_minus_6), "invalid 'dim' value in aten::cat");
+    ASSERT_THROWS_WITH(compile(ir_dim_99), "Invalid index");
+    ASSERT_THROWS_WITH(compile(ir_dim_minus_6), "Invalid index");
   }
 }
 
