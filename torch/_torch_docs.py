@@ -2674,6 +2674,9 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
     if eigenvalues and eigenvectors are all real valued.
 
+    When :attr:`input` is on CUDA, :func:`torch.eig() <torch.eig>` causes
+    host-device synchronization.
+
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
         will be computed
@@ -2698,6 +2701,32 @@ Returns:
           true eigenvectors can be computed as
           :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
           :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
+
+Example::
+
+    Trivial example with a diagonal matrix. By default, only eigenvalues are computed:
+
+    >>> a = torch.diag(torch.tensor([1, 2, 3], dtype=torch.double))
+    >>> e, v = torch.eig(a)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([], dtype=torch.float64)
+
+    Compute also the eigenvectors:
+
+    >>> e, v = torch.eig(a, eigenvectors=True)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]], dtype=torch.float64)
+
 """)
 
 add_docstr(torch.eq, r"""
@@ -5648,6 +5677,66 @@ Examples::
             [[-0.8437,  0.1727, -0.1398]]])
 """.format(**common_args))
 
+add_docstr(torch.swapdims, r"""
+swapdims(input, dim0, dim1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
+add_docstr(torch.swapaxes, r"""
+swapaxes(input, axis0, axis1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor
@@ -6787,6 +6876,10 @@ numbers. The remainder has the same sign as the divisor :attr:`other`.
 
 When :attr:`other` is a tensor, the shapes of :attr:`input` and
 :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+
+Note:
+    Complex inputs are not supported. In some cases, it is not mathematically
+    possible to satisfy the definition of a modulo operation with complex numbers.
 
 Args:
     input (Tensor): the dividend
