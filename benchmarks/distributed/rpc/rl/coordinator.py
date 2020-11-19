@@ -16,8 +16,8 @@ EPISODE_STEPS = 100
 
 
 class CoordinatorBase:
-    def __init__(self, world_size, batch, state_size, nlayers, out_features):
-        self.world_size = world_size
+    def __init__(self, batch_size, batch, state_size, nlayers, out_features):
+        self.batch_size = batch_size
         self.batch = batch
 
         self.agent_rref = None  # Agent RRef
@@ -26,15 +26,15 @@ class CoordinatorBase:
         agent_info = rpc.get_worker_info(AGENT_NAME)
         self.agent_rref = remote(agent_info, AgentBase)
 
-        for rank in range(2, world_size):
-            ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank))
+        for rank in range(batch_size):
+            ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank + 2))
             ob_ref = remote(ob_info, ObserverBase)
             self.ob_rrefs.append(ob_ref)
 
             ob_ref.rpc_sync().set_state(state_size, batch)
 
         self.agent_rref.rpc_sync().set_world(
-            world_size, state_size, nlayers, out_features, self.batch)
+            batch_size, state_size, nlayers, out_features, self.batch)
 
     def run_coordinator(self, episodes, episode_steps):
         agent_latency_final = []
@@ -47,7 +47,7 @@ class CoordinatorBase:
             ep_start_time = time.time()
 
             print(f"Episode {ep} - ", end='')
-            # n_steps = int(episode_steps / (self.world_size - 2))
+            # n_steps = int(episode_steps / self.batch_size)
 
             n_steps = episode_steps
             agent_start_time = time.time()
@@ -58,25 +58,44 @@ class CoordinatorBase:
                     self.agent_rref, n_steps))
 
             rets = torch.futures.wait_all(futs)
-            agent_latency = self.agent_rref.rpc_sync().finish_episode(rets)
+            agent_latency, agent_throughput = self.agent_rref.rpc_sync().finish_episode(rets)
+
+            self.agent_rref.rpc_sync().reset_metrics()
 
             agent_latency_final += agent_latency
+            agent_throughput_final += agent_throughput
+
             observer_latency_final += [ret[2] for ret in rets]
+            observer_throughput_final += [ret[3] for ret in rets]
 
             ep_end_time = time.time()
             episode_time = ep_end_time - ep_start_time
-            print(episode_time)
+            print(round(episode_time, 3))
 
         observer_latency_final = [t for s in observer_latency_final for t in s]
+        observer_throughput_final = [
+            t for s in observer_throughput_final for t in s]
 
-        print("\nAgent Latency -")
+        print("\nAgent Latency - ", len(agent_latency_final))
         agent_latency_final = sorted(agent_latency_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(agent_latency_final, p)
             print("p" + str(p) + ":", round(v, 3))
 
-        print("\nObserver Latency -")
+        print("\nAgent Throughput - ", len(agent_throughput_final))
+        agent_throughput_final = sorted(agent_throughput_final)
+        for p in [50, 75, 90, 95]:
+            v = np.percentile(agent_throughput_final, p)
+            print("p" + str(p) + ":", int(v))
+
+        print("\nObserver Latency - ", len(observer_latency_final))
         observer_latency_final = sorted(observer_latency_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(observer_latency_final, p)
             print("p" + str(p) + ":", round(v, 3))
+
+        print("\nObserver Throughput - ", len(observer_throughput_final))
+        observer_throughput_final = sorted(observer_throughput_final)
+        for p in [50, 75, 90, 95]:
+            v = np.percentile(observer_throughput_final, p)
+            print("p" + str(p) + ":", int(v))

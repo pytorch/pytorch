@@ -41,6 +41,7 @@ args = parser.parse_args()
 
 def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nlayers, out_features):
     state_size = list(map(int, state_size.split(',')))
+    batch_size = world_size - 2  # No. of observers
 
     os.environ['MASTER_ADDR'] = master_addr
     os.environ['MASTER_PORT'] = master_port
@@ -49,7 +50,7 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
         rpc.init_rpc(COORDINATOR_NAME, rank=rank, world_size=world_size)
 
         coordinator = CoordinatorBase(
-            world_size, batch, state_size, nlayers, out_features)
+            batch_size, batch, state_size, nlayers, out_features)
         coordinator.run_coordinator(TOTAL_EPISODES, TOTAL_EPISODE_STEPS)
 
     elif rank == 1:

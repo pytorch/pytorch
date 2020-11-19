@@ -11,12 +11,17 @@ import torch.distributed.rpc as rpc
 from torch.distributed.rpc import RRef, remote
 from torch.distributions import Categorical
 
+from torch import autograd
+
 OBSERVER_NAME = "observer{}"
 gamma = 0.99
+
+torch.autograd.set_detect_anomaly(True)
 
 
 class Policy(nn.Module):
     def __init__(self, state_size, nlayers, out_features, batch=True):
+        torch.autograd.set_detect_anomaly(True)
         super(Policy, self).__init__()
         self.in_features = reduce((lambda x, y: x*y), state_size)
 
@@ -29,8 +34,7 @@ class Policy(nn.Module):
 
     def forward(self, x):
         action_scores = self.model(x)
-        ret = F.softmax(action_scores, dim=self.dim)
-        return ret
+        return F.softmax(action_scores, dim=self.dim)
 
 
 class AgentBase:
@@ -48,27 +52,34 @@ class AgentBase:
         self.agent_latency_start = None
         self.agent_latency_end = None
         self.agent_latency = []
+        self.agent_throughput = []
 
-    def set_world(self, world_size, state_size, nlayers, out_features, batch=True):
+    def reset_metrics(self):
+        self.agent_latency_start = None
+        self.agent_latency_end = None
+        self.agent_latency = []
+        self.agent_throughput = []
+
+    def set_world(self, batch_size, state_size, nlayers, out_features, batch=True):
         from observer import ObserverBase
 
         self.batch = batch
         self.policy = Policy(state_size, nlayers, out_features, self.batch)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=1e-2)
 
-        self.world_size = world_size
-        for rank in range(2, world_size):
-            ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank))
+        self.batch_size = batch_size
+        for rank in range(batch_size):
+            ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank + 2))
             self.ob_rrefs.append(
                 remote(ob_info, ObserverBase))
             self.rewards[ob_info.id] = []
 
         self.saved_log_probs = [] if self.batch else {
-            k: [] for k in range(self.world_size - 2)}
+            k: [] for k in range(self.batch_size)}
 
-        self.pending_states = self.world_size - 2
+        self.pending_states = self.batch_size
         self.state_size = state_size
-        self.states = torch.zeros(self.world_size - 2, *state_size)
+        self.states = torch.zeros(self.batch_size, *state_size)
 
     @staticmethod
     @rpc.functions.async_execution
@@ -76,7 +87,7 @@ class AgentBase:
         self = agent_rref.local_value()
         observer_id -= 2
 
-        if self.pending_states == self.world_size - 2:
+        if self.pending_states == self.batch_size:
             self.agent_latency_start = time.time()
 
         self.states[observer_id].copy_(state)
@@ -87,7 +98,7 @@ class AgentBase:
         with self.lock:
             self.pending_states -= 1
             if self.pending_states == 0:
-                self.pending_states = self.world_size - 2
+                self.pending_states = self.batch_size
                 probs = self.policy(self.states)
                 m = Categorical(probs)
                 actions = m.sample()
@@ -97,13 +108,10 @@ class AgentBase:
                 future_actions.set_result(actions)
 
                 self.agent_latency_end = time.time()
-                self.agent_latency.append(
-                    self.agent_latency_end - self.agent_latency_start)
 
-        # if self.agent_latency_start and self.agent_latency_end:
-        #     print(self.agent_latency_start, self.agent_latency_end)
-        #     self.agent_latency.append(
-        #         self.agent_latency_end - self.agent_latency_start)
+                batch_latency = self.agent_latency_end - self.agent_latency_start
+                self.agent_latency.append(batch_latency)
+                self.agent_throughput.append(self.batch_size / batch_latency)
 
         return future_action
 
@@ -122,8 +130,11 @@ class AgentBase:
         self.saved_log_probs[observer_id].append(m.log_prob(action))
 
         self.agent_latency_end = time.time()
-        self.agent_latency.append(
-            self.agent_latency_end - self.agent_latency_start)
+
+        non_batch_latency = self.agent_latency_end - self.agent_latency_start
+        self.agent_latency.append(non_batch_latency)
+        self.agent_throughput.append(1 / non_batch_latency)
+
         return action.item()
 
     def finish_episode(self, rets):
@@ -143,11 +154,11 @@ class AgentBase:
         self.optimizer.zero_grad()
         # reset variables
         self.saved_log_probs = [] if self.batch else {
-            k: [] for k in range(self.world_size - 2)}
-        self.states = torch.zeros(self.world_size - 2, *self.state_size)
+            k: [] for k in range(self.batch_size)}
+        self.states = torch.zeros(self.batch_size, *self.state_size)
         """
 
-        return self.agent_latency
+        return self.agent_latency, self.agent_throughput
 
         # calculate running rewards
         # self.running_reward = 0.5 * ep_rewards + 0.5 * self.running_reward
