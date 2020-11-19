@@ -471,6 +471,7 @@ CUSTOM_HANDLERS = {
     'distributed/test_distributed_spawn': test_distributed,
     'distributed/rpc/test_process_group_agent': test_rpc,
     'distributed/rpc/test_tensorpipe_agent': test_rpc,
+    'distributed/rpc/test_faulty_agent': test_rpc,
 }
 
 
