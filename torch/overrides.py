@@ -31,8 +31,6 @@ import torch
 from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
 
 __all__ = [
-    "get_ignored_functions",
-    "get_testing_overrides",
     "handle_torch_function",
     "has_torch_function",
     "is_tensor_like",
@@ -41,7 +39,7 @@ __all__ = [
 ]
 
 @functools.lru_cache(None)
-def get_ignored_functions() -> Set[Callable]:
+def _get_ignored_functions() -> Set[Callable]:
     """
     Return public functions that cannot be overridden by ``__torch_function__``.
 
@@ -204,7 +202,7 @@ def get_ignored_functions() -> Set[Callable]:
 
 
 @functools.lru_cache(None)
-def get_testing_overrides() -> Dict[Callable, Callable]:
+def _get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
     Returns
@@ -975,7 +973,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     }
 
     ret2 = {}
-    ignored = get_ignored_functions()
+    ignored = _get_ignored_functions()
 
     for k, v in ret.items():
         # Generate methods like __add__ and add_ by default from add
@@ -1012,6 +1010,13 @@ def wrap_torch_function(dispatcher: Callable):
     ----------
     dispatcher: Callable
         A callable that returns an iterable of Tensor-likes passed into the function.
+
+    Note
+    ----
+    This decorator may reduce the performance of your code. Generally, it's enough to express
+    your code as a series of functions that, themselves, support __torch_function__. If you
+    find yourself in the rare situation where this is not the case, e.g. if you're wrapping a
+    low-level library and you also need it to work for Tensor-likes, then this function is available.
 
     Examples
     --------
@@ -1064,7 +1069,6 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
 
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
-
     """
     # Runtime is O(num_arguments * num_unique_types)
     overloaded_types = set()
@@ -1124,6 +1128,13 @@ def handle_torch_function(
     Raises
     ------
     TypeError : if no implementation is found.
+
+    Example
+    -------
+    >>> def func(a):
+    ...     if type(a) is not torch.Tensor:  # This will make func dispatchable by __torch_function__
+    ...         return handle_torch_function(func, (a,), a)
+    ...     return a + 0
     """
     # Check for __torch_function__ methods.
     overloaded_args = _get_overloaded_args(relevant_args)
@@ -1227,10 +1238,10 @@ def _get_overridable_functions() -> Dict[Any, List[Callable]]:
                 continue
 
             # cannot be overriden by __torch_function__
-            if func in get_ignored_functions():
+            if func in _get_ignored_functions():
                 msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                        "but still has an explicit override")
-                assert func not in get_testing_overrides(), msg.format(namespace, func.__name__)
+                assert func not in _get_testing_overrides(), msg.format(namespace, func.__name__)
                 continue
             overridable_funcs[namespace].append(func)
     return overridable_funcs
