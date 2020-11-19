@@ -32,7 +32,7 @@ class C10_API DebugInfoBase {
 // profiling, etc)
 class C10_API ThreadLocalDebugInfo {
  public:
-  static std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
+  static DebugInfoBase* get(DebugInfoKind kind);
 
   // Get current ThreadLocalDebugInfo
   static std::shared_ptr<ThreadLocalDebugInfo> current();

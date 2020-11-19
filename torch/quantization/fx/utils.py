@@ -233,7 +233,7 @@ def get_quant_type(qconfig):
 
     if weight.dtype == torch.float16:
         if activation.dtype == torch.float:
-            return QuantType.WEIGHT_ONLY
+            return QuantType.DYNAMIC
 
     raise Exception("Unrecognized dtype combination in get_quant_type: activation({}),"
                     "weight({})".format(activation.dtype, weight.dtype))

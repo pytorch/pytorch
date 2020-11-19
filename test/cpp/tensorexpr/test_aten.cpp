@@ -2,6 +2,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <gtest/gtest.h>
+
 #include <c10/macros/Macros.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
@@ -12,7 +14,7 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-void testATen_cast_Float() {
+TEST(ATen, _cast_Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -40,7 +42,7 @@ void testATen_cast_Float() {
   }
 }
 
-void testATennegInt() {
+TEST(ATen, negInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -68,7 +70,7 @@ void testATennegInt() {
   }
 }
 
-void testATennegFloat() {
+TEST(ATen, negFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -96,7 +98,7 @@ void testATennegFloat() {
   }
 }
 
-void testATenaddInt() {
+TEST(ATen, addInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -133,7 +135,7 @@ void testATenaddInt() {
   }
 }
 
-void testATenaddFloat() {
+TEST(ATen, addFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -170,7 +172,7 @@ void testATenaddFloat() {
   }
 }
 
-void testATensubInt() {
+TEST(ATen, subInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -207,7 +209,7 @@ void testATensubInt() {
   }
 }
 
-void testATensubFloat() {
+TEST(ATen, subFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -244,7 +246,7 @@ void testATensubFloat() {
   }
 }
 
-void testATenlerp() {
+TEST(ATen, lerp) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -281,7 +283,7 @@ void testATenlerp() {
   }
 }
 
-void testATenaddcmulInt() {
+TEST(ATen, addcmulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -323,7 +325,7 @@ void testATenaddcmulInt() {
   }
 }
 
-void testATenaddcmulFloat() {
+TEST(ATen, addcmulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -365,7 +367,7 @@ void testATenaddcmulFloat() {
   }
 }
 
-void testATenmulInt() {
+TEST(ATen, mulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -397,7 +399,7 @@ void testATenmulInt() {
   }
 }
 
-void testATenmulFloat() {
+TEST(ATen, mulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -429,7 +431,7 @@ void testATenmulFloat() {
   }
 }
 
-void testATendivInt() {
+TEST(ATen, divInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -461,7 +463,7 @@ void testATendivInt() {
   }
 }
 
-void testATendivFloat() {
+TEST(ATen, divFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -493,7 +495,7 @@ void testATendivFloat() {
   }
 }
 
-void testATenmaxInt() {
+TEST(ATen, maxInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -525,7 +527,7 @@ void testATenmaxInt() {
   }
 }
 
-void testATenmaxFloat() {
+TEST(ATen, maxFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -557,7 +559,7 @@ void testATenmaxFloat() {
   }
 }
 
-void testATenminInt() {
+TEST(ATen, minInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -589,7 +591,7 @@ void testATenminInt() {
   }
 }
 
-void testATenminFloat() {
+TEST(ATen, minFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -648,7 +650,7 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   }
 }
 
-void testATenreluInt() {
+TEST(ATen, reluInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -675,7 +677,7 @@ void testATenreluInt() {
   }
 }
 
-void testATenreluFloat() {
+TEST(ATen, reluFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -704,7 +706,7 @@ void testATenreluFloat() {
   }
 }
 
-void testATenlogFloat() {
+TEST(ATen, logFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -731,7 +733,7 @@ void testATenlogFloat() {
   }
 }
 
-void testATenlog10Float() {
+TEST(ATen, log10Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -758,7 +760,7 @@ void testATenlog10Float() {
   }
 }
 
-void testATenlog2Float() {
+TEST(ATen, log2Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -785,7 +787,7 @@ void testATenlog2Float() {
   }
 }
 
-void testATenexpFloat() {
+TEST(ATen, expFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -812,7 +814,7 @@ void testATenexpFloat() {
   }
 }
 
-void testATenerfFloat() {
+TEST(ATen, erfFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -839,7 +841,7 @@ void testATenerfFloat() {
   }
 }
 
-void testATencosFloat() {
+TEST(ATen, cosFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -866,7 +868,7 @@ void testATencosFloat() {
   }
 }
 
-void testATeneqInt() {
+TEST(ATen, eqInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -892,7 +894,7 @@ void testATeneqInt() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testATengeInt() {
+TEST(ATen, geInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -918,7 +920,7 @@ void testATengeInt() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testATengtInt() {
+TEST(ATen, gtInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -944,7 +946,7 @@ void testATengtInt() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testATenleInt() {
+TEST(ATen, leInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -970,7 +972,7 @@ void testATenleInt() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testATenltInt() {
+TEST(ATen, ltInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
