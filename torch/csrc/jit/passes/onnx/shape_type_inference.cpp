@@ -423,7 +423,7 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
       const char type_err[] = "TypeInferenceError";
       if ((strstr(ex.what(), shape_err) == NULL) &&
           (strstr(ex.what(), type_err) == NULL))
-        throw std::runtime_error(ex.what());
+        throw;
       GRAPH_DEBUG("ONNX shape inference fails with: ", ex.what());
     }
     GRAPH_DEBUG(
