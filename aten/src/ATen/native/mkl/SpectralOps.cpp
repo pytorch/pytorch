@@ -7,6 +7,8 @@
 
 namespace at { namespace native {
 
+REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, fft_fill_with_conjugate_symmetry_fn);
+
 Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
                 bool inverse, IntArrayRef checked_signal_sizes,
@@ -25,6 +27,8 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
+
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <vector>
@@ -46,103 +50,140 @@ namespace at { namespace native {
 // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 template <typename scalar_t>
-static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,
-                       int64_t signal_ndim, int64_t size_last_dim,
-                       int64_t start_last_dim_idx, int64_t i, int64_t num) {
-  scalar_t *data = output.data_ptr<scalar_t>();
+static __ubsan_ignore_undefined__  // UBSAN gives false positives on using negative indexes with a pointer
+void _fft_fill_with_conjugate_symmetry_slice(
+    Range range, at::ArrayRef<bool> is_mirrored_dim, IntArrayRef signal_half_sizes,
+    IntArrayRef in_strides, const scalar_t * in_ptr,
+    IntArrayRef out_strides, scalar_t * out_ptr) {
+  const auto ndim = signal_half_sizes.size();
+  DimVector iter_index(ndim, 0);
 
-  // A slice means a slice of last dimension (of size size_last_dim)
-
-  // This function iterates through the slices to fill, i.e. to_slice_data
-  // (basically data_slices[i:i+num]), and keeps track of the slices it reads
-  // data from, i.e., from_slice_data, using from_slice_indices, a vector
-  // containing the index of the from_slice_data slice.
-
-  // Compute the indices for the first from_slice_data
-  std::vector<int64_t> from_slice_indices(signal_ndim);  // up to before last signal dim
-  int64_t remainder = i;
-  // set last signal dim values
-  int64_t from_slice_offset = 0;
-  for (int64_t d = signal_ndim - 1; d >= 0; d--) {
-    int64_t dim_size = output.size(d);
-    int64_t dim_idx = remainder % dim_size;
-    remainder = remainder / dim_size;
-    from_slice_indices[d] = dim_idx;
-    if (d == 0) {
-      from_slice_offset += dim_idx * output.stride(d);
-    } else if (dim_idx != 0) {
-      from_slice_offset += (dim_size - dim_idx) * output.stride(d);
-    }
-  }
-
-  // First to_slice_data and from_slice_data
-  scalar_t *to_slice_data = data + i * size_last_dim * 2;
-  scalar_t *from_slice_data = data + from_slice_offset;
-
-  while (num > 0) {
-    // Fill to_slice_data from values in from_slice_data
-    for (int64_t j = start_last_dim_idx; j < size_last_dim; j++) {
-      // multiply index by 2 because of the last complex dim has size 2
-      int64_t to_idx = j * 2;
-      int64_t from_idx = (size_last_dim - j) * 2;
-      to_slice_data[to_idx] = from_slice_data[from_idx];
-      to_slice_data[to_idx + 1] = -from_slice_data[from_idx + 1];
-    }
-    // Compute the next to_slice_data and from_slice_data slices
-    to_slice_data += size_last_dim * 2;
-    for (int64_t d = signal_ndim - 1; d >= 0; d--) {
-      // Compute the next index at this dimension using conjugate symmetry
-      // Break out of this loop if nothing carries over
-      from_slice_indices[d] = (from_slice_indices[d] + 1) % output.size(d);
-      if (d > 0) {
-        // At d > 0 nonbatch dim, to get next from_slice_data offset
-        //   1. if this dim idx becomes 1, will need to add (size - 1) * stride
-        //   2. otherwise, will need to subtract stride
-        if (from_slice_indices[d] == 0) {
-          // Subtract. Carries over to previous dimension
-          from_slice_data -= output.stride(d);
-        } else if (from_slice_indices[d] == 1) {
-          // Dimension index becomes 1
-          // Doesn't carry over to previous dimension
-          from_slice_data += (output.size(d) - 1) * output.stride(d);
-          break;
+  // We explicitly loop over one row, then use this lambda to iterate over
+  // n-dimensions. This advances iter_index by one row, while updating in_ptr
+  // and out_ptr to point to the new row of data.
+  auto advance_index = [&] {
+    for (size_t i = 1; i < iter_index.size(); ++i) {
+      if (iter_index[i] + 1 < signal_half_sizes[i]) {
+        ++iter_index[i];
+        in_ptr += in_strides[i];
+        if (is_mirrored_dim[i]) {
+          if (iter_index[i] == 1) {
+            out_ptr += (signal_half_sizes[i] - 1) * out_strides[i];
+          } else {
+            out_ptr -= out_strides[i];
+          }
         } else {
-          // Subtract. Doesn't carry over to previous dimension
-          from_slice_data -= output.stride(d);
-          break;
+          out_ptr += out_strides[i];
         }
+        return;
+      }
+
+      in_ptr -= in_strides[i] * iter_index[i];
+      if (is_mirrored_dim[i]) {
+        out_ptr -= out_strides[i];
       } else {
-        // At d = 0 nonbatch dim, it means that to_slice_data ise now at a the
-        // beginning of a data sample. It maps to itself by conjugate symmetry.
-        from_slice_data = to_slice_data;
+        out_ptr -= out_strides[i] * iter_index[i];
+      }
+      iter_index[i] = 0;
+    }
+  };
+
+  // The data slice we operate on may start part-way into the data
+  // Update iter_index and pointers to reference the start of the slice
+  if (range.begin > 0) {
+    iter_index[0] = range.begin % signal_half_sizes[0];
+    auto linear_idx = range.begin / signal_half_sizes[0];
+
+    for (size_t i = 1; i < ndim && linear_idx > 0; ++i) {
+      iter_index[i] = linear_idx % signal_half_sizes[i];
+      linear_idx = linear_idx / signal_half_sizes[i];
+
+      if (iter_index[i] > 0) {
+        in_ptr += in_strides[i] * iter_index[i];
+        if (is_mirrored_dim[i]) {
+          out_ptr += out_strides[i] * (signal_half_sizes[i] - iter_index[i]);
+        } else {
+          out_ptr += out_strides[i] * iter_index[i];
+        }
       }
     }
-    num--;
+  }
+
+  auto numel_remaining = range.end - range.begin;
+
+  if (is_mirrored_dim[0]) {
+    // Explicitly loop over a Hermitian mirrored dimension
+    if (iter_index[0] > 0) {
+      auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
+      for (int64_t i = iter_index[0]; i < end; ++i) {
+        out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
+      }
+      numel_remaining -= (end - iter_index[0]);
+      iter_index[0] = 0;
+      advance_index();
+    }
+
+    while (numel_remaining > 0) {
+      auto end = std::min(signal_half_sizes[0], numel_remaining);
+      out_ptr[0] = std::conj(in_ptr[0]);
+      for (int64_t i = 1; i < end; ++i) {
+        out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
+      }
+      numel_remaining -= end;
+      advance_index();
+    }
+  } else {
+    // Explicit loop over a non-mirrored dimension, so just a simple conjugated copy
+    while (numel_remaining > 0) {
+      auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
+      for (int64_t i = iter_index[0]; i != end; ++i) {
+        out_ptr[i * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
+      }
+      numel_remaining -= (end - iter_index[0]);
+      iter_index[0] = 0;
+      advance_index();
+    }
   }
 }
 
-// input should be a contiguous batched tensor of same size as full (twosided)
-// signals, but only contains half (onesided) of the values.
-// This function modifies inplace.
-static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
-                      int64_t signal_ndim, int64_t size_last_dim,
-                      int64_t last_dim_start_slice) {
-  if (last_dim_start_slice >= size_last_dim) {
-    return;
+static void _fft_fill_with_conjugate_symmetry_cpu_(
+    ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef signal_half_sizes,
+    IntArrayRef in_strides_bytes, const void * in_data,
+    IntArrayRef out_strides_bytes, void * out_data) {
+
+  // Convert strides from bytes to elements
+  const auto element_size = scalarTypeToTypeMeta(dtype).itemsize();
+  const auto ndim = signal_half_sizes.size();
+  DimVector in_strides(ndim), out_strides(ndim);
+  for (int64_t i = 0; i < ndim; ++i) {
+    TORCH_INTERNAL_ASSERT(in_strides_bytes[i] % element_size == 0);
+    in_strides[i] = in_strides_bytes[i] / element_size;
+    TORCH_INTERNAL_ASSERT(out_strides_bytes[i] % element_size == 0);
+    out_strides[i] = out_strides_bytes[i] / element_size;
   }
 
-  int64_t num = 1;
-  for (int64_t d = 0; d < signal_ndim; d++) {
-    num *= input.size(d);
+  // Construct boolean mask for mirrored dims
+  c10::SmallVector<bool, at::kDimVectorStaticSize> is_mirrored_dim(ndim, false);
+  for (const auto& dim : mirror_dims) {
+    is_mirrored_dim[dim] = true;
   }
 
-  at::parallel_for(0, num, 500, [&](int64_t start, int64_t end) {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "_fft_fill_with_conjugate_symmetry", [&] {
-      _fft_fill_with_conjugate_symmetry_slice<scalar_t>(input, signal_ndim, size_last_dim,
-          last_dim_start_slice, start, (end - start));
-    });
+  const auto numel = at::prod_intlist(signal_half_sizes);
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
+    at::parallel_for(0, numel, at::internal::GRAIN_SIZE,
+        [&](int64_t begin, int64_t end) {
+          _fft_fill_with_conjugate_symmetry_slice(
+              {begin, end}, is_mirrored_dim, signal_half_sizes,
+              in_strides, static_cast<const scalar_t*>(in_data),
+              out_strides, static_cast<scalar_t*>(out_data));
+        });
   });
 }
+
+// Register this one implementation for all cpu types instead of compiling multiple times
+REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_AVX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // MKL DFTI
 Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
@@ -267,9 +308,10 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   }
   // now if needed, fill out the other half using Hermitian symmetry dim
   if (!complex_input && complex_output && !onesided) {
-    auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
-    auto start_slice = infer_ft_real_to_complex_onesided_size(size_last_signal_dim);
-    _fft_fill_with_conjugate_symmetry_(output, signal_ndim, size_last_signal_dim, start_slice);
+    DimVector signal_dims(signal_ndim);
+    std::iota(signal_dims.begin(), signal_dims.end(), 1);
+    auto out_as_complex = at::view_as_complex(output);
+    at::native::_fft_fill_with_conjugate_symmetry_(out_as_complex, signal_dims);
   }
   return output;
 }

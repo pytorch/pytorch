@@ -25,7 +25,7 @@ def _orthogonalize(matrix, epsilon=1e-8):
 
 
 def powerSGD_hook(
-    process_group: object, bucket: dist._GradBucket, matrix_approximation_rank: int = 1
+    process_group: dist.ProcessGroup, bucket: dist._GradBucket, matrix_approximation_rank: int = 1
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
@@ -47,7 +47,7 @@ def powerSGD_hook(
     For warm start, can take one such step at a time, and alternate between them.
 
     Arguments:
-        process_group (object): Process group to communicate.
+        process_group (dist.ProcessGroup): Process group to communicate.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
