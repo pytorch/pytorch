@@ -1986,8 +1986,10 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   }
 
   for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
-    auto t = at::empty(tensorOutputSizes_[i], tensorOutputTensorOptions_[i]);
-    t.as_strided_(tensorOutputSizes_[i], tensorOutputStrides_[i]);
+    auto t = at::empty_strided(
+        tensorOutputSizes_[i],
+        tensorOutputStrides_[i],
+        tensorOutputTensorOptions_[i]);
     outputs.push_back(t);
     runArgs.emplace_back(outputs.back().data_ptr());
   }
