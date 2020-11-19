@@ -851,10 +851,10 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
     for(auto i = decltype(reps.size()){0}; i < reps.size(); ++i){
       new_reps.emplace_back(reps[i]);
     }
-    return at::native::repeat(self, IntArrayRef(new_reps));
+    return self.repeat(IntArrayRef(new_reps));
   }
   // `torch.tile` is equivalent to the already implemented `torch.Tensor.repeat`
-  return at::native::repeat(self, reps);
+  return self.repeat(reps);
 }
 
 Tensor alias_with_sizes_and_strides(
