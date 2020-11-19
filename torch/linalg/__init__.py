@@ -214,6 +214,46 @@ Using the :attr:`dim` argument to compute matrix norms::
     (tensor(3.7417), tensor(11.2250))
 """)
 
+tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
+linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
+
+Computes a tensor ``input_inv`` such that ``tensordot(input_inv, input, ind) == I_n`` (inverse tensor equation),
+where ``I_n`` is the n-dimensional identity tensor and ``n`` is equal to ``input.ndim``.
+The resulting tensor ``input_inv`` has shape equal to ``input.shape[ind:] + input.shape[:ind]``.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+
+.. note:: If :attr:`input` is not invertible or does not satisfy the requirement
+          ``prod(input.shape[ind:]) == prod(input.shape[:ind])``,
+          then a RuntimeError will be thrown.
+
+.. note:: When :attr:`input` is a 2-dimensional tensor and ``ind=1``, this function computes the
+          (multiplicative) inverse of :attr:`input`, equivalent to calling :func:`torch.inverse`.
+
+Args:
+    input (Tensor): A tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
+    ind (int): A positive integer that describes the inverse tensor equation. See :func:`torch.tensordot` for details. Default: 2.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> a = torch.eye(4 * 6).reshape((4, 6, 8, 3))
+    >>> ainv = torch.linalg.tensorinv(a, ind=2)
+    >>> ainv.shape
+    torch.Size([8, 3, 4, 6])
+    >>> b = torch.randn(4, 6)
+    >>> torch.allclose(torch.tensordot(ainv, b), torch.linalg.tensorsolve(a, b))
+    True
+
+    >>> a = torch.randn(4, 4)
+    >>> a_tensorinv = torch.linalg.tensorinv(a, ind=1)
+    >>> a_inv = torch.inverse(a)
+    >>> torch.allclose(a_tensorinv, a_inv)
+    True
+""")
+
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
