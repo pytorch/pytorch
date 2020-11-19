@@ -9,15 +9,28 @@
 namespace torch {
 namespace jit {
 
+// Removes list mutation with functional equivalents
+TORCH_API void RemoveListMutation(const std::shared_ptr<Graph>& graph);
+
+// Replaces in-place aten ops with their functional equivalents
+// when it can be proven that this does not change graph semantics
+TORCH_API void RemoveTensorMutation(const std::shared_ptr<Graph>& graph);
+
+// Removes dict mutation with functional equivalents
+TORCH_API void RemoveDictMutation(const std::shared_ptr<Graph>& graph);
+
+
 struct MutationRemover {
   MutationRemover(const std::shared_ptr<Graph>& graph)
       : aliasDb_(nullptr), graph_(graph) {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
-  void removeListMutation();
+  void RemoveListMutation();
 
-  void removeTensorMutation();
+  void RemoveTensorMutation();
+
+  void RemoveDictMutation();
 
   bool isSpecialMappedOp(Node* n) {
     return n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)") ||
@@ -70,26 +83,21 @@ struct MutationRemover {
   bool newMemoryLocation(Value* v);
   Node* createSpecialMappedOp(Node* n);
   bool listAppendFollowingListConstruct(Node* n);
+  bool dictWriteFollowingDictConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(
       Value* mutated_value,
       Node* mutating_op);
   bool tryMakeUnaliasedIfOutputAndMutationAtomic(
       Value* mutated_value,
       Node* mutating_op);
-  void RemoveListMutation(Block* block);
-  void RemoveTensorMutation(Block* block);
+  void removeListMutation(Block* block);
+  void removeTensorMutation(Block* block);
+  void removeDictMutation(Block* block);
 
  private:
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   std::shared_ptr<Graph> graph_;
 };
-
-// Replaces in-place aten ops with their functional equivalents
-// when it can be proven that this does not change graph semantics
-TORCH_API void RemoveListMutation(const std::shared_ptr<Graph>& graph);
-
-// Removes list mutation with functional equivalents
-TORCH_API void RemoveTensorMutation(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

@@ -3,12 +3,16 @@
 namespace torch {
 namespace jit {
 
-void MutationRemover::removeListMutation() {
-  RemoveListMutation(graph_->block());
+void MutationRemover::RemoveListMutation() {
+  removeListMutation(graph_->block());
 }
 
-void MutationRemover::removeTensorMutation() {
-  RemoveTensorMutation(graph_->block());
+void MutationRemover::RemoveTensorMutation() {
+  removeTensorMutation(graph_->block());
+}
+
+void MutationRemover::RemoveDictMutation() {
+  removeDictMutation(graph_->block());
 }
 
 bool MutationRemover::newMemoryLocation(Value* v) {
@@ -46,6 +50,11 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
 bool MutationRemover::listAppendFollowingListConstruct(Node* n) {
   return n->kind() == aten::append &&
       n->inputs().at(0)->node()->kind() == prim::ListConstruct;
+}
+
+bool MutationRemover::dictWriteFollowingDictConstruct(Node* n) {
+  return n->kind() == aten::_set_item &&
+      n->inputs().at(0)->node()->kind() == prim::DictConstruct;
 }
 
 bool MutationRemover::tryMakeCreationAndMutationAtomic(
@@ -96,13 +105,13 @@ bool MutationRemover::tryMakeUnaliasedIfOutputAndMutationAtomic(
   return aliasDb_->moveBeforeTopologicallyValid(if_node, mutating_op);
 }
 
-void MutationRemover::RemoveListMutation(Block* block) {
+void MutationRemover::removeListMutation(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto* node = *it;
     it++;
 
     for (Block* sub_block : node->blocks()) {
-      RemoveListMutation(sub_block);
+      removeListMutation(sub_block);
     }
 
     if (!listAppendFollowingListConstruct(node)) {
@@ -133,13 +142,50 @@ void MutationRemover::RemoveListMutation(Block* block) {
   }
 }
 
-void MutationRemover::RemoveTensorMutation(Block* block) {
+void MutationRemover::removeDictMutation(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto* node = *it;
     it++;
 
     for (Block* sub_block : node->blocks()) {
-      RemoveTensorMutation(sub_block);
+      removeDictMutation(sub_block);
+    }
+
+    if (!dictWriteFollowingDictConstruct(node)) {
+      continue;
+    }
+
+    Value* mutated_value = node->inputs().at(0);
+    if (!tryMakeCreationAndMutationAtomic(mutated_value, node)) {
+      continue;
+    }
+
+    // We rewrite something like:
+    // x : Dict[int, str] = {}
+    // x[v1] = 2
+    // to:
+    // x = {v1: 2}
+    // We can remove x._set_item from the the alias db list of writes.
+    // All other aliasing properties remain valid.
+    Node* dict_construct = mutated_value->node();
+    dict_construct->addInput(node->inputs().at(1));
+    dict_construct->addInput(node->inputs().at(2));
+    aliasDb_->writeIndex_->erase(node);
+    node->destroy();
+
+    // TODO: don't strictly need to reset write cache, evaluate on models
+    aliasDb_->writtenToLocationsIndex_ =
+        aliasDb_->buildWrittenToLocationsIndex();
+  }
+}
+
+void MutationRemover::removeTensorMutation(Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    auto* node = *it;
+    it++;
+
+    for (Block* sub_block : node->blocks()) {
+      removeTensorMutation(sub_block);
     }
 
     // TODO: out op variants
@@ -201,14 +247,19 @@ void MutationRemover::RemoveTensorMutation(Block* block) {
   }
 }
 
+void RemoveDictMutation(const std::shared_ptr<Graph>& graph) {
+  MutationRemover mr(graph);
+  mr.RemoveDictMutation();
+}
+
 void RemoveListMutation(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
-  mr.removeListMutation();
+  mr.RemoveListMutation();
 }
 
 void RemoveTensorMutation(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
-  mr.removeTensorMutation();
+  mr.RemoveTensorMutation();
 }
 
 } // namespace jit

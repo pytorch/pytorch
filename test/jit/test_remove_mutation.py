@@ -4,6 +4,7 @@ import sys
 import torch
 from torch.nn import functional as F
 from torch.testing import FileCheck
+from typing import Dict
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -200,6 +201,48 @@ class TestRemoveMutation(JitTestCase):
         # it is possible to remove the append here but don't currently have the logic for it
         FileCheck().check_not("append").run(graph)
         self.assertEqual(intermediary_use(), fn())
+
+    def test_dicts_succesful(self):
+        def foo():
+            x: Dict[int, int] = {}
+            x[1] = 2
+            x[2] = 3
+            x[3] = 4
+            return x
+
+        fn = torch.jit.script(foo)
+        graph = fn.graph
+        FileCheck().check("set_item").run(graph)
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check_not("set_item").check("DictConstruct").run(graph)
+        self.assertEqual(fn(), foo())
+
+        def foo():
+            x: Dict[int, int] = {1: 4, 5: 6}
+            x[1] = 2
+            x[2] = 3
+            x[3] = 4
+            return x
+
+        fn = torch.jit.script(foo)
+        graph = fn.graph
+        FileCheck().check("set_item").run(graph)
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check_not("set_item").check("DictConstruct").run(graph)
+        self.assertEqual(fn(), foo())
+
+    def test_dicts_unsuccesful(self):
+        def foo():
+            x: Dict[int, int] = {1: 2}
+            out = x[1]
+            x[3] = 4
+            return x, out
+        fn = torch.jit.script(foo)
+        graph = fn.graph
+        self.run_pass('remove_mutation', graph)
+        # creation and mutation cannot be made atomic, remove mutation fails
+        FileCheck().check("DictConstruct").check("set_item").run(graph)
+        self.assertEqual(fn(), foo())
 
     def test_common_pytorch_list_ops(self):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
