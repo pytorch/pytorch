@@ -151,6 +151,10 @@ inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
     optional<size_t> pos) const {
+  if (value.isTensor() && argument.type() == TensorType::get()) {
+    // Fast-path for the common case
+    return;
+  }
   if (!value.type()->isSubtypeOf(argument.type())) {
     TORCH_CHECK(
         false,

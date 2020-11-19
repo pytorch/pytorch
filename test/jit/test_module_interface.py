@@ -1,7 +1,7 @@
 # flake8: noqa
 # TODO: enable linting check for this file
 
-from typing import Any, List
+from typing import List, Any
 import torch
 import torch.nn as nn
 import os

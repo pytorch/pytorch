@@ -6,7 +6,7 @@ import signal
 import sys
 import warnings
 
-from . import _prctl_pr_set_pdeathsig
+from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
 
 class ProcessException(Exception):
@@ -169,7 +169,7 @@ class ProcessContext:
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
         warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
-        super(SpawnContext, self).__init__(self, processes, error_queues)
+        super(SpawnContext, self).__init__(processes, error_queues)
     pass
 
 

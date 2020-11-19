@@ -38,7 +38,7 @@ struct Argument {
   const std::string& name() const {
     return name_;
   }
-  TypePtr type() const {
+  const TypePtr& type() const {
     return type_;
   }
   c10::optional<int32_t> N() const {

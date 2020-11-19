@@ -65,8 +65,8 @@ class TORCH_API TensorExprKernel {
   ExprHandle chunk(
       Tensor* t,
       size_t chunkIdx,
-      size_t dim,
-      size_t chunks,
+      int64_t dim,
+      int64_t chunks,
       const std::vector<ExprHandle>& axes);
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
