@@ -1007,17 +1007,16 @@ class _LazyConvXdMixin(LazyModuleMixin):
 
     def initialize_parameters(self, input) -> None:
         if self.has_uninitialized_params():
-            with torch.no_grad():
-                self.in_channels = input.shape[1]
-                if self.in_channels % self.groups != 0:
-                    raise ValueError('in_channels must be divisible by groups')
-                if self.transposed:
-                    self.weight.materialize((
-                        self.in_channels, self.out_channels // self.groups, *self.kernel_size))
-                else:
-                    self.weight.materialize((
-                        self.out_channels, self.in_channels // self.groups, *self.kernel_size))
-                self.reset_parameters()
+            self.in_channels = input.shape[1]
+            if self.in_channels % self.groups != 0:
+                raise ValueError('in_channels must be divisible by groups')
+            if self.transposed:
+                self.weight.materialize((
+                    self.in_channels, self.out_channels // self.groups, *self.kernel_size))
+            else:
+                self.weight.materialize((
+                    self.out_channels, self.in_channels // self.groups, *self.kernel_size))
+            self.reset_parameters()
 
 
 class LazyConv1d(_LazyConvXdMixin, Conv1d):
