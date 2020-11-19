@@ -1528,6 +1528,155 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
             torch.linalg.tensorsolve(a, b, out=out)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
+    def test_tensorinv(self, device, dtype):
+
+        def run_test(a_shape, ind):
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            a_numpy = a.cpu().numpy()
+            result = torch.linalg.tensorinv(a, ind=ind)
+            expected = np.linalg.tensorinv(a_numpy, ind=ind)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty_like(result)
+            ans = torch.linalg.tensorinv(a, ind=ind, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        # compare to NumPy output
+        run_test((12, 3, 4), ind=1)
+        run_test((3, 8, 24), ind=2)
+        run_test((18, 3, 3, 2), ind=1)
+        run_test((1, 4, 2, 2), ind=2)
+        run_test((2, 3, 5, 30), ind=3)
+        run_test((24, 2, 2, 3, 2), ind=1)
+        run_test((3, 4, 2, 3, 2), ind=2)
+        run_test((1, 2, 3, 2, 3), ind=3)
+        run_test((3, 2, 1, 2, 12), ind=4)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
+    def test_tensorinv_non_contiguous(self, device, dtype):
+
+        def run_test(a_shape, ind):
+            # check for permuted (transposed) case
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            permutation = list(range(0, a.ndim))
+            a = a.permute(permutation[ind:] + permutation[:ind])
+            self.assertFalse(a.is_contiguous())
+            a_numpy = a.cpu().numpy()
+            result = torch.linalg.tensorinv(a, ind=a.ndim - ind)
+            expected = np.linalg.tensorinv(a_numpy, ind=a.ndim - ind)
+            self.assertEqual(result, expected)
+
+        def run_test_skipped_elements(a_shape, ind):
+            # check for input with skipped elements
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            a = a[::2]
+            self.assertFalse(a.is_contiguous())
+            a_numpy = a.cpu().numpy()
+            result = torch.linalg.tensorinv(a, ind=ind)
+            expected = np.linalg.tensorinv(a_numpy, ind=ind)
+            self.assertEqual(result, expected)
+
+            # check non-contiguous out
+            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
+            self.assertFalse(out.is_contiguous())
+            ans = torch.linalg.tensorinv(a, ind=ind, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        run_test((12, 3, 4), ind=1)
+        run_test((3, 8, 24), ind=2)
+        run_test((18, 3, 3, 2), ind=1)
+        run_test((1, 4, 2, 2), ind=2)
+        run_test((2, 3, 5, 30), ind=3)
+        run_test((24, 2, 2, 3, 2), ind=1)
+        run_test((3, 4, 2, 3, 2), ind=2)
+        run_test((1, 2, 3, 2, 3), ind=3)
+        run_test((3, 2, 1, 2, 12), ind=4)
+
+        run_test_skipped_elements((12, 3, 2), ind=1)
+        run_test_skipped_elements((18, 3, 3, 1), ind=1)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_tensorinv_empty(self, device, dtype):
+        for ind in range(1, 4):
+            # Check for empty inputs. NumPy does not work for these cases.
+            a = torch.empty(0, 0, 1, 2, 3, 0, dtype=dtype, device=device)
+            a_inv = torch.linalg.tensorinv(a, ind=ind)
+            self.assertEqual(a_inv.shape, a.shape[ind:] + a.shape[:ind])
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_tensorinv_errors_and_warnings(self, device, dtype):
+
+        def check_shape(a_shape, ind):
+            # tensorinv requires the input to satisfy
+            # prod(a.shape[ind:]) == prod(a.shape[:ind])
+            a = torch.randn(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "Expected self to satisfy the requirement"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        def check_ind(a_shape, ind):
+            a = torch.randn(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "Expected a strictly positive integer"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        def check_out(a_shape, ind):
+            # if non-empty out tensor with wrong shape is passed a warning is given
+            a = torch.randn(a_shape)
+            out = torch.empty_like(a)
+            with warnings.catch_warnings(record=True) as w:
+                # Trigger warning
+                torch.linalg.tensorinv(a, ind=ind, out=out)
+                # Check warning occurs
+                self.assertEqual(len(w), 1)
+                self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+            # dtypes should match
+            out = torch.empty_like(a).to(torch.int)
+            with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+                torch.linalg.tensorinv(a, ind=ind, out=out)
+
+        # test for invalid shape
+        check_shape((2, 3, 4), ind=1)
+        check_shape((1, 2, 3, 4), ind=3)
+
+        # test for invalid ind
+        check_ind((12, 3, 4), ind=-1)
+        check_ind((18, 3, 3, 2), ind=0)
+
+        # test for invalid out tensor
+        check_out((12, 3, 4), ind=1)
+        check_out((3, 8, 24), ind=2)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_tensorinv_singular_input(self, device, dtype):
+
+        def check_singular_input(a_shape, ind):
+            prod_ind_end = np.prod(a_shape[ind:])
+            a = torch.eye(prod_ind_end, dtype=dtype, device=device)
+            a[-1, -1] = 0   # Now `a` is singular
+            a = a.reshape(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "Failed to invert the input tensor, because it is singular"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        # test for non-invertible input
+        check_singular_input((12, 3, 4), ind=1)
+        check_singular_input((3, 6, 18), ind=2)
+
     def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
         def check(x, y):
             # Compare with numpy
