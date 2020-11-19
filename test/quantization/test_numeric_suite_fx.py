@@ -30,7 +30,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         model_to_quantize = copy.deepcopy(float_model)
         model_to_quantize.eval()
 
-        qconfig = get_default_qconfig("fbgemm")
+        qengine = torch.backends.quantized.engine
+        qconfig = get_default_qconfig(qengine)
+
         qconfig_dict = {"": qconfig}
 
         prepared_model = prepare_fx(model_to_quantize, qconfig_dict)
@@ -63,7 +65,8 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             for k, v in weight_dict.items():
                 self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-        qconfig = get_default_qconfig("fbgemm")
+        qengine = torch.backends.quantized.engine
+        qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
         model_list = [ConvModel(), ConvBnModel(), ConvBNReLU()]
@@ -106,7 +109,8 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         model_to_quantize = copy.deepcopy(float_model)
         model_to_quantize.eval()
 
-        qconfig = get_default_qconfig("fbgemm")
+        qengine = torch.backends.quantized.engine
+        qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
         prepared_model = prepare_fx(model_to_quantize, qconfig_dict)

@@ -410,23 +410,6 @@ def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Ten
     return torch.ops.quantized.celu(input, scale, zero_point, alpha)
 
 
-def relu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""relu(input, inplace=False) -> Tensor
-
-    Applies the rectified linear unit function element-wise.
-    See :class:`~torch.nn.quantized.ReLU` for more details.
-
-    Args:
-        input: quantized input
-        inplace: perform the computation inplace
-    """
-    if not input.is_quantized:
-        raise ValueError("Input to 'quantized.relu' must be quantized!")
-    if inplace:
-        return torch.relu_(input)
-    else:
-        return torch.relu(input)
-
 def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False,
                scale: Optional[float] = None, zero_point: Optional[int] = None):
     r"""

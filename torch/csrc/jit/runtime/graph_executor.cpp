@@ -865,7 +865,10 @@ void runNondiffOptimization(
       "After customPostPassses (end of runNondiffOptimization)\n", *graph);
 }
 
-void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
+void runOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool unroll,
+    bool const_prop_user_classes) {
   // Basic graph preprocessing to eliminate noise.
   GRAPH_DEBUG(
       "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
@@ -878,8 +881,14 @@ void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
 
   PeepholeOptimize(graph);
   GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
-  ConstantPropagation(graph);
+
+  if (const_prop_user_classes) {
+    ConstantPropagation(graph);
+  } else {
+    ConstantPropagation(graph, true);
+  }
   GRAPH_DEBUG("After ConstantPropagation, before ConstantPooling\n", *graph);
+
   ConstantPooling(graph);
   GRAPH_DEBUG("After ConstantPooling\n", *graph);
 
