@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -22,7 +24,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 // Sum an array to a single value.
-void testReduceSum1D() {
+TEST(Reductions, ReduceSum1D) {
   KernelScope kernel_scope;
 
   Placeholder b(BufHandle("b", {10}, kFloat));
@@ -45,7 +47,7 @@ void testReduceSum1D() {
   ASSERT_EQ(out[0], 45);
 }
 // Sum a 2D tensor to a 1D tensor with dynamic shapes.
-void testReduceSum2D() {
+TEST(Reductions, ReduceSum2D) {
   KernelScope kernel_scope;
 
   const int M = 3;
@@ -86,7 +88,7 @@ void testReduceSum2D() {
 
 // Sum a 3D tensor to both a 2D and 1D tensor, then reduce the 2D tensor flat to
 // check our work.
-void testReduceSum3D() {
+TEST(Reductions, ReduceSum3D) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -156,7 +158,7 @@ void testReduceSum3D() {
 }
 
 // Sum a large (10 D) Tensor 5 dimensions in.
-void testReduceSum10D() {
+TEST(Reductions, ReduceSum10D) {
   KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat));
@@ -189,7 +191,7 @@ void testReduceSum10D() {
 }
 
 // Reduce via Mul rather than Add using a custom Reducer.
-void testReduceProduct() {
+TEST(Reductions, ReduceProduct) {
   KernelScope kernel_scope;
 
   const int M = 4;
@@ -229,7 +231,7 @@ void testReduceProduct() {
 }
 
 // Maximum reductions.
-void testReduceMax() {
+TEST(Reductions, ReduceMax) {
   KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("b", {10}, kFloat));
@@ -270,7 +272,7 @@ void testReduceMax() {
 }
 
 // Minimum reduction, with custom initialization.
-void testReduceMinCustomInitializer() {
+TEST(Reductions, ReduceMinCustomInitializer) {
   KernelScope kernel_scope;
 
   VarHandle minInit("minInit", kFloat);
@@ -308,7 +310,7 @@ void testReduceMinCustomInitializer() {
 
 // Example implementation of Any/All.
 // TODO: this is very awkward without logical And/Or operators.
-void testReduceAnyAll() {
+TEST(Reductions, ReduceAnyAll) {
   KernelScope kernel_scope;
 
   VarHandle searchValue("searchValue", kInt);
@@ -394,7 +396,7 @@ void testReduceAnyAll() {
   ASSERT_EQ(out[3], 1);
 }
 
-void testReduceMatmul2D() {
+TEST(Reductions, ReduceMatmul2D) {
   KernelScope kernel_scope;
 
   Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
@@ -436,7 +438,7 @@ void testReduceMatmul2D() {
   }
 }
 
-void testReduceRfactorLike() {
+TEST(Reductions, ReduceRfactorLike) {
   KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {10, 10}, kFloat));
@@ -463,7 +465,7 @@ void testReduceRfactorLike() {
   ASSERT_EQ(out[0], 99 * 50);
 }
 
-void testReduceAsProducer() {
+TEST(Reductions, ReduceAsProducer) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -507,7 +509,7 @@ void testReduceAsProducer() {
   }
 }
 
-void testReduceAsConsumer() {
+TEST(Reductions, ReduceAsConsumer) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -556,7 +558,7 @@ void testReduceAsConsumer() {
   }
 }
 
-void testSplitReduceAxis() {
+TEST(Reductions, SplitReduceAxis) {
   KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
@@ -590,7 +592,7 @@ void testSplitReduceAxis() {
   }
 }
 
-void testSplitNonReduceAxis() {
+TEST(Reductions, SplitNonReduceAxis) {
   KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
@@ -628,7 +630,7 @@ void testSplitNonReduceAxis() {
   }
 }
 
-void testReorderedReductionInitializer() {
+TEST(Reductions, ReorderedReductionInitializer) {
   KernelScope kernel_scope;
   /* From the quip:
   for k in 0..1:  // blockIdx
@@ -677,7 +679,7 @@ void testReorderedReductionInitializer() {
   }
 }
 
-void testReduceRfactor() {
+TEST(Reductions, ReduceRfactor) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -710,7 +712,7 @@ void testReduceRfactor() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduce3DRfactorInternal() {
+TEST(Reductions, Reduce3DRfactorInternal) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -745,7 +747,7 @@ void testReduce3DRfactorInternal() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorInner() {
+TEST(Reductions, Reduce3DRfactorInner) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -780,7 +782,7 @@ void testReduce3DRfactorInner() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorOuter() {
+TEST(Reductions, Reduce3DRfactorOuter) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -814,7 +816,7 @@ void testReduce3DRfactorOuter() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactorWithOuter() {
+TEST(Reductions, Reduce3DRfactorWithOuter) {
   KernelScope kernel_scope;
 
   const int L = 5;
@@ -851,7 +853,7 @@ void testReduce3DRfactorWithOuter() {
   ASSERT_EQ(out[0], 7750);
 }
 
-void testReduce3DRfactorRepeated() {
+TEST(Reductions, Reduce3DRfactorRepeated) {
   KernelScope kernel_scope;
 
   const int M = 5;
@@ -899,7 +901,7 @@ void testReduce3DRfactorRepeated() {
   }
 }
 
-void testReduceRfactorInsertionPoint() {
+TEST(Reductions, ReduceRfactorInsertionPoint) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -932,7 +934,7 @@ void testReduceRfactorInsertionPoint() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduce3DRfactorInsertionPoint() {
+TEST(Reductions, Reduce3DRfactorInsertionPoint) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -966,7 +968,7 @@ void testReduce3DRfactorInsertionPoint() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduceRepeatedInternalRfactor() {
+TEST(Reductions, ReduceRepeatedInternalRfactor) {
   KernelScope kernel_scope;
 
   Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
@@ -1013,7 +1015,7 @@ void testReduceRepeatedInternalRfactor() {
 }
 
 // Split a reduction axis with a tail loop.
-void testReduceSplitTail() {
+TEST(Reductions, ReduceSplitTail) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1047,7 +1049,7 @@ void testReduceSplitTail() {
 }
 
 // Split a reduction axis cleanly so there is no tail loop.
-void testReduceSplitNoTail() {
+TEST(Reductions, ReduceSplitNoTail) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1081,7 +1083,7 @@ void testReduceSplitNoTail() {
 
 // Split a reduction axis with only a tail loop (the split loop will be size 0
 // and eliminated out).
-void testReduceOverSplitTail() {
+TEST(Reductions, ReduceOverSplitTail) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1115,7 +1117,7 @@ void testReduceOverSplitTail() {
 }
 
 // Split a reduction axis with a mask.
-void testReduceSplitMask() {
+TEST(Reductions, ReduceSplitMask) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1149,7 +1151,7 @@ void testReduceSplitMask() {
 }
 
 // Split a reduction axis cleanly not requiring a mask.
-void testReduceSplitNoMask() {
+TEST(Reductions, ReduceSplitNoMask) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1182,7 +1184,7 @@ void testReduceSplitNoMask() {
 }
 
 // Split a reduction axis with all logic in the mask.
-void testReduceOverSplitMask() {
+TEST(Reductions, ReduceOverSplitMask) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1217,7 +1219,7 @@ void testReduceOverSplitMask() {
 
 // Test an rfactor when there are two ReduceOps in the graph due to a
 // splitWithTail.
-void testReduceSplitRfactor() {
+TEST(Reductions, ReduceSplitRfactor) {
   KernelScope kernel_scope;
 
   const int M = 2;
@@ -1257,7 +1259,7 @@ void testReduceSplitRfactor() {
 
 // Test an rfactor which ends up being eliminated since the total loop size is
 // smaller than the split factor.
-void testReduceOverSplitRfactor() {
+TEST(Reductions, ReduceOverSplitRfactor) {
   KernelScope kernel_scope;
 
   const int N = 10;
@@ -1308,7 +1310,7 @@ void testReduceOverSplitRfactor() {
   // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testReduceInlineReduction() {
+TEST(Reductions, ReduceInlineReduction) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1341,7 +1343,7 @@ void testReduceInlineReduction() {
   ASSERT_FALSE(l1.computeInline(x->buf()));
 }
 
-void testReduceInlineConsumer() {
+TEST(Reductions, ReduceInlineConsumer) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1395,7 +1397,7 @@ void testReduceInlineConsumer() {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-void testReduceInlineReducerInternal() {
+TEST(Reductions, ReduceInlineReducerInternal) {
   KernelScope kernel_scope;
   const int M = 4;
   const int N = 5;
@@ -1453,7 +1455,7 @@ void testReduceInlineReducerInternal() {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-void testReductionCacheAccessesOuter() {
+TEST(Reductions, ReductionCacheAccessesOuter) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1502,7 +1504,7 @@ void testReductionCacheAccessesOuter() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionCacheAccessesInner() {
+TEST(Reductions, ReductionCacheAccessesInner) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1551,7 +1553,7 @@ void testReductionCacheAccessesInner() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionCacheBodyAccess() {
+TEST(Reductions, ReductionCacheBodyAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1592,7 +1594,7 @@ void testReductionCacheBodyAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionCacheConsumerAccess() {
+TEST(Reductions, ReductionCacheConsumerAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1635,7 +1637,7 @@ void testReductionCacheConsumerAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionSplitCacheConsumerAccess() {
+TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1683,7 +1685,7 @@ void testReductionSplitCacheConsumerAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionReorderCacheConsumerAccess() {
+TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
@@ -1732,7 +1734,7 @@ void testReductionReorderCacheConsumerAccess() {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-void testReductionRfactorCacheTempOuter() {
+TEST(Reductions, ReductionRfactorCacheTempOuter) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1791,7 +1793,7 @@ void testReductionRfactorCacheTempOuter() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReductionRfactorCacheTempInner() {
+TEST(Reductions, ReductionRfactorCacheTempInner) {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -1845,7 +1847,7 @@ void testReductionRfactorCacheTempInner() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReductionVectorize() {
+TEST(Reductions, ReductionVectorize) {
   KernelScope kernel_scope;
 
   std::vector<float> in_(8 * 8);
@@ -1892,7 +1894,7 @@ void testReductionVectorize() {
   }
 }
 
-void testReductionVectorizeInner() {
+TEST(Reductions, ReductionVectorizeInner) {
   KernelScope kernel_scope;
 
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
@@ -1904,7 +1906,7 @@ void testReductionVectorizeInner() {
       l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
 }
 
-void testReductionVectorizeRfactor() {
+TEST(Reductions, ReductionVectorizeRfactor) {
   KernelScope kernel_scope;
 
   std::vector<float> in_(8 * 8);

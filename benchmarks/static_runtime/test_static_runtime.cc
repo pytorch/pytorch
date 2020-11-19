@@ -1,6 +1,91 @@
-#include "deep_wide_pt.h"
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include "deep_wide_pt.h"
+#include "test_scripts.h"
+
+using namespace caffe2;
+using namespace torch;
+using namespace torch::jit;
+using c10::IValue;
+
+namespace {
+static at::Tensor getTensor(const at::IValue& ival) {
+  if (ival.isTensor()) {
+    return ival.toTensor();
+  } else if (ival.isTensorList()) {
+    auto tensor_vec = ival.toTensorVector();
+    TORCH_CHECK(tensor_vec.size() == 1);
+    return tensor_vec[0];
+  } else if (ival.isTuple()) {
+    auto tuple = ival.toTuple();
+    auto ivalue_vec = tuple->elements();
+    TORCH_CHECK(ivalue_vec.size() == 1);
+    return ivalue_vec[0].toTensor();
+  } else {
+    CAFFE_THROW("Unknown input IValue");
+  }
+}
+
+void compareTensorLists(
+    const std::vector<IValue>& l, /* values */
+    const std::vector<IValue>& r /* expects */) {
+  EXPECT_TRUE(l.size() == r.size());
+  for (int i = 0; i < l.size(); ++i) {
+    ASSERT_TRUE(l[i].isTensor());
+    ASSERT_TRUE(r[i].isTensor());
+    LOG(INFO) << "output " << i << ": \n" << l[i] << std::endl;
+    LOG(INFO) << "expect " << i << ": \n" << r[i] << std::endl;
+    EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
+  }
+}
+
+void compareTensorLists(
+    const std::vector<at::Tensor>& l, /* values */
+    const std::vector<at::Tensor>& r /* expects */) {
+  EXPECT_TRUE(l.size() == r.size());
+  for (int i = 0; i < l.size(); ++i) {
+    LOG(INFO) << "output " << i << ": \n" << l[i] << std::endl;
+    LOG(INFO) << "expect " << i << ": \n" << r[i] << std::endl;
+    EXPECT_TRUE(l[i].equal(r[i]));
+  }
+}
+
+// Given a model/function in jit script, run the model/function
+// with the jit interpreter and static runtime, and compare the results
+void testStaticRuntime(
+    const std::string& jit_script,
+    const std::vector<IValue>& args) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  auto expect = module.forward(args);
+
+  StaticRuntime runtime(module);
+  auto actual = runtime.run(args, {});
+
+  if (expect.isTuple()) {
+    compareTensorLists(
+        expect.toTuple()->elements(), actual.toTuple()->elements());
+  } else if (expect.isList()) {
+    compareTensorLists(
+        expect.toTensorVector(), actual.toTensorVector());
+  } else {
+    EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
+  }
+}
+} // namespace
+
+TEST(StaticRuntime, IndividualOps_Binary) {
+  auto a = at::randn({2, 3});
+  auto b = at::ones({2, 3});
+
+  std::vector<IValue> args{a, b};
+
+  testStaticRuntime(add_script, args);
+  testStaticRuntime(list_construct_script, args);
+  testStaticRuntime(list_unpack_script, args);
+  testStaticRuntime(tuple_construct_script, args);
+}
 
 TEST(StaticRuntime, LongModel) {
   torch::jit::Module mod = getLongScriptModel();
@@ -52,23 +137,6 @@ TEST(StaticRuntime, LeakyReLU) {
   torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
   EXPECT_TRUE(output_1.equal(output_2));
-}
-
-static at::Tensor getTensor(const at::IValue &ival) {
-  if (ival.isTensor()) {
-    return ival.toTensor();
-  } else if (ival.isTensorList()) {
-    auto tensor_vec = ival.toTensorVector();
-    TORCH_CHECK(tensor_vec.size() == 1);
-    return tensor_vec[0];
-  } else if (ival.isTuple()) {
-    auto tuple = ival.toTuple();
-    auto ivalue_vec = tuple->elements();
-    TORCH_CHECK(ivalue_vec.size() == 1);
-    return ivalue_vec[0].toTensor();
-  } else {
-    CAFFE_THROW("Unknown input IValue");
-  }
 }
 
 TEST(StaticRuntime, DeepWide) {
