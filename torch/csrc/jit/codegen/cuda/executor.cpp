@@ -289,7 +289,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
                 launch_constraints.getDim(p_type));
           } else {
             // Bind the launch constraint into our evaluation context
-            expr_eval.bind(extent, launch_constraints.getDim(entry.first));
+            expr_eval.bind(extent, launch_constraints.getDim(p_type));
             launch_params.bind(launch_constraints.getDim(p_type), p_type);
           }
         }

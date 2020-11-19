@@ -14,6 +14,10 @@ namespace cuda {
 
 void ExpressionEvaluator::bind(Val* value, Int::ScalarType concrete_value) {
   TORCH_CHECK(value->isAnInt());
+  auto val = value->getInt();
+  if (val.has_value() && val.value() == concrete_value) {
+    return;
+  }
   TORCH_CHECK(!value->isConstScalar(), "Tried to bind to a constant value");
   TORCH_CHECK(
       value->getOrigin() == nullptr,
