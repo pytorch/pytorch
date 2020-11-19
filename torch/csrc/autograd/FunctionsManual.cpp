@@ -628,18 +628,18 @@ Tensor sparse_matmul_kernel_grad(const Tensor& grad_, const Tensor& x) {
   if (grad_order == 1) {
     auto ret =  x.t().mm(grad);
     return ret;
-  } else if (grad_order == 0) {
-    // Since mm(dense, sparse) doesn't exist,
-    // pass a transposed output matrix to the underlying "addmm"
-    // function directly.
-    int64_t out_rows = x.size(0);
-    int64_t out_cols = grad.size(0);
+  } 
+  // (grad_order == 0) 
+  // Since mm(dense, sparse) doesn't exist,
+  // pass a transposed output matrix to the underlying "addmm"
+  // function directly.
+  int64_t out_rows = x.size(0);
+  int64_t out_cols = grad.size(0);
 
-    Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
-    Tensor r = at::empty({out_cols, out_rows}, grad.options());
-    at::addmm_out(r, t, x, grad.t(), 1, 1);
-    return r.t();
-  }
+  Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
+  Tensor r = at::empty({out_cols, out_rows}, grad.options());
+  at::addmm_out(r, t, x, grad.t(), 1, 1);
+  return r.t();
 }
 
 Tensor sparse_sparse_matmul_backward(

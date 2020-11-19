@@ -3081,6 +3081,34 @@ class TestSparse(TestCase):
                     values.append(d[i, j])
                 return torch.sparse_coo_tensor(torch.tensor([i3, j3]), torch.tensor(values), (n, m))
 
+        def test_grad_with_custom_sparsity_pattern(sparse_dims, nnz, shape_a, shape_b):
+            def test_grad_dense(a, b, g):
+                a = a.to_dense().detach()
+                b = b.to_dense().detach()
+                g = g.to_dense().detach()
+
+                a.requires_grad_(True)
+                b.requires_grad_(True)
+                c = a @ b
+                c.backward(g)
+                return a.grad, b.grad
+
+            a, _, _ = self._gen_sparse(sparse_dims, nnz, shape_a)
+            b, _, _ = self._gen_sparse(sparse_dims, nnz, shape_b)
+            a.requires_grad_(True)
+            b.requires_grad_(True)
+
+            c = torch.sparse.mm(a, b)
+            c2 = c.to_dense().detach()
+            c2 = torch.rand_like(c2)
+            g = c2.sparse_mask(c.coalesce())
+
+            c.backward(g)
+
+            a_grad, b_grad = test_grad_dense(a, b, g)
+            self.assertEqual(a.grad.to_dense(), a_grad.sparse_mask(a.coalesce()).to_dense())
+            self.assertEqual(b.grad.to_dense(), b_grad.sparse_mask(b.coalesce()).to_dense())
+
         def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
             b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
@@ -3101,6 +3129,7 @@ class TestSparse(TestCase):
             def fn(D1, D2):
                 return torch.sparse.mm(D1, D2).to_dense()
             gradcheck(fn, (a, b), check_sparse_nnz=True)
+            test_grad_with_custom_sparsity_pattern(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
             def fn(sparse_dims, nnz, shape_a, shape_b):
@@ -3127,7 +3156,7 @@ class TestSparse(TestCase):
                 for p in range(2, 8):
                     test_sparse_matmul(2, 10, [n, m], [m, p])
         test_error_cases()
-
+        
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
