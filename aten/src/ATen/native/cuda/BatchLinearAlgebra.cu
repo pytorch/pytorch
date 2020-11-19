@@ -1245,17 +1245,17 @@ Tensor& _inverse_out_helper_cuda_legacy(Tensor& result) {
   if (result.dim() > 2) {
     std::vector<int64_t> infos(batchCount(result), 0);
     auto input_working_copy = cloneBatchedColumnMajor(result);
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_out_cuda", [&]{
       apply_batched_inverse<scalar_t>(
         input_working_copy, result, infos);
     });
-    batchCheckErrors(infos, "inverse_cuda");
+    batchCheckErrors(infos, "inverse_out_cuda");
   } else {
     int64_t info = 0;
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_out_cuda", [&]{
       apply_single_inverse<scalar_t>(result, info);
     });
-    singleCheckErrors(info, "inverse_cuda");
+    singleCheckErrors(info, "inverse_out_cuda");
   }
   return result;
 }

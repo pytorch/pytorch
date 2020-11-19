@@ -118,17 +118,17 @@ Tensor& _inverse_out_helper_cuda_lib(Tensor& result) {
 
   if (result.dim() > 2 && batch_size > 1) {
     Tensor infos = at::zeros({batchCount(result) * 2}, result.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_out_cuda", [&]{
       apply_batched_inverse_lib<scalar_t>(
         input_working_copy, result, infos);
     });
-    batchCheckErrors(infos, "inverse_cuda", false, 2);
+    batchCheckErrors(infos, "inverse_out_cuda", false, 2);
   } else {
     Tensor info = at::zeros({2}, result.options().dtype(at::kInt));
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_out_cuda", [&]{
       apply_single_inverse_lib<scalar_t>(input_working_copy, result, info);
     });
-    batchCheckErrors(info, "inverse_cuda", false, 2);
+    batchCheckErrors(info, "inverse_out_cuda", false, 2);
   }
 
   return result;
