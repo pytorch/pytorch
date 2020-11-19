@@ -894,7 +894,7 @@ class JitRpcTest(
         # wait for local MyScriptModule instantiation to finish,
         # otherwise it could instantiate MyScriptModule in parallel with
         # server thread in the below
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
 
         # rpc_sync still accepts script class and run it in

@@ -391,6 +391,20 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
     return _test_cpp_extensions_aot('test_cpp_extensions_aot',
                                     test_directory, options, use_ninja=False)
 
+def test_rpc(test_module, test_directory, options):
+    for use_tcp_init in [True, False]:
+        if use_tcp_init:
+            if options.verbose:
+                print_to_stderr("Running RPC tests with TCP init_method")
+            os.environ["RPC_INIT_WITH_TCP"] = "1"
+        else:
+            if options.verbose:
+                print_to_stderr("Running RPC tests with FILE init_method")
+        run_test(test_module, test_directory, options)
+
+        # Clear environment variable for future runs
+        if os.environ.get("RPC_INIT_WITH_TCP", None) is not None:
+            del os.environ["RPC_INIT_WITH_TCP"]
 
 def test_distributed(test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0

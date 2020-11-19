@@ -2,6 +2,7 @@ import concurrent.futures
 import contextlib
 import json
 import logging
+import os
 import sys
 from threading import Lock
 import time
@@ -782,11 +783,19 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
-        with self.assertRaisesRegex(RuntimeError, "is already initialized"):
+        # TODO: with TCP init, rank 0 raises Address already in use because
+        # rank 0 is the start daemon and the store is created before checking if
+        # RPC is already initialized in init_rpc.
+        if os.environ.get("RPC_INIT_WITH_TCP", None) == "1" and self.rank == 0:
+            expected_reinit_err = "Address already in use"
+        else:
+            expected_reinit_err = "is already initialized"
+
+        with self.assertRaisesRegex(RuntimeError, expected_reinit_err):
             rpc.init_rpc(
                 name=worker_name(self.rank),
                 backend=self.rpc_backend,
@@ -1391,7 +1400,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_rpc_profiling_async_function(self):
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
             dist.barrier()
@@ -1400,7 +1409,7 @@ class RpcTest(RpcAgentTestFixture):
     @single_threaded_process_group_agent
     @dist_init
     def test_rpc_profiling_async_function_single_threaded(self):
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
         if torch.cuda.is_available():
             dist.barrier()
@@ -1959,7 +1968,7 @@ class RpcTest(RpcAgentTestFixture):
         with captured_output() as (_, err):
             # This barrier prevents a race condition where the main thread has
             # not entered the context manager when the remote function runs.
-            initialize_pg(self.init_method, self.rank, self.world_size)
+            initialize_pg(self.file_init_method, self.rank, self.world_size)
             dist.barrier()
             n = self.rank + 1
             dst_rank = n % self.world_size
@@ -2459,7 +2468,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
@@ -2537,7 +2546,7 @@ class RpcTest(RpcAgentTestFixture):
         # The barrier before the check makes sure that all previous states are
         # cleared globally, the barrier after ensures that no following states
         # change gets into the current check.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
@@ -2674,7 +2683,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         if self.rank == 1:
             dst_rank = (self.rank + 1) % self.world_size
@@ -2703,7 +2712,7 @@ class RpcTest(RpcAgentTestFixture):
         if not dist_initialized:
             dist.init_process_group(
                 backend="gloo",
-                init_method=self.init_method,
+                init_method=self.file_init_method,
                 rank=self.rank,
                 world_size=self.world_size,
             )
@@ -2728,7 +2737,7 @@ class RpcTest(RpcAgentTestFixture):
         # A barrier is needed to ensure that all RPCs are processed.
         # Otherwise, some RPCs can timeout since the receiving end
         # has terminated.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
@@ -3554,6 +3563,10 @@ class RpcTest(RpcAgentTestFixture):
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "init_pg_then_rpc does not work with TCP init."
+    )
     def test_init_pg_then_rpc(self):
         dist.init_process_group(
             backend="gloo",
@@ -3581,6 +3594,10 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "init_rpc_then_pg does not work with TCP init."
+    )
     def test_init_rpc_then_pg(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3630,8 +3647,12 @@ class RpcTest(RpcAgentTestFixture):
             ret = torch.futures.wait_all(futs)
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "Test does not work with TCP init, see https://github.com/pytorch/pytorch/issues/46491",
+    )
     def test_init_rpc_twice(self):
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3849,12 +3870,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_single_threaded_rref_owner(self):
         # We need a process group in order to perform a barrier at the end.
-        dist.init_process_group(
-            backend="gloo",
-            init_method=self.init_method,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
@@ -3920,12 +3936,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_single_threaded_rref_to_here(self):
         # We need a process group in order to perform a barrier at the end.
-        dist.init_process_group(
-            backend="gloo",
-            init_method=self.init_method,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
@@ -3984,7 +3995,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
     @dist_init
     def test_process_group_debug_info(self):
         rpc.enable_gil_profiling(True)
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
         info = rpc.api._get_current_rpc_agent().get_debug_info()
