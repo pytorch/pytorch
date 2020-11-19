@@ -89,7 +89,8 @@ sccache --zero-stats
 set CC=sccache-cl
 set CXX=sccache-cl
 
-set CMAKE_GENERATOR=Ninja
+set USE_NINJA=OFF
+set CMAKE_GENERATOR=Visual Stuido 16 2019
 
 if "%USE_CUDA%"=="1" (
   copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
