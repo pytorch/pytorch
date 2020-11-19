@@ -18,7 +18,7 @@ VkCommandPool create_command_pool(
   const VkCommandPoolCreateInfo command_pool_create_info{
     VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
     nullptr,
-    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+    0u,
     queue_family_index,
   };
 

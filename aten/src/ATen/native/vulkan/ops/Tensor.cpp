@@ -1185,7 +1185,7 @@ vTensor::View::State::transition(const Bundle bundle) {
     to.image = bundle.image;
   }
 
-// #ifdef DEBUG
+#ifdef DEBUG
   // Forward declaration
   std::ostream& operator<<(
       std::ostream&,
@@ -1193,7 +1193,7 @@ vTensor::View::State::transition(const Bundle bundle) {
 
   std::cout << "From:" << std::endl << from << std::endl;
   std::cout << "To:" << std::endl << to << std::endl;
-// #endif /* DEBUG */
+#endif /* DEBUG */
 
   return Transition{
     from,

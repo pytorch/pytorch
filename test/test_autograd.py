@@ -2904,6 +2904,14 @@ class TestAutograd(TestCase):
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 
+    def test_igammac(self):
+        # 1e-3 offset to avoid zeros in s
+        # NOTE: derivative for s is not implemented
+        s = (torch.rand(100, dtype=torch.double) + 1e-3)
+        x = (torch.rand(100, dtype=torch.double)).requires_grad_()
+        gradcheck(torch.igamma, (s, x))
+        gradgradcheck(torch.igamma, (s, x))
+
     @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
@@ -5015,11 +5023,6 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
                 'addcdiv'] + separate_complex_tests
 
-# this list corresponds to cases that are not currently implemented
-skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex', 'inverse_batched_complex',
-                  'solve_batched_broadcast_A_complex', 'solve_batched_broadcast_b_complex',
-                  'solve_batched_complex', 'solve_batched_dims_complex']
-
 def add_test(
         name,
         self_size,
@@ -5199,11 +5202,6 @@ def add_test(
 
             for skip in skipTestIf:
                 do_test = skip(do_test)
-
-            # TODO: remove this once tests from skip_cuda_list work
-            do_test = skipCUDAIf(
-                any(skip_test in test_name for skip_test in skip_cuda_list),
-                "not implemented for CUDA yet")(do_test)
 
             setattr(TestAutogradDeviceType, test_name, do_test)
 

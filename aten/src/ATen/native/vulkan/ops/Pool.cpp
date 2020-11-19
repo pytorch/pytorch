@@ -35,11 +35,35 @@ Tensor adaptive_avg_pool2d(
   command_buffer.begin();
   {
     if (v_self.has_image()) {
+      const VkExtent3D v_output_size = v_output.extents();
+      const VkExtent3D v_self_size = v_self.extents();
+
+      const struct Stride final {
+        float x, y;
+      } stride {
+        static_cast<float>(v_self_size.width) / v_output_size.width,
+        static_cast<float>(v_self_size.height) / v_output_size.height,
+      };
+
+      const struct {
+        VkExtent3D size;
+        uint32_t _;
+        Stride stride;
+        float kernel_x, kernel_y;
+      } block{
+        v_output.extents(),
+        0u,
+        stride,
+        v_self_size.width - (v_output_size.width - 1u) * stride.x,
+        v_self_size.height - (v_output_size.height - 1u) * stride.y,
+      };
+
       context->dispatch(
           command_buffer,
           {
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(adaptive_avg_pool2d),
           v_output.extents(),
@@ -53,7 +77,10 @@ Tensor adaptive_avg_pool2d(
           // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute));
+              vTensor::Stage::Compute),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -149,16 +176,19 @@ Tensor avg_pool2d(
 
     if (v_self.has_image()) {
       const struct {
-        int32_t kernel_width, kernel_height;
+        VkExtent3D extents;
+        int32_t kernel_range;
+        VkExtent2D iextents;
         int32_t stride_x, stride_y;
         int32_t padding_x, padding_y;
+        int32_t kernel_width, kernel_height;
       } block {
-        safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-        safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
         safe_downcast<int32_t>(stride[Layout::Parameter::width]),
         safe_downcast<int32_t>(stride[Layout::Parameter::height]),
         safe_downcast<int32_t>(padding[Layout::Parameter::width]),
         safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+        safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+        safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
       };
 
       context->dispatch(
