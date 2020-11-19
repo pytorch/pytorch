@@ -4,6 +4,9 @@ from typing import Dict, List, Set, NamedTuple, Tuple
 import torch
 from torch.fx.experimental.subgraph_creation_example import split_module
 import operator
+from torch.fx.experimental.partitioner_utils import Partition, \
+    Device, PartitionerConfig, get_partition_to_latency_mapping,\
+    get_latency_of_partitioned_graph, NodeLatency, get_extra_size_of
 
 class DAGNode():
     """
@@ -43,95 +46,16 @@ class DAG:
         node = DAGNode(submodule_node, input_nodes, output_nodes, logical_devices, size_bytes)
         self.nodes.append(node)
 
-class Partition:
-    """Partition class contains all the information about an individual partition.
-    It also provides necessary methods for manipulation the partition.
-    """
-    def __init__(self, partition_id: int) -> None:
-        self.nodes: Set[Node] = set()
-        self.partition_id = partition_id
-        self.parents: Set['Partition'] = set()
-        self.children: Set['Partition'] = set()
-        self.bfs_level: int = -1
-        self.used_mem_bytes: int = 0
-        self.logical_device_ids: List[int] = []
-
-    def __str__(self):
-        return str(self.partition_id)
-
-    def recalculate_mem_size(self):
-        self.used_mem_bytes = 0
-        for node in self.nodes:
-            self.used_mem_bytes += get_extra_size_of(node, self.nodes)
-
-    def add_node(self, node):
-        input_nodes: Dict[Node, None] = {}
-        map_arg(node.args, lambda n: input_nodes.setdefault(n))
-        map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
-        # Add current node's input nodes if they are placeholder or constants
-        for n in input_nodes:
-            if n.op in {'placeholder', 'get_attr'}:
-                self.nodes.add(n)
-        self.nodes.add(node)
-
-    def remove_node(self, node):
-        # Remove a node only if the node is in the partition
-        if node in self.nodes:
-            self.nodes.remove(node)
-            # Collect the node's input nodes
-            input_nodes: Dict[Node, None] = {}
-            map_arg(node.args, lambda n: input_nodes.setdefault(n))
-            map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
-            # Check if an input node is a placeholder or get_attr,
-            # and this input node is not used by some other nodes in this partition,
-            # the remove this input node
-            for input_node in input_nodes:
-                if all([n not in self.nodes for n in input_node.users]):
-                    self.nodes.remove(input_node)
-
 class PartitionResult(NamedTuple):
     """NameTuple used for returning DAG and a new graph module
     """
     dag: DAG
     module_with_submodules: GraphModule
 
-class Device(NamedTuple):
-    name: str
-    available_mem_bytes: int
-    logical_id: int
-
-class PartitionerConfig(NamedTuple):
-    devices: List[Device]
-    is_sparse_nn: bool = False
-
 """Followings are some helper functions for partition manipulation"""
-
-def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
-    """Given a node and a set of nodes,
-       this function return the extra size that needed
-       if this node is included in this set.
-    """
-    # Find all its input nodes
-    input_nodes: Dict[Node, None] = {}
-    map_arg(node.args, lambda n: input_nodes.setdefault(n))
-    map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
-    # Calculate total size of related nodes
-    total_size_of_input_nodes = 0
-    for n in input_nodes:
-        # Make sure this node hasn't been in this set yet
-        if n not in nodes:
-            size_bytes = getattr(n, 'size_bytes', None)
-            if size_bytes:
-                total_size_of_input_nodes += size_bytes.output_size
-            else:
-                raise RuntimeError('node has no size_bytes attr')
-    # Don't forget the op node itself
-    size_bytes = getattr(node, 'size_bytes', None)
-    if size_bytes:
-        total_size_of_input_nodes += size_bytes.total_size
-    else:
-        raise RuntimeError('node has no size_bytes attr')
-    return total_size_of_input_nodes
+def reset_partition_device(partitions):
+    for partition in partitions:
+        partition.logical_device_ids = []
 
 def combine_two_partitions(
     partition_0: Partition,
@@ -148,10 +72,7 @@ def combine_two_partitions(
     partitions.append(partition)
     partitions.remove(partition_0)
     partitions.remove(partition_1)
-    # reset parents and children for all partitions
-    for partition in partitions:
-        partition.parents = set()
-        partition.children = set()
+    # Reorganize partitions
     reorganize_partitions(partitions)
     return
 
@@ -233,12 +154,12 @@ def get_device_to_partitions_mapping(partitions: List[Partition], devices: List[
         all_nodes: Set[Node] = set()
         for p in partitions:
             all_nodes = all_nodes.union(p.nodes)
+        if len(all_nodes) == 0:
+            return partition.used_mem_bytes
+        all_nodes = all_nodes.union(partition.nodes)
         extra_size_needed = 0
         for node in partition.nodes:
-            if node in all_nodes or node.op in {'placeholder', 'get_attr'}:
-                continue
-            else:
-                extra_size_needed += get_extra_size_of(node, all_nodes)
+            extra_size_needed += get_extra_size_of(node, all_nodes)
         return extra_size_needed
 
     def find_device_for(partition: Partition):
@@ -289,6 +210,20 @@ def get_device_to_partitions_mapping(partitions: List[Partition], devices: List[
             break
     return found_device
 
+def check_dependency(partition):
+    visited: Set[Partition] = set([partition])
+    queue: List[Partition] = [partition]
+    while queue:
+        p = queue.pop(0)
+        for child in p.children:
+            if child == partition:
+                return True
+            else:
+                if child not in visited:
+                    visited.add(child)
+                    queue.append(child)
+    return False
+
 class Partitioner:
     """A graph module may not fit into one device.
     Partitioner class helps cut one graph into subgraphs (partitions),
@@ -319,7 +254,6 @@ class Partitioner:
         self.devices = partitioner_config.devices
         if len(self.devices) == 0:
             raise RuntimeError('No devices')
-        available_mem_bytes = self.devices[0].available_mem_bytes
         # Check if there are op nodes in the graph
         nodes = self.graph_module.graph.nodes
         if all(node.op in {'placeholder', 'get_attr', 'output'} for node in nodes):
@@ -337,13 +271,19 @@ class Partitioner:
             raise RuntimeError('Devices have no enough memory for the module')
         else:
             if partitioner_config.is_sparse_nn:
+                available_mem_bytes = self.devices[0].available_mem_bytes
                 if not all(device.available_mem_bytes == available_mem_bytes for device in self.devices):
                     raise RuntimeError('All devices must have same memory size!')
                 # sparse_nn_partition only support same memory size
                 # TODO: add different size support for sparse_nn_partition
                 self.sparse_nn_partition(available_mem_bytes)
+            elif partitioner_config.is_cost_aware:
+                self.cost_aware_partition(
+                    partitioner_config.transfer_rate_bytes_per_sec,
+                    partitioner_config.node_to_latency_mapping
+                )
             else:
-                self.size_based_partition(available_mem_bytes)
+                self.size_based_partition()
         module_with_submodules = self.do_partition()
         # The DAG contains DAGNodes with info of each partition's input nodes, output nodes
         # and how partitions are connected.
@@ -364,7 +304,7 @@ class Partitioner:
         self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return
 
-    def size_based_partition(self, available_mem_bytes: int) -> None:
+    def size_based_partition(self) -> None:
         """This method is to partition the graph based on memory size.
            It uses greedy approach. The result may not be the best.
            The basic idea is:
@@ -431,7 +371,6 @@ class Partitioner:
                             partition.logical_device_ids.append(device.logical_id)
                     partition.add_node(node)
                     partition_to_left_mem_bytes[partition] -= total_size_of_input_nodes
-                    partition.used_mem_bytes += total_size_of_input_nodes
                 # No device left, create single node partitions
                 else:
                     self.create_single_node_partition(node)
@@ -491,7 +430,6 @@ class Partitioner:
         """
         partition = self.create_partition()
         partition.add_node(node)
-        partition.recalculate_mem_size()
         return
 
     def sparse_nn_partition(self, available_mem_bytes: int) -> None:
@@ -499,7 +437,7 @@ class Partitioner:
            It first traverse all the nodes and do the partitions based on memory size.
            If the current partition has no enough memory left for a new op node
            (call_module, call_method, call_function), a new partition is created.
-           Different for size_based_partition, when traversing cross the boundary between
+           Different from size_based_partition, when traversing cross the boundary between
            non-embedding nodes and embedding nodes, a new partition is created regardlessly.
            For example, if the current node is a non-embedding node but the next node is an
            embedding node, a new partition is created for the next node.
@@ -614,7 +552,6 @@ class Partitioner:
                     if total_size_of_input_nodes > available_mem_bytes:
                         raise RuntimeError(node.target + 'is too large to fit into a device')
                 partition.add_node(node)
-                partition.used_mem_bytes += total_size_of_input_nodes
         reset_partition_in_sparse_nn(partition, new_partition=False)
         # Set parents and children for partitions
         set_parents_and_children(self.partitions)
@@ -647,5 +584,117 @@ class Partitioner:
         for partition in non_embedding_partitions:
             partition.logical_device_ids = occupied_devices
         # Get the node to partition mapping
+        self.node_to_partition = get_node_to_partition_mapping(self.partitions)
+        return
+
+    def cost_aware_partition(
+        self,
+        transfer_rate_bytes_per_sec: float,
+        node_to_latency_mapping: Dict[Node, NodeLatency]
+    ) -> None:
+        """This method is to partition the fx module based on the cost.
+           The cost is the total latency of running the whole graph.
+           In partitioner_utils.py, the cost model is built.
+           The algorithm is:
+           #1. At every begining, each node is a partition.
+               Then we map all the partitions to the devices
+               and calculate the cost
+           #2. Then try to pre-combine any two of the partitions if the two
+               partitions can be combined.
+               (the bfs level is less than 2 or two partitions are connected and
+               can find partition to device mapping)
+               See if any partition pair could reduce the current cost.
+               Choose the pair that shows the minimum cost and then combine them
+           #3. Repeat #2 until the cost cannot be reduced.
+        """
+        def try_combining_partitions(
+            p0_index,
+            p1_index,
+            partitions
+        ) -> float:
+            """Given two partitions and a list of partitions, try to combine these two partitions
+               and see what is the cost of the modified partition list
+            """
+            p0 = partitions[p0_index]
+            p1 = partitions[p1_index]
+            """If two partitions' bfs level are less than 2 or two partitions are connected to each other,
+               then they can be combined
+            """
+            if (abs(p0.bfs_level - p1.bfs_level) <= 1) or (p0 in p1.parents) or p0 in (p1.children):
+                combine_two_partitions(p0, p1, partitions)
+                # Check if a circular dependency exists after combining
+                if check_dependency(partitions[-1]):
+                    return float('inf')
+                # Check if the modified partition list can be mapped to devices after combination
+                reset_partition_device(partitions)
+                found_deivce = get_device_to_partitions_mapping(partitions, self.devices)
+                if not found_deivce:
+                    return float('inf')
+                # Calculate the new cost
+                partition_to_latency_mapping = get_partition_to_latency_mapping(partitions, node_to_latency_mapping)
+                cost = get_latency_of_partitioned_graph(partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec)
+                return cost
+            # If two partition can not be combined, the cost is inf
+            return float('inf')
+
+        def search_combination(
+            transfer_rate_bytes_per_sec,
+            node_to_latency_mapping
+        ) -> bool:
+            """Given transfer rate between partitions and each node's latency,
+               find two partitions to combine so the cost of the partitions can
+               be reduced.
+               The algorithm is :
+               1. Going through all the partition pairs and see
+               if the pair of partitions can be combined.
+               2. If they are combined, the cost is calculated.
+               3. Select the minimum cost and combine its cooresponding partition pair
+            """
+            partition_to_latency_mapping = get_partition_to_latency_mapping(self.partitions, node_to_latency_mapping)
+            cost = get_latency_of_partitioned_graph(self.partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec)
+            if len(self.partitions) == 1:
+                return False
+            partition_pair: List[int] = []
+            for i in range(len(self.partitions) - 1):
+                for j in range(i + 1, len(self.partitions)):
+                    # Try to combine the partition pair
+                    # and see the new cost after combination
+                    new_cost = try_combining_partitions(
+                        i,
+                        j,
+                        self.partitions[:]
+                    )
+                    if new_cost <= cost:
+                        partition_pair = [i, j]
+                        cost = new_cost
+                    reorganize_partitions(self.partitions)
+            # If a partition pair is found, combine them
+            if len(partition_pair) != 0:
+                p0 = self.partitions[partition_pair[0]]
+                p1 = self.partitions[partition_pair[1]]
+                combine_two_partitions(p0, p1, self.partitions)
+            get_bfs_level_partition(self.partitions)
+            reset_partition_device(self.partitions)
+            get_device_to_partitions_mapping(self.partitions, self.devices)
+            return len(partition_pair) != 0
+
+        for node in self.graph_module.graph.nodes:
+            if node.op not in {'placeholder', 'get_attr', 'output'}:
+                self.create_single_node_partition(node)
+        # Set up parent partitions and children partitions for each partition
+        set_parents_and_children(self.partitions)
+        # Get bfs level for each partition
+        get_bfs_level_partition(self.partitions)
+        find_combination = True
+        while find_combination:
+            # Search for a pair partition to generate the minimum new cost,
+            # then combine them
+            find_combination = search_combination(
+                transfer_rate_bytes_per_sec,
+                node_to_latency_mapping
+            )
+        # Make sure all partitions are set up correctly.
+        reorganize_partitions(self.partitions)
+        # Set up node to partition mapping
         self.node_to_partition = get_node_to_partition_mapping(self.partitions)
         return

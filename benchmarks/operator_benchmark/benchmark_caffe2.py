@@ -93,6 +93,10 @@ class Caffe2BenchmarkBase(object):
             Caffe2BenchmarkBase.test_index += 1
         return name
 
+    def extract_inputs_tuple(self):
+        # add a dummy function here to match the interface of TorchBenchmarkBase
+        pass
+
 
 class Caffe2OperatorTestCase(object):
     """ This class includes all the information needed to benchmark an operator.

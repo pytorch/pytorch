@@ -133,8 +133,6 @@ _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_forward) \
-_(aten, _th_baddbmm) \
-_(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_mode) \
@@ -374,6 +372,8 @@ _(aten, i0) \
 _(aten, i0_) \
 _(aten, igamma) \
 _(aten, igamma_) \
+_(aten, igammac) \
+_(aten, igammac_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -669,7 +669,6 @@ _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
-_(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
 _(aten, th_pow) \
@@ -700,7 +699,6 @@ _(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
-_(aten, transpose) \
 _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
