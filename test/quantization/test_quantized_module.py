@@ -30,6 +30,7 @@ hu.assert_deadline_disabled()
 
 import io
 import numpy as np
+import itertools
 
 """
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -56,21 +57,35 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(y6_ref, qy6.dequantize(),
                          msg="ReLU6 module API failed")
 
-
-    @given(
-        batch_size=st.integers(1, 5),
-        in_features=st.integers(16, 32),
-        out_features=st.integers(4, 8),
-        use_bias=st.booleans(),
-        use_fused=st.booleans(),
-        per_channel=st.booleans(),
-        backend_independent=st.booleans(),
-    )
     @override_qengines
-    def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, backend_independent):
+    def test_linear_api(self):
         """test API functionality for nn.quantized.linear and nn.intrinsic.quantized.linear_relu"""
+        options = itertools.product(
+            [1, 5],
+            [16, 32],
+            [4, 8],
+            [True, False],
+            [True, False],
+            [True, False],
+            [True, False])
+        for batch_size, in_features, out_features, use_bias, \
+            use_fused, per_channel, backend_independent in options:
+            self._test_linear_api_impl(
+                batch_size, in_features, out_features, use_bias, use_fused,
+                per_channel, backend_independent)
+
+    def _test_linear_api_impl(self, batch_size, in_features, out_features, use_bias, use_fused, per_channel, backend_independent):
         if torch.backends.quantized.engine == 'qnnpack':
             per_channel = False
+
+        # (use_fused, backend_independent) -> quantized class
+        class_map = {
+            (True, True) : nnq_fused.LinearReLUBackendIndependent,
+            (True, False) : nnq_fused.LinearReLU,
+            (False, True) : nnq.LinearBackendIndependent,
+            (False, False) : nnq.Linear,
+        }
+
         W = torch.rand(out_features, in_features).float()
         if per_channel:
             scale_tensor = torch.ones(out_features, dtype=torch.double)
@@ -88,14 +103,11 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         B = torch.rand(out_features).float() if use_bias else None
         scale = 0.5
         zero_point = 3
-        if use_fused:
-            qlinear = nnq_fused.LinearReLU(in_features, out_features, backend_independent=backend_independent)
-        else:
-            qlinear = nnq.Linear(in_features, out_features, backend_independent=backend_independent)
+        qlinear = class_map[(use_fused, backend_independent)](in_features, out_features)
 
-        print('begin')
-        self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
-        print('end')
+        qlinear_copy = qlinear  # deepcopy does not work right now
+        # qlinear_copy = copy.deepcopy(qlinear)
+        self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
         qlinear(X_q)
@@ -146,15 +158,14 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 self.assertEqual(b_model, b_loaded)
             else:
                 self.assertEqual(model_dict[key], loaded_dict[key])
-        if use_fused:
-            loaded_qlinear = nnq_fused.LinearReLU(
-                in_features, out_features, backend_independent=backend_independent)
-        else:
-            loaded_qlinear = nnq.Linear(
-                in_features, out_features, backend_independent=backend_independent)
-        loaded_qlinear.load_state_dict(loaded_dict)
 
-        self.assertEqual(loaded_qlinear.backend_independent, backend_independent)
+        loaded_qlinear = class_map[(use_fused, backend_independent)](
+            in_features, out_features)
+        loaded_qlinear.load_state_dict(loaded_dict)
+        print('loaded_dict:', loaded_dict)
+        print('linear scale:', qlinear.scale)
+        print('loaded qlinear:', loaded_qlinear.scale)
+
         if backend_independent:
             self.assertEqual(qlinear._qweight, loaded_qlinear._qweight)
             self.assertEqual(qlinear._bias, loaded_qlinear._bias)
@@ -164,6 +175,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                              linear_unpack(loaded_qlinear._packed_params._packed_params))
         self.assertEqual(qlinear.scale, loaded_qlinear.scale)
         self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
+        # make sure loaded_qlinear has the same dir as qlinear since
+        # scripting the module will add __overloads__ to __dict__
+        self.checkScriptable(loaded_qlinear, [[X_q]], check_save_load=True)
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
         if not backend_independent:

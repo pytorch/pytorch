@@ -10,7 +10,7 @@ class LinearPackedParams(torch.nn.Module):
     _version = 3
 
     def __init__(self, dtype=torch.qint8):
-        super(LinearPackedParams, self).__init__()
+        super().__init__()
         self.dtype = dtype
         if self.dtype == torch.qint8:
             wq = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
@@ -128,13 +128,7 @@ class Linear(torch.nn.Module):
     _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias_=True,
-                 dtype=torch.qint8, backend_independent=False):
-        """ backend_independent is a flag configuring whether we want to produce
-        a backend independent module or not, if it's set to True, we will not
-        pack the parameters, since weight packing is an optimization for quantized
-        backends supported in PyTorch (fbgemm/qnnpack), this is useful when user
-        want to use this module in other backends like Glow.
-        """
+                 dtype=torch.qint8):
         super().__init__()
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
@@ -154,13 +148,8 @@ class Linear(torch.nn.Module):
         else:
             raise RuntimeError('Unsupported dtype specified for quantized Linear!')
 
-        self.backend_independent = backend_independent
-        if self.backend_independent:
-            self._qweight = qweight
-            self._bias = bias
-        else:
-            self._packed_params = LinearPackedParams(dtype)
-            self._packed_params.set_weight_bias(qweight, bias)
+        self._packed_params = LinearPackedParams(dtype)
+        self._packed_params.set_weight_bias(qweight, bias)
         self.scale = 1.0
         self.zero_point = 0
 
@@ -175,18 +164,9 @@ class Linear(torch.nn.Module):
     def __repr__(self):
         return hide_packed_params_repr(self, LinearPackedParams)
 
-    def forward(self, x):
-        if self.backend_independent:
-            x_dequant = x.dequantize()
-            weight_dequant = self._qweight.dequantize()
-            float_result = F.linear(x_dequant, weight_dequant, self._bias)
-            # NEEDFIX: we don't have dtype in the Linear module APIs right now!
-            result = torch.quantize_per_tensor(
-                float_result, self.scale, self.zero_point, torch.quint8)
-        else:
-            result = torch.ops.quantized.linear(
-                x, self._packed_params._packed_params, self.scale, self.zero_point)
-        return result
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.ops.quantized.linear(
+            x, self._packed_params._packed_params, self.scale, self.zero_point)
 
     # ===== Serialization methods =====
     # The special consideration here is that we have to unpack the weights into their
@@ -218,13 +198,9 @@ class Linear(torch.nn.Module):
     #                              of LinearPackedParams C++ struct
     #
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(Linear, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'backend_independent'] = torch.tensor(self.backend_independent)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-        if self.backend_independent:
-            destination[prefix + '_qweight'] = self._qweight
-            destination[prefix + '_bias'] = self._bias
 
     # ===== Deserialization methods =====
     # Counterpart to the serialization methods, we must pack the serialized QTensor
@@ -246,26 +222,14 @@ class Linear(torch.nn.Module):
             state_dict.update({prefix + '_packed_params.weight': weight,
                                prefix + '_packed_params.bias': bias})
 
-        if version == 4:
-            self.backend_independent = bool(state_dict[prefix + 'backend_independent'])
-            state_dict.pop(prefix + 'backend_independent')
-
-            if self.backend_independent:
-                self._qweight = state_dict[prefix + '_qweight']
-                self._bias = state_dict[prefix + '_bias']
-                state_dict.pop(prefix + '_qweight')
-                state_dict.pop(prefix + '_bias')
-
-        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                  missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, False,
+            missing_keys, unexpected_keys, error_msgs)
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
     def _weight_bias(self):
-        if self.backend_independent:
-            return self._qweight, self._bias
-        else:
-            return self._packed_params._weight_bias()
+        return self._packed_params._weight_bias()
 
     def weight(self):
         return self._weight_bias()[0]
@@ -274,14 +238,10 @@ class Linear(torch.nn.Module):
         return self._weight_bias()[1]
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        if self.backend_independent:
-            self._qweight = w
-            self._bias = b
-        else:
-            self._packed_params.set_weight_bias(w, b)
+        self._packed_params.set_weight_bias(w, b)
 
     @classmethod
-    def from_float(cls, mod, backend_independent=False):
+    def from_float(cls, mod):
         r"""Create a quantized module from a float module or qparams_dict
 
         Args:
@@ -307,9 +267,55 @@ class Linear(torch.nn.Module):
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear = cls(mod.in_features,
                       mod.out_features,
-                      dtype=dtype,
-                      backend_independent=backend_independent)
+                      dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
         return qlinear
+
+class LinearBackendIndependent(Linear):
+    """ A backend independent version of nn.quantized.Linear
+        we will not pack the parameters in this module, since weight packing is an
+        optimization for quantized backends supported in PyTorch (fbgemm/qnnpack),
+        this is useful when user want to use this module in other backends like Glow.
+    """
+    def __init__(self, in_features, out_features, bias_=True,
+                 dtype=torch.qint8):
+        super().__init__(in_features, out_features, bias_, dtype)
+        self._qweight, self._bias = self._packed_params._weight_bias()
+        del self._packed_params
+
+    def _get_name(self):
+        return "QuantizedLinear(BackendIndependent)"
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_dequant = x.dequantize()
+        weight_dequant = self._qweight.dequantize()
+        float_result = F.linear(x_dequant, weight_dequant, self._bias)
+        # NEEDFIX: we don't have dtype in the Linear module APIs right now!
+        result = torch.quantize_per_tensor(
+            float_result, self.scale, self.zero_point, torch.quint8)
+        return result
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + '_qweight'] = self._qweight
+        destination[prefix + '_bias'] = self._bias
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self._qweight = state_dict[prefix + '_qweight']
+        self._bias = state_dict[prefix + '_bias']
+        state_dict.pop(prefix + '_qweight')
+        state_dict.pop(prefix + '_bias')
+
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, False,
+            missing_keys, unexpected_keys, error_msgs)
+
+    def _weight_bias(self):
+        return self._qweight, self._bias
+
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+        self._qweight = w
+        self._bias = b
