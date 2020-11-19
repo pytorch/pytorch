@@ -240,7 +240,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
   // Simple case with nonzero elements in the input
   if ((input != 0).all().item<uint8_t>()) {
     Tensor result = at::cumprod(input, dim);
-    return sum_scan_exclusive(result.conj() * grad, dim) / input.conj();
+    return sum_scan_exclusive(result * grad, dim) / input;
   }
 
   auto ones_size = input.sizes().vec();
@@ -269,7 +269,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
     AT_ASSERT(omitted_products.size(dim) == dim_size - k);
 
     grad_input.select(dim, k).copy_(
-        at::sum(grad.slice(dim, k) * omitted_products.conj(), dim));
+        at::sum(grad.slice(dim, k) * omitted_products,dim));
   }
 
   return grad_input;
