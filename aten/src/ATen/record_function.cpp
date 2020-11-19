@@ -146,31 +146,26 @@ class CallbackManager {
       return num_callbacks;
     };
 
-    // Don't bother constructing temporary vectors if we know we won't do anything.
+    // Don't bother allocating state if we know we won't do anything.
     if (rf_tls_.sorted_tls_callbacks_.empty() && sorted_global_callbacks_.empty()) {
       return;
     }
 
-    // Keep temporary state on the stack in case we don't find an
-    // active callback so that we can avoid allocating state in that
-    // case.
-    CallbackHandles sorted_active_tls_handles;
-    CallbackHandles sorted_active_global_handles;
-    size_t num_tls_callbacks = init_handles(sorted_active_tls_handles, rf_tls_.sorted_tls_callbacks_);
-    size_t num_global_callbacks = init_handles(sorted_active_global_handles, sorted_global_callbacks_);
+    rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+    size_t num_tls_callbacks = init_handles(rec_fn.state_->sorted_active_tls_handles_, rf_tls_.sorted_tls_callbacks_);
+    size_t num_global_callbacks = init_handles(rec_fn.state_->sorted_active_global_handles_, sorted_global_callbacks_);
+
     if (!found_active_cb) {
+      rec_fn.state_.reset();
       return;
     }
 
-    rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
     // Pre-allocate observer context list with nullptr.
     rec_fn.state_->tls_ctx_.resize(num_tls_callbacks);
     rec_fn.state_->global_ctx_.resize(num_global_callbacks);
 
-    rec_fn.state_->sorted_active_tls_handles_ = std::move(sorted_active_tls_handles);
-    rec_fn.state_->sorted_active_global_handles_ = std::move(sorted_active_global_handles);
     rec_fn.state_->needs_inputs = found_needs_inputs;
-    if (found_needs_ids && found_active_cb) {
+    if (found_needs_ids) {
       rec_fn.setHandle(next_unique_record_function_handle());
     }
   }
