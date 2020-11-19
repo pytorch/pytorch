@@ -133,13 +133,6 @@ class NativeFunction:
     # method is one which has the same dispatch for all types;
     # we just implement it in the base Type.  This is exposed
     # in Declarations.yaml via a field named 'abstract'.
-    #
-    # Although this is what we have historically exposed, it is
-    # actually not all that useful for end users, who are also interested
-    # whether or not there is an explicit entry in derivatives.yaml
-    # for the entry or not (as this affects whether or not the operation is
-    # overrideable or not.)  Once this all gets cleaned up, this
-    # property will be obsolete.
     @property
     def is_abstract(self) -> bool:
         if self.structured_delegate:
