@@ -56,7 +56,7 @@ elif torch.cuda.is_available() and ROCM_HOME is not None:
         ])
     ext_modules.append(extension)
 
-if not IS_WINDOWS:  # MSVC has bug compiling this example
+if True:  # MSVC has bug compiling this example
     if torch.cuda.is_available() and CUDA_HOME is not None:
         extension = CUDAExtension(
             'torch_test_cpp_extension.torch_library', [
