@@ -68,8 +68,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             [True, False],
             [True, False],
             [True, False])
-        for batch_size, in_features, out_features, use_bias, \
-            use_fused, per_channel, backend_independent in options:
+        for (batch_size, in_features, out_features, use_bias,
+             use_fused, per_channel, backend_independent) in options:
             self._test_linear_api_impl(
                 batch_size, in_features, out_features, use_bias, use_fused,
                 per_channel, backend_independent)
@@ -162,10 +162,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         loaded_qlinear = class_map[(use_fused, backend_independent)](
             in_features, out_features)
         loaded_qlinear.load_state_dict(loaded_dict)
-        print('loaded_dict:', loaded_dict)
-        print('linear scale:', qlinear.scale)
-        print('loaded qlinear:', loaded_qlinear.scale)
-
         if backend_independent:
             self.assertEqual(qlinear._qweight, loaded_qlinear._qweight)
             self.assertEqual(qlinear._bias, loaded_qlinear._bias)
@@ -194,7 +190,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        print('qlinear:', qlinear, ' type:', type(qlinear), ' backend independent:', backend_independent)
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
 
         # Test from_float.
