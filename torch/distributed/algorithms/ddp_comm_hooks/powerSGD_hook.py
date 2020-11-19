@@ -25,7 +25,9 @@ def _orthogonalize(matrix, epsilon=1e-8):
 
 
 def powerSGD_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket, matrix_approximation_rank: int = 1
+    process_group: dist.ProcessGroup,
+    bucket: dist._GradBucket,
+    matrix_approximation_rank: int = 1,
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
