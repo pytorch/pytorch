@@ -172,7 +172,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 6, 1)
+python_min_version = (3, 6, 2)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -337,7 +337,11 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future', 'typing_extensions', 'dataclasses']
+install_requires = [
+    'future',
+    'typing_extensions',
+    'dataclasses; python_version < "3.7"'
+]
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -724,6 +728,7 @@ if __name__ == '__main__':
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
+    version_range_max = max(sys.version_info[1], 8) + 1
     setup(
         name=package_name,
         version=version,
@@ -883,7 +888,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], 9)],
+        ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )
