@@ -17,8 +17,6 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
     skipIfNoFBGEMM,
 )
-from torch.testing._internal.common_quantized import override_qengines
-
 
 @skipIfNoFBGEMM
 class TestGraphModeNumericSuite(QuantizationTestCase):
