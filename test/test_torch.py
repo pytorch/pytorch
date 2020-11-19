@@ -17097,74 +17097,44 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def _reference_implementation(x, mod):
             np_x = x.cpu().numpy()
             np_mod = 0
-            # No type promotion
-            # Issue #47779: https://github.com/pytorch/pytorch/issues/47779
             if torch.is_tensor(mod):
                 np_mod = mod.cpu().numpy()
-            if not torch.is_tensor(mod):
+            else:
                 np_mod = mod
-                if x.dtype in torch.testing.get_all_int_dtypes():
-                    np_mod = int(np_mod)
             exp = np.fmod(np_x, np_mod)
             exp = torch.from_numpy(exp)
 
             res = torch.fmod(x, mod)
-            res = res.to(exp.dtype)
+            common_dtype = torch.promote_types(res.dtype, exp.dtype)
+            exp = exp.to(common_dtype)
+
+            res = res.to(common_dtype)
             self.assertEqual(res, exp)
             # out
-            out = torch.empty(0, device=device, dtype=dtype)
+            out = torch.empty(0, device=device, dtype=common_dtype)
             torch.fmod(x, mod, out=out)
-            out.to(exp.dtype)
+            out.to(common_dtype)
             self.assertEqual(out, exp)
             self.assertEqual(out.size(), torch.Size([10, 10]))
             # in-place
             x.fmod_(mod)
-            x.to(exp.dtype)
-            self.assertEqual(out, exp)
+            x = x.to(common_dtype)
+            self.assertEqual(x, exp)
 
         x = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
         # Exclude 0
         # mod with same dtype as x
         mod = make_tensor((10, 10), device=device, dtype=dtype, low=1, high=9)
         # mod with floating-point dtype
-        mod_float = make_tensor((10, 10), device=device,
-                                dtype=torch.float if dtype in torch.testing.get_all_int_dtypes() else dtype,
-                                low=1, high=9)
+        mod_float = make_tensor((10, 10), device=device, dtype=torch.float, low=1, high=9)
         # non-contiguous
         x_nc = x.t()
-        mod_nc = mod.t()
 
-        # Mods: Integer, Float, Tensor, Non-contiguous Tensor
-        mods = [3, 2.3, mod, mod_nc]
-        for m in mods:
-            _reference_implementation(x, m)
-            _reference_implementation(x_nc, m)
-
-        # Integral Tensor fmod to floating-point Tensor
-        # Can not cast floating-point result to original integral Tensor without type promotion
-        if dtype in torch.testing.get_all_int_dtypes():
-            if device == 'cpu':
-                with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
-                                                          "can't be cast to the desired "
-                                                          "output type (Byte|Char|Short|Int|Long)"):
-                    res = torch.fmod(x, mod_float)
-            else:
-                res = torch.fmod(x, mod_float)
-                exp = np.fmod(x.cpu().numpy(), mod_float.cpu().numpy())
-                exp = torch.from_numpy(exp)
-                res = res.to(exp.dtype)
-                self.assertEqual(res, exp)
-            with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
-                                                      "can't be cast to the desired "
-                                                      "output type (Byte|Char|Short|Int|Long)"):
-                out = torch.empty(0, device=device, dtype=dtype)
-                torch.fmod(x, mod_float, out=out)
-            with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
-                                                      "can't be cast to the desired "
-                                                      "output type (Byte|Char|Short|Int|Long)"):
-                x.fmod_(mod_float)
-        else:
-            _reference_implementation(x, mod_float)
+        # Mods: Integer, Float, Tensor, Non-contiguous Tensor, float Tensor
+        mods = [3, 2.3, mod, mod.t(), mod_float]
+        for mod in mods:
+            _reference_implementation(x, mod)
+            _reference_implementation(x_nc, mod)
 
     @onlyCPU
     @dtypes(torch.float, torch.long)
