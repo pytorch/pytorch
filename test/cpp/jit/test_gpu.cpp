@@ -1,4 +1,4 @@
-// #if defined(USE_CUDA)
+#if defined(USE_CUDA)
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -4450,22 +4450,28 @@ TEST(NVFuserTest, FusionAdvancedIndexing7_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  auto t0 = makeSymbolicTensor(1);
-  fusion.addInput(t0);
-  auto t1 = makeSymbolicTensor(2);
-  fusion.addInput(t1);
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
 
-  auto t2 = broadcast(t0, {false, true});
-  auto t3 = add(t1, t2);
-  auto t4 = sum(t3, {0, 1});
-  fusion.addOutput(t4);
+  auto tv1 = broadcast(tv0, {false, true});
 
-  t4->merge(-2, -1);
-  t4->split(-1, 4);
-  auto t5 = t4->rFactor({-1});
+  auto tv2 = makeSymbolicTensor(2);
+  fusion.addInput(tv2);
 
-  t5->computeAt(t4, -1);
-  t0->computeAt(t5, -1);
+  auto tv3 = add(tv1, tv2);
+  auto tv4 = sum(tv3, {0, 1});
+  fusion.addOutput(tv4);
+
+  tv4->merge(0, 1);
+  tv4->split(0, 128);
+  tv4->split(0, 4);
+
+  auto tv5 = tv4->rFactor({0, 1});
+
+  tv5->computeAt(tv4, -1);
+  tv0->computeAt(tv5, -1);
+
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -9760,4 +9766,4 @@ TEST(NVFuserTest, Issue507_CUDA) {
 } // namespace jit
 } // namespace torch
 
-// #endif // #if defined(USE_CUDA)
+#endif // #if defined(USE_CUDA)
