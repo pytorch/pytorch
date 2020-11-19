@@ -3565,7 +3565,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
-        "init_pg_then_rpc does not work with TCP init."
+        "init_pg_then_rpc does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
     def test_init_pg_then_rpc(self):
         dist.init_process_group(
@@ -3596,7 +3596,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init(setup_rpc=False)
     @unittest.skipIf(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
-        "init_rpc_then_pg does not work with TCP init."
+        "init_rpc_then_pg does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
     def test_init_rpc_then_pg(self):
         rpc.init_rpc(
