@@ -82,6 +82,10 @@ Examples::
     True
 """)
 
+inv = _add_docstr(_linalg.linalg_inv, r"""
+linalg.inv(input, *, out=None) -> Tensor
+""")
+
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 

@@ -460,6 +460,59 @@ Tensor& inverse_out(Tensor &result, const Tensor &self) {
   return result;
 }
 
+// result should be in column major order and contain matrices to invert
+// the content of result is overriden by 'apply_inverse'
+Tensor& _inverse_out_helper_cpu(Tensor &result) {
+  std::vector<int64_t> infos(batchCount(result), 0);
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "inverse_cpu", [&]{
+    apply_inverse<scalar_t>(result, infos);
+  });
+  if (result.dim() > 2) {
+    batchCheckErrors(infos, "inverse_cpu");
+  } else {
+    singleCheckErrors(infos[0], "inverse_cpu");
+  }
+  return result;
+}
+
+Tensor linalg_inv(const Tensor &input) {
+  squareCheckInputs(input);
+  if (input.numel() == 0) {
+    return at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  auto result = cloneBatchedColumnMajor(input);
+  at::_inverse_out_helper(result);
+  return result;
+}
+
+Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
+  squareCheckInputs(input);
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+
+  if (input.numel() == 0) {
+    at::native::resize_output(result, input.sizes());
+    return result;
+  }
+
+  // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
+  TORCH_CHECK(result.numel() != 0 && result.sizes().equals(input.sizes()),
+    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  }
+
+  // How to check efficiently that the individual matrices in the batch (last two dimensions) are in the column major order?
+  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+
+  result.copy_(input);
+  at::_inverse_out_helper(result);
+  return result;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>

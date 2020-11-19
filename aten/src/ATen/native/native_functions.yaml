@@ -2124,6 +2124,13 @@
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
 
+- func: _inverse_out_helper(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _inverse_out_helper_cpu
+    CUDA: _inverse_out_helper_cuda
+
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -9342,6 +9349,19 @@
   variants: function, method
   dispatch:
     DefaultBackend: det
+
+- func: linalg_inv(Tensor self) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_inv
+
+- func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_inv_out
 
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor

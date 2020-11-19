@@ -1240,6 +1240,22 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
 #endif
 }
 
+// result should be in column major order and contain matrices to invert
+// the content of result is overriden by 'apply_inverse'
+Tensor& _inverse_out_helper_cuda(Tensor &result) {
+// #ifdef USE_CUSOLVER
+//   if ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2) || !use_magma_) {
+//     return _inverse_helper_cuda_lib(self);    // cusolver or cublas
+//   } else {
+//     return _inverse_helper_cuda_legacy(self); // magma-cuda
+//   }
+// #else
+//   return _inverse_helper_cuda_legacy(self); // magma-cuda
+// #endif
+  TORCH_CHECK(false, "_inverse_out_helper_cuda: not implemented!")
+  return result;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
