@@ -109,7 +109,7 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(
-      c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
       "log1p: result type cannot be Integral, got:",
       r.scalar_type());
 
