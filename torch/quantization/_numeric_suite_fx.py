@@ -40,7 +40,6 @@ def remove_qconfig_observer_fx(model):
         else:
             env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
 
-        # removes qconfig and activation_post_process modules
     _remove_qconfig(model)
     model = GraphModule(model, act_post_process_removed_graph)
     return model

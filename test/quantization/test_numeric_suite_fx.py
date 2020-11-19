@@ -18,6 +18,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
 )
 
+
 @skipIfNoFBGEMM
 class TestGraphModeNumericSuite(QuantizationTestCase):
     def test_remove_qconfig_observer_fx(self):
@@ -74,14 +75,14 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             model_to_quantize = copy.deepcopy(float_model)
             model_to_quantize.eval()
 
-            fused = fuse_fx(float_model)
+            backup_prepared_model = fuse_fx(float_model)
             prepared_model = prepare_fx(model_to_quantize, qconfig_dict)
 
             # Run calibration
             calibrate(prepared_model, self.img_data_2d)
             q_model = convert_fx(prepared_model)
 
-            compare_and_validate_results(fused, q_model)
+            compare_and_validate_results(backup_prepared_model, q_model)
 
     @skipIfNoFBGEMM
     def test_compare_weights_linear_static_fx(self):
@@ -116,13 +117,11 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         backup_prepared_model = copy.deepcopy(prepared_model)
         backup_prepared_model.eval()
 
-        model = remove_qconfig_observer_fx(backup_prepared_model)
-
         # Run calibration
         calibrate(prepared_model, self.calib_data)
         q_model = convert_fx(prepared_model)
 
-        compare_and_validate_results(model, q_model)
+        compare_and_validate_results(backup_prepared_model, q_model)
 
     @skipIfNoFBGEMM
     def test_compare_weights_linear_dynamic_fx(self):
