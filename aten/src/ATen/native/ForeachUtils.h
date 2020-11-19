@@ -13,7 +13,7 @@ void check_foreach_api_restrictions(TensorList tensors) {
   }
 }
 
-void check_foreach_api_restrictions(TensorList tensors, ArrayRef<double> scalars) {
+void check_foreach_api_restrictions(TensorList tensors, ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors);
   TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 }
@@ -49,7 +49,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
   }
 }
 
-void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<double> scalars) {
+void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
   TORCH_CHECK(tensors1.size() == scalars.size(), "Tensor list must have same number of elements as scalar list, got ", tensors1.size(), " and ", scalars.size());
 }
@@ -137,7 +137,7 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
+bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
   return can_use_fast_route(tensors);
 }
 
@@ -209,7 +209,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<double> scalars) {
+bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
   return can_use_fast_route(tensors1, tensors2, tensors3);
 }
 
