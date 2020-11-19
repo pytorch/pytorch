@@ -439,13 +439,12 @@ class Graph:
             op = target
             if _is_magic(op):
                 op = op[2:-2]
+        op = _snake_case(op)
         return op
 
     def _create_unique_name(self, candidate : str) -> str:
-        candidate = candidate.replace('.', '_')
         # delete all characters that are illegal in a Python identifier
         candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
-        candidate = _snake_case(candidate)
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
