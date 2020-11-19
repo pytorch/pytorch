@@ -29,7 +29,7 @@ void maybePreprocessComplexTensor(std::vector<at::Tensor>& tensors) {
 
 void maybePreprocessComplexTensor(std::vector<std::vector<at::Tensor>>& tensors_lists) {
   for(std::vector<at::Tensor>& t : tensors_lists) {
-    maybePreprocessComplexTensor(tensors_lists);
+    maybePreprocessComplexTensor(t);
   }
 }
 
