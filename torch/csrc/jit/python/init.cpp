@@ -436,7 +436,8 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_constant_propagation",
-          [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); })
+          [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); },
+          py::arg("graph"))
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
       .def(
           "_jit_pass_create_autodiff_subgraphs",
