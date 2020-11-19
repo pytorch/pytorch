@@ -2,7 +2,7 @@ from .module import Module
 from .. import functional as F
 
 from torch import Tensor
-
+from typing import Optional
 
 class _DropoutNd(Module):
     __constants__ = ['p', 'inplace']
