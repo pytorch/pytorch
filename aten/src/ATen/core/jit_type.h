@@ -536,11 +536,13 @@ struct CAFFE2_API SymbolicShape {
 template <typename T>
 struct VaryingShape {
   using ListOfOptionalElements = std::vector<c10::optional<T>>;
-  VaryingShape(const std::vector<T>& vec)
-      : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
+  VaryingShape(const std::vector<T>& vec)  {
+        concrete_sizes_ = vec;
+        dims_ = c10::nullopt;
+      }
 
   VaryingShape(c10::ArrayRef<T> vec)
-      : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
+      : VaryingShape(std::vector<T>(vec.begin(), vec.end())) {}
 
   VaryingShape(c10::optional<size_t> size = c10::nullopt) : dims_(c10::nullopt) {
     if (size) {
@@ -548,27 +550,51 @@ struct VaryingShape {
     }
   }
 
-  VaryingShape(ListOfOptionalElements dims) : dims_(std::move(dims)) {}
+  VaryingShape(ListOfOptionalElements dims) : dims_(std::move(dims)) {
+    if (computeComplete()) {
+      std::vector<T> sizes;
+      auto len = dims_->size();
+      sizes.reserve(len);
+      for (size_t i = 0, n = len; i < n; ++i) {
+        sizes.push_back(*(*dims_)[i]);
+      }
+      concrete_sizes_ = std::move(sizes);
+      dims_ = c10::nullopt;
+    }
+  }
 
   VaryingShape(size_t size) : VaryingShape(c10::optional<size_t>(size)) {}
 
   bool operator==(const VaryingShape& other) const {
-    return dims_ == other.dims_;
+    return concrete_sizes_ == other.concrete_sizes_ && dims_ == other.dims_;
   }
 
-  const c10::optional<T> &operator[](size_t i) const {
-    if (!dims_) {
+  const c10::optional<T> operator[](size_t i) const {
+    return index(i);
+  }
+
+  const c10::optional<T> index(size_t i) const {
+    if (concrete_sizes_) {
+      return (*concrete_sizes_).at(i);
+    } else if (dims_) {
+      return (*dims_).at(i);
+    } else {
       throw std::runtime_error("Rank isn't fixed");
     }
-    return (*dims_).at(i);
   }
 
   c10::optional<size_t> size() const {
-    if (!dims_) {
+    if (concrete_sizes_)  {
+      return concrete_sizes_->size();
+    } else if (dims_) {
+      return dims_->size();
+    } else {
       return c10::nullopt;
     }
-    const auto& dims = dims_.value();
-    return dims.size();
+  }
+
+  bool isComplete() const {
+    return concrete_sizes_.has_value();
   }
 
   const c10::optional<ListOfOptionalElements>& sizes() const {
@@ -578,20 +604,15 @@ struct VaryingShape {
   CAFFE2_API VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<T>> concrete_sizes() const {
-    if (!dims_) {
-      return c10::nullopt;
-    }
-    std::vector<T> sizes;
-    for (auto d : *dims_) {
-      if (!d) {
-        return c10::nullopt;
-      }
-      sizes.push_back(d.value());
-    }
-    return sizes;
+    return concrete_sizes_;
   }
 
-  bool isComplete() const {
+ private:
+  // invariant that if all elements are known, dims_ is c10::nullopt
+  c10::optional<ListOfOptionalElements> dims_;
+  c10::optional<std::vector<T>> concrete_sizes_ = c10::nullopt;
+
+  bool computeComplete() const {
     if (!dims_) {
       return false;
     }
@@ -603,9 +624,10 @@ struct VaryingShape {
     return true;
   }
 
- private:
-  c10::optional<ListOfOptionalElements> dims_;
 };
+
+
+
 
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;

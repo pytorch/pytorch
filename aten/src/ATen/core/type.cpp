@@ -537,12 +537,20 @@ std::string TensorType::str() const {
 
 template <typename T>
 VaryingShape<T> VaryingShape<T>::merge(const VaryingShape<T>& other) const {
-  if (!dims_ || !other.dims_ || dims_->size() != other.dims_->size()) {
+  auto maybe_out_size = merge_primitive(size(), other.size());
+  if (!maybe_out_size) {
     return VaryingShape<T>();
   }
+  auto out_size = *maybe_out_size;
+  if (auto concrete_out_sizes = merge_primitive(concrete_sizes(), other.concrete_sizes())) {
+    return VaryingShape<T>(*concrete_out_sizes);
+  }
   ListOfOptionalElements dims;
-  for (size_t i = 0, n = dims_->size(); i < n; i++) {
-    dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
+  dims.resize(out_size);
+  for (size_t i = 0, n = out_size; i < n; i++) {
+    const c10::optional<T> self_elem = this->index(i);
+    const c10::optional<T> other_elem = other[i];
+    dims.push_back(merge_primitive(self_elem, other_elem));
   }
   return VaryingShape<T>(std::move(dims));
 }
@@ -581,6 +589,31 @@ bool is_null_or_equal(c10::optional<T> a, c10::IntArrayRef b) {
   return !a.has_value() || a.value() == b;
 }
 
+bool vectorsEqual(std::vector<int64_t> a, at::ArrayRef<int64_t> b) {
+    auto size = a.size();
+    if (size != b.size()) {
+        return false;
+    }
+    size_t i = 0;
+    // vectorized comparison
+    for (i = 0 ; i + 4 < size; ++i) {
+        bool equal =
+            (a[i] == b[i]) &
+            a[i + 1] == b[i + 1] &
+            a[i + 2] == b[i + 2] &
+            a[i + 3] == b[i + 3];
+        if (!equal) {
+            return false;
+        }
+    }
+    for (; i < size; ++i) {
+        if (a[i] != b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool TensorType::matchTensor(const at::Tensor& t) {
   bool undef = undefined().value_or(!t.defined());
   if (undef != !t.defined()) {
@@ -596,13 +629,17 @@ bool TensorType::matchTensor(const at::Tensor& t) {
   }
   // Here we know t.defined() == true and compare all other properties.
   bool rg = at::GradMode::is_enabled() && t.requires_grad();
-  bool matched_strides = (!t.has_storage() && !stride_properties().isComplete())
-    || stride_properties() == computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
+  bool matched_strides = (strides().isComplete() &&
+    vectorsEqual(std::move(*strides().concrete_sizes()), t.strides())) ||
+    (!t.has_storage() && !stride_properties().isComplete()) ||
+    (stride_properties() == computeStrideProps(t.sizes(), t.strides(), t.is_contiguous()));
+
   return scalarType().value_or(t.scalar_type()) == t.scalar_type()
     && device().value_or(t.device()) == t.device()
     && requiresGrad().value_or(rg) == rg
     && matched_strides
-    && is_null_or_equal(sizes().concrete_sizes(), t.sizes());
+    // TODO: I dont understand this check if sizes is not equal, not currently enabled
+    && (!sizes().isComplete() || vectorsEqual(std::move(*sizes().concrete_sizes()), t.sizes()));
 }
 
 bool TensorType::operator==(const c10::Type& rhs) const {
