@@ -1252,46 +1252,46 @@ class TestLinalg(TestCase):
     def test_inverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
+        def run_test(torch_inverse, matrix, batches, n):
+            matrix_inverse = torch_inverse(matrix)
+
+            # Compare against NumPy output
+            # NumPy uses 'gesv' LAPACK routine solving the equation A A_inv = I
+            # But in PyTorch 'gertf' + 'getri' is used causing element-wise differences
+            expected = np.linalg.inv(matrix.cpu().numpy())
+            self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=1e-3)
+
+            # Additional correctness tests, check matrix*matrix_inverse == identity
+            identity = torch.eye(n, dtype=dtype, device=device)
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
+
+            # check the out= variant
+            # if (torch_inverse != torch.linalg.inv and matrix.is_contiguous()) or torch_inverse == torch.inverse:
+            # prepare the expected out tensor
+            matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
+            matrix_inverse_out_t = matrix_inverse_out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
+            matrix_inverse_out = matrix_inverse_out_t.transpose(-2, -1)
+            ans = torch_inverse(matrix, out=matrix_inverse_out)
+            self.assertEqual(matrix_inverse_out, ans, atol=0, rtol=0)
+            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
+
+            # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
+            if matrix.ndim > 2:
+                expected_inv_list = []
+                p = int(np.prod(batches))  # use `p` instead of -1, so that the test works for empty input as well
+                for mat in matrix.contiguous().view(p, n, n):
+                    expected_inv_list.append(torch_inverse(mat))
+                expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
+                if self.device_type == 'cuda' and dtype in [torch.float32, torch.complex64]:
+                    # single-inverse is done using cuSOLVER, while batched inverse is done using MAGMA
+                    # individual values can be significantly different for fp32, hence rather high rtol is used
+                    # the important thing is that torch_inverse passes above checks with identity
+                    self.assertEqual(matrix_inverse, expected_inv, atol=1e-1, rtol=1e-2)
+                else:
+                    self.assertEqual(matrix_inverse, expected_inv)
+
         for torch_inverse in [torch.inverse, torch.linalg.inv]:
-            def run_test(matrix, batches, n):
-                matrix_inverse = torch_inverse(matrix)
-
-                # Compare against NumPy output
-                # NumPy uses 'gesv' LAPACK routine solving the equation A A_inv = I
-                # But in PyTorch 'gertf' + 'getri' is used causing element-wise differences
-                expected = np.linalg.inv(matrix.cpu().numpy())
-                self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=1e-3)
-
-                # Additional correctness tests, check matrix*matrix_inverse == identity
-                identity = torch.eye(n, dtype=dtype, device=device)
-                self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
-                self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
-
-                # check the out= variant
-                # if (torch_inverse != torch.linalg.inv and matrix.is_contiguous()) or torch_inverse == torch.inverse:
-                # prepare the expected out tensor
-                matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
-                matrix_inverse_out_t = matrix_inverse_out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
-                matrix_inverse_out = matrix_inverse_out_t.transpose(-2, -1)
-                ans = torch_inverse(matrix, out=matrix_inverse_out)
-                self.assertEqual(matrix_inverse_out, ans, atol=0, rtol=0)
-                self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
-
-                # batched matrices: 3+ dimensional tensors, check matrix_inverse same as single-inverse for each matrix
-                if matrix.ndim > 2:
-                    expected_inv_list = []
-                    p = int(np.prod(batches))  # use `p` instead of -1, so that the test works for empty input as well
-                    for mat in matrix.contiguous().view(p, n, n):
-                        expected_inv_list.append(torch_inverse(mat))
-                    expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
-                    if self.device_type == 'cuda' and dtype in [torch.float32, torch.complex64]:
-                        # single-inverse is done using cuSOLVER, while batched inverse is done using MAGMA
-                        # individual values can be significantly different for fp32, hence rather high rtol is used
-                        # the important thing is that torch_inverse passes above checks with identity
-                        self.assertEqual(matrix_inverse, expected_inv, atol=1e-1, rtol=1e-2)
-                    else:
-                        self.assertEqual(matrix_inverse, expected_inv)
-
             for batches, n in itertools.product(
                 [[], [1], [4], [2, 3]],
                 [0, 5, 64]
@@ -1300,12 +1300,13 @@ class TestLinalg(TestCase):
                 if batches and batches[0] == 32 and n == 256:
                     continue
                 matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
-                run_test(matrices, batches, n)
+                run_test(torch_inverse, matrices, batches, n)
 
                 # test non-contiguous input
-                run_test(matrices.transpose(-2, -1), batches, n)
+                run_test(torch_inverse, matrices.transpose(-2, -1), batches, n)
                 if n > 0:
                     run_test(
+                        torch_inverse,
                         random_fullrank_matrix_distinct_singular_value(n * 2, *batches, dtype=dtype).to(device)
                         .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                         batches, n
@@ -1320,18 +1321,18 @@ class TestLinalg(TestCase):
     def test_inverse_many_batches(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
+        def test_inverse_many_batches_helper(torch_inverse, b, n):
+            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype).to(device)
+            matrices_inverse = torch_inverse(matrices)
+
+            # Compare against NumPy output
+            expected = np.linalg.inv(matrices.cpu().numpy())
+            self.assertEqual(matrices_inverse, expected, atol=self.precision, rtol=1e-3)
+
         for torch_inverse in [torch.inverse, torch.linalg.inv]:
-            def test_inverse_many_batches_helper(b, n):
-                matrices = random_fullrank_matrix_distinct_singular_value(b, n, n, dtype=dtype).to(device)
-                matrices_inverse = torch_inverse(matrices)
-
-                # Compare against NumPy output
-                expected = np.linalg.inv(matrices.cpu().numpy())
-                self.assertEqual(matrices_inverse, expected, atol=self.precision, rtol=1e-3)
-
-            test_inverse_many_batches_helper(5, 256)
-            test_inverse_many_batches_helper(3, 512)
-            test_inverse_many_batches_helper(64, 64)
+            test_inverse_many_batches_helper(torch_inverse, 5, 256)
+            test_inverse_many_batches_helper(torch_inverse, 3, 512)
+            test_inverse_many_batches_helper(torch_inverse, 64, 64)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
