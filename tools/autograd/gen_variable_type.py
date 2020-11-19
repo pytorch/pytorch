@@ -467,7 +467,7 @@ def emit_body(declaration):
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
-        def guard_for(arg: Variable) -> Optional[str]:
+        def guard_for(arg: SavedAttribute) -> Optional[str]:
             # It's hard to determine the edge offset if we have TensorLists
             if has_tensorlist_arg:
                 return None
@@ -574,9 +574,9 @@ def emit_body(declaration):
         return body
 
     def save_variables(
-        saved_variables: Sequence[Variable],
+        saved_variables: Sequence[SavedAttribute],
         is_output: bool,
-        guard_for: Callable[[Variable], Optional[str]] = lambda name: None,
+        guard_for: Callable[[SavedAttribute], Optional[str]] = lambda name: None,
     ) -> Sequence[str]:
         # assign the saved variables to the generated grad_fn
         stmts: List[str] = []

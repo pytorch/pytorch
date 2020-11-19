@@ -28,7 +28,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
 
     # What's the difference between function schema v.s. signature?
     # function schema is the complete declaration including mutability annotation / default value and etc.
-    # signature is the canonical schema for a group of functions (in/out/functional variants)
+    # signature is the canonical schema for a group of functions (in-place/out/functional variants)
     # that are semantically related.
     functions_by_signature: Dict[FunctionSchema, List[NativeFunction]] = defaultdict(list)
     functions_by_schema: Dict[str, NativeFunction] = dict()
@@ -193,6 +193,7 @@ def create_differentiability_info(
 
     # now map this to the legacy schema; this isn't technically necessary, but we'd need some logic here
     # to map in-place schemas to the out-of-place variants.
+    # TODO: maybe the logic to handle the legacy schema is no longer necessary?
     signature = schema_function.func.signature()
     functions = functions_by_signature[signature]
     if len(functions) == 0:
@@ -237,7 +238,7 @@ def saved_variables(
     arg_names: Tuple[str, ...],
     arg_types: Tuple[str, ...],
     var_names: Tuple[str, ...],
-) -> Tuple[str, Tuple[Variable, ...]]:
+) -> Tuple[str, Tuple[SavedAttribute, ...]]:
 
     def stride_expr(name: str) -> str:
         assert var_names == (name,), (
@@ -301,7 +302,7 @@ def saved_variables(
     ]
 
     # find which arguments need to be saved
-    saved: List[Variable] = []
+    saved: List[SavedAttribute] = []
 
     for name, type in zip(arg_names, arg_types):
         # First search the formula for expressions which can be evaluated
@@ -310,7 +311,7 @@ def saved_variables(
             def repl(m: Match[str]) -> str:
                 suffix: str = info['suffix'](m) if callable(info['suffix']) else info['suffix']
                 expr: str = info['expr'](name) if 'expr' in info else m.group(0)
-                saved.append(Variable(
+                saved.append(SavedAttribute(
                     name=name + suffix,
                     type=info['type'],
                     expr=expr,
@@ -324,7 +325,7 @@ def saved_variables(
 
         # Find any variables which remain in the formula and save them
         if re.search(IDENT_REGEX.format(name), formula):
-            saved.append(Variable(
+            saved.append(SavedAttribute(
                 name=name,
                 # TODO: change from string to type data model
                 type=type.replace('const ', '').replace(' &', ''),
@@ -363,9 +364,9 @@ def create_op_names(infos: Sequence[DifferentiabilityInfo]) -> Sequence[Optional
             dedup.append(name)
     return dedup
 
-def dedup_vars(vars: Sequence[Variable]) -> Sequence[Variable]:
+def dedup_vars(vars: Sequence[SavedAttribute]) -> Sequence[SavedAttribute]:
     seen: Set[str] = set()
-    saved: List[Variable] = []
+    saved: List[SavedAttribute] = []
     for var in vars:
         if var.name in seen:
             continue

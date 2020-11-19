@@ -148,7 +148,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             size = '1'
         compute_index_ranges.append(f'auto {arg.name}_ix = gen.range({size});')
 
-    def save_var(var: Variable, is_output: bool) -> None:
+    def save_var(var: SavedAttribute, is_output: bool) -> None:
         name = var.name
         if var.type == 'Tensor' or var.type == 'c10::optional<Tensor>' or var.type == 'c10::optional<Tensor>&' or \
                 (var.type == 'Scalar' and is_output):
