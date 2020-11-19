@@ -106,6 +106,12 @@ class TraceError(ValueError):
 
 
 def _create_friendly_names(a: Any, frames_up : int):
+    """
+    Given an args/kwargs object, go through and try to pull out the names for
+    each contained Proxy from the Python interpreter frame `frames_up` above
+    us in the stack. If found, assign that name to the Proxy's underlying Node's
+    unique name
+    """
     frame = inspect.currentframe()
     if not frame:
         raise RuntimeError("failed to inspect frame")
@@ -124,26 +130,32 @@ def _create_friendly_names(a: Any, frames_up : int):
         if isinstance(a, (tuple, list)):
             for elem in a:
                 _assign_friendly_name(elem)
-            return
         elif isinstance(a, dict):
             for k, v in a.items():
                 if not isinstance(k, str):
                     raise NotImplementedError(f"dictionaries with non-string keys: {a}")
                 _assign_friendly_name(v)
-            return
         elif isinstance(a, slice):
             _assign_friendly_name(a.start)
             _assign_friendly_name(a.stop)
             _assign_friendly_name(a.step)
-            return
 
         if isinstance(a, Proxy):
             # Base case: look for Proxy objects in locals:
+
+            found_name : Optional[str] = None
             for k, v in f_locals.items():
                 if a is v:
+                    # Arbitrary tie-breaker: use the shortest name found in the
+                    # frame. This will account for cases e.g. `x` and `identity`
+                    # in the same frame (as in ResNet). This tie-breaker makes it
+                    # so that we use a consistent name. TODO: Futher introspect
+                    # into Python bytecode state to get the actual name used?
+                    if not found_name or len(k) < len(found_name):
+                        found_name = k
+                if found_name is not None and found_name != a.node.name:
                     a.node.name = a.tracer.graph._create_unique_name(k)
-                    break
-            return
+
     _assign_friendly_name(a)
 
 
