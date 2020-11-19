@@ -1,32 +1,27 @@
 #pragma once
 
-#include <ATen/ATen.h>  // TODO: improve
-// #include <ATen/NativeFunctions.h>
+#include <ATen/DimVector.h>
+#include <c10/core/TensorOptions.h>
 
 namespace at {
+
+class Tensor;
 
 struct TensorMeta {
   DimVector sizes;
   // TODO: DimVector strides;
   TensorOptions options;
 
+  TensorMeta() {}  // blegh default construction
   TensorMeta(IntArrayRef _sizes, TensorOptions _options)
     : sizes(_sizes), options(_options) {}
 };
 
-inline Tensor meta_tensor_from_meta(const TensorMeta& meta) {
-  // TODO: eliminate indirection
-  return at::empty_meta(meta.sizes, meta.options);
-}
+CAFFE2_API Tensor meta_tensor_from_meta(const TensorMeta& meta);
 
-inline Tensor tensor_from_meta(const TensorMeta& meta) {
-  // TODO: eliminate indirection
-  return at::empty(meta.sizes, meta.options);
-}
+CAFFE2_API Tensor tensor_from_meta(const TensorMeta& meta);
 
 // Analogous to self.new_empty(sizes)
-inline TensorMeta new_meta(const Tensor& self, IntArrayRef sizes) {
-  return TensorMeta(sizes, self.options());
-}
+CAFFE2_API TensorMeta new_meta(const Tensor& self, IntArrayRef sizes);
 
 } // namespace at

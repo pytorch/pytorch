@@ -34,7 +34,7 @@ static std::array<int64_t, 3> upsample_nearest1d_common_check(IntArrayRef input_
   return {nbatch, channels, output_width};
 }
 
-TensorMeta upsample_nearest1d(const Tensor& input, IntArrayRef output_size, c10::optional<double> scales) {
+upsample_nearest1d::upsample_nearest1d(const Tensor& input, IntArrayRef output_size, c10::optional<double> scales) {
   auto full_output_size = upsample_nearest1d_common_check(input.sizes(), output_size);
 
   // Allow for empty batch size but not other dimensions
@@ -43,17 +43,17 @@ TensorMeta upsample_nearest1d(const Tensor& input, IntArrayRef output_size, c10:
       "Non-empty 3D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  return new_meta(input, full_output_size);
+  ret_ = new_meta(input, full_output_size);
 }
 
-TensorMeta upsample_nearest1d_backward(const Tensor& grad_output, IntArrayRef output_size, IntArrayRef input_size, c10::optional<double> scales) {
+upsample_nearest1d_backward::upsample_nearest1d_backward(const Tensor& grad_output, IntArrayRef output_size, IntArrayRef input_size, c10::optional<double> scales) {
   auto full_output_size = upsample_nearest1d_common_check(input_size, output_size);
 
   check_dim_size(grad_output, 3, 0, full_output_size[0]);
   check_dim_size(grad_output, 3, 1, full_output_size[1]);
   check_dim_size(grad_output, 3, 2, full_output_size[2]);
 
-  return new_meta(grad_output, input_size);
+  ret_ = new_meta(grad_output, input_size);
 }
 
 } // namespace meta
@@ -61,7 +61,7 @@ TensorMeta upsample_nearest1d_backward(const Tensor& grad_output, IntArrayRef ou
 
 namespace native {
 
-Tensor& upsample_nearest1d_out_cpu(
+Tensor& upsample_nearest1d_out_cpu::impl(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
@@ -70,7 +70,7 @@ Tensor& upsample_nearest1d_out_cpu(
   return output;
 }
 
-Tensor& upsample_nearest1d_backward_out_cpu(
+Tensor& upsample_nearest1d_backward_out_cpu::impl(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,

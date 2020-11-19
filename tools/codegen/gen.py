@@ -261,7 +261,6 @@ class RegisterDispatchKey:
             # TODO: put this into StructuredNativeFunctions itself
             functional_func = g.out.func.signature()
             functional_sig = DispatcherSignature.from_schema(functional_func)
-            meta_name = meta.name(functional_func)
 
             # This is a little abusive; this assumes that the functionalization
             # transformation ALWAYS refers to valid arguments in the original
@@ -282,9 +281,9 @@ class RegisterDispatchKey:
                 if k is SchemaKind.functional:
                     out_expr = "result"
                     if self.dispatch_key == "Meta":
-                        prologue = "auto result = meta_tensor_from_meta(meta_result);"
+                        prologue = "auto result = meta_tensor_from_meta(op.ret_);"
                     else:
-                        prologue = "auto result = tensor_from_meta(meta_result);"
+                        prologue = "auto result = tensor_from_meta(op.ret_);"
                 elif k is SchemaKind.inplace:
                     out_expr = "self"
                     prologue = "// TODO: consistency check assert"
@@ -295,15 +294,17 @@ class RegisterDispatchKey:
                     # scope by sig
                     out_expr = f.func.arguments.out[0].name
                     prologue = f"""
-// TODO: add a consistency check for meta_result
-{out_expr}.resize_(meta_result.sizes);
+// TODO: add a consistency check for op.ret_
+{out_expr}.resize_(op.ret_.sizes);
 """
 
                 if self.dispatch_key == "Meta":
+                    meta_name = meta.name(g)
+                    out_impl_name = f"at::meta::{meta_name}"
                     out_impl_call = "// meta function does nothing"
                 else:
                     out_impl_name = f"at::native::{g.out.dispatch[self.dispatch_key]}"
-                    out_impl_call = f"{out_impl_name}({out_expr}, {functional_exprs});"
+                    out_impl_call = f"op.impl({out_expr}, {functional_exprs});"
 
                 device_guard = ""
 
@@ -326,7 +327,7 @@ class RegisterDispatchKey:
                 return f"""\
 {sig.defn()} {{
     {device_guard}
-    auto meta_result = meta::{meta_name}({functional_exprs});
+    {out_impl_name} op({functional_exprs});
     {prologue}
     {out_impl_call}
     return {out_expr};
@@ -547,32 +548,61 @@ def compute_aten_op(f: NativeFunction) -> str:
 # Generates NativeFunctions.h, a list of forward declarations of all
 # actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function
-def compute_native_function_declaration(f: NativeFunction) -> List[str]:
-    ns = list(f.dispatch.values())
+def compute_native_function_declaration(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
+    if isinstance(g, StructuredNativeFunctions):
+        # only out has dispatch
+        meta_name = meta.name(g)
+        f = g.out
+        rs = []
+        # TODO: test that there aren't name collisions within functions
+        # that share name
+        for n in set(f.dispatch.values()):
+            returns_type = native.returns_type(f.func.returns)
+            args = native.arguments(f.func)
+            rs.append(f"""\
+struct CAFFE2_API {n} : public at::meta::{meta_name} {{
+    using meta::{meta_name}::{meta_name};
+    {returns_type} impl({', '.join(a.str_with_default() for a in args)});
+}};
+""")
+        return rs
 
-    rs = []
-    # Sometimes a function name shows up multiple times; only generate
-    # it once!
-    seen = set()
-    for n in ns:
-        if n in seen:
-            continue
-        if "legacy::" in n:
-            continue
-        seen.add(n)
-        returns_type = native.returns_type(f.func.returns)
-        args = native.arguments(f.func)
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
+    else:
+        f = g
+        ns = list(f.dispatch.values())
 
-    return rs
+        rs = []
+        # Sometimes a function name shows up multiple times; only generate
+        # it once!
+        seen = set()
+        for n in ns:
+            if n in seen:
+                continue
+            if "legacy::" in n:
+                continue
+            seen.add(n)
+            returns_type = native.returns_type(f.func.returns)
+            args = native.arguments(f.func)
+            rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
+
+        return rs
 
 def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
     with native_function_manager(g.out):
         sig = g.signature()
-        name = meta.name(sig)
+        name = meta.name(g)
         returns_type = meta.returns_type(sig.returns)
         args = meta.arguments(sig)
-        return f"CAFFE2_API {returns_type} {name}({', '.join(map(str, args))});"
+        args_str = ', '.join(map(str, args))
+        # TODO: maybe return should be done as individual fields
+        # rather than tuple; but that makes the return field convention
+        # more complex
+        return f"""\
+struct CAFFE2_API {name} {{
+    {name}({args_str});
+    {returns_type} ret_;
+}};
+"""
 
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
@@ -1191,7 +1221,7 @@ def main() -> None:
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
-        'native_function_declarations': list(concatMap(compute_native_function_declaration, native_functions)),
+        'native_function_declarations': list(concatMap(compute_native_function_declaration, grouped_native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
