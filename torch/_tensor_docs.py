@@ -1076,11 +1076,25 @@ cumprod(dim, dtype=None) -> Tensor
 See :func:`torch.cumprod`
 """)
 
+add_docstr_all('cumprod_',
+               r"""
+cumprod_(dim, dtype=None) -> Tensor
+
+In-place version of :meth:`~Tensor.cumprod`
+""")
+
 add_docstr_all('cumsum',
                r"""
 cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
+""")
+
+add_docstr_all('cumsum_',
+               r"""
+cumsum_(dim, dtype=None) -> Tensor
+
+In-place version of :meth:`~Tensor.cumsum`
 """)
 
 add_docstr_all('data_ptr',
@@ -1589,6 +1603,18 @@ add_docstr_all('igamma_',
 igamma_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.igamma`
+""")
+
+add_docstr_all('igammac',
+               r"""
+igammac(other) -> Tensor
+See :func:`torch.igammac`
+""")
+
+add_docstr_all('igammac_',
+               r"""
+igammac_(other) -> Tensor
+In-place version of :meth:`~Tensor.igammac`
 """)
 
 add_docstr_all('indices',

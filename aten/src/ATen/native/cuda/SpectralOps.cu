@@ -130,6 +130,59 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
 
 REGISTER_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cuda_);
 
+// Execute a pre-planned tranform
+static void exec_cufft_plan(
+    const CuFFTConfig &config, void* in_data, void* out_data, bool forward) {
+  auto& plan = config.plan();
+#ifdef __HIP_PLATFORM_HCC__
+  auto value_type = config.data_type();
+  if (value_type == kFloat) {
+    switch (config.transform_type()) {
+      case CuFFTTransformType::C2C: {
+        CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(in_data),
+                                  static_cast<hipfftComplex*>(out_data),
+                                  forward ? HIPFFT_FORWARD : HIPFFT_BACKWARD));
+        return;
+      }
+      case CuFFTTransformType::R2C: {
+        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
+                                  static_cast<hipfftReal*>(out_data)));
+        return;
+      }
+      case CuFFTTransformType::C2R: {
+        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
+                                  static_cast<hipfftComplex*>(out_data)));
+        return;
+      }
+    }
+  } else if (value_type == kDouble) {
+    switch (config.transform_type()) {
+      case CuFFTTransformType::C2C: {
+        CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(in_data),
+                                  static_cast<hipfftDoubleComplex*>(out_data),
+                                  forward ? HIPFFT_FORWARD : HIPFFT_BACKWARD));
+        return;
+      }
+      case CuFFTTransformType::R2C: {
+        CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(in_data),
+                                  static_cast<hipfftDoubleComplex*>(out_data)));
+        return;
+      }
+      case CuFFTTransformType::C2R: {
+        CUFFT_CHECK(hipfftExecZ2D(plan, static_cast<hipfftDoubleComplex*>(in_data),
+                                  static_cast<hipfftDoubleReal*>(out_data)));
+        return;
+      }
+    }
+  }
+  TORCH_CHECK(false, "hipFFT doesn't support transforms on type: ", value_type);
+#else
+  CUFFT_CHECK(cufftXtExec(plan, in_data, out_data,
+                          forward ? CUFFT_FORWARD : CUFFT_INVERSE));
+#endif
+}
+
+
 // NOTE [ cuFFT Embedded Strides ]
 //
 // cuFFT supports a subset of arbitrary strides via their "advanced data layout"
@@ -193,45 +246,7 @@ static inline Tensor _run_cufft(
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
-#ifdef __HIP_PLATFORM_HCC__
-  if (input.scalar_type() == ScalarType::Float) {
-      if (complex_input && complex_output) {
-        CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(input.data_ptr()),
-          static_cast<hipfftComplex*>(output.data_ptr()),
-          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
-      } else if (complex_input && !complex_output) {
-        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(input.data_ptr()),
-          static_cast<hipfftReal*>(output.data_ptr())));
-      } else if (!complex_input && complex_output) {
-        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(input.data_ptr()),
-          static_cast<hipfftComplex*>(output.data_ptr())));
-      } else {
-        AT_ERROR("hipFFT doesn't support r2r (float)");
-      }
-    } else if (input.scalar_type() == ScalarType::Double) {
-      if (complex_input && complex_output) {
-        CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
-          static_cast<hipfftDoubleComplex*>(output.data_ptr()),
-          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
-      } else if (complex_input && !complex_output) {
-        CUFFT_CHECK(hipfftExecZ2D(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
-          static_cast<hipfftDoubleReal*>(output.data_ptr())));
-      } else if (!complex_input && complex_output) {
-        CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(input.data_ptr()),
-          static_cast<hipfftDoubleComplex*>(output.data_ptr())));
-      } else {
-        AT_ERROR("hipFFT doesn't support r2r (double)");
-      }
-    } else {
-      std::ostringstream ss;
-      ss << "hipFFT doesn't support tensor of type: "
-         << toString(input.scalar_type());
-      AT_ERROR(ss.str());
-    }
-#else
-  CUFFT_CHECK(cufftXtExec(plan, input.data_ptr(), output.data_ptr(),
-    inverse ? CUFFT_INVERSE : CUFFT_FORWARD));
-#endif
+  exec_cufft_plan(config, input.data_ptr(), output.data_ptr(), !inverse);
 
   // rescale if requested
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
@@ -330,7 +345,12 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(self.device().index());
 
   Tensor input = self;
-  bool input_was_cloned = false;
+  const auto fft_type = GetCuFFTTransformType(complex_input, complex_output);
+
+  if (complex_input) {
+    TORCH_CHECK(input.size(-1) == 2, "Expected a complex (size 2) last dimension");
+  }
+
 
   // Slice when twosided complex-to-real. This is not always needed because we
   // calculate the inembed. But it will benefit us in certain cases where we
@@ -338,7 +358,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   //
   // See NOTE [ cuFFT Embedded Strides ].
   // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
-  if (complex_input && !complex_output && !onesided) {
+  if (fft_type == CuFFTTransformType::C2R && !onesided) {
     auto onesided_size = infer_ft_real_to_complex_onesided_size(checked_signal_sizes[signal_ndim - 1]);
     input = input.narrow(signal_ndim, 0, onesided_size);
   }
@@ -348,10 +368,27 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // (see kRoundSmall and kRoundLarge in THCCachingAllocator.cpp), but we do
   // need to check input tensor to make sure that it is not unaligned, e.g.,
   // from a slicing.
+  bool must_clone = false;
   auto complex_size_bytes = 2 * input.element_size();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {
-    input = input.clone(at::MemoryFormat::Contiguous);
-    input_was_cloned = true;
+    must_clone = true;
+  }
+
+  if (complex_input) {
+    auto strides = input.strides();
+    // Real/imag dimension must be like complex type.
+    must_clone |= strides.back() != 1;
+    // Strides of other dimensions needs to be aligned when viewed as complex
+    // type, i.e., multiples of 2.
+    must_clone |= std::any_of(strides.begin(), strides.end() - 1,
+                              [&](int64_t stride) { return stride % 2 != 0; });
+
+    // Complex to real FFTs may overwrite the input buffer (gh-34551)
+    must_clone |= !complex_output;
+  }
+
+  if (must_clone) {
+    input = input.clone(MemoryFormat::Contiguous);
   }
 
   // Now that we have done error check and data_ptr checks, we delegate all
@@ -364,30 +401,46 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // e.g., irfft, is difficult as we have a long call sequence looking like
   //   irfft --> _fft --> _fft_with_size --dispatching-to-> _fft_cufft
 
+  DimVector in_strides(signal_ndim + 1);
+  auto input_strides = input.strides();
+  for (int64_t i = signal_ndim; i >= 0; --i) {
+    in_strides[i] = complex_input ? input_strides[i] / 2 : input_strides[i];
+  }
+
+  DimVector out_strides(signal_ndim + 1);
+  out_strides[signal_ndim] = 1;
+  if (fft_type == CuFFTTransformType::R2C && onesided) {
+    out_strides[signal_ndim - 1] = checked_signal_sizes[signal_ndim - 1] / 2 + 1;
+  } else {
+    out_strides[signal_ndim - 1] = checked_signal_sizes[signal_ndim - 1];
+  }
+  for (int64_t i = signal_ndim - 2; i >= 0; --i) {
+    out_strides[i] = out_strides[i + 1] * checked_signal_sizes[i];
+  }
+
+  DimVector full_sizes(signal_ndim + 1);
+  full_sizes[0] = self.size(0);
+  std::copy(checked_signal_sizes.begin(), checked_signal_sizes.end(), full_sizes.begin() + 1);
+  CuFFTParams Params(in_strides, out_strides, full_sizes, fft_type,
+                     c10::toValueType(input.scalar_type()));
+
   // This read is not locked for perf reason. Shouldn't matter too much because
   // we check again after acquiring the lock.
   if (plan_cache.max_size() > 0) {
-    CuFFTParams params;
-    setCuFFTParams(&params, input, signal_ndim, complex_input,
-      complex_output, checked_signal_sizes, onesided);
     std::lock_guard<std::mutex> guard(plan_cache.mutex);
     if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
-      const CuFFTConfig &config = plan_cache.try_emplace_value(std::move(params),
-                                             input, signal_ndim, complex_input,
-                                             complex_output, checked_signal_sizes,
-                                             onesided, output_sizes);
+      const CuFFTConfig &config = plan_cache.lookup(Params);
       return _run_cufft(config, input, signal_ndim, complex_input,
                         complex_output, inverse, checked_signal_sizes,
                         static_cast<fft_norm_mode>(normalization),
-                        onesided, output_sizes, input_was_cloned);
+                        onesided, output_sizes, must_clone);
     }
   }
-  CuFFTConfig config(input, signal_ndim, complex_input, complex_output,
-                     checked_signal_sizes, onesided, output_sizes);
+  CuFFTConfig config(Params);
   return _run_cufft(config, input, signal_ndim, complex_input,
                     complex_output, inverse, checked_signal_sizes,
                     static_cast<fft_norm_mode>(normalization),
-                    onesided, output_sizes, input_was_cloned);
+                    onesided, output_sizes, must_clone);
 }
 
 }} // at::native
