@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -17,7 +19,7 @@ namespace jit {
 using namespace torch::indexing;
 using namespace torch::jit::tensorexpr;
 
-void testKernel_1() {
+TEST(Kernel, _1) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -56,7 +58,7 @@ void testKernel_1() {
   }
 }
 
-void testKernel_2() {
+TEST(Kernel, _2) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -96,7 +98,7 @@ void testKernel_2() {
   }
 }
 
-void testKernel_3() {
+TEST(Kernel, _3) {
   KernelScope kernel_scope;
 
   const auto graph_string = R"IR(
@@ -136,7 +138,7 @@ void testKernel_3() {
   }
 }
 
-void testKernel_4() {
+TEST(Kernel, _4) {
   // Test TensorExpr shape inference capabilities: it should only require shapes
   // for the inputs
   {
@@ -384,7 +386,7 @@ void testKernel_4() {
   }
 }
 
-void testKernelCatInputTypesPromotion() {
+TEST(Kernel, CatInputTypesPromotion) {
   {
     // Test that we properly promote input types for aten::cat
     KernelScope kernel_scope;
@@ -464,7 +466,7 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 
 } // namespace
 
-void testKernelSumAllAxes() {
+TEST(Kernel, SumAllAxes) {
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -511,7 +513,7 @@ void testKernelSumAllAxes() {
   }
 }
 
-void testKernelSumOneAxis() {
+TEST(Kernel, SumOneAxis) {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -568,7 +570,7 @@ void testKernelSumOneAxis() {
   }
 }
 
-void testKernelSumMultipleAxes() {
+TEST(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
@@ -630,7 +632,7 @@ void testKernelSumMultipleAxes() {
 // This test and the following ones testing Softmax only tests with dim set
 // to one of the valid input dimensions. It does not test with dim=None
 // because that is supposed to be deprecated.
-void testKernelSoftmax2D() {
+TEST(Kernel, Softmax2D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
@@ -692,7 +694,7 @@ void testKernelSoftmax2D() {
   }
 }
 
-void testKernelSoftmax3D() {
+TEST(Kernel, Softmax3D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(3, 4, 5, strides=[20, 5, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
@@ -765,7 +767,7 @@ void testKernelSoftmax3D() {
   }
 }
 
-void testKernelSoftmax4D() {
+TEST(Kernel, Softmax4D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
         %1 : int = prim::Constant[value=${dim}]()
@@ -842,7 +844,7 @@ void testKernelSoftmax4D() {
   }
 }
 
-void testKernelInlineProducerIntoReduction() {
+TEST(Kernel, InlineProducerIntoReduction) {
   KernelScope kernel_scope;
 
   // Inline producer (mul) into reduction (sum).
@@ -881,7 +883,7 @@ void testKernelInlineProducerIntoReduction() {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-void testKernelInlineReductionIntoConsumer() {
+TEST(Kernel, InlineReductionIntoConsumer) {
   KernelScope kernel_scope;
 
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT
