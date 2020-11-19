@@ -68,6 +68,27 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensor
 FOREACH_BINARY_OP_SCALAR(add, std::plus);
 FOREACH_BINARY_OP_SCALAR(sub, std::minus);
 FOREACH_BINARY_OP_SCALAR(mul, std::multiplies);
-FOREACH_BINARY_OP_SCALAR(div, std::divides);
+
+void foreach_tensor_div_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
+    check_foreach_api_restrictions(tensors);
+    // In the case of division, integer inputs will result in float. 
+    // Currently multi tensor apply can only return result of the same type as input.
+    if (!can_use_fast_route(tensors, scalar, true)) {
+        return at::native::foreach_tensor_div_scalar_kernel_slow_(tensors, scalar);
+    }
+
+    foreach_binary_op_<std::divides>(tensors, scalar);
+}
+
+std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
+    check_foreach_api_restrictions(tensors);
+    // In the case of division, integer inputs will result in float. 
+    // Currently multi tensor apply can only return result of the same type as input.
+    if (!can_use_fast_route(tensors, scalar, true)) {
+        return at::native::foreach_tensor_div_scalar_kernel_slow(tensors, scalar);
+    }
+
+    return foreach_binary_op<std::divides>(tensors, scalar);
+}
 
 }} // namespace at::native
