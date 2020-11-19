@@ -6219,18 +6219,23 @@ class TestTorchDeviceType(TestCase):
 
         base = make_tensor((30,), device, base_dtype, low=1, high=100)
         # Complex and real results do not agree between PyTorch and NumPy when computing negative and zero power of 0
-        # Related: https://github.com/pytorch/pytorch/issues/45690
+        # Related: https://github.com/pytorch/pytorch/issues/48000
         # base[0] = base[3] = base[7] = 0
         exp = make_tensor((30,), device, exp_dtype, low=-2, high=2)
         exp[0] = exp[4] = exp[6] = 0
 
         expected = torch.from_numpy(np.float_power(to_np(base), to_np(exp)))
 
+        exponents = [-2.8, -2, -1, -0.5, 0.5, 1, 2]
+        complex_exponents = exponents + [-2.5j, -1.0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
+
         for op in (torch.float_power, torch.Tensor.float_power, torch.Tensor.float_power_):
 
+            # Exception case test in test_float_power_exceptions
             if op is torch.Tensor.float_power_ and base_dtype != out_dtype:
                 continue
 
+            # Case of Tensor x Tensor
             result = op(base.clone(), exp)
             self.assertEqual(expected, result)
 
@@ -6239,12 +6244,12 @@ class TestTorchDeviceType(TestCase):
                 op(base, exp, out=out)
                 self.assertEqual(expected, out)
 
-            for i in [-2.8, -2, -1, -0.5, 0.5, 1, 2, -2.5j, -1.0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]:
+            # Case of Tensor x Scalar
+            for i in complex_exponents if exp_dtype.is_complex else exponents:
                 out_dtype_scalar_exp = torch.complex128 if base_dtype.is_complex or type(i) == complex else torch.float64
-                out_dtype_scalar_base = torch.complex128 if exp_dtype.is_complex or type(i) == complex else torch.float64
                 expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
-                expected_scalar_base = torch.from_numpy(np.float_power(i, to_np(exp)))
 
+                # Exception case test in test_float_power_exceptions
                 if op is torch.Tensor.float_power_ and base_dtype != out_dtype_scalar_exp:
                     continue
 
@@ -6252,16 +6257,21 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(expected_scalar_exp, result)
 
                 if op is torch.float_power:
-                    result = op(i, exp)
-                    self.assertEqual(expected_scalar_base, result)
-
                     out = torch.empty_like(base).to(device=device, dtype=out_dtype_scalar_exp)
                     op(base, i, out=out)
                     self.assertEqual(expected_scalar_exp, out)
 
-                    out = torch.empty_like(exp).to(device=device, dtype=out_dtype_scalar_base)
-                    op(i, exp, out=out)
-                    self.assertEqual(expected_scalar_base, out)
+        # Case of Scalar x Tensor
+        for i in complex_exponents if base_dtype.is_complex else exponents:
+            out_dtype_scalar_base = torch.complex128 if exp_dtype.is_complex or type(i) == complex else torch.float64
+            expected_scalar_base = torch.from_numpy(np.float_power(i, to_np(exp)))
+
+            result = torch.float_power(i, exp)
+            self.assertEqual(expected_scalar_base, result)
+
+            out = torch.empty_like(exp).to(device=device, dtype=out_dtype_scalar_base)
+            torch.float_power(i, exp, out=out)
+            self.assertEqual(expected_scalar_base, out)
 
     def test_float_power_exceptions(self, device):
         def _promo_helper(x, y):
