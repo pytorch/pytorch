@@ -58,8 +58,8 @@ goto cuda_build_common
 
 :cuda_build_11
 
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0
-set CUDA_PATH_V11_0=%CUDA_PATH%
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.1
+set CUDA_PATH_V11_1=%CUDA_PATH%
 
 goto cuda_build_common
 
@@ -89,8 +89,7 @@ sccache --zero-stats
 set CC=sccache-cl
 set CXX=sccache-cl
 
-set USE_NINJA=OFF
-set CMAKE_GENERATOR=Visual Stuido 16 2019
+set CMAKE_GENERATOR=Ninja
 
 if "%USE_CUDA%"=="1" (
   copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
