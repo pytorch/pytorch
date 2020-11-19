@@ -9907,6 +9907,12 @@ tile(input, reps) -> Tensor
 Constructs a tensor by repeating the elements of an :attr:`input`'s dimension 
 the number of times given by the value of :attr:`reps`'s dimension.
 
+If :attr:`input` or :attr:`reps` has got more dimensions than the other, it gets 
+promoted by preprending 1's to its size in order to match the size of both inputs. 
+Thus for :attr:`input` of size (8, 6, 4, 2),  a :attr:`reps` of size (2, 2) is 
+treated as (1, 1, 2, 2). For :attr:`reps` of size (5, 5, 9, 9), an :attr:`input` 
+of size (4, 3) is treated as (1, 1, 4, 3).
+
 .. note::
 
     This function is similar to NumPy's tile function.

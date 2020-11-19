@@ -6063,7 +6063,7 @@ class TestTorchDeviceType(TestCase):
             for t in (tensor, tensor.T):
                 for dims in reps:
                     expected = np.tile(t.cpu().numpy(), dims)
-                    result = torch.tile(t, dims).cpu().numpy()
+                    result = torch.tile(t, dims).numpy()
                     self.assertEqual(expected, result)
 
     @onlyOnCPUAndCUDA
