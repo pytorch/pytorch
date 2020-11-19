@@ -782,31 +782,21 @@ if(USE_CUDA)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
   )
 
-  # NVFUSER runtime files build location
-  # (on Windows, shared libs are under 'bin', on ELF platforms under 'lib')
-  if(WIN32)
-    set(nvfuser_rt_dir "${CMAKE_BINARY_DIR}/bin/nvfuser_runtime")
-  else()
-    set(nvfuser_rt_dir "${CMAKE_BINARY_DIR}/lib/nvfuser_runtime")
-  endif()  
-
-  # Copy NVFUSER runtime sources
+  # "stringify" NVFUSER runtime sources
+  # (generate C++ header files embedding the original input as a string literal)
+  set(NVFUSER_STRINGIFY_TOOL "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tools/stringify_file.py")
   foreach(src ${NVFUSER_RUNTIME_FILES})
-    get_filename_component(filename ${src} NAME)
-    set(dst "${nvfuser_rt_dir}/${filename}")
+    get_filename_component(filename ${src} NAME_WE)
+    set(dst "${CMAKE_BINARY_DIR}/include/nvfuser_runtime/${filename}.h")
     add_custom_command(
-      COMMENT "Copying NVFUSER runtime files"
+      COMMENT "Stringify NVFUSER runtime source file"
       OUTPUT ${dst}
       DEPENDS ${src}
-      COMMAND ${CMAKE_COMMAND} -E copy ${src} ${dst}
+      COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
     )
     add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
     add_dependencies(torch_cuda nvfuser_rt_${filename})
   endforeach()
-
-  # Install NVFUSER runtime sources
-  install(DIRECTORY "${nvfuser_rt_dir}"
-    DESTINATION ${TORCH_INSTALL_LIB_DIR})
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
