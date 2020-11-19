@@ -16,7 +16,7 @@ namespace c10d {
 class Backend {
  public:
   // Maps to Backend.__new__ in Python.
-  static std::string get(std::string);
+  static std::string get(const std::string&);
 
   // TODO: How to support registering third_party backend?
   static void registerBackend();

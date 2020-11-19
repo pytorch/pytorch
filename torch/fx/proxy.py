@@ -154,7 +154,7 @@ class Proxy:
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
-                                            name=self.tracer.graph._name(orig_method.__name__))
+                                            name=self.tracer.graph._target_to_str(orig_method.__name__))
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
