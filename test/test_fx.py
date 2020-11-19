@@ -357,7 +357,7 @@ class TestFX(JitTestCase):
                 if n.op == 'placeholder':
                     # Placeholders specify function argument names. Save these
                     # for later when we generate the wrapper GraphModule
-                    fn_input_names.append(target)
+                    fn_input_names.append(out_name)
                 elif n.op == 'call_function':
                     assert target in target_to_name, "Unsupported call target " + target
                     arg_names = []
@@ -986,9 +986,8 @@ class TestFX(JitTestCase):
 
         users_of_x = x.node.users
         self.assertEqual(len(users_of_x), 3)
-        expected_ops = set(['relu', 'add', 'neg'])
-        for use in users_of_x:
-            assert any(use.name.startswith(prefix) for prefix in expected_ops)
+        expected_users = set([n.node for n in [u, y, z]])
+        self.assertEqual(set(users_of_x.keys()), expected_users)
 
     def test_inline_graph(self):
         class InlineInto(torch.nn.Module):
@@ -1029,9 +1028,9 @@ class TestFX(JitTestCase):
         graph.output((relu.node, z.node))
         graph.lint()
 
-        expected_ops = ['x', 'neg', 'tanh', 'relu']
-        for node, expected in zip(graph.nodes, expected_ops):
-            assert expected in node.name
+        expected_targets = ['x', torch.neg, torch.tanh, torch.relu]
+        for node, expected in zip(graph.nodes, expected_targets):
+            self.assertEqual(node.target, expected)
 
     def test_reassign_args_kwargs_uses(self):
         graph = torch.fx.Graph()
