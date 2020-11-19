@@ -310,6 +310,24 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         case IRNodeType::kXor:
           result_v[i] = lhs_v[i] ^ rhs_v[i];
           break;
+        default:
+          // TODO: change to a proper error report
+          throw std::runtime_error("invalid operator type");
+      }
+    }
+    return Value(result_v);
+  }
+
+  template <typename T>
+  Value shift_binary_op(
+      const Value& lhs,
+      const Value& rhs,
+      IRNodeType op_type) {
+    std::vector<T> lhs_v = lhs.as_vec<T>();
+    std::vector<T> rhs_v = rhs.as_vec<T>();
+    std::vector<T> result_v(lhs_v.size());
+    for (size_t i = 0; i < lhs_v.size(); i++) {
+      switch (op_type) {
         case IRNodeType::kLshift:
           result_v[i] = lhs_v[i] << rhs_v[i];
           break;
@@ -376,8 +394,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
-        expr_type == IRNodeType::kXor || expr_type == IRNodeType::kLshift ||
-        expr_type == IRNodeType::kRshift) {
+        expr_type == IRNodeType::kXor) {
       switch (lhs_v.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                                  \
   case ScalarType::Name:                                       \
@@ -385,6 +402,20 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     break;
         AT_FORALL_INT_TYPES(TYPE_CASE);
 #undef TYPE_CASE
+        case ScalarType::Bool:
+          value_ = bitwise_binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
+          break;
+        default:
+          throw unsupported_dtype();
+      }
+      return;
+    }
+
+    if (expr_type == IRNodeType::kLshift || expr_type == IRNodeType::kRshift) {
+      switch (lhs_v.dtype().scalar_type()) {
+        case ScalarType::Int:
+          value_ = shift_binary_op<int>(lhs_v, rhs_v, expr_type);
+          break;
         default:
           throw unsupported_dtype();
       }
