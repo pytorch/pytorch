@@ -1801,18 +1801,18 @@ std::vector<int64_t> TensorExprKernel::getReductionAxes(
 }
 
 template <typename T>
-std::vector<size_t> reverse_sort_indices(const std::vector<T> &v) {
-
+std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   // initialize original index locations
   std::vector<size_t> idx(v.size());
   iota(idx.begin(), idx.end(), 0);
 
-  std::sort(idx.begin(), idx.end(),
-       [&v](size_t i1, size_t i2) {return v[i1] > v[i2];});
+  std::sort(idx.begin(), idx.end(), [&v](size_t i1, size_t i2) {
+    return v[i1] > v[i2];
+  });
   return idx;
 }
 
-Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value *v) {
+Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
   TORCH_INTERNAL_ASSERT(tensors_.count(v->unique()));
   Tensor* tensor = tensors_[v->unique()];
@@ -1848,22 +1848,26 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value *v) {
   //     cur_idx = absolute // stride
   //     absolute = absolute % stride
 
-  return Compute("output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
-      std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
-      auto absolute_position = IntImm::make(0);
-      for (size_t i = 0; i < axes.size(); ++i) {
-        absolute_position = absolute_position + (IntImm::make(default_strides[i]) * axes[i]);
-      }
-      std::vector<size_t> sorted_stride_indices = reverse_sort_indices(strides);
-      std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
-      for (size_t stride_index: sorted_stride_indices) {
-        auto stride = strides[stride_index];
-        auto index = Div::make(absolute_position, IntImm::make(stride));
-        absolute_position = Mod::make(absolute_position, IntImm::make(stride));
-        new_axes[stride_index] = index;
-      }
-      return tensor->call(new_axes);
-  });
+  return Compute(
+      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+        std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
+        auto absolute_position = IntImm::make(0);
+        for (size_t i = 0; i < axes.size(); ++i) {
+          absolute_position =
+              absolute_position + (IntImm::make(default_strides[i]) * axes[i]);
+        }
+        std::vector<size_t> sorted_stride_indices =
+            reverse_sort_indices(strides);
+        std::vector<ExprHandle> new_axes(sorted_stride_indices.size());
+        for (size_t stride_index : sorted_stride_indices) {
+          auto stride = strides[stride_index];
+          auto index = Div::make(absolute_position, IntImm::make(stride));
+          absolute_position =
+              Mod::make(absolute_position, IntImm::make(stride));
+          new_axes[stride_index] = index;
+        }
+        return tensor->call(new_axes);
+      });
 }
 
 void TensorExprKernel::compile() {
@@ -1903,7 +1907,7 @@ void TensorExprKernel::compile() {
     // The "strided" tensor will be incorrect if used in NNC,
     // since NNC views it as contiguous. Only convert it to the right
     // strides at the end of the kernel (if already contiguous it's a no-op)
-    Tensor * properly_strided_output = convertOutputToCorrectStrides(output);
+    Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
     tensors_[output->unique()] = properly_strided_output;
     const auto& tt = output->type()->expect<TensorType>();
     tensorOutputSizes_.push_back(*tt->sizes().concrete_sizes());

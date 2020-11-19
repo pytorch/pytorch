@@ -137,7 +137,7 @@ class TORCH_API TensorExprKernel {
 
   void bindInput(const torch::jit::Value* input);
 
-  Tensor* convertOutputToCorrectStrides(torch::jit::Value * v);
+  Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
 
   // Captures the information for reduction operation nodes.
   struct ReductionInfo {
