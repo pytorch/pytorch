@@ -107,6 +107,7 @@ std::vector<IValue> getParamAttributes(
         auto slot = *type->findAttributeSlot(name);
 
         if (type->is_parameter(slot) || type->is_buffer(slot) ||
+            (attr.isObject() && !attr.toObjectRef().type()->is_module()) ||
             name == "training") {
           if (attr.isTensor()) {
             TORCH_INTERNAL_ASSERT(attr.isTensor());
@@ -118,6 +119,12 @@ std::vector<IValue> getParamAttributes(
             }
             attrValues.emplace_back(attr.toTensor());
             paramConst = addParamAsArgument(function_, fullName, attr);
+          } else if (
+              attr.isObject() && !attr.toObjectRef().type()->is_module()) {
+            attrValues.emplace_back(
+                script::Object(attr.toObject()).run_method("__getstate__"));
+            paramConst = addParamAsArgument(function_, fullName, attr);
+
           } else if (attr.isNone() || name == "training") {
             auto attrVal = tryInsertConstant(*graph, attr);
             paramConst = *attrVal;
