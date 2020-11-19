@@ -86,7 +86,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
     case at::kChar:
       return ncclDataType_t::ncclChar;
     case at::kByte:
-      return ncclDataType_t::ncclChar;
+      return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
 #if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
