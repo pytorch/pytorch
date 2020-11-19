@@ -1020,12 +1020,9 @@ class _LazyConvXdMixin(LazyModuleMixin):
 
 
 class LazyConv1d(_LazyConvXdMixin, Conv1d):
-    r"""A :class:`torch.nn.Conv1d` module with lazy initialization.
-    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the
-    module will become a regular :class:`torch.nn.Conv1d` module.
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
+    r"""A :class:`torch.nn.Conv1d` module with lazy initialization of
+    the ``in_channels`` argument of the :class:`Conv1d` that is inferred from
+    the ``input.size(1)``.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1042,17 +1039,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
 
-    Attributes:
-        weight (Tensor): the learnable weights of the module of shape
-            :math:`(\text{out\_channels},
-            \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
-            The values of these weights are sampled from
-            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
-        bias (Tensor):   the learnable bias of the module of shape
-            (out_channels). If :attr:`bias` is ``True``, then the values of these weights are
-            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
+    .. seealso:: :class:`torch.nn.Conv1d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
     cls_to_become = Conv1d
@@ -1083,12 +1070,9 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):
 
 
 class LazyConv2d(_LazyConvXdMixin, Conv2d):
-    r"""A :class:`torch.nn.Conv2d` module with lazy initialization.
-    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the
-    module will become a regular :class:`torch.nn.Conv2d` module.
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
+    r"""A :class:`torch.nn.Conv2d` module with lazy initialization of
+    the ``in_channels`` argument of the :class:`Conv2d` that is inferred from
+    the ``input.size(1)``.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1105,18 +1089,8 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
 
-    Attributes:
-        weight (Tensor): the learnable weights of the module of shape
-            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
-            :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
-            The values of these weights are sampled from
-            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape
-            (out_channels). If :attr:`bias` is ``True``,
-            then the values of these weights are
-            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]    """
+    .. seealso:: :class:`torch.nn.Conv2d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
+    """
 
     cls_to_become = Conv2d
 
@@ -1146,12 +1120,9 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):
 
 
 class LazyConv3d(_LazyConvXdMixin, Conv3d):
-    r"""A :class:`torch.nn.Conv3d` module with lazy initialization.
-    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the
-    module will become a regular :class:`torch.nn.Conv3d` module.
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
+    r"""A :class:`torch.nn.Conv3d` module with lazy initialization of
+    the ``in_channels`` argument of the :class:`Conv3d` that is inferred from
+    the ``input.size(1)``.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1168,17 +1139,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):
         bias (bool, optional): If ``True``, adds a learnable bias to the
             output. Default: ``True``
 
-    Attributes:
-        weight (Tensor): the learnable weights of the module of shape
-            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
-            :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
-            The values of these weights are sampled from
-            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
-            then the values of these weights are
-            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+    .. seealso:: :class:`torch.nn.Conv3d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
     cls_to_become = Conv3d
@@ -1209,12 +1170,9 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):
 
 
 class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):
-    r"""A :class:`torch.nn.Conv1d` module with lazy initialization.
-    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the
-    module will become a regular :class:`torch.nn.Conv1d` module.
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
+    r"""A :class:`torch.nn.ConvTranspose1d` module with lazy initialization of
+    the ``in_channels`` argument of the :class:`ConvTranspose1d` that is inferred from
+    the ``input.size(1)``.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1228,17 +1186,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
-    Attributes:
-        weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
-                         :math:`\text{kernel\_size})`.
-                         The values of these weights are sampled from
-                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels).
-                         If :attr:`bias` is ``True``, then the values of these weights are
-                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
+    .. seealso:: :class:`torch.nn.ConvTranspose1d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
     cls_to_become = ConvTranspose1d
@@ -1271,12 +1219,9 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):
 
 
 class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):
-    r"""A :class:`torch.nn.Conv2d` module with lazy initialization.
-    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the
-    module will become a regular :class:`torch.nn.Conv2d` module.
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
+    r"""A :class:`torch.nn.ConvTranspose2d` module with lazy initialization of
+    the ``in_channels`` argument of the :class:`ConvTranspose2d` that is inferred from
+    the ``input.size(1)``.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1290,17 +1235,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
-    Attributes:
-        weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
-                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
-                         The values of these weights are sampled from
-                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels)
-                         If :attr:`bias` is ``True``, then the values of these weights are
-                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+    .. seealso:: :class:`torch.nn.ConvTranspose2d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
     cls_to_become = ConvTranspose2d
@@ -1333,12 +1268,9 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):
 
 
 class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):
-    r"""A :class:`torch.nn.Conv3d` module with lazy initialization.
-    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
-    class. They will be initialized  after the first call to ``forward`` is done and the
-    module will become a regular :class:`torch.nn.Conv3d` module.
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
+    r"""A :class:`torch.nn.ConvTranspose3d` module with lazy initialization of
+    the ``in_channels`` argument of the :class:`ConvTranspose3d` that is inferred from
+    the ``input.size(1)``.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1352,17 +1284,7 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
-    Attributes:
-        weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
-                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
-                         The values of these weights are sampled from
-                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
-        bias (Tensor):   the learnable bias of the module of shape (out_channels)
-                         If :attr:`bias` is ``True``, then the values of these weights are
-                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+    .. seealso:: :class:`torch.nn.ConvTranspose3d` and :class:`torch.nn.modules.lazy.LazyModuleMixin`
     """
 
     cls_to_become = ConvTranspose3d
