@@ -1195,6 +1195,18 @@ if(USE_CUDA)
 
 endif()
 
+# ---[ Metal(OSX) modification
+if(APPLE AND USE_PYTORCH_METAL)
+  if(NOT INTERN_BUILD_MOBILE)
+    include(../cmake/Metal.cmake)
+    # We need to link the system frameworks explicitly
+    find_library(metal NAMES Metal)
+    find_library(mps NAMES MetalPerformanceShaders)
+    find_library(foundation NAMES Foundation)
+    find_library(accelerate NAMES Accelerate)
+    target_link_libraries(torch_cpu PUBLIC ${metal} ${mps} ${foundation} ${accelerate})
+  endif()
+endif()
 
 # Note [Global dependencies]
 # Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,

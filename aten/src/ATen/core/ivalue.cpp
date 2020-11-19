@@ -508,6 +508,9 @@ std::ostream& IValue::repr(
       return out << enum_holder->qualifiedClassName() << "." <<
           enum_holder->name();
     }
+    case IValue::Tag::Object: {
+      TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind(), ". Perhaps you've frozen a module with custom classes?");
+    }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }

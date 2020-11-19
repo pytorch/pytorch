@@ -3536,6 +3536,31 @@ symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
 See :func:`torch.symeig`
 """)
 
+add_docstr_all('swapdims', r"""
+swapdims(dim0, dim1) -> Tensor
+
+See :func:`torch.swapdims`
+""")
+
+add_docstr_all('swapdims_',
+               r"""
+swapdims_(dim0, dim1) -> Tensor
+
+In-place version of :meth:`~Tensor.swapdims`
+""")
+
+add_docstr_all('swapaxes', r"""
+swapaxes(axis0, axis1) -> Tensor
+
+See :func:`torch.swapaxes`
+""")
+
+add_docstr_all('swapaxes_', r"""
+swapaxes_(axis0, axis1) -> Tensor
+
+In-place version of :meth:`~Tensor.swapaxes`
+""")
+
 add_docstr_all('t',
                r"""
 t() -> Tensor

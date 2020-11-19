@@ -697,7 +697,6 @@ _(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
-_(aten, transpose) \
 _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
