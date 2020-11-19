@@ -96,7 +96,7 @@ The matrix rank is computed as the number of singular values (or the absolute ei
 above the specified :attr:`tol` threshold.
 
 If :attr:`tol` is not specified, :attr:`tol` is set to
-``S.max(dim=-1) * max(input.shape[0:-2]) * eps`` where ``S`` is the singular values
+``S.max(dim=-1) * max(input.shape[-2:]) * eps`` where ``S`` is the singular values
 (or the absolute eigenvalues when :attr:`hermitian` is ``True``),
 and ``eps`` is the epsilon value for the datatype of :attr:`input`.
 
