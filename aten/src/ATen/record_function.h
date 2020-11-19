@@ -386,10 +386,10 @@ class TORCH_API RecordFunctionCallback {
   std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&, ObserverContext*)> end_;
   std::function<bool(const RecordFunctionCallback&)> should_run_;
-  bool needs_inputs_ = false;
-  bool needs_ids_ = false;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
+  bool needs_inputs_ = false;
+  bool needs_ids_ = false;
 };
 
 // Using macro to minimize inputs copies,
