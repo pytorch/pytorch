@@ -1260,7 +1260,7 @@ class TestLinalg(TestCase):
                 # NumPy uses 'gesv' LAPACK routine solving the equation A A_inv = I
                 # But in PyTorch 'gertf' + 'getri' is used causing element-wise differences
                 expected = np.linalg.inv(matrix.cpu().numpy())
-                self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=1e-4)
+                self.assertEqual(matrix_inverse, expected, atol=self.precision, rtol=1e-3)
 
                 # Additional correctness tests, check matrix*matrix_inverse == identity
                 identity = torch.eye(n, dtype=dtype, device=device)
@@ -1327,7 +1327,7 @@ class TestLinalg(TestCase):
 
                 # Compare against NumPy output
                 expected = np.linalg.inv(matrices.cpu().numpy())
-                self.assertEqual(matrices_inverse, expected, atol=self.precision, rtol=1e-4)
+                self.assertEqual(matrices_inverse, expected, atol=self.precision, rtol=1e-3)
 
             test_inverse_many_batches_helper(5, 256)
             test_inverse_many_batches_helper(3, 512)
