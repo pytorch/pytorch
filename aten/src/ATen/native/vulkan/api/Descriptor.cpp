@@ -16,7 +16,7 @@ VkDescriptorPool create_descriptor_pool(
     uint32_t capacity;
     c10::SmallVector<VkDescriptorPoolSize, 8u> sizes;
   } descriptor {
-    1024u,
+    4096u,
     {
       // Note: It is OK for the sum of descriptors per type, below, to exceed
       // the max total figure above, but be concenious of memory consumption.
@@ -31,11 +31,11 @@ VkDescriptorPool create_descriptor_pool(
 
         {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          768u,
+          3072u,
         },
         {
           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          768u,
+          3072u,
         },
 
         /*
@@ -44,11 +44,11 @@ VkDescriptorPool create_descriptor_pool(
 
         {
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          768u,
+          3072u,
         },
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          768u,
+          3072u,
         },
       },
     },

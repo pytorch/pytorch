@@ -118,8 +118,18 @@ struct Descriptor final {
     void purge();
 
    private:
+    struct Configuration final {
+      static constexpr uint32_t kQuantum = 64u;
+      static constexpr uint32_t kReserve = 1024u;
+    };
+
     VkDevice device_;
     Handle<VkDescriptorPool, VK_DELETER(DescriptorPool)> descriptor_pool_;
+
+    struct {
+      std::vector<VkDescriptorSet> pool;
+      size_t in_use;
+    } set_;
   } pool /* [thread_count] */;
 
   explicit Descriptor(const GPU& gpu)

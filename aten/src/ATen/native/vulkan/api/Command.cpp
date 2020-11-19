@@ -18,7 +18,7 @@ VkCommandPool create_command_pool(
   const VkCommandPoolCreateInfo command_pool_create_info{
     VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
     nullptr,
-    0u,
+    VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
     queue_family_index,
   };
 
@@ -36,9 +36,11 @@ VkCommandPool create_command_pool(
   return command_pool;
 }
 
-VkCommandBuffer allocate_command_buffer(
+void allocate_command_buffers(
     const VkDevice device,
-    const VkCommandPool command_pool) {
+    const VkCommandPool command_pool,
+    VkCommandBuffer* const command_buffers,
+    const uint32_t count) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device,
       "Invalid Vulkan device!");
@@ -52,32 +54,19 @@ VkCommandBuffer allocate_command_buffer(
     nullptr,
     command_pool,
     VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    1u,
+    count,
   };
 
-  VkCommandBuffer command_buffer{};
   VK_CHECK(vkAllocateCommandBuffers(
       device,
       &command_buffer_allocate_info,
-      &command_buffer));
-
-  TORCH_CHECK(
-      command_buffer,
-      "Invalid Vulkan command buffer!");
-
-  return command_buffer;
+      command_buffers));
 }
 
 } // namespace
 
-Command::Buffer::Buffer()
-  : command_buffer_(VK_NULL_HANDLE) {
-}
-
-Command::Buffer::Buffer(
-    const VkDevice device,
-    const VkCommandPool command_pool)
-  : command_buffer_(allocate_command_buffer(device, command_pool)) {
+Command::Buffer::Buffer(const VkCommandBuffer command_buffer)
+  : command_buffer_(command_buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "Invalid Vulkan command buffer!");
@@ -101,8 +90,8 @@ void Command::Buffer::Buffer::begin() {
       &command_buffer_begin_info));
 
   // Reset
-  barriers_ = {};
-  bound_ = {};
+  bound_.reset();
+  barriers_.reset();
 }
 
 void Command::Buffer::Buffer::end() {
@@ -174,10 +163,15 @@ void Command::Buffer::barrier() {
   }
 
   // Reset
-  barriers_ = {};
+  barriers_.reset();
 }
 
 void Command::Buffer::barrier(const Pipeline::Barrier& barrier) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "This command buffer is in an invalid state! "
+      "Potential reason: This command buffer is moved from.");
+
   barriers_.stage.src |= barrier.stage.src;
   barriers_.stage.dst |= barrier.stage.dst;
 
@@ -192,8 +186,7 @@ void Command::Buffer::barrier(const Pipeline::Barrier& barrier) {
       barrier.images.end());
 }
 
-void Command::Buffer::bind(
-    const Pipeline::Object& pipeline) {
+void Command::Buffer::bind(const Pipeline::Object& pipeline) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
@@ -213,8 +206,7 @@ void Command::Buffer::bind(
   }
 }
 
-void Command::Buffer::bind(
-    const Descriptor::Set& set) {
+void Command::Buffer::bind(const Descriptor::Set& set) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
@@ -257,7 +249,6 @@ void Command::Buffer::copy(
       destination,
       "Invalid Vulkan destination buffer!");
 
-  // Flush pending barriers.
   barrier();
 
   const VkBufferCopy buffer_copy{
@@ -281,7 +272,6 @@ void Command::Buffer::dispatch(
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
-  // Flush pending barriers.
   barrier();
 
   vkCmdDispatch(
@@ -328,7 +318,8 @@ Command::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     command_pool_(
         create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index),
-        VK_DELETER(CommandPool)(device_)) {
+        VK_DELETER(CommandPool)(device_)),
+    buffer_{} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
@@ -336,11 +327,14 @@ Command::Pool::Pool(const GPU& gpu)
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_pool_,
       "Invalid Vulkan command pool!");
+
+  buffer_.pool.reserve(Configuration::kReserve);
 }
 
 Command::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
-    command_pool_(std::move(pool.command_pool_)) {
+    command_pool_(std::move(pool.command_pool_)),
+    buffer_(std::move(pool.buffer_)) {
   pool.device_ = VK_NULL_HANDLE;
 }
 
@@ -348,6 +342,7 @@ Command::Pool& Command::Pool::operator=(Pool&& pool) {
   if (&pool != this) {
     device_ = std::move(pool.device_);
     command_pool_ = std::move(pool.command_pool_);
+    buffer_ = std::move(pool.buffer_);
 
     pool.device_ = VK_NULL_HANDLE;
   };
@@ -361,7 +356,19 @@ Command::Buffer Command::Pool::allocate() {
       "This command pool is in an invalid state! "
       "Potential reason: This command pool is moved from.");
 
-  return Buffer(device_, command_pool_.get());
+  if (buffer_.pool.size() == buffer_.in_use) {
+    buffer_.pool.resize(
+        buffer_.pool.size() +
+        Configuration::kQuantum);
+
+    allocate_command_buffers(
+       device_,
+       command_pool_.get(),
+       buffer_.pool.data() + buffer_.in_use,
+       Configuration::kQuantum);
+  }
+
+  return Buffer(buffer_.pool[buffer_.in_use++]);
 }
 
 void Command::Pool::purge() {
@@ -371,6 +378,7 @@ void Command::Pool::purge() {
       "Potential reason: This command pool is moved from.");
 
   VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
+  buffer_.in_use = 0u;
 }
 
 } // namespace api
