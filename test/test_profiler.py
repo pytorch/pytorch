@@ -9,6 +9,8 @@ from torch.testing._internal.common_utils import (
 from torch.autograd.profiler import profile
 from torch.autograd import kineto_available
 
+import torch.profiler
+
 try:
     import psutil
     HAS_PSUTIL = True
@@ -128,6 +130,36 @@ class TestProfiler(TestCase):
         self.assertTrue(found_gemm)
         self.assertTrue(found_memcpy)
         # p.export_chrome_trace("/tmp/test_trace.json")
+
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_kineto_api(self):
+        called_num = 0
+        def test_output_fn(p):
+            print(p.key_averages().table(
+                sort_by="self_cuda_time_total", row_limit=-1))
+            called_num += 1
+
+        with profile(use_cuda=True, use_kineto=True):
+            self.payload()
+
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA],
+            enable_pred=torch.profiler.EnablePred(
+                wait=1,
+                warmup=1,
+                active=2,
+                output_fn=test_output_fn)
+        ) as p:
+            for idx in range(8):
+                self.payload()
+                p.next_step()
+
+        self.assertEqual(called_num, 2)
+
 
 if __name__ == '__main__':
     run_tests()

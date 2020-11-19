@@ -444,6 +444,15 @@ class profile(object):
             torch.autograd._enable_profiler_legacy(self.config)
         return self
 
+    def _prepare_kineto_trace(self):
+        assert self.kineto_activities
+        self.entered = True
+        torch.autograd._prepare_profiler(self.config, self.kineto_activities)
+
+    def _start_kineto_trace(self):
+        assert self.kineto_activities
+        torch.autograd._enable_profiler(self.config, self.kineto_activities)
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
