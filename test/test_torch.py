@@ -2806,7 +2806,7 @@ class AbstractTestCases:
 
             input = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
 
-            self.assertEqual(F.dropout(input, 0.5, training=True, generator=g1),F.dropout(input, 0.5, training=True, generator=g2))
+            self.assertEqual(F.dropout(input, 0.5, training=True, generator=g1), F.dropout(input, 0.5, training=True, generator=g2))
 
         def test_invalid_generator_raises(self):
             self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
