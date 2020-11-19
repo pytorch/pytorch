@@ -120,5 +120,22 @@ TEST(SerializationTest, TypeTags) {
   }
 }
 
+TEST(SerializationTest, TestJitStream_CUDA) {
+  torch::jit::script::Module model;
+  std::vector<torch::jit::IValue> inputs;
+  // Deserialize the ScriptModule from a file using torch::jit::load().
+  // Load the model saved inside saved_models
+  model = torch::jit::load("./test/test_script_modelsr/saved_model.pt");
+
+  auto output = model.forward(inputs);
+  auto is_stream_s = output.toTuple()->elements()[0].toBool();
+  auto a = output.toTuple()->elements()[1].toTensor();
+  auto b = output.toTuple()->elements()[2].toTensor();
+  auto c = output.toTuple()->elements()[3].toTensor();
+  auto op = at::cat({a, b}, 0);
+
+  ASSERT_TRUE(is_stream_s);
+  ASSERT_EQ(op.sizes(), c.sizes());
+}
 } // namespace jit
 } // namespace torch

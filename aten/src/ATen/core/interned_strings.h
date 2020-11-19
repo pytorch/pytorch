@@ -279,6 +279,9 @@ namespace c10 {
   _(aten, zero_)                     \
   _(aten, fill_)                     \
   _(aten, masked_fill_)              \
+  _(aten, _cuda_setDevice)           \
+  _(aten, _cuda_setStream)           \
+  _(aten, current_device)            \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

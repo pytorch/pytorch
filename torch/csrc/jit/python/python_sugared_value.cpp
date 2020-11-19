@@ -221,7 +221,6 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-
   // List of all the cuda operators which are supported in JIT
   const std::vector<std::string> cuda_ops = {"current_stream",
                                              "default_stream",

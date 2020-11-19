@@ -1076,6 +1076,9 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
+    case aten::_cuda_setStream:
+    case aten::_cuda_setDevice:
+    case aten::current_device:
     case prim::Enter:
     case prim::Exit:
       return true;

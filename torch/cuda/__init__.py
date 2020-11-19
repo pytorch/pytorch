@@ -325,7 +325,7 @@ def get_device_index(device: Optional[_device] = None, optional: bool = False, a
 
     return device_index
 
-class device_jit(object):
+class set_cuda_device(object):
     r"""Context-manager that changes the selected device.
     This is similar to device (torch.device or int), but has been
     introduced for jit compatibility
@@ -343,6 +343,7 @@ class device_jit(object):
         if self.idx == -1:
             return
         self.prev_idx = torch.cuda.current_device()
+
         if self.prev_idx != self.idx:
             torch.cuda._cuda_setDevice(self.idx)
 
@@ -375,14 +376,16 @@ class StreamContext(object):
         if self.idx == -1:
             return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
-        """if self.idx != self.cur_stream.device_index():
-            with device_jit(self.cur_stream.device()):
-                self.dst_prev_stream = torch.cuda.current_stream(self.idx)"""
+        if self.idx != self.cur_stream.device_index():
+            with set_cuda_device(self.cur_stream.device()):
+                self.dst_prev_stream = torch.cuda.current_stream(self.idx)
+            torch.cuda._cuda_setDevice(self.cur_stream.device_index())
         torch.cuda._cuda_setStream(self.cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        """if self.src_prev_stream.device_index() != self.cur_stream.device_index():
-            torch.cuda._cuda_setStream(self.dst_prev_stream)"""
+        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
+            torch.cuda._cuda_setStream(self.dst_prev_stream)
+            torch.cuda._cuda_setDevice(self.idx)
         torch.cuda._cuda_setStream(self.src_prev_stream)
 
 def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.StreamContext':
