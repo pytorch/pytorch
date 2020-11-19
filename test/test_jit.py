@@ -7626,7 +7626,7 @@ dedent """
             self.checkScript(foo_continue, (i,))
             self.checkScript(foo_break, (i,))
 
-        def test_refine_outside_loop(cond):
+        def test_refine_outside_loop():
             if 1 == 1:
                 x = None
             else:

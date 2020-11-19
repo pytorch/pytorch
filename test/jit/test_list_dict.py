@@ -53,14 +53,14 @@ class TestList(JitTestCase):
 
         def reassign_arity_change():
             x = [1]
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
             return
         self.checkScript(reassign_arity_change, (), optimize=False)
 
         def reassign_from_empty_literal():
             x = []
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
             return
         with self.assertRaisesRegex(RuntimeError, r"previously has type List\[Tensor\]"):
@@ -68,20 +68,20 @@ class TestList(JitTestCase):
 
         def reassign_from_empty_builtin():
             x = torch.jit.annotate(List[int], [])
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
             y = torch.jit.annotate(List[float], [])
-            if True:
+            if 1 == 1:
                 y = [1.0, 2.0, 3.0]
             z = []
-            if True:
+            if 1 == 1:
                 z = [torch.randn([1])]
             return
         self.checkScript(reassign_from_empty_builtin, (), optimize=False)
 
         def reassign_bad_type():
             x = [1]
-            if True:
+            if 1 == 1:
                 x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
@@ -89,9 +89,9 @@ class TestList(JitTestCase):
 
         def reassign_nested():
             x = torch.jit.annotate(List[int], [])
-            if True:
+            if 1 == 1:
                 x = [1, 2, 3]
-                if True:
+                if 1 == 1:
                     x = [1.0]
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
@@ -554,7 +554,7 @@ class TestList(JitTestCase):
     def test_mutable_list_append_if(self):
         def test_append_if():
             a = [1]
-            if True:
+            if 1 == 1:
                 a.append(4)
             return a == [1, 4]
         self.checkScript(test_append_if, ())
