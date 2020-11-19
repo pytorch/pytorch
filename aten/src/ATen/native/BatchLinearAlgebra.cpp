@@ -482,7 +482,7 @@ Tensor linalg_inv(const Tensor &input) {
     return at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   auto result = cloneBatchedColumnMajor(input);
-  at::_inverse_out_helper(result);
+  at::_inverse_out_helper_(result);
   return result;
 }
 
@@ -510,7 +510,7 @@ Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
   TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
 
   result.copy_(input);
-  at::_inverse_out_helper(result);
+  at::_inverse_out_helper_(result);
   return result;
 }
 
