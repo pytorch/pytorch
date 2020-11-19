@@ -511,7 +511,6 @@ class FunctionSchema:
         else:
             return SchemaKind.functional
 
-    # WARNING: This method is not currently tested in any meaningful way
     def signature(self) -> 'FunctionSchema':
         """
         Certain schemas are 'related', in that they are simply

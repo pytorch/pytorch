@@ -42,14 +42,9 @@ from tools.codegen.api.types import *
 from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, parse_native_yaml, with_native_function, FileManager
 from tools.codegen.model import *
+from tools.codegen.utils import *
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
-
-try:
-    # use faster C loader if available
-    from yaml import CLoader as Loader
-except ImportError:
-    from yaml import Loader  # type: ignore
 
 #
 # declarations blocklist
@@ -244,14 +239,6 @@ def load_deprecated_signatures(
         rearranged_types = ', '.join(types.get(arg, 'Scalar') for arg in call_args)
         return f'{opname}({rearranged_types})'
 
-    # TODO: Use a real parser here; this will get bamboozled
-    def split_name_params(schema: str) -> Tuple[str, List[str]]:
-        m = re.match(r'(\w+)(\.\w+)?\((.*)\)', schema)
-        if m is None:
-            raise RuntimeError(f'Unsupported function schema: {schema}')
-        name, _, params = m.groups()
-        return name, params.split(', ')
-
     # group the original ATen signatures by type-only signature
     grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
     for pair in pairs:
@@ -261,7 +248,7 @@ def load_deprecated_signatures(
     results: List[PythonSignatureNativeFunctionPair] = []
 
     with open(deprecated_yaml_path, 'r') as f:
-        deprecated_defs = yaml.load(f, Loader=Loader)
+        deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
         _, params = split_name_params(deprecated['name'])
