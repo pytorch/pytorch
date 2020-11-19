@@ -98,8 +98,10 @@ class TestFXExperimental(JitTestCase):
         assert agm1.serialized_graph["nodes"][0]["dtype"] == "torch.float32"
         assert agm1.serialized_graph["nodes"][0]["target"] == "a"
         assert agm1.serialized_graph["nodes"][0]["op_code"] == "placeholder"
-        assert agm1.serialized_graph["nodes"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_2"
+        # TODO: These checks are not safe, since node names are not guaranteed
+        # from a compatibility perspective
+        # assert agm1.serialized_graph["nodes"][0]["name"] == "a"
+        # assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_2"
         assert agm1.serialized_graph["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
@@ -156,11 +158,11 @@ class TestFXExperimental(JitTestCase):
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         partition = partitioner.partitions[0]
         assert partition.used_mem_bytes == 112
-        # Select add_3 node to remove
-        selected_node = None
-        for node in partition.nodes:
-            if node.name == 'add_3':
-                selected_node = node
+        # Select last add node to remove
+        for node in list(partition.nodes)[0].graph.nodes:
+            if node.op == 'output':
+                assert len(node.args) == 1 and isinstance(node.args[0], torch.fx.Node)
+                selected_node = node.args[0]
         partition.remove_node(selected_node)
         assert(partition.used_mem_bytes == 80)
 

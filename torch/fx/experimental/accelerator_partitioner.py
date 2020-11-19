@@ -412,7 +412,7 @@ class Partitioner:
                 output_nodes = list(node.users)
             else:
                 output_nodes = [node]
-            partition_id = int(node.name.rsplit('_', 1)[-1])
+            partition_id = int(node.target.rsplit('_', 1)[-1])
             device_ids = self.partitions[partition_id].logical_device_ids
             size_bytes = self.partitions[partition_id].used_mem_bytes
             dag.create_node(node, list(input_nodes), output_nodes, device_ids, size_bytes)
