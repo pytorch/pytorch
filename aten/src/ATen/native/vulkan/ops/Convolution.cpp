@@ -622,7 +622,6 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   command_buffer.begin();
   {
     if (is_depthwise(unpacked_.filter, unpacked_.groups)) {
-      //std::cout << "====== Depthwise ======" << std::endl;
       conv2d_depthwise(
           context,
           command_buffer,
@@ -637,9 +636,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
           packed_.output_min,
           packed_.output_max);
     }
-		/*
     else if (is_pointwise(unpacked_.filter)) {
-      //std::cout << "====== Pointwise ======" << std::endl;
       conv2d_pointwise(
           context,
           command_buffer,
@@ -653,9 +650,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
           packed_.output_min,
           packed_.output_max);
     }
-		*/
     else {
-      //std::cout << "====== Conv2D ======" << std::endl;
       conv2d(
           context,
           command_buffer,
@@ -671,15 +666,6 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
           packed_.output_max);
     }
   }
-  //std::cout << "Input size : " << input_arg.sizes() << std::endl;
-  //std::cout << "Weight size: " << unpacked_.weight.sizes() << std::endl;
-  //std::cout << "Packed size: " << packed_.v_weight.sizes() << std::endl;
-  //std::cout << "Bias size  : " << unpacked_.bias->sizes() << std::endl;
-  //std::cout << "Filter     : " << unpacked_.filter << std::endl;
-  //std::cout << "Stride     : " << unpacked_.stride << std::endl;
-  //std::cout << "Padding    : " << unpacked_.padding << std::endl;
-  //std::cout << "Dilation   : " << unpacked_.dilation << std::endl;
-  //std::cout << "Output size: " << v_output.sizes() << std::endl;
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);
 

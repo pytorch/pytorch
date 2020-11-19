@@ -29,7 +29,7 @@ void main() {
   const ivec3 size = imageSize(uOutput);
   const ivec3 isize = textureSize(uInput, 0);
   const int tower = pos.z/(uBlock.stacks_per_tower);
-	const int tower_offset = pos.z % uBlock.stacks_per_tower;
+  const int tower_offset = pos.z % uBlock.stacks_per_tower;
   const ivec4 block = tower_offset * uBlock.kernel.x + ivec4(0, 1, 2, 3);
 
   if (all(lessThan(pos, size))) {

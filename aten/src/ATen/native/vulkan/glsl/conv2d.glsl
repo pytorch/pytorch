@@ -18,7 +18,7 @@ layout(set = 0, binding = 4)          uniform PRECISION restrict           Block
   ivec2 padding;
   ivec2 dilate;
   vec2 clamp;
-	int stacks_per_tower;
+  int stacks_per_tower;
 } uBlock;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
@@ -30,7 +30,7 @@ void main() {
   const ivec3 size = imageSize(uOutput);
   const ivec3 isize = textureSize(uInput, 0);
   const int tower = pos.z/(uBlock.stacks_per_tower);
-	const int tower_offset = pos.z % uBlock.stacks_per_tower;
+  const int tower_offset = pos.z % uBlock.stacks_per_tower;
   const ivec4 block = tower_offset * uBlock.kernel.z + ivec4(0, 1, 2, 3);
 
   if (all(lessThan(pos, size))) {
