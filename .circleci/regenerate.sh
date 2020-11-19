@@ -1,7 +1,5 @@
 #!/bin/bash -xe
 
-# force test of everything
-
 # Allows this script to be invoked from any directory:
 cd $(dirname "$0")
 
