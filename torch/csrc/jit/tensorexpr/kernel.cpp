@@ -1026,10 +1026,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::pow: {
       return computeTwoOperand(
           "aten_pow", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            double val = 0;
-            if (rhs.node()->isConstant()) {
-              val = immediateAs<double>(IRSimplifier::simplify(rhs.node()));
+            if (!rhs.node()->isConstant()) {
+              return pow(lhs, rhs);
             }
+            double val =
+                immediateAs<double>(IRSimplifier::simplify(rhs.node()));
 
             if (val == 1.0f) {
               return lhs;
