@@ -30,7 +30,8 @@ Tensors = Tuple[Tensor, ...]
 TensorOrTensors = Union[Tensor, Tensors]
 
 if TYPE_CHECKING:
-    Module = nn.Module[TensorOrTensors]
+    # Typechecking: nn.Module is not a Generic
+    Module = nn.Module[TensorOrTensors]  # type: ignore[type-arg]
     NamedModules = OrderedDict[str, Module]
 else:
     Module = nn.Module
