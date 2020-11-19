@@ -691,11 +691,6 @@ class AbstractTestCases:
             self.assertEqual('cuda', cuda90.type)
             self.assertEqual(90, cuda90.index)
 
-            cuda23333 = torch.device('cuda', 23333)
-            self.assertEqual('cuda:23333', str(cuda23333))
-            self.assertEqual('cuda', cuda23333.type)
-            self.assertEqual(23333, cuda23333.index)
-
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
