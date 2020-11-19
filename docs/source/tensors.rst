@@ -353,6 +353,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: i0_
    .. automethod:: igamma
    .. automethod:: igamma_
+   .. automethod:: igammac
+   .. automethod:: igammac_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
@@ -585,6 +587,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
+   .. automethod:: swapaxes
+   .. automethod:: swapdims
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
