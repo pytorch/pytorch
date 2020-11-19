@@ -50,6 +50,9 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+const int64_t MAX_STACK_DEPTH=2048*4;
+//const int64_t MAX_STACK_DEPTH=170;
+
 struct Adapter;
 struct Command;
 class Context;
