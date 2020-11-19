@@ -87,18 +87,20 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclChar;
     case at::kByte:
       return ncclDataType_t::ncclChar;
+    case at::kBool:
+      return ncclDataType_t::ncclUint8;
 #if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif
     default:
-      throw std::runtime_error("Unconvertible NCCL type");
+      TORCH_CHECK(false, "Unconvertible NCCL type ", type);
   }
 }
 
 ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
   if (!t.is_cuda()) {
-    throw std::runtime_error("Unconvertible NCCL type");
+    TORCH_CHECK(false, "NCCL only supports CUDA tensors, but got a tensor on ", t.device());
   }
   return to_nccl_data_type(t.scalar_type());
 }
