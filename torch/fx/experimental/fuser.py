@@ -32,6 +32,9 @@ def matches_module_pattern(pattern: Iterable[Type], node: fx.Node, modules: Dict
 
 
 def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
+    """
+    Fuses convolution/BN layers for inference purposes. Will deepcopy your model by default, but an modify the model inplace as well.
+    """
     patterns = [(torch.nn.Conv1d, torch.nn.BatchNorm1d), (torch.nn.Conv2d, torch.nn.BatchNorm2d), (torch.nn.Conv3d, torch.nn.BatchNorm3d)]
     if not inplace:
         model = copy.deepcopy(model)
