@@ -152,6 +152,8 @@ class Tracer(TracerBase):
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
+        torch.fx.proxy._create_friendly_names(args, 2)
+        torch.fx.proxy._create_friendly_names(args, 2)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
     def create_args_for_root(self, root_fn, is_module):

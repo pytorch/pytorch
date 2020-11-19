@@ -104,6 +104,49 @@ class GraphAppendingTracer(TracerBase):
 class TraceError(ValueError):
     pass
 
+
+def _create_friendly_names(a: Any, frames_up : int):
+    frame = inspect.currentframe()
+    if not frame:
+        raise RuntimeError("failed to inspect frame")
+
+    i = 0
+    while i < frames_up + 1:
+        frame = frame.f_back
+        if not frame:
+            raise RuntimeError("failed to get frame")
+        i += 1
+
+    f_locals = frame.f_locals
+
+    def _assign_friendly_name(a : Any):
+        # aggregates
+        if isinstance(a, (tuple, list)):
+            for elem in a:
+                _assign_friendly_name(elem)
+            return
+        elif isinstance(a, dict):
+            for k, v in a.items():
+                if not isinstance(k, str):
+                    raise NotImplementedError(f"dictionaries with non-string keys: {a}")
+                _assign_friendly_name(v)
+            return
+        elif isinstance(a, slice):
+            _assign_friendly_name(a.start)
+            _assign_friendly_name(a.stop)
+            _assign_friendly_name(a.step)
+            return
+
+        if isinstance(a, Proxy):
+            # Base case: look for Proxy objects in locals:
+            for k, v in f_locals.items():
+                if a is v:
+                    a.node.name = a.tracer.graph._create_unique_name(k)
+                    break
+            return
+    _assign_friendly_name(a)
+
+
 # Proxy objects are stand-in values for normal values in a PyTorch computation.
 # Instead of performing compute they record computation into Graph.
 # Each proxy wraps the Node instance that represents the expression that define the
@@ -128,6 +171,7 @@ class Proxy:
         return Attribute(self, k)
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
+        _create_friendly_names(args, 1)
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)
 
     def __iter__(self) -> Iterable['Proxy']:
@@ -150,6 +194,8 @@ class Proxy:
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+        _create_friendly_names(args, 1)
+        _create_friendly_names(kwargs, 1)
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
@@ -172,6 +218,7 @@ class Attribute(Proxy):
         return self._node
 
     def __call__(self, *args, **kwargs):
+        _create_friendly_names(args, 1)
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
 for method in magic_methods:
@@ -179,6 +226,8 @@ for method in magic_methods:
         def impl(*args, **kwargs):
             tracer = args[0].tracer
             target = getattr(operator, method)
+            _create_friendly_names(args, 1)
+            _create_friendly_names(kwargs, 1)
             return tracer.create_proxy('call_function', target, args, kwargs)
         impl.__name__ = method
         as_magic = f'__{method}__'
