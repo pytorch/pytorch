@@ -1,7 +1,7 @@
 # Parses derivatives.yaml into autograd functions
 #
-# Each autograd function is represented by `AutogradFunction` containing
-# a list of `Derivative`.
+# Each autograd function is represented by `DifferentiabilityInfo` containing
+# a list of `Derivative`. See `tools.codegen.api.autograd` for the data models.
 from collections import defaultdict, Counter
 import re
 from typing import Sequence, Any, Tuple, List, Set, Dict, Match, Optional
