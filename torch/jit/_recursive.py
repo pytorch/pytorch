@@ -273,7 +273,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 value)
             continue
 
-        # Handle ScriptClass attributes
+        # Handle ScriptClass attributes.
         if isinstance(value, torch.jit.RecursiveScriptClass):
             attr_type = infer_type(name, value)
             concrete_type_builder.add_attribute(name, attr_type, False, False)
@@ -381,17 +381,24 @@ def get_module_concrete_type(nn_module, share_types=True):
     return concrete_type
 
 def create_script_class(obj):
-    return create_script_class_impl(obj)
+    """
+    Create and return a RecursiveScriptClass instance from a Python object.
 
-def create_script_class_impl(obj):
+    Arguments:
+        obj: A Python object.
+    """
     qualified_class_name = _jit_internal._qualified_name(type(obj))
     rcb = _jit_internal.createResolutionCallbackForClassMethods(type(obj))
+    # Script the type of obj if it hasn't already been scripted.
     _compile_and_register_class(type(obj), rcb, qualified_class_name)
     class_ty = _python_cu.get_class(qualified_class_name)
+    # Create an empty torch._C.ScriptObject with the scripted type.
     cpp_object = torch._C._create_object_with_type(class_ty)
+    # Copy all of the attributes over to the torch._C.ScriptObject.
     for name, value in obj.__dict__.items():
         cpp_object.setattr(name, value)
 
+    # Wrap the torch._C.ScriptObject in a RecursiveScriptClass instance.
     return wrap_cpp_class(cpp_object)
 
 def create_script_module(nn_module, stubs_fn, share_types=True):
@@ -434,7 +441,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             if attr_type.is_class_type():
                 qual_name = qualified_name = _jit_internal._qualified_name(type(orig_value))
                 if _get_script_class(qualified_name):
-                    orig_value = orig_value if isinstance(orig_value, torch.jit.RecursiveScriptClass) else create_script_class_impl(orig_value)
+                    orig_value = orig_value if isinstance(orig_value, torch.jit.RecursiveScriptClass) else create_script_class(orig_value)
 
             cpp_module.setattr(name, orig_value)
 

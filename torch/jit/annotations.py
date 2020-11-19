@@ -332,6 +332,8 @@ def try_ann_to_type(ann, loc):
             torch.jit._script._recursive_compile_class(ann, loc)
             return ClassType(qualified_name)
     if isinstance(ann, torch.jit._script.ScriptClassWrapper):
+        # Get the wrapped class (which will be a regular Python class)
+        # and look up the JIT type associated with that.
         ann = ann.get_wrapped_class()
         qualified_name = _qualified_name(ann)
         return ClassType(qualified_name)

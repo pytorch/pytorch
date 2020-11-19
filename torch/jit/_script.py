@@ -58,18 +58,40 @@ def _is_new_style_class(cls):
 
 
 class ScriptClassWrapper:
+    """
+    A wrapper class returned when Python classes are decorated with @torch.jit.script.
+    This allows construction of instances of the class to be overriden (similar to
+    how using a metaclass would) so that the result is always a RecursiveScriptClass,
+    which can be seamless passed to scripted functions.
+
+    Attributes:
+        obj [type]: The class that has been scripted.
+    """
     def __init__(self, obj):
         self.obj = obj
 
     def __getattr__(self, attr):
+        """
+        Forward getattr lookups to the wrapped class.
+        """
         return getattr(self.obj, attr)
 
     def get_wrapped_class(self):
         return self.obj
 
     def __call__(self, *args, **kwargs):
+        """
+        Construct an instance of self.obj in C++ using the JIT
+        type of obj with the given arguments, and return a Python
+        wrapper containing that C++ object.
+
+        Returns:
+            A RecursiveScriptClass that wraps a C++ Object instance
+            with the JIT type corresponding to self.obj.
+        """
         instance = self.obj(*args, **kwargs)
         return torch.jit._recursive.create_script_class(instance)
+
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
 # module with versions that get/set properties inside of Module.
@@ -269,6 +291,17 @@ class ConstMap:
 
 if _enabled:
     class RecursiveScriptClass(object):
+        """
+        An analogue of RecursiveScriptModule for regular objects that are not modules.
+        This class is a wrapper around a torch._C.ScriptObject that represents an instance
+        of a TorchScript class and allows it to be used in Python.
+
+        Attributes:
+            _c [torch._C.ScriptObject]: The C++ object to which attribute lookups and method
+                calls are forwarded.
+            _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
+                exposed on this wrppaer.
+        """
         def __init__(self, cpp_class):
             super(RecursiveScriptClass, self).__init__()
             self.__dict__["_initializing"] = True
@@ -893,7 +926,7 @@ def call_prepare_scriptable_func(obj):
                 sub_module[k] = call_prepare_scriptable_func(v)
             obj.__setattr__(name, sub_module)
         elif isinstance(sub_module, torch.nn.Module) and not isinstance(sub_module, ScriptModule):
-            obj.__setattr__(name, call_prepare_scriptable_func(sub_module)) 
+            obj.__setattr__(name, call_prepare_scriptable_func(sub_module))
     return obj
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
@@ -1052,7 +1085,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
 
     if isinstance(obj, torch.nn.Module):
-        obj = call_prepare_scriptable_func(obj) 
+        obj = call_prepare_scriptable_func(obj)
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
@@ -1082,6 +1115,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
 
+        # Wrap obj in a ScriptClassWrapper so that any attempt to construct it will
+        # produce a RecursiveScriptClass.
         return ScriptClassWrapper(obj)
     elif inspect.isfunction(obj):
         qualified_name = _qualified_name(obj)

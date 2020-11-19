@@ -1,5 +1,4 @@
 import io
-import pdb
 import os
 import sys
 import unittest
@@ -24,6 +23,10 @@ if __name__ == '__main__':
 
 class TestClassType(JitTestCase):
     def test_reference_semantics(self):
+        """
+        Test that modifications made to a class in TorchScript
+        are visible in Python.
+        """
         global Foo
 
         @torch.jit.script
@@ -45,7 +48,7 @@ class TestClassType(JitTestCase):
             obj.set_a(2)
 
         scripted_fn = torch.jit.script(test_fn)
-        obj = torch.jit.script(Foo(1))
+        obj = Foo(1)
 
         scripted_fn(obj)
         self.assertEqual(obj.get_a(), 2)
@@ -1184,7 +1187,6 @@ class TestClassType(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Mutable default parameters are not supported"):
             torch.jit.script(should_fail)
 
-    # @unittest.skip("staticmethod hidden behind decorator :(, probably solveable with metaclass?")
     def test_staticmethod(self):
         """
         Test static methods on class types.
@@ -1221,7 +1223,6 @@ class TestClassType(JitTestCase):
         def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
             return ClassWithStaticMethod.create_from(a, b)
 
-        test_function(3, 4)
         self.checkScript(test_function, (1, 2))
 
     def test_properties(self):
