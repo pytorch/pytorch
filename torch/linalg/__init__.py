@@ -131,6 +131,20 @@ Examples::
     >>> torch.linalg.matrix_rank(a)
     tensor([[2, 2, 2, 2],
             [2, 2, 2, 2]])
+
+    >>> a = torch.randn(2, 4, 3, 3, dtype=torch.complex64)
+    >>> torch.linalg.matrix_rank(a)
+    tensor([[3, 3, 3, 3],
+            [3, 3, 3, 3]])
+    >>> torch.linalg.matrix_rank(a, hermitian=True)
+    tensor([[3, 3, 3, 3],
+            [3, 3, 3, 3]])
+    >>> torch.linalg.matrix_rank(a, tol=1.0)
+    tensor([[3, 2, 2, 2],
+            [1, 2, 1, 2]])
+    >>> torch.linalg.matrix_rank(a, tol=1.0, hermitian=True)
+    tensor([[2, 2, 2, 1],
+            [1, 2, 2, 2]])
 """)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
