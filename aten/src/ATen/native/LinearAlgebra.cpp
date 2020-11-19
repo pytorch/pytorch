@@ -141,7 +141,7 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
     return (S > tol_value).sum(/*dim=*/-1);
   } else {
     ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-    double tol_value = _get_epsilon(real_dtype) * std::max(self.size(0), self.size(1));
+    double tol_value = _get_epsilon(real_dtype) * std::max(self.size(-1), self.size(-2));
     Tensor max_S = std::get<0>(S.max(/*dim=*/-1));
     return (S > max_S.mul_(tol_value).unsqueeze_(-1)).sum(/*dim=*/-1);
   }
