@@ -1267,7 +1267,6 @@ class TestLinalg(TestCase):
             self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
 
             # check the out= variant
-            # if (torch_inverse != torch.linalg.inv and matrix.is_contiguous()) or torch_inverse == torch.inverse:
             # prepare the expected out tensor
             matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
             matrix_inverse_out_t = matrix_inverse_out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
@@ -1363,7 +1362,7 @@ class TestLinalg(TestCase):
     def test_inv_autograd(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        for batches, n in itertools.product( [[], [4], [2, 3]], [0, 5]):
+        for batches, n in itertools.product([[], [4], [2, 3]], [0, 5]):
             # using .to(device) instead of device=device because @xwang233 claims it's faster
             a = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
             a.requires_grad_()
