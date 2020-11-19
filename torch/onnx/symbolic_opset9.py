@@ -1784,6 +1784,9 @@ def sort(g, self, dim, decending, out=None):
     try:
         dim_size = self_sizes[dim]
     except Exception:
+        dim_size = None
+
+    if dim_size is None:
         return _unimplemented("Sort", "input size not accessible")
 
     return g.op("TopK", self, k_i=dim_size, axis_i=dim, outputs=2)
