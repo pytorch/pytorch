@@ -4,7 +4,10 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Utils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
@@ -22,115 +25,110 @@ namespace at { namespace native {
 
 using namespace at::native::detail;
 
+// Offset calculator for indexing in Hermitian mirrored order.
+// In mirrored dims, maps linear index i to (n - i) % n
+template <typename index_t>
+struct HermitianSymmetryOffsetCalculator {
+  using offset_type = at::detail::Array<index_t, 1>;
+  using dim_type = std::remove_cv_t<decltype(MAX_DIMS)>;
+  dim_type dims;
+  IntDivider<index_t> sizes_[MAX_DIMS];
+  index_t strides_[MAX_DIMS];
+  uint32_t mirror_dim_;  // bit mask
+  static_assert(MAX_DIMS < 32, "Need a bigger mask type");
+
+  HermitianSymmetryOffsetCalculator(
+      IntArrayRef sizes, IntArrayRef strides, IntArrayRef dim,
+      const int64_t element_size){
+    TORCH_INTERNAL_ASSERT(sizes.size() == strides.size());
+    TORCH_INTERNAL_ASSERT(sizes.size() <= MAX_DIMS);
+    dims = sizes.size();
+
+    for (dim_type i = 0; i < MAX_DIMS; ++i) {
+      if (i < dims) {
+        sizes_[i] = IntDivider<index_t>(sizes[i]);
+        strides_[i] = strides[i] / element_size;
+      } else {
+        sizes_[i] = IntDivider<index_t>(1);
+        strides_[i] = 0;
+      }
+    }
+
+    mirror_dim_ = 0;
+    for (int64_t i = 0; i < dim.size(); ++i) {
+      mirror_dim_ |= (uint32_t{1} << dim[i]);
+    }
+  }
+
+  C10_HOST_DEVICE offset_type get(index_t linear_idx) const {
+    index_t offset = 0;
+
+    for (dim_type dim = 0; dim < dims; ++dim) {
+      auto divmod = sizes_[dim].divmod(linear_idx);
+      linear_idx = divmod.div;
+
+      if ((mirror_dim_ & (uint32_t{1} << dim)) == 0) {
+        offset += divmod.mod * strides_[dim];
+      } else if (divmod.mod != 0) {
+        offset += (sizes_[dim].divisor - divmod.mod) * strides_[dim];
+      }
+    }
+    offset_type offsets;
+    offsets[0] = offset;
+    return offsets;
+  }
+};
+
+// out[:] = conj(in[:]) where in and out ordering is generalized by offset calculators
+template <typename scalar_t, typename inp_calc_t, typename out_calc_t>
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void _fft_conjugate_copy_kernel(
+    int64_t numel, scalar_t * out_data, const scalar_t * in_data,
+    inp_calc_t ic, out_calc_t oc) {
+  CUDA_KERNEL_LOOP_TYPE(index, numel, int64_t) {
+    auto in_offset = ic.get(index)[0];
+    auto out_offset = oc.get(index)[0];
+    out_data[out_offset] = std::conj(in_data[in_offset]);
+  }
+}
+
 // In real-to-complex transform, cuFFT only fills half of the values due to
 // conjugate symmetry. See native/SpectralUtils.h for more details.
-// The following structs are used to fill in the other half with symmetry in
+// The following function fills in the other half with symmetry in
 // case of real-to-complex transform with onesided=False flag.
 // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
-// counting_iterator => index to fill
-struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
-{
-  int64_t last_dim_size;
-  int64_t last_dim_start_slice;
-  int64_t last_dim_to_fill_size;
-
-  cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
-    last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
-    last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
-
-  // HIP wants __host__ __device__ tag, CUDA does not
-#ifdef __HIP_PLATFORM_HCC__
-  __host__ __device__
-#endif
-  cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
-
-  __host__ __device__ __forceinline__
-  int64_t operator()(const int64_t& i) const
-  {
-    int64_t imag = i % 2;
-    int64_t idx = i / 2;
-    int64_t num_dim = idx / last_dim_to_fill_size;
-    int64_t slice_idx = idx % last_dim_to_fill_size;
-    return (num_dim * last_dim_size + last_dim_start_slice + slice_idx) * 2 + imag;
-  }
-};
-
-// index to fill => index to read from
-template <typename scalar_t>
-struct dst_idx_to_src_functor : public thrust::unary_function<int64_t, scalar_t>
-{
-  // output can have at most dim 5 (batch + 3 signal dim + real/imag)
-  int64_t sizes[max_rank + 2], strides[max_rank + 2];
-  const int64_t signal_ndim;
-  scalar_t *data;  // device ptr
-
-  dst_idx_to_src_functor(const Tensor& batched_complex_signal)
-    : signal_ndim(batched_complex_signal.dim() - 1),
-      data(batched_complex_signal.data_ptr<scalar_t>()) {
-    for (int64_t i = 0; i < signal_ndim; i++) {
-      sizes[i] = batched_complex_signal.size(i);
-      strides[i] = batched_complex_signal.stride(i);
-    }
-  }
-
-  __device__ __forceinline__
-  scalar_t operator()(const int64_t& write_idx_with_imag) const
-  {
-    int64_t imag = write_idx_with_imag % 2;
-    // all but first (batch) and last (real/imag) dims need to be reflected
-    int64_t read_idx = 0;
-    int64_t remainder = write_idx_with_imag - imag;
-    int64_t dim_idx, dim_stride;
-    for (int64_t i = 0; i < signal_ndim; i++) {
-      dim_stride = strides[i];
-      dim_idx = remainder / dim_stride;
-      if (i == 0) {
-        read_idx += dim_idx * dim_stride;
-      } else if (dim_idx != 0) {
-        read_idx += (sizes[i] - dim_idx) * dim_stride;
-      }
-      remainder = remainder % dim_stride;
-    }
-    if (imag) {
-      return -data[read_idx + 1];
-    } else {
-      return data[read_idx];
-    }
-  }
-};
-
-// input should be a contiguous batched tensor of same size as full (twosided)
+// input should be a tensor of same size as full (twosided)
 // signals, but only contains half (onesided) of the values.
 // This function modifies inplace.
-__forceinline__
-static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
-                      int64_t size_last_dim, int64_t last_dim_start_slice) {
-  if (last_dim_start_slice >= size_last_dim) {
-    return;
-  }
+void _fft_fill_with_conjugate_symmetry_cuda_(
+    ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef signal_half_sizes,
+    IntArrayRef in_strides, const void * in_data,
+    IntArrayRef out_strides, void * out_data) {
+  // Do the actual conjugate mirroring.
+  // TODO: consider adding a 32bit indexed kernel for improved performance
+  auto* in_strides_ptr = in_strides.data();
+  const int ndim = in_strides.size();
+  const int64_t element_size = scalarTypeToTypeMeta(dtype).itemsize();
+  OffsetCalculator<1, int64_t> input_offset_calculator(
+      ndim, signal_half_sizes.data(), &in_strides_ptr, &element_size);
+  HermitianSymmetryOffsetCalculator<int64_t> output_offset_calculator(
+      signal_half_sizes, out_strides, mirror_dims, element_size);
 
-  // copy
-  int64_t n = input.numel() / size_last_dim * (size_last_dim - last_dim_start_slice);
-
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "_fft_fill_with_conjugate_symmetry_", [&] {
-    typedef thrust::device_ptr<scalar_t> device_ptr;
-    typedef thrust::counting_iterator<int64_t> counter;
-    typedef thrust::transform_iterator<cnt_to_dst_idx_functor, counter> dst_idx_iterator;
-    typedef thrust::permutation_iterator<device_ptr, dst_idx_iterator> dst_iterator;
-    typedef thrust::transform_iterator<dst_idx_to_src_functor<scalar_t>, dst_idx_iterator> src_iterator;
-
-    dst_idx_iterator dst_idxs(counter(0), cnt_to_dst_idx_functor(size_last_dim, last_dim_start_slice));
-
-    auto data = device_ptr(input.data_ptr<scalar_t>());
-    dst_iterator dsts(data, dst_idxs);
-    src_iterator srcs(dst_idxs, dst_idx_to_src_functor<scalar_t>(input));
-    thrust::copy_n(policy, srcs, n, dsts);
-  });
+  const auto numel = at::prod_intlist(signal_half_sizes);
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
+        using namespace cuda::detail;
+        _fft_conjugate_copy_kernel<<<
+          GET_BLOCKS(numel), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+              numel,
+              static_cast<scalar_t*>(out_data),
+              static_cast<const scalar_t*>(in_data),
+              input_offset_calculator,
+              output_offset_calculator);
+      });
 }
+
+REGISTER_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cuda_);
 
 // NOTE [ cuFFT Embedded Strides ]
 //
@@ -255,8 +253,10 @@ static inline Tensor _run_cufft(
 
   // if needed, fill out the other half using conjugate symmetry
   if (!complex_input && complex_output && !onesided) {
-    auto start_slice = infer_ft_real_to_complex_onesided_size(size_last_signal_dim);
-    _fft_fill_with_conjugate_symmetry_(output, size_last_signal_dim, start_slice);
+    DimVector signal_dims(signal_ndim);
+    std::iota(signal_dims.begin(), signal_dims.end(), 1);
+    auto out_as_complex = at::view_as_complex(output);
+    at::native::_fft_fill_with_conjugate_symmetry_(out_as_complex, signal_dims);
   }
   return output;
 }

@@ -69,7 +69,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky'
+    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -176,9 +176,19 @@ DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
 
+SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
+auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
+""")
+
 SETUP_DERIVATIVE = CodeTemplate("""\
-if (compute_requires_grad( ${args_with_derivatives} )) {
+if (_any_requires_grad) {
   ${setup}
+}
+""")
+
+SETUP_NONE_REQUIRES_GRAD = CodeTemplate("""\
+if (compute_requires_grad( ${args_to_check} )) {
+  throw_error_out_requires_grad("${base_name}");
 }
 """)
 
@@ -253,36 +263,6 @@ ${statements}
 #endif
 """)
 
-FACTORY_FUNCTION_NAMES = None
-
-# TODO The maybe_unwrap_optional_tensors is only needed because our at::native::xxx functions
-# still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
-# to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
-# and use the use_optional_tensor=True behavior always.
-def maybe_unwrap_optional_tensors(option, formals, args):
-    assert len(formals) == len(args), \
-        "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
-    if option['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-        def maybe_unwrap_optional_tensor(formal, arg):
-            if formal['dynamic_type'] == 'Tensor' and formal['is_nullable']:
-                return "{}.has_value() ? *{} : at::Tensor()".format(arg, arg)
-            else:
-                return arg
-        return [maybe_unwrap_optional_tensor(formal, arg) for (formal, arg) in zip(formals, args)]
-    else:
-        assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-        return args
-
-
-def find_factory_functions(declarations):
-    global FACTORY_FUNCTION_NAMES
-    FACTORY_FUNCTION_NAMES = set()
-
-    for declaration in declarations:
-        if declaration['is_factory_method']:
-            FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
-
-
 # Methods shared by TraceType and VariableType to handle return variable declaration, tie and tuple.
 def format_return_variables(declaration):
     name = declaration['name']
@@ -333,9 +313,6 @@ def gen_variable_type(out, aten_declarations, template_path):
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
-
-    # WARNING: this function call modifies global mutable state
-    find_factory_functions(aten_declarations)
 
     aten_declarations = list(sorted(aten_declarations, key=lambda decl: decl['name']))
 
@@ -532,22 +509,21 @@ def emit_body(declaration):
         return setup
 
     def setup_derivative(differentiable_inputs):
-
         env = {}
         env['args_with_derivatives'] = [arg['name'] for arg in args_with_derivatives]
         env['op'] = func['op'] if func is not None else 'NotImplemented'
         env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
-            setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
+            # For out functions, ensure that no input or output requires grad
             body = []
             body.append(DECLARE_GRAD_FN.substitute(op='Node'))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
-            body.append(SETUP_DERIVATIVE.substitute(
-                setup=setup,
-                args_with_derivatives=[arg['name'] for arg in differentiable_outputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_inputs]))
+            body.append(SETUP_NONE_REQUIRES_GRAD.substitute(
+                base_name=base_name,
+                args_to_check=[arg['name'] for arg in differentiable_outputs]))
             return body
 
         setup = []
@@ -557,7 +533,7 @@ def emit_body(declaration):
         body = []
         body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
         body.append(DECLARE_GRAD_FN.substitute(env))
-        body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
+        body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
 
     def emit_check_if_in_complex_autograd_allowlist():
@@ -786,10 +762,14 @@ def emit_body(declaration):
             return CONDITIONAL.substitute(cond='grad_fn', statements=stmts)
         return ''
 
+    def emit_any_requires_grad():
+        return [SETUP_ANY_REQUIRES_GRAD.substitute(
+            args_with_derivatives=[arg['name'] for arg in args_with_derivatives]), ]
+
     def emit_check_inplace():
         if not inplace:
             return []
-        return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
+        return ['check_inplace({}, _any_requires_grad);'.format(arg['name']) for arg in differentiable_outputs]
 
     def emit_increment_version():
         if not modifies_arguments:
@@ -805,6 +785,7 @@ def emit_body(declaration):
 
     body.extend(unpack_args(env, declaration))
     if requires_derivative:
+        body.extend(emit_any_requires_grad())
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables)
@@ -815,7 +796,6 @@ def emit_body(declaration):
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.append(emit_history())
-    if requires_derivative:
         body.append(emit_save_outputs())
         body.extend(emit_check_if_in_complex_autograd_allowlist())
     if base_name in RESET_GRAD_ACCUMULATOR:
