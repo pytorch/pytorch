@@ -114,9 +114,12 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
   if (self.numel() == 0) {
+    // matrix_rank assigns a scalar value for each matrix in the batch so
+    // result's shape is equal to self.shape[0:self.ndim-2]
+    // for single matrix result_shape = {}
     auto result_shape = self.sizes().vec();
     result_shape.pop_back();
-    result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
+    result_shape.pop_back();
     return at::zeros(result_shape, self.options().dtype(ScalarType::Long));
   }
 
