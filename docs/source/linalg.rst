@@ -14,5 +14,6 @@ Functions
 
 .. autofunction:: cholesky
 .. autofunction:: det
+.. autofunction:: matrix_rank
 .. autofunction:: norm
 .. autofunction:: tensorsolve
