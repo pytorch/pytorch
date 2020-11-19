@@ -91,17 +91,18 @@ Alias of :func:`torch.det`.
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False) -> Tensor
 
-Computes the numerical rank of a matrix :attr:`input`,
-or of each matrix in a batched :attr:`input`. The method to compute the
-matrix rank is done using SVD by default. If :attr:`hermitian` is ``True``,
-then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
-and the computation of the rank is done by obtaining the eigenvalues.
+Computes the numerical rank of a matrix :attr:`input`, or of each matrix in a batched :attr:`input`.
+The matrix rank is computed as the number of singular values (or the absolute eigenvalues when :attr:`hermitian` is ``True``)
+above the specified :attr:`tol` threshold.
 
-:attr:`tol` is the threshold below which the singular values (or the eigenvalues
-when :attr:`hermitian` is ``True``) are considered to be 0. If :attr:`tol` is not
-specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
-singular values (or the eigenvalues when :attr:`hermitian` is ``True``), and ``eps``
-is the epsilon value for the datatype of :attr:`input`.
+If :attr:`tol` is not specified, :attr:`tol` is set to
+``S.max(dim=-1) * max(input.shape[0:-2]) * eps`` where ``S`` is the singular values
+(or the absolute eigenvalues when :attr:`hermitian` is ``True``),
+and ``eps`` is the epsilon value for the datatype of :attr:`input`.
+
+The method to compute the matrix rank is done using singular value decomposition (see :func:`torch.linalg.svd`) by default.
+If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+and the computation of the rank is done by obtaining the eigenvalues (see :func:`torch.linalg.eigvalsh`).
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
 
