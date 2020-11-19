@@ -9,15 +9,10 @@ namespace jit {
 class CUDAEvent;
 class CUDAStream final : public CustomClassHolder {
  public:
-  CUDAStream(int64_t device = -1, int64_t priority = 0, bool copy = false) {
+  CUDAStream(int64_t device = -1, int64_t priority = 0) {
     constexpr int64_t PRIORITY_INDEX = 50;
-
-    if (copy) {
-      stream_ = std::make_unique<c10::cuda::CUDAStream>(c10::cuda::getCurrentCUDAStream(device));
-    } else {
     stream_ = std::make_unique<c10::cuda::CUDAStream>(
         c10::cuda::getStreamFromPool(priority > PRIORITY_INDEX, device));
-    }
   }
 
   bool query() {
@@ -52,9 +47,17 @@ class CUDAStream final : public CustomClassHolder {
     return stream_->pack();
   }
 
-  void setStream(int64_t idx) {
-    auto s = c10::cuda::getCurrentCUDAStream(idx);
-    stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
+  /// Set the current or the default stream for the given device
+  /// depending on the bool value is_current. This is a wrapper function
+  /// which sets the stream for torch.jit.CUDStreams.
+  void setStream(int64_t idx = -1, bool is_current = false) {
+    if (is_current) {
+      auto s = c10::cuda::getCurrentCUDAStream(idx);
+      stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
+    } else {
+      auto s = c10::cuda::getDefaultCUDAStream(idx);
+      stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
+    }
   }
 
  private:

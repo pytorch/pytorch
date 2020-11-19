@@ -343,6 +343,7 @@ class device_jit(object):
         if self.idx == -1:
             return
         self.prev_idx = torch.cuda.current_device()
+
         if self.prev_idx != self.idx:
             torch.cuda._cuda_setDevice(self.idx)
 
@@ -375,14 +376,14 @@ class StreamContext(object):
         if self.idx == -1:
             return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
-        """if self.idx != self.cur_stream.device_index():
+        if self.idx != self.cur_stream.device_index():
             with device_jit(self.cur_stream.device()):
-                self.dst_prev_stream = torch.cuda.current_stream(self.idx)"""
-        torch.cuda._cuda_setStream(self.cur_stream)
+                self.dst_prev_stream = torch.cuda.current_stream(self.idx)
+        return torch.cuda._cuda_setStream(self.cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        """if self.src_prev_stream.device_index() != self.cur_stream.device_index():
-            torch.cuda._cuda_setStream(self.dst_prev_stream)"""
+        if self.src_prev_stream.device_index() != self.cur_stream.device_index():
+            torch.cuda._cuda_setStream(self.dst_prev_stream)
         torch.cuda._cuda_setStream(self.src_prev_stream)
 
 def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.StreamContext':
