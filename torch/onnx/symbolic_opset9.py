@@ -1781,10 +1781,12 @@ def sort(g, self, dim, decending, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported for sort")
     self_sizes = sym_help._get_tensor_sizes(self)
-    if self_sizes is None or self_sizes[dim] < 0:
+    try:
+        dim_size = self_sizes[dim]
+    except Exception:
         return _unimplemented("Sort", "input size not accessible")
 
-    return g.op("TopK", self, k_i=self.type().sizes()[dim], axis_i=dim, outputs=2)
+    return g.op("TopK", self, k_i=dim_size, axis_i=dim, outputs=2)
 
 
 def numel(g, self):
