@@ -406,6 +406,11 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(example_outputs, torch.Tensor):
         example_outputs = [example_outputs]
 
+    # Temporarily disable the new APIs for quantized models until
+    # we fix feeze_module to handle the attributes
+    if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        use_new_jit_passes=False
+
     graph, params, torch_out = _create_jit_graph(model, args,
                                                  _retain_param_name,
                                                  use_new_jit_passes)
