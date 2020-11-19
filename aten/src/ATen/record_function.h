@@ -193,12 +193,17 @@ struct TORCH_API RecordFunction {
     handle_ = handle;
   }
 
-  // Whether this RecordFunction runs any callbacks
-  bool active = false;
+  bool isActive() const {
+    return active_;
+  }
+
   // Whether any of the picked callbacks require inputs
   bool needs_inputs = false;
 
  private:
+  // Whether this RecordFunction runs any callbacks
+  bool active_ = false;
+
   // Allows the modification of some internal states for callbacks.
   friend class CallbackManager;
 
@@ -362,7 +367,7 @@ class TORCH_API RecordFunctionCallback {
 // optional argument - function's seq_no
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
-  if (guard.active) { \
+  if (guard.isActive()) {          \
     if (guard.needs_inputs) { \
       guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \
