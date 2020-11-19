@@ -1263,21 +1263,8 @@ class TestLinalg(TestCase):
 
             # Additional correctness tests, check matrix*matrix_inverse == identity
             identity = torch.eye(n, dtype=dtype, device=device)
-            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            if self.device_type == 'cuda' and dtype.is_complex:
-                result_identity_list1 = []
-                result_identity_list2 = []
-                p = int(np.prod(batches))  # use `p` instead of -1, so that the test works for empty input as well
-                for m, m_inv in zip(matrix.contiguous().view(p, n, n), matrix_inverse.contiguous().view(p, n, n)):
-                    result_identity_list1.append(torch.matmul(m, m_inv))
-                    result_identity_list2.append(torch.matmul(m_inv, m))
-                result_identity1 = torch.stack(result_identity_list1).view(*batches, n, n)
-                result_identity2 = torch.stack(result_identity_list2).view(*batches, n, n)
-                self.assertEqual(identity.expand_as(matrix), result_identity1)
-                self.assertEqual(identity.expand_as(matrix), result_identity2)
-            else:
-                self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
-                self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
+            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
 
             # check the out= variant
             matrix_inverse_out = torch.empty(*batches, n, n, dtype=dtype, device=device)
@@ -1387,11 +1374,7 @@ class TestLinalg(TestCase):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.solve(b, A)[0]  # Actual output
             self.assertEqual(x_exp, x_act)  # Equality check
-            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            if self.device_type == 'cuda' and dtype.is_complex:
-                Ax = torch.matmul(A.cpu(), x_act.cpu()).to(device)
-            else:
-                Ax = torch.matmul(A, x_act)
+            Ax = torch.matmul(A, x_act)
             self.assertEqual(b, Ax)
 
         for batchsize in [1, 3, 4]:
@@ -1417,11 +1400,7 @@ class TestLinalg(TestCase):
         for A_dims, b_dims in zip([(5, 256, 256), (3, )], [(5, 1), (512, 512, 3, 1)]):
             b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
             x, _ = torch.solve(b, A)
-            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            if self.device_type == 'cuda' and dtype.is_complex:
-                Ax = torch.matmul(A.cpu(), x.cpu()).to(device)
-            else:
-                Ax = torch.matmul(A, x)
+            Ax = torch.matmul(A, x)
             self.assertEqual(Ax, b.expand_as(x))
 
     @skipCUDAIfNoMagma
@@ -1623,15 +1602,8 @@ class TestLinalg(TestCase):
         triangle_function = torch.triu if upper else torch.tril
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = torch.randn(*A_dims, dtype=dtype, device=device)
-        # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-        if self.device_type == 'cuda' and dtype.is_complex:
-            A_tmp = torch.empty_like(A).view(-1, *A_dims[-2:])
-            for A_i, A_tmp_i in zip(A.contiguous().view(-1, *A_dims[-2:]), A_tmp):
-                torch.matmul(A_i, A_i.t(), out=A_tmp_i)
-            A = A_tmp.view(*A_dims)
-        else:
-            # create positive definite matrix
-            A = torch.matmul(A, A.transpose(-2, -1))
+        # create positive definite matrix
+        A = torch.matmul(A, A.transpose(-2, -1))
         A_triangular = triangle_function(A)
         if unitriangular:
             A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
@@ -1675,15 +1647,7 @@ class TestLinalg(TestCase):
             if transpose:
                 A = A.transpose(-2, -1)
 
-            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            if self.device_type == 'cuda' and dtype.is_complex:
-                Ax = torch.empty_like(x_act).view(-1, *b_dims[-2:])
-                for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, *A_dims[-2:]),
-                                          x_act.contiguous().view(-1, *b_dims[-2:]), Ax):
-                    torch.matmul(A_i, x_i, out=Ax_i)
-                Ax = Ax.view(*x_act.shape)
-            else:
-                Ax = torch.matmul(A, x_act)
+            Ax = torch.matmul(A, x_act)
             self.assertEqual(b, Ax)
 
         for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product(
@@ -1708,14 +1672,7 @@ class TestLinalg(TestCase):
             if transpose:
                 A = A.transpose(-2, -1)
 
-            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            if self.device_type == 'cuda' and dtype.is_complex:
-                Ax = torch.empty_like(x).view(-1, 5, 1)
-                for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, 5, 5), x.contiguous().view(-1, 5, 1), Ax):
-                    torch.matmul(A_i, x_i, out=Ax_i)
-                Ax = Ax.view(256, 256, 5, 1)
-            else:
-                Ax = torch.matmul(A, x)
+            Ax = torch.matmul(A, x)
 
             rtol = 1e-2 if dtype in [torch.float32, torch.complex64] else self.precision
             self.assertEqual(Ax, b.expand_as(Ax), atol=self.precision, rtol=rtol)
