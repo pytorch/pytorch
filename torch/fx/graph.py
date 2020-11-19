@@ -243,8 +243,8 @@ class Graph:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
-        n = Node(self, sanitized_name, op, target, args, kwargs, type_expr)
+        unique_name = self._create_unique_name(name if name is not None else self._target_to_str(target))
+        n = Node(self, unique_name, op, target, args, kwargs, type_expr)
         self._insert(n)
         self._len += 1
         return n
@@ -414,21 +414,7 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        if node.op == "placeholder":
-            # Placeholder names are user-visible, so they should be copied as-is without normalizing them.
-            name = node.name
-        else:
-            sanitized_name = node.name
-            if '_' in node.name:
-                base, maybe_idx = node.name.rsplit('_', 1)
-                if base != '':
-                    try:
-                        int(maybe_idx)
-                        sanitized_name = base
-                    except ValueError:
-                        pass
-            name = self._name(sanitized_name)
-        return self.create_node(node.op, node.target, args, kwargs, name, node.type)
+        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
 
     def output(self, result: Argument, type_expr: Optional[Any] = None):
         """
@@ -441,7 +427,7 @@ class Graph:
         """
         return self.create_node(op='output', target='output', args=(result,), type_expr=type_expr)
 
-    def _name(self, target: Target) -> str:
+    def _target_to_str(self, target : Target) -> str:
         if callable(target):
             op = target.__name__
         else:
@@ -449,31 +435,31 @@ class Graph:
             op = target
             if _is_magic(op):
                 op = op[2:-2]
-        op = op.replace('.', '_')
-        # delete all characters that are illegal in a Python identifier
-        op = re.sub('[^0-9a-zA-Z_]+', '_', op)
         op = _snake_case(op)
-        if op[0].isdigit():
-            op = f'_{op}'
+        return op
 
-        return self._register_name_used(op)
+    def _create_unique_name(self, candidate : str) -> str:
+        # delete all characters that are illegal in a Python identifier
+        candidate = re.sub('[^0-9a-zA-Z_]+', '_', candidate)
+        if candidate[0].isdigit():
+            candidate = f'_{candidate}'
 
-    def _register_name_used(self, op : str) -> str:
-        """
-        Even if a user provides us with a name, we must register that that
-        name is used to prevent duplication of names from further nodes as
-        well as ensure that the name provided does not shadow a builtin.
-        """
-        if op not in self._used_names:
-            self._used_names[op] = 0
-            # Avoid shadowing PyTorch and Python builtins.
-            if not hasattr(torch, op) and \
-               not hasattr(torch.nn.functional, op) and \
-               not hasattr(torch.nn, op) and \
-               not _shadows_builtin_name(op):
-                return op
-        i = self._used_names[op] = self._used_names[op] + 1
-        return f'{op}_{i}'
+        def illegal_shadowing_name(name : str) -> bool:
+            return hasattr(torch, name) or \
+                hasattr(torch.nn.functional, name) or \
+                hasattr(torch.nn, name) or \
+                _shadows_builtin_name(name)
+
+        while candidate in self._used_names or illegal_shadowing_name(candidate):
+            match = re.match(r"(.*)_(\d+)", candidate)
+            if match is None:
+                candidate = candidate + '_1'
+            else:
+                base, num = match.group(1, 2)
+                candidate = f'{base}_{int(num) + 1}'
+
+        self._used_names.setdefault(candidate)
+        return candidate
 
     def python_code(self, root_module: str) -> str:
         """

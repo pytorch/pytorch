@@ -151,12 +151,13 @@ struct GraphFuser {
       AliasDb* aliasDb,
       Block* block,
       FusionCallback callback,
-      Symbol kind)
+      Symbol kind,
+      bool strict_fuser_check = false)
       : block_(block),
         aliasDb_(aliasDb),
         callback_(std::move(callback)),
         kind_(kind),
-        strict_fuser_check_(false) {}
+        strict_fuser_check_(strict_fuser_check) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;
@@ -1169,7 +1170,8 @@ struct GraphFuser {
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(aliasDb_, sub_block, callback_, kind_).run();
+        GraphFuser(aliasDb_, sub_block, callback_, kind_, strict_fuser_check_)
+            .run();
       }
     }
   }
