@@ -153,15 +153,15 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
-    return self.sign() * grad;
+    return self.sgn() * grad;
   } else if (p == 2.0) {
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).type_as(self);
+    self_scaled = self.sgn() * (self.abs() == norm).type_as(self);
     scale_v = grad.clone(at::MemoryFormat::Preserve);
   } else if (p < 2.0) {
-    self_scaled = self.sign() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
   } else {
     self_scaled = self * self.abs().pow(p - 2);

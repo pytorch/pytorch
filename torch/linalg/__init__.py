@@ -286,7 +286,10 @@ dimensions and the value of the `ord` parameter.
 Args:
     input (Tensor): The input tensor. If dim is None, x must be 1-D or 2-D, unless :attr:`ord`
         is None. If both :attr:`dim` and :attr:`ord` are None, the 2-norm of the input flattened to 1-D
-        will be returned.
+        will be returned. Its data type must be either a floating point or complex type. For complex
+        inputs, the norm is calculated on of the absolute values of each element. If the input is
+        complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will be
+        the corresponding downgraded real number type.
 
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): The order of norm.
         inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
