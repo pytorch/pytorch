@@ -589,6 +589,33 @@ terrible spacing
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
 
+    def test_subgraph_uniquename(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, a, b, c, d):
+                add_1 = a + b
+                add_2 = add_1 + c
+                linear_1 = self.linear(add_1)
+                add_3 = add_2 + d
+                add_4 = add_2 + linear_1
+                add_5 = add_3 + add_4
+                return add_5
+
+        a, b, c, d = torch.ones(4), torch.ones(4), torch.ones(4), torch.ones(4)
+        mm = MyModule()
+        traced = symbolic_trace(mm)
+
+        def split_cb(node : torch.fx.Node):
+            if node.name == 'a' or node.name == 'b' or node.name == 'add':
+                return 0
+            else:
+                return 1
+        module_with_submodule = split_module(traced, mm, split_cb)
+        self.assertEqual(module_with_submodule(a, b, c, d), traced(a, b, c, d))
+
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):
             return torch.relu(x)
