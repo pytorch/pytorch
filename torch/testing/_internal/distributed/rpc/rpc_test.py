@@ -606,14 +606,14 @@ class RpcTest(RpcAgentTestFixture):
     def test_rref_proxy_non_exist(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
-        msg = "non_exist is not an attribute of type"
-        with self.assertRaisesRegex(ValueError, msg):
+        msg = "has no attribute \'non_exist\'"
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_sync().non_exist()
 
-        with self.assertRaisesRegex(ValueError, msg):
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_async().non_exist()
 
-        with self.assertRaisesRegex(ValueError, msg):
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.remote().non_exist()
 
     def _test_rref_proxy_tensor(self, dst):
