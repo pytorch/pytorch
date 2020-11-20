@@ -1981,12 +1981,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
       Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
       F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
       F.pow_(-1);
-      if (inplace_is_vmap_compatible(F, gv)) {
-        F.mul_(at::matmul(vh, gv));
-      } else {
-        F = F.mul(at::matmul(vh, gv));
-      }
-      result = at::matmul(v, at::matmul(F, vh));
+      result = at::matmul(v, at::matmul(F * at::matmul(vh, gv), vh));
   } else {
       result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
