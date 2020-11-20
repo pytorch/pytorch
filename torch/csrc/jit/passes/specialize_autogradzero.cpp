@@ -75,8 +75,7 @@ void insertProfileNodesForSpecializeAutogradZero(
 }
 
 void InsertProfileNodesForSpecializeAutogradZero(ProfilingRecord* pr) {
-  insertProfileNodesForSpecializeAutogradZero(
-      pr->profiled_graph_->block(), pr);
+  insertProfileNodesForSpecializeAutogradZero(pr->profiled_graph_->block(), pr);
 }
 
 struct AutogradZeroSpecializer {
