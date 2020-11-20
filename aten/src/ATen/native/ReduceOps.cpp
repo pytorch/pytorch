@@ -839,26 +839,9 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
-              self.scalar_type(), result.scalar_type());
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
-  std::cout << "iter.shape: " << iter.shape() << " iter.nouts: "
-            << iter.noutputs() << " iter.num_output_elements(): "
-            << iter.num_output_elements()
-            << " iter.numel(): "
-            << iter.numel() << std::endl;
-  std::cout << "result: " << result << std::endl;
-  for (auto it = dim.begin(); it < dim.end(); ++it) {
-    std::cout << ">>>>> HHHELLOOWW *it : " << *it << std::endl;
-    TORCH_CHECK(self.size(*it) != 0,
-                "Expected tensor with non-zero reduction dimension. Instead got: ",
-                self.sizes());
-  }
-  std::cout << "result: " << result << std::endl;
-  if (result.numel() == 0)  {
-    std::cout << "iter.numel() == 0 is true\n";
-    return result;
-  }
+  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
   max_values_stub(iter.device_type(), iter);
   return result;
 }
