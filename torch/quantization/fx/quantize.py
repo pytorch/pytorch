@@ -788,11 +788,11 @@ class Quantizer:
         act_post_process_removed_graph = Graph()
         env = {}
 
-        def load_arg_simple(a):
+        def load_arg(a):  # type: ignore
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'output':
-                act_post_process_removed_graph.output(map_arg(node.args[0], load_arg_simple))
+                act_post_process_removed_graph.output(map_arg(node.args[0], load_arg))
                 continue
             if node.op == 'call_module' and \
                is_activation_post_process(self.modules[node.target]):
