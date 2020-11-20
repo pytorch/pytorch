@@ -27,4 +27,3 @@ with open(args.input, 'r') as fin:
             fout.write(line)
         fout.write(')";\n')
         fout.write('\n} // namespace nvfuser_resources\n')
-
