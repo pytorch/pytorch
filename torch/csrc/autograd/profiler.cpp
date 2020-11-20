@@ -313,14 +313,11 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   }
 
   void profileStart() {
-    mark("__start_profile", false);
-    prev_profile_top_level_ = at::isRecordingTopLevelOnly();
-    at::recordTopLevelOnly(false);
+    at::setRecordAllFunctionsLocal();
   }
 
   void profileEnd() {
-    mark("__stop_profile");
-    at::recordTopLevelOnly(prev_profile_top_level_);
+    at::unsetRecordAllFunctionsLocal();
   }
 
  private:
@@ -416,7 +413,6 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   std::mutex state_mutex_;
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
-  bool prev_profile_top_level_ = true;
 
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
   at::CallbackHandle handle_ = 0;
@@ -559,6 +555,7 @@ void enableProfiler(const ProfilerConfig& new_config) {
         state->mark("__cuda_start_event");
     });
   }
+  state->mark("__start_profile", false);
   state->profileStart();
 }
 
@@ -587,6 +584,7 @@ thread_event_lists disableProfiler(c10::optional<ProfilerDisableOptions> profile
     return thread_event_lists();
   }
 
+  state_ptr->mark("__stop_profile");
   // Note that this will erase the underlying events.
   return state_ptr->consolidate();
 }

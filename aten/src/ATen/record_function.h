@@ -301,7 +301,7 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& samplingProb(double sampling_prob) {
-    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob_ <= 1.0,
+    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob <= 1.0,
         "Invalid sampling probability");
     sampling_prob_ = sampling_prob;
     return *this;
@@ -512,19 +512,17 @@ struct TORCH_API RecordFunctionTLS {
   RecordFunctionCallbacks sorted_tls_callbacks_;
 
   bool tls_record_function_enabled_ = true;
-
-  bool tls_record_top_level_only_ = true;
-
-  uint64_t function_call_depth_ = 0;
 };
 
 TORCH_API const RecordFunctionTLS& get_record_function_tls_();
 
 TORCH_API void set_record_function_tls_(const RecordFunctionTLS& tls);
 
-// API to control the logging of non-top-level operators
-TORCH_API bool isRecordingTopLevelOnly();
-TORCH_API void recordTopLevelOnly(bool record);
-TORCH_API bool isTopLevelRecordFunction();
+TORCH_API bool shouldRunRecordFunction();
+TORCH_API void setRecordAllFunctionsLocal();
+TORCH_API void unsetRecordAllFunctionsLocal();
+TORCH_API void setRecordAllFunctionsGlobal();
+TORCH_API void unsetRecordAllFunctionsGlobal();
+TORCH_API void setExtraSamplingProbability(double);
 
 } // namespace at

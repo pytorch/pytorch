@@ -30,6 +30,39 @@ public:
 private:
   std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
+
+struct Stat {
+  uint64_t sum = 0;
+  uint64_t count = 0;
+};
+std::vector<Stat> stats;
+
+void add_stat_(uint64_t stat_id, uint64_t t) {
+  if (stat_id >= stats.size()) {
+    stats.resize(stat_id + 1);
+  }
+  stats[stat_id].sum += t;
+  stats[stat_id].count++;
+}
+
+int counter = 0;
+void maybeprint_() {
+  ++counter;
+  if (counter % 1000000 == 0) {
+    for (auto idx = 0; idx < stats.size(); ++idx) {
+      if (stats[idx].count > 0) {
+        std::cerr << "   " << idx << " -> " << (((float)stats[idx].sum)/stats[idx].count) << " (" << stats[idx].count << ")  total: " << stats[idx].sum << std::endl;
+      }
+    }
+  }
+}
+
+int64_t get_time_() {
+  // clock_gettime is *much* faster than std::chrono implementation on Linux
+  struct timespec t{};
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
+}
 }
 
 OpRegistrationListener::~OpRegistrationListener() {}

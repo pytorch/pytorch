@@ -352,25 +352,8 @@ void enableRecordFunction(bool enable) {
   rf_tls_.tls_record_function_enabled_ = enable;
 }
 
-bool isRecordingTopLevelOnly() {
-  return rf_tls_.tls_record_top_level_only_;
-}
-
-void recordTopLevelOnly(bool record) {
-  rf_tls_.tls_record_top_level_only_ = record;
-}
-
-bool isTopLevelRecordFunction() {
-  return rf_tls_.function_call_depth_ == 0;
-}
-
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
   auto* rf_tls_ptr = &rf_tls_;
-  // Keep track of nestedness of FUNCTION scopes to control the logging of
-  // non-top-level operators
-  if (scope_ == RecordScope::FUNCTION) {
-    rf_tls_ptr->function_call_depth_++;
-  }
   auto& m = manager();
   if (rf_tls_ptr->tls_record_function_enabled_ &&
       (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty())) {
@@ -436,9 +419,6 @@ void RecordFunction::before(
 
 RecordFunction::~RecordFunction() {
   end();
-  if (scope_ == RecordScope::FUNCTION) {
-    rf_tls_.function_call_depth_--;
-  }
 }
 
 void RecordFunction::end() {
@@ -446,6 +426,57 @@ void RecordFunction::end() {
     manager().runEndCallbacks(*this);
   }
   active_ = false;
+}
+
+//
+namespace {
+std::atomic<int> global_record_all_functions_ {0};
+thread_local int tls_record_all_functions_ = 0;
+thread_local int dispatch_tries_left_ = 0;
+double extra_sampling_prob_ = kLowProb;
+}
+void setRecordAllFunctionsGlobal() {
+  ++global_record_all_functions_;
+}
+void unsetRecordAllFunctionsGlobal() {
+  TORCH_CHECK(--global_record_all_functions_ >= 0);
+}
+void setRecordAllFunctionsLocal() {
+  ++tls_record_all_functions_;
+}
+void unsetRecordAllFunctionsLocal() {
+  TORCH_CHECK(--tls_record_all_functions_ >= 0);
+}
+
+void setExtraSamplingProbability(double sampling_prob) {
+  TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob <= 1.0,
+          "Invalid sampling probability");
+  extra_sampling_prob_ = sampling_prob;
+}
+
+bool shouldRunRecordFunction() {
+  if (global_record_all_functions_ > 0) {
+    return true;
+  }
+  if (tls_record_all_functions_ > 0) {
+    return true;
+  }
+
+  if (extra_sampling_prob_ <= kLowProb) {
+    if (dispatch_tries_left_ == 0) {
+      dispatch_tries_left_ = sample_geometric();
+      if (extra_sampling_prob_ < kLowProb) {
+        return (sample_zero_one() < extra_sampling_prob_ / kLowProb);
+      } else {
+        return true;
+      }
+    } else {
+      --dispatch_tries_left_;
+      return false;
+    }
+  } else {
+    return (sample_zero_one() < extra_sampling_prob_);
+  }
 }
 
 } // namespace at
