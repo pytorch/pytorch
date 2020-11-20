@@ -2697,6 +2697,7 @@ class TestNN(NNTestCase):
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
 
+        # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
         with warnings.catch_warnings(record=True) as w:
@@ -2714,6 +2715,7 @@ class TestNN(NNTestCase):
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
 
+        # Test whether loading from older checkpoints works without triggering warnings
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
         with warnings.catch_warnings(record=True) as w:
