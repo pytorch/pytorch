@@ -960,7 +960,7 @@ class Tensor(torch._C._TensorBase):
         of the flattened tensor and the other half to the 1st.
 
         The ``fill_value`` is a value within the dense tensor that is
-        excluded from being included into the sparse tensor.
+        excluded from the sparse tensor.
 
         Examples::
 
@@ -1028,7 +1028,7 @@ class Tensor(torch._C._TensorBase):
         return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
                                        torch.tensor(co, dtype=torch.int32),
                                        torch.tensor(vals, dtype=torch.double),
-                                       torch.tensor(reduction), shape, fill_value)
+                                       torch.tensor(reduction), shape)
 
 
     def _update_names(self, names, inplace):

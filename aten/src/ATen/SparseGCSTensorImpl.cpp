@@ -26,18 +26,17 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type))
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
-      , Scalar()  ) {}
+) {}
 
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type,
                                          at::Tensor pointers, at::Tensor indices, at::Tensor values,
-                                         at::Tensor reduction, Scalar fill_value)
+                                         at::Tensor reduction)
   : TensorImpl(key_set, data_type, values.device()),
     pointers_(std::move(pointers)),
     indices_(std::move(indices)),
     values_(std::move(values)),
-    reduction_(std::move(reduction)),
-    fill_value_(std::move(fill_value)) {}
+    reduction_(std::move(reduction)) {}
 
 void SparseGCSTensorImpl::resize_(IntArrayRef size) {
     
@@ -70,8 +69,7 @@ void SparseGCSTensorImpl::resize_as_(const Tensor& src) {
 }
   
 void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
-                                                      const Tensor& values, const Tensor& reduction,
-                                                    const Scalar& fill_value) {
+                                                      const Tensor& values, const Tensor& reduction) {
   // TODO: perform lots of error checking to check correct type and sizes of inputs. Check
   // SparseTensorImpl::set_indices_and_values_unsafe() for details
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
@@ -97,7 +95,6 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   indices_ = indices;
   values_ = values;
   reduction_ = reduction;
-  fill_value_ = fill_value;
 
   AT_ASSERT(device() == values_.device());    
   AT_ASSERT(indices_.device() == values_.device());

@@ -16,7 +16,6 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   Tensor indices_;
   Tensor values_;
   Tensor reduction_;
-  Scalar fill_value_;
 
   // Data for making index conversion operations faster.
 
@@ -40,8 +39,7 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   
 
   void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
-                                 const Tensor& values, const Tensor& reduction,
-                                 const Scalar& fill_value);
+                                 const Tensor& values, const Tensor& reduction);
 
   std::vector<int> strides0() const { return strides0_; }
   std::vector<int> strides1() const { return strides1_; }
@@ -58,8 +56,7 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
  private :
   
   explicit SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
-                               at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction,
-                               Scalar fill_value);
+                               at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction);
 
   void make_strides(int shape_begin, std::vector<int>& strides, std::vector<int>& dims);
 };

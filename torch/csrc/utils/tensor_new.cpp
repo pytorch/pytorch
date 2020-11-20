@@ -604,7 +604,7 @@ Tensor indexing_tensor_from_data(
 
 Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-      "sparse_gcs_tensor.pointers_indices(PyObject* pointers, PyObject* indices, PyObject* values, PyObject* reduction, IntArrayRef size, Scalar fill_value, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"
+      "sparse_gcs_tensor.pointers_indices(PyObject* pointers, PyObject* indices, PyObject* values, PyObject* reduction, IntArrayRef size,  *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"
   });
   ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -627,7 +627,7 @@ Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor reduction = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(8), r.pyobject(3),
                                            /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    return at::sparse_gcs_tensor(pointers, indices, values, reduction, r.intlist(4), r.scalar(5),
+    return at::sparse_gcs_tensor(pointers, indices, values, reduction, r.intlist(4),
                                  options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseGCS))
                                  .set_requires_grad(r.toBool(10));
   }
