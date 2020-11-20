@@ -52,11 +52,6 @@ C10_DEFINE_bool(
   use_caching_allocator,
   false,
   "Whether to cache allocations between inference iterations");
-C10_DEFINE_int(
-    use_bundled_input,
-    -1,
-    "If set, benchmark will expect the model to have bundled inputs "
-    "and will run on the input with this index. ");
 C10_DEFINE_bool(
   print_output,
   false,
@@ -73,12 +68,14 @@ C10_DEFINE_string(refbackend, "cpu", "what backend to use for model (vulkan, cpu
 
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   float maxValue = 0.0f;
+  float tolerance = 1e-5;
 
   for (const auto& tensor : inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
+  float maxDiff = diff.abs().max().item<float>();
 
-  return diff.abs().max().item<float>() < (2e-6 * maxValue);
+  return maxDiff < (tolerance*maxValue);
 }
 
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
@@ -98,13 +95,12 @@ split(char separator, const std::string& string, bool ignore_empty = true) {
   return pieces;
 }
 
-std::vector<c10::IValue> create_inputs(std::string backend) {
+std::vector<c10::IValue> create_inputs(
+    std::vector<c10::IValue>& refinputs,
+    std::vector<c10::IValue>& inputs,
+    std::string refbackend,
+    std::string backend) {
   if (FLAGS_no_inputs) {
-    return {};
-  }
-
-  if (FLAGS_use_bundled_input >= 0) {
-    // Need to get these after the model is loaded.
     return {};
   }
 
@@ -125,7 +121,6 @@ std::vector<c10::IValue> create_inputs(std::string backend) {
       input_memory_format_list.size(),
       "Input dims and format should have the same number of items.");
 
-  std::vector<c10::IValue> inputs;
   for (size_t i = 0; i < input_dims_list.size(); ++i) {
     auto input_dims_str = split(',', input_dims_list[i]);
     std::vector<int64_t> input_dims;
@@ -161,6 +156,13 @@ std::vector<c10::IValue> create_inputs(std::string backend) {
     const auto input_tensor = torch::rand(
         input_dims,
         at::TensorOptions(input_type).memory_format(input_memory_format));
+
+    if (refbackend == "vulkan") {
+      refinputs.push_back(input_tensor.vulkan());
+    } else {
+      refinputs.push_back(input_tensor);
+    }
+
     if (backend == "vulkan") {
       inputs.push_back(input_tensor.vulkan());
     } else {
@@ -170,7 +172,19 @@ std::vector<c10::IValue> create_inputs(std::string backend) {
 
   if (FLAGS_pytext_len > 0) {
     auto stensor = FLAGS_pytext_len * at::ones({1}, torch::kI64);
-    inputs.push_back(stensor);
+    if (refbackend == "vulkan") {
+      refinputs.push_back(stensor.vulkan());
+    }
+    else{
+      refinputs.push_back(stensor);
+    }
+
+    if (backend == "vulkan") {
+      inputs.push_back(stensor.vulkan());
+    }
+    else{
+      inputs.push_back(stensor);
+    }
   }
 
   return inputs;
@@ -180,49 +194,19 @@ int main(int argc, char** argv) {
   c10::SetUsageMessage(
     "Run accuracy comparison to a reference model for a pytorch model.\n"
     "Example usage:\n"
-    "./cpuref_compare"
-    " --refmodel=<model_file>"
+    "./model_compare"
+    " --refmodel=<ref_model_file>"
     " --model=<model_file>"
-    " --use_bundled_input=0"
     " --iter=20");
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
     std::cerr << "Failed to parse command line flags!" << std::endl;
     return 1;
   }
 
-  std::vector<c10::IValue> refinputs = create_inputs(FLAGS_refbackend);
-  std::vector<c10::IValue> inputs = create_inputs(FLAGS_backend);
-
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
   auto refmodule = torch::jit::load(FLAGS_refmodel);
-
-  if (FLAGS_use_bundled_input >= 0) {
-    auto get_method = module.find_method("get_all_bundled_inputs");
-    if (!get_method) {
-      std::cerr << "Model does not have bundled inputs.  Before saving," << std::endl
-        << "use torch.utils.bundled_inputs.augment_model_with_bundled_inputs." << std::endl;
-      return 1;
-    }
-    auto ref_get_method = refmodule.find_method("get_all_bundled_inputs");
-    if (!ref_get_method) {
-      std::cerr << "Reference Model does not have bundled inputs.  Before saving," << std::endl
-        << "use torch.utils.bundled_inputs.augment_model_with_bundled_inputs." << std::endl;
-      return 1;
-    }
-
-    auto all_inputs = (*get_method)({}).toList();
-    auto ref_all_inputs = (*ref_get_method)({}).toList();
-    if (FLAGS_use_bundled_input >= all_inputs.size() || FLAGS_use_bundled_input >= ref_all_inputs.size()) {
-      // NOTE: This check is only to make the error message nicer.
-      // The get call below does internal bounds checking.
-      std::cerr << "Model has only " << all_inputs.size() << " bundled inputs." << std::endl;
-      std::cerr << "Reference Model has only " << ref_all_inputs.size() << " bundled inputs." << std::endl;
-      return 1;
-    }
-    inputs = all_inputs.get(FLAGS_use_bundled_input).toTuple()->elements();
-  }
 
   module.eval();
   refmodule.eval();
@@ -234,15 +218,22 @@ int main(int argc, char** argv) {
   }
   std::cout << "Running modules." << std::endl;
 
-  const auto refoutput = refmodule.forward(refinputs).toTensor().cpu();
-  const auto output = module.forward(inputs).toTensor().cpu();
+  for(int i=0; i < FLAGS_iter; ++i) {
+    std::vector<c10::IValue> refinputs;
+    std::vector<c10::IValue> inputs;
+    create_inputs(refinputs, inputs, FLAGS_refbackend, FLAGS_backend);
 
-	bool check = almostEqual(refoutput, output);
-	if (check) {
-    std::cout << "Passed!" << std::endl;
-  }
-  else {
-    std::cout << "Failed!" << std::endl;
+    const auto refoutput = refmodule.forward(refinputs).toTensor().cpu();
+    const auto output = module.forward(inputs).toTensor().cpu();
+
+    std::cout << "Run " << i << " ";
+    bool check = almostEqual(refoutput, output);
+    if (check) {
+      std::cout << "Passed!" << std::endl;
+    }
+    else {
+      std::cout << "Failed!" << std::endl;
+    }
   }
 
   return 0;
