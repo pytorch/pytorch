@@ -242,6 +242,7 @@ core_sources_full = [
     "torch/csrc/jit/tensorexpr/block_codegen.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
     "torch/csrc/jit/tensorexpr/mem_arena.cpp",
+    "torch/csrc/jit/tensorexpr/reduction.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
     "torch/csrc/jit/tensorexpr/tensor.cpp",
     "torch/csrc/jit/tensorexpr/types.cpp",
@@ -549,6 +550,7 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/comm.cpp",
     "torch/lib/c10d/default_comm_hooks.cpp",
+    "torch/lib/c10d/frontend.cpp",
     "torch/lib/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",

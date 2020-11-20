@@ -80,7 +80,7 @@ def generate_code(ninja_global=None,
 
     if subset == "python" or not subset:
         gen_annotated(
-            declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
             python_install_dir,
             autograd_dir)
 

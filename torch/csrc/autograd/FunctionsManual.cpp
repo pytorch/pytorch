@@ -9,7 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
-#include <ATen/DimVector.h>
+#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 
@@ -146,10 +146,21 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const T
             x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1)};
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
+Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scalar> & p_, const Tensor& norm) {
+  return norm_backward(grad, self, p_, norm, {}, true);
+}
+
+Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
+
+  if (!keepdim && self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, ndim);
+    norm = unsqueeze_multiple(norm, dim, ndim);
+  }
+
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
@@ -158,8 +169,13 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).type_as(self);
-    scale_v = grad.clone(at::MemoryFormat::Preserve);
+    Tensor is_eq_max = (self.abs() == norm).type_as(self);
+    self_scaled = self.sign() * is_eq_max;
+    Tensor nb_max = is_eq_max.count_nonzero(dim);
+    if (self.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    scale_v = grad / nb_max;
   } else if (p < 2.0) {
     self_scaled = self.sign() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
@@ -170,25 +186,6 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
   return self_scaled * scale_v;
-}
-
-Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
-  IntArrayRef sizes = self.sizes();
-  if (!keepdim && self.dim() != 0) {
-    if (dim.size()==1) {
-      grad = grad.unsqueeze(dim[0]);
-      norm = norm.unsqueeze(dim[0]);
-    } else {
-      auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, sizes.size());
-      for (size_t i = 0; i < sizes.size(); i++){
-        if (dims_to_unsqueeze[i]) {
-          grad = grad.unsqueeze(i);
-          norm = norm.unsqueeze(i);
-        }
-      }
-    }
-  }
-  return norm_backward(grad, self, p_, norm);
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
@@ -1022,13 +1019,58 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// See NOTE: [vmap-incompatible in-place operations] for what it means for an
+// in-place operation to be incompatible with vmap.
+//
+// If an in-place operation used in a backward formula is vmap-incompatible,
+// then as developers we have the following options:
+//
+// - If the in-place operation directly followed the creation of a tensor with
+//   a factory function like at::zeros(...), we should replace the factory with a
+//   corresponding grad.new_zeros(...) call. The grad.new_zeros(...) call
+//   propagates the batch dims to the resulting tensor.
+//   For example:
+//     Before: at::zeros(input.sizes(), grad.options()).copy_(grad)
+//     After:  grad.new_zeros(input.sizes()).copy_(grad)
+//
+// - If the in-place operation followed some sequence of operations, if the
+//   we want to be able to vmap over the backward formula as-is (this is
+//   usually the case for simple (<15loc) backward formulas), then use
+//   inplace_is_vmap_compatible to guard the operation. For example:
+//             c = a * b
+//     Before: c.mul_(grad)
+//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//
+// - If we don't want to vmap directly over the backward formula (e.g., if the
+//   backward formula is too complicated or has a lot of vmap-incompatible
+//   operations, then register the backward formula as an operator and eventually
+//   write a batching rule for it.
+static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
+  const auto* other_batched = at::maybeGetBatchedImpl(other);
+  if (!other_batched) {
+    return true;
+  }
+  const auto* self_batched = at::maybeGetBatchedImpl(self);
+  if (!self_batched) {
+    // self is not batched but other is batched
+    return false;
+  }
+  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
+  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
+  return self_levels == (self_levels | other_levels);
+}
+
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  gI *= (grad * grad_output);
+  if (inplace_is_vmap_compatible(gI, grad)) {
+    gI *= (grad * grad_output);
+  } else {
+    gI = gI * (grad * grad_output);
+  }
 
   if (isDefined(weight)) {
     gI *= *weight;
@@ -1045,7 +1087,11 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  ggO *= grad;
+  if (inplace_is_vmap_compatible(ggO, grad)) {
+    ggO *= grad;
+  } else {
+    ggO = ggO * grad;
+  }
 
   if (isDefined(weight)) {
     ggO *= *weight;
@@ -1932,14 +1978,23 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
       Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
       F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
       F.pow_(-1);
-      F.mul_(at::matmul(vt, gv));
+      if (inplace_is_vmap_compatible(F, gv)) {
+        F.mul_(at::matmul(vt, gv));
+      } else {
+        F = F.mul(at::matmul(vt, gv));
+      }
       result = at::matmul(v, at::matmul(F, vt));
   } else {
       result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (glambda.defined()) {
-      result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
+      auto tmp = at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt);
+      if (inplace_is_vmap_compatible(result, tmp)) {
+        result.add_(tmp);
+      } else {
+        result = result + tmp;
+      }
   }
   return result.add(result.transpose(-2, -1)).mul_(0.5);
 }

@@ -590,13 +590,6 @@ class Tensor(torch._C._TensorBase):
         return torch.floor_divide(other, self)
 
     __neg__ = _C._TensorBase.neg
-
-    __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
-    __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
-    __lt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.lt)
-    __le__ = _wrap_type_error_to_not_implemented(_C._TensorBase.le)
-    __gt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.gt)
-    __ge__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ge)
     __abs__ = _C._TensorBase.abs
 
     def __len__(self):
