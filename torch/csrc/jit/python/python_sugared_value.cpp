@@ -228,8 +228,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
                                              "_cuda_setDevice",
                                              "_cuda_getDeviceIndex",
                                              "_cuda_getDeviceCount",
-                                             "_cuda_setStream",
-                                             "current_stream_id"};
+                                             "_cuda_setStream"};
 
   for (auto op : cuda_ops) {
     if (op == field) {
