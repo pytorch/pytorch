@@ -2663,6 +2663,11 @@ class TestNN(NNTestCase):
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
         self.assertTrue(len(w) == 0)
 
+        with warnings.catch_warnings(record=True) as w:
+            mod.train()
+            mod.eval()
+        self.assertTrue(len(w) == 0)
+
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterList is not supported"):
             torch.nn.utils.weight_norm(mod, "0")
@@ -2671,9 +2676,49 @@ class TestNN(NNTestCase):
             mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         self.assertTrue(len(w) == 0)
 
+        with warnings.catch_warnings(record=True) as w:
+            mod.train()
+            mod.eval()
+        self.assertTrue(len(w) == 0)
+
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterDict is not supported"):
             torch.nn.utils.weight_norm(mod, "b")
+
+    def test_parameterlistdict_pickle(self):
+        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        del m._initialized
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        del m._initialized
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
+
+        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        del m._forward_pre_hooks, m._state_dict_hooks, m._load_state_dict_pre_hooks, m._non_persistent_buffers_set
+        with warnings.catch_warnings(record=True) as w:
+            m = pickle.loads(pickle.dumps(m))
+        self.assertTrue(len(w) == 0)
 
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
