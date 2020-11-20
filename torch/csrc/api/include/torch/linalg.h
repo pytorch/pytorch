@@ -44,6 +44,14 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
 }
 
+inline Tensor tensorinv(const Tensor& self, int64_t ind) {
+  return torch::linalg_tensorinv(self, ind);
+}
+
+inline Tensor& tensorinv_out(Tensor& result,const Tensor& self, int64_t ind) {
+  return torch::linalg_tensorinv_out(result, self, ind);
+}
+
 inline Tensor tensorsolve(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
   return torch::linalg_tensorsolve(self, other, dims);
 }
@@ -102,6 +110,24 @@ inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermiti
 
 inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+/// Computes the inverse of a tensor
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.tensorinv
+///
+/// Example:
+/// ```
+/// auto a = torch::eye(4*6).reshape({4, 6, 8, 3});
+/// int64_t ind = 2;
+/// auto ainv = torch::linalg::tensorinv(a, ind);
+/// ```
+inline Tensor tensorinv(const Tensor& self, int64_t ind) {
+  return detail::tensorinv(self, ind);
+}
+
+inline Tensor& tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
+  return detail::tensorinv_out(result, self, ind);
 }
 
 /// Computes a tensor `x` such that `tensordot(input, x, dims=x.dim()) = other`.

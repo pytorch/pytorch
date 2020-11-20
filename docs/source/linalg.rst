@@ -16,4 +16,5 @@ Functions
 .. autofunction:: det
 .. autofunction:: matrix_rank
 .. autofunction:: norm
+.. autofunction:: tensorinv
 .. autofunction:: tensorsolve
