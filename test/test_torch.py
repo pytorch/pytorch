@@ -13109,31 +13109,32 @@ class TestTorchDeviceType(TestCase):
     def test_reduction_empty(self, device):
         fns_to_test = [
             # name, function, identity, kwargs
-            ('amax', torch.amax, None, {})#,
-            # ('amin', torch.amin, None, {}),
-            # ('argmax', torch.argmax, None, {'dtype': torch.int64}),
-            # ('argmin', torch.argmin, None, {'dtype': torch.int64}),
+            ('amax', torch.amax, None, {}),
+            ('amin', torch.amin, None, {}),
+            ('argmax', torch.argmax, None, {'dtype': torch.int64}),
+            ('argmin', torch.argmin, None, {'dtype': torch.int64}),
 
-            # ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
-            # ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
-            # ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
-            # ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, None, {}),
-            # ('mode', torch.mode, None, {}),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs).values, None, {}),
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs).values, None, {}),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs).values, None, {}),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs).values, None, {}),
+            ('mode', torch.mode, None, {}),
 
-            # ('prod', torch.prod, 1., {}),
-            # ('sum', torch.sum, 0., {}),
-            # ('norm', torch.norm, 0., {}),
-            # ('mean', torch.mean, nan, {}),
-            # ('var', torch.var, nan, {}),
-            # ('std', torch.std, nan, {}),
-            # ('logsumexp', torch.logsumexp, -inf, {}),
+            ('prod', torch.prod, 1., {}),
+            ('sum', torch.sum, 0., {}),
+            ('norm', torch.norm, 0., {}),
+            ('mean', torch.mean, nan, {}),
+            ('var', torch.var, nan, {}),
+            ('std', torch.std, nan, {}),
+            ('logsumexp', torch.logsumexp, -inf, {}),
         ]
 
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
 
         for fn in [torch.max, torch.min, torch.argmax, torch.argmin]:
-            ident_err = 'operation does not have an identity'
+            ident_err = 'Expected tensor with non-zero'
+            print("function: ", fn)
             self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
 
         # median and nanmedian have been updated to follow the new convention for empty tensors
