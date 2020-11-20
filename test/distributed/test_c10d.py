@@ -25,6 +25,7 @@ import torch.nn.functional as F
 import torch.distributed as c10d
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
+import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 from torch.nn.parallel import DistributedDataParallel
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
@@ -3504,7 +3505,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def fp16_compress_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
             return default.fp16_compress_hook(process_group, bucket)
 
-        for hook in [allreduce_hook, fp16_compress_hook]:
+        def powerSGD_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            return powerSGD.powerSGD_hook(process_group, bucket)
+
+        for hook in [allreduce_hook, fp16_compress_hook, powerSGD_hook]:
             # Get GPU model with the hook registered.
             gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, hook, gradient_as_bucket_view)
 

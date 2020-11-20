@@ -6,7 +6,8 @@ from torch.fx.experimental.subgraph_creation_example import split_module
 import operator
 from torch.fx.experimental.partitioner_utils import Partition, \
     Device, PartitionerConfig, get_partition_to_latency_mapping,\
-    get_latency_of_partitioned_graph, NodeLatency, get_extra_size_of
+    get_latency_of_partitioned_graph, NodeLatency, get_extra_size_of, \
+    PartitionMode
 
 class DAGNode():
     """
@@ -53,6 +54,9 @@ class PartitionResult(NamedTuple):
     module_with_submodules: GraphModule
 
 """Followings are some helper functions for partition manipulation"""
+def reset_partition_device(partitions):
+    for partition in partitions:
+        partition.logical_device_ids = []
 
 def combine_two_partitions(
     partition_0: Partition,
@@ -151,12 +155,12 @@ def get_device_to_partitions_mapping(partitions: List[Partition], devices: List[
         all_nodes: Set[Node] = set()
         for p in partitions:
             all_nodes = all_nodes.union(p.nodes)
+        if len(all_nodes) == 0:
+            return partition.used_mem_bytes
+        all_nodes = all_nodes.union(partition.nodes)
         extra_size_needed = 0
         for node in partition.nodes:
-            if node in all_nodes or node.op in {'placeholder', 'get_attr'}:
-                continue
-            else:
-                extra_size_needed += get_extra_size_of(node, all_nodes)
+            extra_size_needed += get_extra_size_of(node, all_nodes)
         return extra_size_needed
 
     def find_device_for(partition: Partition):
@@ -267,15 +271,20 @@ class Partitioner:
         elif total_size_of_graph > sum([d.available_mem_bytes for d in self.devices]):
             raise RuntimeError('Devices have no enough memory for the module')
         else:
-            if partitioner_config.is_sparse_nn:
+            if partitioner_config.mode == PartitionMode.sparse_nn:
                 available_mem_bytes = self.devices[0].available_mem_bytes
                 if not all(device.available_mem_bytes == available_mem_bytes for device in self.devices):
                     raise RuntimeError('All devices must have same memory size!')
                 # sparse_nn_partition only support same memory size
                 # TODO: add different size support for sparse_nn_partition
                 self.sparse_nn_partition(available_mem_bytes)
-            elif partitioner_config.is_cost_aware:
+            elif partitioner_config.mode == PartitionMode.cost_aware:
                 self.cost_aware_partition(
+                    partitioner_config.transfer_rate_bytes_per_sec,
+                    partitioner_config.node_to_latency_mapping
+                )
+            elif partitioner_config.mode == PartitionMode.kl_based:
+                self.kl_based_partition(
                     partitioner_config.transfer_rate_bytes_per_sec,
                     partitioner_config.node_to_latency_mapping
                 )
@@ -623,6 +632,7 @@ class Partitioner:
                 if check_dependency(partitions[-1]):
                     return float('inf')
                 # Check if the modified partition list can be mapped to devices after combination
+                reset_partition_device(partitions)
                 found_deivce = get_device_to_partitions_mapping(partitions, self.devices)
                 if not found_deivce:
                     return float('inf')
@@ -663,15 +673,16 @@ class Partitioner:
                     if new_cost <= cost:
                         partition_pair = [i, j]
                         cost = new_cost
+                    reorganize_partitions(self.partitions)
             # If a partition pair is found, combine them
             if len(partition_pair) != 0:
                 p0 = self.partitions[partition_pair[0]]
                 p1 = self.partitions[partition_pair[1]]
                 combine_two_partitions(p0, p1, self.partitions)
-                get_bfs_level_partition(self.partitions)
-                get_device_to_partitions_mapping(self.partitions, self.devices)
-                return True
-            return False
+            get_bfs_level_partition(self.partitions)
+            reset_partition_device(self.partitions)
+            get_device_to_partitions_mapping(self.partitions, self.devices)
+            return len(partition_pair) != 0
 
         for node in self.graph_module.graph.nodes:
             if node.op not in {'placeholder', 'get_attr', 'output'}:
@@ -680,7 +691,6 @@ class Partitioner:
         set_parents_and_children(self.partitions)
         # Get bfs level for each partition
         get_bfs_level_partition(self.partitions)
-
         find_combination = True
         while find_combination:
             # Search for a pair partition to generate the minimum new cost,
@@ -693,4 +703,137 @@ class Partitioner:
         reorganize_partitions(self.partitions)
         # Set up node to partition mapping
         self.node_to_partition = get_node_to_partition_mapping(self.partitions)
+        return
+
+    def kl_based_partition(
+        self,
+        transfer_rate_bytes_per_sec: float,
+        node_to_latency_mapping: Dict[Node, NodeLatency]
+    ) -> None:
+        """This function is a cost aware partition based
+           on Kernighan-Lin algorithm.
+           First, the graph is partitioned using size_based_partition.
+           Then, each node is swapped with any other node in a different
+           partition, and at the same time, the cost is estimated after
+           the swapping.
+           For example, we have nodes n0, n1, n2, n3 and n4.
+           Using size_based_partition, n0 and n1 are in Partition p0.
+           n2, n3 and n4 in Partition p1. The current cost is esimated.
+           We first tried using n0 to swap with n2 from the other partiton.
+           Then we found swapping n0 and n2 shows a lower cost
+           than the current cost and it is the minimum among other pairs like
+           (n0, None)(This means moving n0 to Partition without swapping other nodes),
+           (n0, n3) and (n0, n4). We swap n0 and n2 and set the new cost
+           as the current cost.
+           Then We repeat this process for all the other nodes until all swapping pairs
+           are tried.
+        """
+        def swap_nodes(n0, n1, p0, p1):
+            # Either n0 or n1 could be None
+            # That means we simply move the node
+            # to another partition
+            if n0 is not None:
+                p0.remove_node(n0)
+                p1.add_node(n0)
+            if n1 is not None:
+                p0.add_node(n1)
+                p1.remove_node(n1)
+
+        def try_swap_nodes(n0, n1, p0, p1, node_to_latency_mapping, transfer_rate_per_sec):
+            cost = float('inf')
+            swap_nodes(n0, n1, p0, p1)
+            # Reorganize partitions after swapping
+            reorganize_partitions(self.partitions)
+            # Check if there is a circular dependency after swapping
+            if (not check_dependency(p0)) and (not check_dependency(p1)):
+                reset_partition_device(self.partitions)
+                partition_to_latency_mapping = get_partition_to_latency_mapping(
+                    self.partitions,
+                    node_to_latency_mapping
+                )
+                # Check if all partitions can be mapped to logical devices after swapping
+                found_device = get_device_to_partitions_mapping(self.partitions, self.devices)
+                if not found_device:
+                    cost = float('inf')
+                else:
+                    cost = get_latency_of_partitioned_graph(
+                        self.partitions,
+                        partition_to_latency_mapping,
+                        transfer_rate_bytes_per_sec
+                    )
+            # Swap back and reset all partitions back to original
+            swap_nodes(n1, n0, p0, p1)
+            reorganize_partitions(self.partitions)
+            reset_partition_device(self.partitions)
+            get_device_to_partitions_mapping(self.partitions, self.devices)
+            return cost
+
+        def swap_node_to_partition(node, p0, p1, node_to_latency_mapping, transfer_rate_per_sec):
+            """This function helps to swap one node from partition p0
+               with all the nodes in another partition p1
+            """
+            p1_nodes = list(p1.nodes) + [None]
+            min_cost = float('inf')
+            node_pair: List[Node] = []
+            for n1 in p1_nodes:
+                # Ignore the node if it is not a op node
+                if n1 is not None and n1.op in {'placeholder', 'get_attr'}:
+                    continue
+                # Try swapping node in p0 with n1 in p1
+                cost = try_swap_nodes(node, n1, p0, p1, node_to_latency_mapping, transfer_rate_per_sec)
+                if cost < min_cost:
+                    node_pair = [node, n1]
+                    min_cost = cost
+            return cost, node_pair
+
+        # First use size_base_partition
+        self.size_based_partition()
+        partition_to_latency_mapping = get_partition_to_latency_mapping(
+            self.partitions,
+            node_to_latency_mapping
+        )
+        # Calculate the cost of the partitions
+        cost = get_latency_of_partitioned_graph(
+            self.partitions,
+            partition_to_latency_mapping,
+            transfer_rate_bytes_per_sec
+        )
+        # Keep tracking the node pair that shows the better cost
+        node_pair: List[Node] = []
+        # Keep tracking the partition pair of node pair
+        partition_pair: List[Partition] = []
+        # Collect all the op nodes from the graph
+        op_nodes = []
+        for n in self.graph_module.graph.nodes:
+            if n.op not in {'placeholder', 'get_attr', 'output'}:
+                op_nodes.append(n)
+        for node in op_nodes:
+            # Find which partition the current node belongs
+            p0_index = self.node_to_partition[node]
+            p0 = self.partitions[p0_index]
+            # Go through all the other partitions to swap
+            # with other nodes from those partitions
+            for p1_index, _ in enumerate(self.partitions):
+                if p0_index != p1_index:
+                    p1 = self.partitions[p1_index]
+                    new_cost, new_node_pair = swap_node_to_partition(
+                        node,
+                        p0,
+                        p1,
+                        node_to_latency_mapping,
+                        transfer_rate_bytes_per_sec
+                    )
+                    # Update cost and node pair
+                    if new_cost < cost:
+                        cost = new_cost
+                        node_pair = new_node_pair
+                        partition_pair = [p0, p1]
+            # Do the swapping after trying all the nodes from a partition
+            if len(node_pair) != 0:
+                swap_nodes(node_pair[0], node_pair[1], partition_pair[0], partition_pair[1])
+                reorganize_partitions(self.partitions)
+                get_device_to_partitions_mapping(self.partitions, self.devices)
+        reorganize_partitions(self.partitions)
+        # Mapping the device to the partition
+        get_device_to_partitions_mapping(self.partitions, self.devices)
         return
