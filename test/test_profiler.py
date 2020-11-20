@@ -139,6 +139,7 @@ class TestProfiler(TestCase):
         def test_output_fn(p):
             print(p.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
+            # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
             called_num[0] += 1
 
         with profile(use_cuda=True, use_kineto=True):

@@ -121,21 +121,22 @@ class profile(object):
         self.with_stack = with_stack
         self.step_num = 0
         self.profiler = None
+        self.step_rec_fn = None
 
         if not self.enable_pred:
             print("Warning: using profiler without enable predicate may result in the skewed " +
                 "results, use enable_pred to control the warmup time")
 
     def __enter__(self):
-        self.step_num += 1
-        if self.enable_pred:
-            self._run_actions(self.step_num)
-        else:
+        self.next_step()
+        if not self.enable_pred:
             self._run_action(EnablePred.Action.START_WARMUP)
             self._run_action(EnablePred.Action.START_TRACE)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.step_rec_fn:
+            self.step_rec_fn.__exit__(None, None, None)
         if self.profiler:
             if self.enable_pred:
                 if self.enable_pred._num_state(self.step_num) == EnablePred.State.WARMUP:
@@ -143,9 +144,14 @@ class profile(object):
             self._run_action(EnablePred.Action.STOP_TRACE, keep_profiler=True)
 
     def next_step(self):
+        if self.step_rec_fn:
+            self.step_rec_fn.__exit__(None, None, None)
         self.step_num += 1
         if self.enable_pred:
             self._run_actions(self.step_num)
+
+        self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
+        self.step_rec_fn.__enter__()
 
     def export_chrome_trace(self, path:str):
         assert self.profiler
