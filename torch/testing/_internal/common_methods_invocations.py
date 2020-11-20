@@ -440,15 +440,6 @@ if TEST_SCIPY:
                        dtypes=floating_types(),
                        dtypesIfCPU=floating_types_and(torch.bfloat16),
                        dtypesIfCUDA=floating_types_and(torch.half)),
-        UnaryUfuncInfo('erfinv',
-                       ref=scipy.special.erfinv,
-                       decorators=(precisionOverride({torch.float16: 1e-2,
-                                                      torch.bfloat16: 1e-2,
-                                                      torch.float32: 1e-4}),),
-                       dtypes=floating_types(),
-                       domain=(-1, 1),
-                       dtypesIfCPU=floating_types_and(torch.bfloat16),
-                       dtypesIfCUDA=floating_types_and(torch.half)),
     ]
     op_db = op_db + op_db_scipy_reference
 
