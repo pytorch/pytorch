@@ -108,7 +108,7 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
 
   accscalar_t x = static_cast<accscalar_t>(in);
   if (x == 0) {
-    return static_cast<scalar_t>(-INFINITY);
+    return std::copysign(static_cast<scalar_t>(INFINITY), -x);
   }
 
   bool x_is_integer = x == ::floor(x);

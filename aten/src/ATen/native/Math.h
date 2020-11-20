@@ -279,7 +279,7 @@ static inline float trigamma(float x) {
 static inline double calc_digamma(double x) {
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
-    return -INFINITY;
+    return std::copysign(INFINITY, -x);
   }
 
   int x_is_integer = x == floor(x);
@@ -326,7 +326,7 @@ static inline double calc_digamma(double x) {
 static inline float calc_digamma(float x) {
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
-    return -INFINITY;
+    return std::copysign(INFINITY, -x);
   }
 
   int x_is_integer = x == floorf(x);
