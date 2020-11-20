@@ -108,14 +108,14 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
 
   accscalar_t x = static_cast<accscalar_t>(in);
   if (x == 0) {
-    return static_cast<scalar_t>(INFINITY);
+    return static_cast<scalar_t>(-INFINITY);
   }
 
   bool x_is_integer = x == ::floor(x);
   accscalar_t result = 0;
   if (x < 0) {
     if (x_is_integer) {
-      return static_cast<scalar_t>(INFINITY);
+      return static_cast<scalar_t>(NAN);
     }
     // Rounding errors in tan's input can really affect the output
     // for extreme values, so we always perform this computation in double.

@@ -279,13 +279,13 @@ static inline float trigamma(float x) {
 static inline double calc_digamma(double x) {
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
-    return INFINITY;
+    return -INFINITY;
   }
 
   int x_is_integer = x == floor(x);
   if (x < 0) {
     if (x_is_integer) {
-      return INFINITY;
+      return NAN;
     }
     return calc_digamma(1 - x) - M_PI / tan(M_PI * x);
   }
@@ -326,13 +326,13 @@ static inline double calc_digamma(double x) {
 static inline float calc_digamma(float x) {
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
-    return INFINITY;
+    return -INFINITY;
   }
 
   int x_is_integer = x == floorf(x);
   if (x < 0) {
     if (x_is_integer) {
-      return INFINITY;
+      return NAN;
     }
     // Avoid rounding errors for `tan`'s input.
     // Those make a big difference at extreme values.
