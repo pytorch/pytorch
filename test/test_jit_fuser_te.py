@@ -1468,7 +1468,7 @@ class TestTEFuser(JitTestCase):
         binary_ops = [
             torch.pow,
         ]
-        devices = ['cuda']
+        devices = ['cuda'] if torch.cuda.is_available() else []
         # Maybe we should split this into separate tests to speed it up by
         # only using  scalar values relevant to particular ops
         scalars = [1.5, 3, 0, -2.0, -1]
