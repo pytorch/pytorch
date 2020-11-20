@@ -609,7 +609,7 @@ terrible spacing
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
 
         mod = symbolic_trace(Test())
-        mod._to_folder('foo', 'Foo')
+        mod.to_folder('foo', 'Foo')
         from foo import Foo
         t = torch.randn(2, 2)
         self.assertEqual(Foo()(t), mod(t))

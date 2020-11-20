@@ -1,8 +1,9 @@
 import torch
+import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
 import linecache
-from typing import Type, Dict, List, Any, Union
+from typing import Type, Dict, List, Any, Union, Optional
 from .graph import Graph
 import copy
 import sys
@@ -10,6 +11,7 @@ import traceback
 import math
 from pathlib import Path
 import os
+import warnings
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -198,7 +200,11 @@ class GraphModule(torch.nn.Module):
         self.recompile()
 
 
-    def _to_folder(self, folder: Union[str, os.PathLike], module_name="FxModule"):
+    def to_folder(self, folder: Union[str, os.PathLike], module_name="FxModule"):
+        """
+        Dumps out module to `folder` with `module_name` so that it can be
+        imported with `from <folder> import <module_name>`
+        """
         folder = Path(folder)
         Path(folder).mkdir(exist_ok=True)
         torch.save(self.state_dict(), folder / 'state_dict.pt')
@@ -211,8 +217,7 @@ class {module_name}(torch.nn.Module):
         super().__init__()
 """
 
-        def _gen_model_repr(module_name: str, module: torch.nn.Module):
-            import torch.nn as nn
+        def _gen_model_repr(module_name: str, module: torch.nn.Module) -> Optional[str]:
             safe_reprs = [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d]
             if type(module) in safe_reprs:
                 return f"{module.__repr__()}"
@@ -246,7 +251,8 @@ class {module_name}(torch.nn.Module):
         init_file.write_text('from .module import *')
 
         if len(blobified_modules) > 0:
-            print("Was not able to save the following children modules as reprs - saved as pickled files instead: ", blobified_modules)
+            warnings.warn("Was not able to save the following children modules as reprs -"
+                          f"saved as pickled files instead: {blobified_modules}")
 
     def recompile(self) -> None:
         """
