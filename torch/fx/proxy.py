@@ -105,7 +105,7 @@ class TraceError(ValueError):
     pass
 
 
-def _create_friendly_names(a: Any, frames_up : int):
+def _create_friendly_names(args: Tuple[Any], kwargs: Dict[str, Any], frames_up : int):
     """
     Given an args/kwargs object, go through and try to pull out the names for
     each contained Proxy from the Python interpreter frame `frames_up` above
@@ -156,8 +156,8 @@ def _create_friendly_names(a: Any, frames_up : int):
             if found_name is not None and not a.node.name.startswith(found_name):
                 a.node.name = a.tracer.graph._create_unique_name(found_name)
 
-    _assign_friendly_name(a)
-
+    _assign_friendly_name(args)
+    _assign_friendly_name(kwargs)
 
 # Proxy objects are stand-in values for normal values in a PyTorch computation.
 # Instead of performing compute they record computation into Graph.
@@ -183,7 +183,7 @@ class Proxy:
         return Attribute(self, k)
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
-        _create_friendly_names(args, 1)
+        _create_friendly_names(args, kwargs, 1)
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)
 
     def __iter__(self) -> Iterable['Proxy']:
@@ -206,8 +206,7 @@ class Proxy:
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
-        _create_friendly_names(args, 1)
-        _create_friendly_names(kwargs, 1)
+        _create_friendly_names(args, kwargs, 1)
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
@@ -230,7 +229,7 @@ class Attribute(Proxy):
         return self._node
 
     def __call__(self, *args, **kwargs):
-        _create_friendly_names(args, 1)
+        _create_friendly_names(args, kwargs, 1)
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
 for method in magic_methods:
@@ -238,8 +237,7 @@ for method in magic_methods:
         def impl(*args, **kwargs):
             tracer = args[0].tracer
             target = getattr(operator, method)
-            _create_friendly_names(args, 1)
-            _create_friendly_names(kwargs, 1)
+            _create_friendly_names(args, kwargs, 1)
             return tracer.create_proxy('call_function', target, args, kwargs)
         impl.__name__ = method
         as_magic = f'__{method}__'

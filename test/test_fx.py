@@ -285,6 +285,24 @@ class TestFX(JitTestCase):
         assert (a - d).abs().max() < 2
         self.assertEqual(d, e)
 
+    def test_friendly_names(self):
+        class FriendlyNameTest(torch.nn.Module):
+            def forward(self, x):
+                a = x(x)
+                b = torch.relu(a)
+                c = x.relu(b)
+                return torch.neg(c)
+
+        traced = symbolic_trace(FriendlyNameTest())
+        target_to_expected_name = {
+            '__call__': 'a',
+            torch.relu: 'b',
+            'relu' : 'c'
+        }
+        for node in traced.graph.nodes:
+            if node.target in target_to_expected_name:
+                self.assertEqual(node.name, target_to_expected_name[node.target])
+
     def test_unpack(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
