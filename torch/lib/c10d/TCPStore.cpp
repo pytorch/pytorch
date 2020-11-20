@@ -16,7 +16,7 @@ namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETED };
+enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE_KEY };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
@@ -230,7 +230,7 @@ void TCPStoreDaemon::query(int socket) {
   } else if (qt == QueryType::GETNUMKEYS) {
     getNumKeysHandler(socket);
 
-  } else if (qt == QueryType::DELETED) {
+  } else if (qt == QueryType::DELETE_KEY) {
     deleteHandler(socket);
 
   } else {
@@ -422,7 +422,7 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 
 bool TCPStore::deleteKey(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETED);
+  tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE_KEY);
   tcputil::sendString(storeSocket_, regKey, true);
   auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
   return (numDeleted == 1);
