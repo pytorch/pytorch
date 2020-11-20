@@ -304,8 +304,8 @@ Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
 
-Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
-Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
+Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, digamma_stub); }
+Tensor digamma(const Tensor& self) { return unary_op_impl_float(self, digamma_stub); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
 Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, reciprocal_stub); }
@@ -602,16 +602,18 @@ Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  at::polygamma_out(result, n, self);
-  return result;
+  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
+  Tensor result;
+  auto iter = TensorIterator::unary_float_op(result, self);
+  polygamma_stub(iter.device_type(), iter, n);
+  return iter.output();
 }
 Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  auto iter = TensorIterator::unary_op(result, self);
+  auto iter = TensorIterator::unary_float_op(result, self);
   polygamma_stub(iter.device_type(), iter, n);
   return result;
 }
