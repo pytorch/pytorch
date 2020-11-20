@@ -53,10 +53,10 @@ Engine& PythonEngine::get_python_engine() {
 }
 
 void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
-  // Increment thread usage count before acquiring the GIL
-  if (should_increment) {
-    increment_non_reentrant_thread_count();
-  }
+  //Ignore `should_increment` option, as PythonEngine device threads should never be destroyed
+  // (as Python runtime most likely is invalid during the destruction of singletons/global variables
+  (void)should_increment;
+
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
@@ -64,10 +64,6 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
   pybind11::gil_scoped_release no_gil;
   Engine::thread_init(device, ready_queue, false);
 
-  if (should_increment) {
-    // Decrement the count during shutdown if we incremented earlier.
-    decrement_non_reentrant_thread_count();
-  }
 }
 
 void PythonEngine::thread_on_exception(

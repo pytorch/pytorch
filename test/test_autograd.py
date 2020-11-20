@@ -4031,26 +4031,6 @@ class TestAutograd(TestCase):
         b.data = a
         self.assertTrue(b_id_saved == id(b))
 
-    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
-    def test_thread_shutdown(self):
-        code = """import torch
-from torch.autograd import Function
-class MyFunction(Function):
-    @staticmethod
-    def forward(ctx, x):
-        return x
-
-    @staticmethod
-    def backward(ctx, grad):
-        return grad
-
-for shape in [(1,), ()]:
-    v = torch.ones(shape, requires_grad=True)
-    MyFunction.apply(v).backward()
-"""
-        s = TestCase.runWithPytorchAPIUsageStderr(code)
-        self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
-
     @unittest.skipIf(IS_MACOS, "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941")
     def test_deep_reentrant(self):
 
