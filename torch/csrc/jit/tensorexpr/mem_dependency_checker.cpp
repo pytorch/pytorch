@@ -609,51 +609,6 @@ void MemDependencyChecker::visit(const FunctionCall* v) {
   currentScope_->accesses_.push_back(call);
 }
 
-void MemDependencyChecker::visit(const ReduceOp* v) {
-  auto indicesScope =
-      std::make_shared<Scope>(currentScope_->block, currentScope_);
-  currentScope_ = indicesScope;
-
-  for (const Expr* ind : v->output_args()) {
-    ind->accept(this);
-  }
-
-  const Var* var = v->accumulator()->base_handle();
-
-  // ReduceOps are functionally Loads, and the distinction isn't meaningful so
-  // just record them as Loads. They get lowered directly to load during
-  // prepareForCodegen anyway.
-  auto load = std::make_shared<AccessInfo>(
-      nextAccess_++,
-      AccessType::Load,
-      v,
-      lastStmt_,
-      var,
-      getIndicesBounds(v->output_args()));
-
-  // If there were loads in the output_args, this call depends on them, also
-  // merge.
-  if (!indicesScope->accesses_.empty()) {
-    for (auto& access : indicesScope->accesses_) {
-      load->addDependency(access);
-      access->addDependent(load);
-    }
-    mergeScope(indicesScope, indicesScope->parent, false);
-  }
-
-  stmtToAccess_.emplace(lastStmt_, load);
-  exprToAccess_.emplace(v, load);
-
-  // Intentionally using operator[], we want it to be created if it does not
-  // exist.
-  auto& writeHistory = currentScope_->openWrites_[var];
-  updateWriteHistory(writeHistory, load, load->id());
-  currentScope_->accesses_.push_back(load);
-
-  // accept the body of the reduction to handle further reads.
-  v->body().node()->accept(this);
-}
-
 // This check determines if two accesses within a loop are "safe" from loop-self
 // dependence. This function does not consider overlap in bound range, but
 // rather the stride of the bound relative to the loop variable. This is the

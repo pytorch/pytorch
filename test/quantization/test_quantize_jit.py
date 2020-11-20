@@ -2674,6 +2674,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
         num_quantize_per_tensor = 1  # for output
         for num_quant, num_op in num_op_by_num_quant.items():
             num_quantize_per_tensor += num_op * num_quant
+        num_quantize_per_tensor -= 4  # constant propagation removes some prepacks
         FileCheck().check_count("aten::quantize_per_tensor(", num_quantize_per_tensor, exactly=True) \
                    .run(m1.graph)
 
@@ -2997,8 +2998,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         m = torch.jit.script(M())
         m = quantize_dynamic_jit(m, {'': float16_dynamic_qconfig})
 
-        FileCheck().check("quantized::linear_prepack_fp16") \
-                   .check_next("quantized::linear_dynamic_fp16") \
+        FileCheck().check("quantized::linear_dynamic_fp16") \
                    .check_not("aten::linear") \
                    .check_not("aten::dequantize") \
                    .check_not("aten::quantize") \
@@ -3032,6 +3032,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 FunctionalLinear(weight, bias), x,
                 "quantized::linear_dynamic", tracing=tracing, dynamic=True)
 
+    @skipIfNoFBGEMM
     def test_embedding_bag(self):
         class M(torch.nn.Module):
             def __init__(self, weights):
@@ -3075,7 +3076,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
             m = prepare_jit(m, {'embedding1' : int4_qconfig, 'embedding2' : int8_qconfig})
             m = convert_jit(m)
             FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
-                       .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
+                       .check("quantized::embedding_bag_byte_rowwise_offsets") \
                        .run(m.graph)
             m(*dummy_inputs)
 

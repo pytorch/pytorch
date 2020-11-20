@@ -412,8 +412,8 @@ struct ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
-  const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
-  return dynamic_cast<ProfilerThreadLocalState*>(state.get());
+  return static_cast<ProfilerThreadLocalState*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
 }
 
 void pushProfilingCallbacks() {
