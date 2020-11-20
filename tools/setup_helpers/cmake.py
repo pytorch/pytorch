@@ -212,7 +212,7 @@ class CMake:
         # Store build options that are directly stored in environment variables
         build_options = {
             # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
-            'CMAKE_PREFIX_PATH': distutils.sysconfig.get_python_lib()
+            'CMAKE_PREFIX_PATH': distutils.sysconfig.BASE_PREFIX
         }
         # Build options that do not start with "BUILD_", "USE_", or "CMAKE_" and are directly controlled by env vars.
         # This is a dict that maps environment variables to the corresponding variable name in CMake.
