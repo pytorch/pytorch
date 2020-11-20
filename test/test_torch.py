@@ -11577,6 +11577,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumsum(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumsum_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
@@ -11625,6 +11627,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumprod_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
@@ -17117,6 +17121,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(out, exp)
             self.assertEqual(out.size(), torch.Size([10, 10]))
             # in-place
+            if dtype in torch.testing.get_all_int_dtypes():
+                if (torch.is_tensor(mod) and mod.dtype in torch.testing.get_all_fp_dtypes()) or \
+                   type(mod) == float:
+                    with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
+                                                              "can't be cast to the desired "
+                                                              "output type (Byte|Char|Short|Int|Long)"):
+                        x.fmod_(mod)
+                    return
             x.fmod_(mod)
             x = x.to(common_dtype)
             self.assertEqual(x, exp)
@@ -17126,7 +17138,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # mod with same dtype as x
         mod = make_tensor((10, 10), device=device, dtype=dtype, low=1, high=9)
         # mod with floating-point dtype
-        mod_float = make_tensor((10, 10), device=device, dtype=torch.float, low=1, high=9)
+        mod_float = make_tensor((10, 10), device=device, 
+                                dtype=torch.float if dtype in torch.testing.get_all_int_dtypes() else dtype, 
+                                low=1, high=9)
         # non-contiguous
         x_nc = x.t()
 
