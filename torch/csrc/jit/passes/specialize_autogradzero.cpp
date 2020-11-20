@@ -19,7 +19,7 @@ bool hasGradSumToSizeUses(Value* v) {
   });
 }
 
-void insertProfileNodesForSpecializeAutogradZero_(
+void insertProfileNodesForSpecializeAutogradZero(
     Block* block,
     ProfilingRecord* pr) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
@@ -69,13 +69,13 @@ void insertProfileNodesForSpecializeAutogradZero_(
     }
 
     for (auto ib : n->blocks()) {
-      insertProfileNodesForSpecializeAutogradZero_(ib, pr);
+      insertProfileNodesForSpecializeAutogradZero(ib, pr);
     }
   }
 }
 
 void InsertProfileNodesForSpecializeAutogradZero(ProfilingRecord* pr) {
-  insertProfileNodesForSpecializeAutogradZero_(
+  insertProfileNodesForSpecializeAutogradZero(
       pr->profiled_graph_->block(), pr);
 }
 
@@ -214,12 +214,12 @@ struct AutogradZeroSpecializer {
     std::vector<Value*> nonzero_values;
 
     for (auto inp : graph_->inputs()) {
-      if (auto profile_optional_node =
+      if (auto profile_ivalue_node =
               getUseWithAttribute(inp, countsAttribute)) {
         TORCH_INTERNAL_ASSERT(
-            profile_optional_node->hasAttribute(countsAttribute));
+            profile_ivalue_node->hasAttribute(countsAttribute));
         const auto& counts_attr =
-            profile_optional_node->ival(countsAttribute).toGenericDict();
+            profile_ivalue_node->ival(countsAttribute).toGenericDict();
         auto num_present = counts_attr.at(IValue{"num_present"}).toInt();
         auto num_none = counts_attr.at(IValue{"num_none"}).toInt();
         if (num_present == 0 && num_none != 0) {
