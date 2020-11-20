@@ -770,7 +770,7 @@ elseif(USE_CUDA)
   endif()
 endif()
 
-if(USE_CUDA)
+if(USE_CUDA OR USE_ROCM)
   # The list of NVFUSER runtime files
   list(APPEND NVFUSER_RUNTIME_FILES
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
@@ -798,7 +798,11 @@ if(USE_CUDA)
     add_dependencies(torch_cuda nvfuser_rt_${filename})
   endforeach()
 
-  target_include_directories(torch_cuda PRIVATE "${CMAKE_BINARY_DIR}/include")
+  if(USE_CUDA)
+    target_include_directories(torch_cuda PRIVATE "${CMAKE_BINARY_DIR}/include")
+  elseif(USE_ROCM)
+    target_include_directories(torch_hip PRIVATE "${CMAKE_BINARY_DIR}/include")
+  endif()
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
