@@ -31,9 +31,38 @@ class EnablePred(object):
         self.warmup = warmup
         self.active = active
         self.output_fn = output_fn
+        def active_active_fn(step):
+            if self._mod_step(step) == 1:
+                return [EnablePred.Action.STOP_TRACE, EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE]
+            else:
+                return []
+        def inactive_warmup_fn(_):
+            assert False, "incorrect state sequence"
+
+        self.actions_map = {
+            EnablePred.State.ACTIVE: {
+                EnablePred.State.ACTIVE: active_active_fn,
+                EnablePred.State.WARMUP: [EnablePred.Action.START_TRACE],
+                EnablePred.State.INACTIVE: [EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE],
+            },
+            EnablePred.State.WARMUP: {
+                EnablePred.State.ACTIVE: [EnablePred.Action.STOP_TRACE, EnablePred.Action.START_WARMUP],
+                EnablePred.State.WARMUP: [],
+                EnablePred.State.INACTIVE: [EnablePred.Action.START_WARMUP],
+            },
+            EnablePred.State.INACTIVE: {
+                EnablePred.State.ACTIVE: [EnablePred.Action.STOP_TRACE],
+                EnablePred.State.WARMUP: inactive_warmup_fn,
+                EnablePred.State.INACTIVE: [],
+            }
+        }
 
     def _mod_step(self, step:int):
-        return step % (self.wait + self.warmup + self.active)
+        sum_states = self.wait + self.warmup + self.active
+        r = step % sum_states
+        if r == 0:
+            r = sum_states
+        return r
 
     def _num_state(self, step:int):
         mod_step = self._mod_step(step)
@@ -55,31 +84,12 @@ class EnablePred(object):
                 return []
         else:
             st = self._num_state(step)
-            prev_st = self._num_state(step)
-            if st == EnablePred.State.ACTIVE:
-                if prev_st == EnablePred.State.ACTIVE:
-                    if self._mod_step(step) == 0:
-                        return [EnablePred.Action.STOP_TRACE, EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE]
-                    else:
-                        return []
-                elif prev_st == EnablePred.State.WARMUP:
-                    return [EnablePred.Action.START_TRACE]
-                elif prev_st == EnablePred.State.INACTIVE:
-                    return [EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE]
-            elif st == EnablePred.State.WARMUP:
-                if prev_st == EnablePred.State.ACTIVE:
-                    return [EnablePred.Action.STOP_TRACE, EnablePred.Action.START_WARMUP]
-                elif prev_st == EnablePred.State.WARMUP:
-                    return []
-                elif prev_st == EnablePred.State.INACTIVE:
-                    return [EnablePred.Action.START_WARMUP]
-            elif st == EnablePred.State.INACTIVE:
-                if prev_st == EnablePred.State.ACTIVE:
-                    return [EnablePred.Action.STOP_TRACE]
-                elif prev_st == EnablePred.State.WARMUP:
-                    assert False, "incorrect state sequence"
-                elif prev_st == EnablePred.State.INACTIVE:
-                    return []
+            prev_st = self._num_state(step - 1)
+            acts = self.actions_map[st][prev_st]
+            if callable(acts):
+                return acts(step)
+            else:
+                return acts
 
 
 class profile(object):
@@ -158,7 +168,6 @@ class profile(object):
                 profile_memory=self.profile_memory,
                 with_stack=self.with_stack,
                 use_kineto=True,
-
             )
             self.profiler._prepare_kineto_trace()
         elif act == EnablePred.Action.START_TRACE:

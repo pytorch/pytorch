@@ -135,11 +135,11 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_kineto_api(self):
-        called_num = 0
+        called_num = [0]
         def test_output_fn(p):
             print(p.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
-            called_num += 1
+            called_num[0] += 1
 
         with profile(use_cuda=True, use_kineto=True):
             self.payload()
@@ -158,7 +158,7 @@ class TestProfiler(TestCase):
                 self.payload()
                 p.next_step()
 
-        self.assertEqual(called_num, 2)
+        self.assertEqual(called_num[0], 2)
 
 
 if __name__ == '__main__':
