@@ -8103,6 +8103,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
         ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
         ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
+        ("TORCH_CUDA_KERNEL_LAUNCH_CHECK", ("TORCH_HIP_KERNEL_LAUNCH_CHECK", API_C10))
     ]
 )
 

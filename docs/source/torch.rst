@@ -298,6 +298,7 @@ Pointwise Ops
     fmod
     frac
     imag
+    ldexp
     lerp
     lgamma
     log

@@ -2881,6 +2881,20 @@ class TestAutograd(TestCase):
         run_test((10,), 3)
         run_test((10,), 1)
         run_test((10,), 1.5)
+        run_test((10,), inf)
+
+    def test_norm_inf_subgradient(self):
+        def run_test(input, expected, dim=None):
+            x = torch.tensor(input, requires_grad=True)
+            out = x.norm(inf, dim=dim, keepdim=True)
+            out.backward(torch.ones(out.size()))
+            self.assertEqual(x.grad, expected)
+
+        run_test([0., 0., 0.], [0., 0., 0.])
+        run_test([1., 0., 1.], [0.5, 0., 0.5])
+        run_test([[1., 0., 1.], [0., 1., 1.]], [[0.25, 0., 0.25], [0., 0.25, 0.25]])
+        run_test([[1., 0., 1.], [0., 1., 0.]], [[0.5, 0., 0.5], [0., 1., 0.]], (1,))
+        run_test(torch.ones((2, 2, 2)), torch.full((2, 2, 2), 0.25), (0, 2))
 
     def test_pow_zero_tensor_gradient(self):
         def run_test(input_size, exponent):
@@ -5021,7 +5035,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv'] + separate_complex_tests
+                'addcdiv', 'linalg.tensorinv', ] + separate_complex_tests
 
 def add_test(
         name,

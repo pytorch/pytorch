@@ -155,20 +155,17 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
     const Module& module) {
   Module moduleClone = module.clone(true);
   Method method = moduleClone.get_method("forward");
-  std::unordered_set<Function*> preservedMethods_;
-  preservedMethods_.insert(&method.function());
-
+  auto function = &method.function();
   std::vector<IValue> modelParams;
-  for (auto function : preservedMethods_) {
-    GRAPH_DEBUG("List attributes for function: " + function->name());
-    auto graph = function->graph();
-    auto attributes = getParamAttributes(graph, moduleClone, function);
-    for (auto& attr_ : attributes) {
-      modelParams.push_back(attr_);
-    }
-    GRAPH_DEBUG("Cleaning up module");
-    EliminateDeadCode(graph->block());
+
+  GRAPH_DEBUG("List attributes for function: " + function->name());
+  auto graph = function->graph();
+  auto attributes = getParamAttributes(graph, moduleClone, function);
+  for (auto& attr_ : attributes) {
+    modelParams.push_back(attr_);
   }
+  GRAPH_DEBUG("Cleaning up module");
+  EliminateDeadCode(graph->block());
 
   return std::make_pair(moduleClone, modelParams);
 }
