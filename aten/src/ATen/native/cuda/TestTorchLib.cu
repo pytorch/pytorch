@@ -4,6 +4,6 @@
 
 bool logical_and(bool a, bool b) { return a && b; }
 
-TORCH_LIBRARY(torch_library, m) {
+TORCH_LIBRARY(aaa, m) {
   m.def("logical_and", &logical_and);
 }
