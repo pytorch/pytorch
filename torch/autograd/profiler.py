@@ -167,7 +167,13 @@ class EventList(list):
                 cpu/cuda ops events are omitted for profiler result readability.
 
         Returns:
-            A string containing the table.
+            A string containing the table. The table reports a subset of the following quantities:
+                * `CPU total`, `CPU total %`: The amount of CPU time spent in a given code block. Either measured in seconds or percent of total execution time.
+                * `Self CPU %`, `Self CPU`: The amount of CPU time spent in a block, but not in child blocks.
+                * `CPU time avg`: The total CPU time spent in a block, divided by the number of times the block is called.
+                * `CPU Mem`, `Self CPU Mem`: The average difference between main memory allocated before and after executing the block.
+                * `CUDA Mem`,  `Self CUDA Mem`: The average difference between GPU memory allocated before and after executing the block.
+                * `# of Calls`: How often the code block was called.
         """
         return build_table(
             self,
