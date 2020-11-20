@@ -123,41 +123,44 @@ class CallbackManager {
   inline void init(RecordFunction& rec_fn, RecordScope scope) {
     bool found_needs_inputs = false;
     bool found_needs_ids = false;
-    auto init_handles = [
-        scope, &found_needs_inputs, &found_needs_ids](
-            RecordFunction& rec_fn, RecordFunctionCallbacks& cbs, bool is_tls) {
-      size_t num_callbacks = 0;
-      for (const auto& cb : cbs) {
-        if (cb.first.shouldRun(scope)) {
-          if (cb.first.needsInputs()) {
-            found_needs_inputs = true;
-          }
-          if (cb.first.needsIds()) {
-            found_needs_ids = true;
-          }
-          if (!rec_fn.state_) {
-            rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
-          }
-          if (is_tls) {
-            rec_fn.state_->sorted_active_tls_handles_.push_back(cb.second);
-          } else {
-            rec_fn.state_->sorted_active_global_handles_.push_back(cb.second);
-          }
-          ++num_callbacks;
-        }
-      }
-      return num_callbacks;
-    };
 
-    size_t num_tls_callbacks = init_handles(rec_fn, rf_tls_.sorted_tls_callbacks_, true);
-    size_t num_global_callbacks = init_handles(rec_fn, sorted_global_callbacks_, false);
+    for (const auto& cb: rf_tls_.sorted_tls_callbacks_) {
+      if (cb.first.shouldRun(scope)) {
+        if (cb.first.needsInputs()) {
+          found_needs_inputs = true;
+        }
+        if (cb.first.needsIds()) {
+          found_needs_ids = true;
+        }
+        if (!rec_fn.state_) {
+          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+        }
+        rec_fn.state_->sorted_active_tls_handles_.push_back(cb.second);
+      }
+    }
+
+    for (const auto& cb: sorted_global_callbacks_) {
+      if (cb.first.shouldRun(scope)) {
+        if (cb.first.needsInputs()) {
+          found_needs_inputs = true;
+        }
+        if (cb.first.needsIds()) {
+          found_needs_ids = true;
+        }
+        if (!rec_fn.state_) {
+          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+        }
+        rec_fn.state_->sorted_active_global_handles_.push_back(cb.second);
+      }
+    }
+
     if (!rec_fn.state_) {
       return;
     }
 
     // Pre-allocate observer context list with nullptr.
-    rec_fn.state_->tls_ctx_.resize(num_tls_callbacks);
-    rec_fn.state_->global_ctx_.resize(num_global_callbacks);
+    rec_fn.state_->tls_ctx_.resize(rec_fn.state_->sorted_active_tls_handles_.size());
+    rec_fn.state_->global_ctx_.resize(rec_fn.state_->sorted_active_global_handles_.size());
 
     rec_fn.state_->needs_inputs = found_needs_inputs;
     if (found_needs_ids) {

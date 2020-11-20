@@ -233,6 +233,11 @@ struct TORCH_API RecordFunction {
     // Whether any of the picked callbacks require inputs
     bool needs_inputs = false;
 
+    // In cases when RecordFunction might be active but we chose not to
+    // use the observers (e.g. operator is not observed), this boolean
+    // flag is used to check whether the start callbacks were called
+    bool called_start_callbacks_ = false;
+
     // Used internally to keep track of thread local and global callbacks
     // that were picked to run; must be sorted;
     CallbackHandles sorted_active_tls_handles_;
@@ -245,11 +250,6 @@ struct TORCH_API RecordFunction {
     // Stores various ObserverContext objects with event metadata for global
     // callbacks.
     ObserverContextList global_ctx_;
-
-    // In cases when RecordFunction might be active but we chose not to
-    // use the observers (e.g. operator is not observed), this boolean
-    // flag is used to check whether the start callbacks were called
-    bool called_start_callbacks_ = false;
 
     StringView name_;
     int64_t sequence_nr_ = -1;
@@ -350,8 +350,8 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& setShouldRun(
-      std::function<bool(const RecordFunctionCallback&)> should_run) {
-    should_run_ = std::move(should_run);
+      bool(*should_run)(const RecordFunctionCallback&)) {
+    should_run_ = should_run;
     return *this;
   }
 
@@ -385,7 +385,7 @@ class TORCH_API RecordFunctionCallback {
  private:
   std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&, ObserverContext*)> end_;
-  std::function<bool(const RecordFunctionCallback&)> should_run_;
+  bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
   bool needs_inputs_ = false;
