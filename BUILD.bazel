@@ -136,6 +136,7 @@ genrule(
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/NativeFunctions.h",
+        "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
