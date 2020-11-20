@@ -510,12 +510,7 @@ def argument_type_size(t: Type) -> Optional[int]:
     else:
         return None
 
-def argument(cpp_arg: CppArgument) -> PythonArgument:
-    a = cpp_arg.argument
-    if not isinstance(a, Argument):
-        # cpp's TensorOptionsArguments is ignored, we will reintroduce the
-        # scattered fields in tensor_options_args.
-        raise RuntimeError(f'unsupported cpp argument: \'{cpp_arg}\'')
+def argument(a: Argument) -> PythonArgument:
     return PythonArgument(
         name=a.name,
         type=a.type,
@@ -527,25 +522,18 @@ def argument(cpp_arg: CppArgument) -> PythonArgument:
 
 def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # Use cpp api to gather TensorOptions fields from kwargs.
-    # Always set 'method' to false as ThisArgument is not relevant - 'self'
-    # is still included as regular Argument type.
-    # TODO: maybe directly generate from FunctionSchema to avoid slicing back
-    # into args/kwargs/outputs?
-    cpp_sig = _cpp_signature(f, method=False)
-
     # Skip ThisArgument if this is method signature.
     # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
     # arguments are created based on different rules - see below.
-    cpp_arguments = tuple(filter(lambda a: not (method and a.name == 'self') and
-                                 not isinstance(a.argument, TensorOptionsArguments), cpp_sig.arguments()))
+    args = tuple(a for a in cpp.group_arguments(f.func, method=method) if isinstance(a, Argument))
 
+    input_arg_set = set(a.name for a in f.func.arguments)
     kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
     out_arg_set = set(a.name for a in f.func.out_arguments)
 
-    input_args = tuple(map(argument,
-                           filter(lambda a: not (a.name in kwarg_only_set or a.name in out_arg_set), cpp_arguments)))
-    input_kwargs = tuple(map(argument, filter(lambda a: a.name in kwarg_only_set, cpp_arguments)))
-    outputs = tuple(map(argument, filter(lambda a: a.name in out_arg_set, cpp_arguments)))
+    input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
+    input_kwargs = tuple(map(argument, filter(lambda a: a.name in kwarg_only_set, args)))
+    outputs = tuple(map(argument, filter(lambda a: a.name in out_arg_set, args)))
 
     # Reintroduce the scattered fields of TensorOptions for Python.
     # Compared to the cpp counterpart, the python arguments have new property
