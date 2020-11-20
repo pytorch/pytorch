@@ -52,16 +52,6 @@ vTensor pack_weights(
     Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
     Future::Payload v_weight_payload = v_weight_future.wait();
 
-    /* Source */
-    const int64_t src_kernel = src_filter[Layout::Filter::height] * src_filter[Layout::Filter::width];
-    const int64_t src_block = src_kernel * src_filter[Layout::Filter::input];
-
-    /* Destination */
-    const IntArrayRef dst_filter = v_weight.sizes();
-    const int64_t dst_kernel = dst_filter[Layout::Filter::height] * dst_filter[Layout::Filter::width];
-    const int64_t dst_block = dst_kernel * dst_filter[Layout::Filter::input];
-    TORCH_INTERNAL_ASSERT(src_kernel == dst_kernel, "Internal error!");
-
     memcpy(
         v_weight_payload.get(),
         src_weight_ptr,
