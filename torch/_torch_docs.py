@@ -3920,6 +3920,35 @@ Example::
     tensor([15, 30, 15])
 """.format(**common_args))
 
+add_docstr(torch.ldexp, r"""
+ldexp(input, other, *, out=None) -> Tensor
+
+Multiplies :attr:`input` by 2**:attr:`other`.
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i * 2^\text{{other}}_i
+""" + r"""
+
+Typically this function is used to construct floating point numbers by multiplying
+mantissas in :attr:`input` with integral powers of two created from the exponents
+in :attr:'other'.
+
+Args:
+    {input}
+    other (Tensor): a tensor of exponents, typically integers.
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.ldexp(torch.tensor([1.]), torch.tensor([1]))
+    tensor([2.])
+    >>> torch.ldexp(torch.tensor([1.0]), torch.tensor([1, 2, 3, 4]))
+    tensor([ 2.,  4.,  8., 16.])
+
+
+""".format(**common_args))
+
 add_docstr(torch.le, r"""
 le(input, other, *, out=None) -> Tensor
 
