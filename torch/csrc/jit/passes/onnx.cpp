@@ -194,6 +194,8 @@ void BlockToONNX(
   for (auto output : old_block->outputs()) {
     ctx.block->registerOutput(env.at(output));
   }
+
+  // Run dce to clean-up unused functional and inplace ops.
   EliminateDeadCode(
       ctx.block,
       true,
@@ -274,7 +276,7 @@ void NodeToONNX(
         new_block->owningGraph()->createClone(node, envFn));
     for (size_t i = 0; i < node->outputs().size(); i++) {
       // n_->outputs()[i]->setType(node->outputs()[i]->type());
-      env[node->outputs()[i]] = n_->outputs()[i];
+      env[node->output(i)] = n_->output(i);
     }
   };
 

@@ -191,6 +191,9 @@ void ConvertSequenceDependencies(Block* block, int opset_version) {
   }
 }
 
+// Resolving limitation from ONNX that the block output can not be
+// a value from outside the block. Inserting an Identity node inside
+// the block, linking with the value outside as workaround.
 void FixupONNXSubblockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
     for (Value* output : block->outputs()) {
@@ -345,21 +348,21 @@ void FixupONNXLoopNodeInputs(Node* node) {
   auto* graph = node->owningGraph();
 
   // add cast to condition input outside the loop.
-  Value* cond_val = node->inputs()[1];
+  Value* cond_val = node->input(1);
   if (IsCondCastRequired(cond_val))
     InsertCastForCond(cond_val, graph, node);
 
   // Setup Loop input cond and i.
   TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
-  auto* sub_block = node->blocks()[0];
+  auto* sub_block = node->blocks().at(0);
   Value* cond = sub_block->insertInput(1, "cond");
   cond->setType(BoolType::create());
 
-  Value* i = sub_block->inputs()[0];
+  Value* i = sub_block->inputs().at(0);
   i->setType(TensorType::fromNumberType(IntType::get()));
 
   // add cast to condition input inside the loop.
-  Value* next_cond_val = sub_block->outputs()[0];
+  Value* next_cond_val = sub_block->outputs().at(0);
   if (IsCondCastRequired(next_cond_val))
     InsertCastForCond(next_cond_val, graph, sub_block->return_node());
 }
