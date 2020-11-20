@@ -371,7 +371,6 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-
   if (at::shouldRunRecordFunction()) {
     // Check if we need to run callbacks registered with RecordFunction
     // If true and callbacks need inputs, we box the arguments and pass
@@ -399,7 +398,6 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
     return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
@@ -450,7 +448,6 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
         }
       }
     }
-
     kernel.callBoxed(op, stack);
     return;
   }
