@@ -972,8 +972,8 @@ class JitRpcTest(
             args=(self.rank,)
         )
         # Verify it is an instance of ScriptModule on remote end.
-        ret = rpc.rpc_sync(remote_script_module.owner(), rref_isinstance, args=(remote_script_module, torch.jit.ScriptModule))
-        self.assertTrue(ret)
+        remote_end_is_script = rpc.rpc_sync(remote_script_module.owner(), rref_isinstance, args=(remote_script_module, torch.jit.ScriptModule))
+        self.assertTrue(remote_end_is_script)
         # Run forward pass remotely.
         # TODO: make RRef helper work with ScriptModule.
         remote_forward_output = rpc.rpc_sync(remote_script_module.owner(), run, args=(remote_script_module, "forward", (), {}))
