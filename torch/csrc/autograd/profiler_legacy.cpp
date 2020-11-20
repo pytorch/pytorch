@@ -403,8 +403,8 @@ const std::unordered_set<std::string> disable_cuda_profiling = {
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
-  const auto& state = c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE);
-  return dynamic_cast<ProfilerThreadLocalState*>(state.get());
+  return static_cast<ProfilerThreadLocalState*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
 }
 
 void pushProfilingCallbacksLegacy() {
