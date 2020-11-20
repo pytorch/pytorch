@@ -1317,7 +1317,7 @@ class TestTEFuser(JitTestCase):
             # torch.gt,
             # torch.lt,
 
-            # TODO: fails on CPU backend with int8
+            # FIXME: fails on CPU backend with int8
             # torch.fmod,
             # torch.remainder,
 
