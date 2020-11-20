@@ -5,6 +5,10 @@ import torch.nn.functional as F
 from typing import Dict, Any
 
 
+euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
+
+
+
 def broadcast_all(*values):
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
