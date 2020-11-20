@@ -789,7 +789,8 @@ class FunctionEvent(FormattedTimesMixin):
     def __init__(
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0):
+            is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
+            is_legacy=False):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -810,6 +811,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.sequence_nr: int = sequence_nr
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
+        self.is_legacy: bool = is_legacy
 
     def append_kernel(self, name, device, start, end):
         assert self.device_type == DeviceType.CPU
@@ -869,9 +871,13 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async:
             return 0
         if self.device_type == DeviceType.CPU:
-            # account for the kernels in the children ops
-            return (sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) +
-                    sum(ch.cuda_time_total for ch in self.cpu_children))
+            if not self.is_legacy:
+                # account for the kernels in the children ops
+                return (sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) +
+                        sum(ch.cuda_time_total for ch in self.cpu_children))
+            else:
+                # each legacy cpu events has a single (fake) kernel
+                return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
         else:
             assert self.device_type == DeviceType.CUDA
             return self.time_range.elapsed_us()
@@ -902,7 +908,7 @@ class FunctionEvent(FormattedTimesMixin):
         return (
             '<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={}>'.format(
+            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>'.format(
                 self.id,
                 self.name,
                 self.device_type,
@@ -920,6 +926,7 @@ class FunctionEvent(FormattedTimesMixin):
                 self.is_async,
                 self.is_remote,
                 self.sequence_nr,
+                self.is_legacy,
             )
         )
 
@@ -1086,9 +1093,10 @@ def parse_kineto_results(result):
         function_events.append(fe)
         if kineto_event.device_type() == DeviceType.CUDA:
             corr_id = kineto_event.linked_correlation_id()
-            if corr_id > 0 and corr_id not in cuda_corr_map:
-                cuda_corr_map[corr_id] = []
-            cuda_corr_map[corr_id].append(kineto_event)
+            if corr_id > 0:
+                if corr_id not in cuda_corr_map:
+                    cuda_corr_map[corr_id] = []
+                cuda_corr_map[corr_id].append(kineto_event)
 
     # associate CUDA kernels with CPU events
     for fe in function_events:
@@ -1209,6 +1217,7 @@ def parse_legacy_records(thread_records):
                     is_remote=is_remote_event,
                     sequence_nr=start.sequence_nr(),
                     device_type=DeviceType.CPU,
+                    is_legacy=True,
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
