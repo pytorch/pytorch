@@ -5,6 +5,9 @@
 namespace c10d {
 namespace tcputil {
 
+#define AF_SELECTED AF_INET
+#define CONNECT_SOCKET_OFFSET 1
+
 inline void closeSocket(int socket) {
   ::closesocket(socket);
 }
@@ -81,6 +84,11 @@ inline void socketInitialize() {
       WSADATA wsa_data;
       SYSCHECK_ERR_RETURN_NEG1(WSAStartup(MAKEWORD(2, 2), &wsa_data))
   });
+}
+
+inline struct ::pollfd getPollfd(int socket, short events) {
+  struct ::pollfd res = {(SOCKET)socket, events};
+  return res;
 }
 
 } // namespace tcputil

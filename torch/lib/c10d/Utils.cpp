@@ -1,8 +1,7 @@
-#include <c10d/Utils.hpp>
-
 #ifdef _WIN32
 #include <c10d/WinSockUtils.hpp>
 #else
+#include <c10d/UnixSockUtils.hpp>
 #include <netdb.h>
 #include <sys/poll.h>
 #include <arpa/inet.h>
@@ -82,11 +81,7 @@ std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-#ifdef _WIN32
-  hints.ai_family = AF_INET;
-#else
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
-#endif
+  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -203,11 +198,7 @@ int connect(
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-#ifdef _WIN32
-  hints.ai_family = AF_INET;
-#else
-  hints.ai_family = AF_UNSPEC; // either IPv4 or IPv6
-#endif
+  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
@@ -281,11 +272,7 @@ std::tuple<int, std::string> accept(
     const std::chrono::milliseconds& timeout) {
   // poll on listen socket, it allows to make timeout
   std::unique_ptr<struct ::pollfd[]> events(new struct ::pollfd[1]);
-#ifdef _WIN32
-  events[0] = {(SOCKET)listenSocket, POLLIN};
-#else
-  events[0] = {.fd = listenSocket, .events = POLLIN};
-#endif
+  events[0] = tcputil::getPollfd(listenSocket, POLLIN);
 
   while (true) {
     int res = tcputil::poll(events.get(), 1, timeout.count());

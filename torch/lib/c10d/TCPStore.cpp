@@ -29,21 +29,7 @@ enum class WaitResponseType : uint8_t { STOP_WAITING };
 TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
     : storeListenSocket_(storeListenSocket) {
   // Use control pipe to signal instance destruction to the daemon thread.
-#ifdef _WIN32
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  if (ghStopEvent_ == NULL)
-  {
-      throw std::runtime_error(
-          "Failed to create the control pipe to start the "
-          "TCPStoreDaemon run");
-  }
-#else
-  if (pipe(controlPipeFd_.data()) == -1) {
-    throw std::runtime_error(
-        "Failed to create the control pipe to start the "
-        "TCPStoreDaemon run");
-  }
-#endif
+  initStopSignal();
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
 }
 
@@ -59,148 +45,63 @@ TCPStoreDaemon::~TCPStoreDaemon() {
     }
   }
   // Now close the rest control pipe
-#ifdef _WIN32
-  CloseHandle(ghStopEvent_);
-#else
-  for (auto fd : controlPipeFd_) {
-    if (fd != -1) {
-      ::close(fd);
-    }
-  }
-#endif
+  closeStopSignal();
 }
 
 void TCPStoreDaemon::join() {
   daemonThread_.join();
 }
 
-void TCPStoreDaemon::run() {
-  std::vector<struct pollfd> fds;
-  tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
-#ifndef _WIN32
-  // Push the read end of the pipe to signal the stopping of the daemon run
-  tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
-#endif
-
-  // receive the queries
-  bool finished = false;
-  while (!finished) {
-    for (size_t i = 0; i < sockets_.size(); i++) {
-      fds[i].revents = 0;
-    }
-
-#ifdef _WIN32
-    int res;
-    SYSCHECK_ERR_RETURN_NEG1(
-      res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
-    if (res == 0) {
-      auto rv = WaitForSingleObject(ghStopEvent_, 0);
-      if (rv != WAIT_TIMEOUT) {
-          finished = true;
-          break;
-      }
+void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
+  // Skipping the fds[0] and fds[1],
+  // fds[0] is master's listening socket
+  // fds[1] is control pipe's reading fd, it is not for Windows platform
+  for (size_t fdIdx = CONNECT_SOCKET_OFFSET; fdIdx < fds.size(); ++fdIdx) {
+    if (fds[fdIdx].revents == 0) {
       continue;
     }
-#else
-    SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
-#endif
 
-    // TCPStore's listening socket has an event and it should now be able to
-    // accept new connections.
-    if (fds[0].revents != 0) {
-#ifdef _WIN32
-      if (!(fds[0].revents & POLLIN)) {
-#else
-      if (fds[0].revents ^ POLLIN) {
-#endif
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent on the master's listening socket: " +
-                std::to_string(fds[0].revents));
-      }
-      int sockFd = std::get<0>(tcputil::accept(storeListenSocket_));
-      sockets_.push_back(sockFd);
-      tcputil::addPollfd(fds, sockFd, POLLIN);
-    }
+    // Now query the socket that has the event
+    try {
+      query(fds[fdIdx].fd);
+    } catch (...) {
+      // There was an error when processing query. Probably an exception
+      // occurred in recv/send what would indicate that socket on the other
+      // side has been closed. If the closing was due to normal exit, then
+      // the store should continue executing. Otherwise, if it was different
+      // exception, other connections will get an exception once they try to
+      // use the store. We will go ahead and close this connection whenever
+      // we hit an exception here.
+      tcputil::closeSocket(fds[fdIdx].fd);
 
-#ifndef _WIN32
-    // The pipe receives an event which tells us to shutdown the daemon
-    if (fds[1].revents != 0) {
-      // Will be POLLUP when the pipe is closed
-      if (fds[1].revents ^ POLLHUP) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent on the control pipe's reading fd: " +
-                std::to_string(fds[1].revents));
-      }
-      finished = true;
-      break;
-    }
-#endif
-    // Skipping the fds[0] and fds[1],
-    // fds[0] is master's listening socket
-    // fds[1] is control pipe's reading fd, it is not for Windows platform
-    for (size_t fdIdx = CONNECT_SOCKET_OFFSET; fdIdx < fds.size(); ++fdIdx) {
-      if (fds[fdIdx].revents == 0) {
-        continue;
-      }
-
-      // Now query the socket that has the event
-      try {
-        query(fds[fdIdx].fd);
-      } catch (...) {
-        // There was an error when processing query. Probably an exception
-        // occurred in recv/send what would indicate that socket on the other
-        // side has been closed. If the closing was due to normal exit, then
-        // the store should continue executing. Otherwise, if it was different
-        // exception, other connections will get an exception once they try to
-        // use the store. We will go ahead and close this connection whenever
-        // we hit an exception here.
-        tcputil::closeSocket(fds[fdIdx].fd);
-
-        // Remove all the tracking state of the close FD
-        for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
-          for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-            if (*vecIt == fds[fdIdx].fd) {
-              vecIt = it->second.erase(vecIt);
-            } else {
-              ++vecIt;
-            }
-          }
-          if (it->second.size() == 0) {
-            it = waitingSockets_.erase(it);
+      // Remove all the tracking state of the close FD
+      for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
+        for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
+          if (*vecIt == fds[fdIdx].fd) {
+            vecIt = it->second.erase(vecIt);
           } else {
-            ++it;
+            ++vecIt;
           }
         }
-        for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
-          if (it->first == fds[fdIdx].fd) {
-            it = keysAwaited_.erase(it);
-          } else {
-            ++it;
-          }
+        if (it->second.size() == 0) {
+          it = waitingSockets_.erase(it);
+        } else {
+          ++it;
         }
-        fds.erase(fds.begin() + fdIdx);
-        sockets_.erase(sockets_.begin() + fdIdx - CONNECT_SOCKET_OFFSET);
-        --fdIdx;
-        continue;
       }
+      for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
+        if (it->first == fds[fdIdx].fd) {
+          it = keysAwaited_.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      fds.erase(fds.begin() + fdIdx);
+      sockets_.erase(sockets_.begin() + fdIdx - CONNECT_SOCKET_OFFSET);
+      --fdIdx;
+      continue;
     }
   }
-}
-
-void TCPStoreDaemon::stop() {
-#ifdef _WIN32
-  SetEvent(ghStopEvent_);
-#else
-  if (controlPipeFd_[1] != -1) {
-    // close the write end of the pipe
-    ::close(controlPipeFd_[1]);
-    controlPipeFd_[1] = -1;
-  }
-#endif
 }
 
 // query communicates with the worker. The format
@@ -329,6 +230,137 @@ bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
     return tcpStore_.count(s) > 0;
   });
 }
+
+#ifdef _WIN32
+void TCPStoreDaemon::initStopSignal() {
+  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (ghStopEvent_ == NULL) {
+      throw std::runtime_error(
+          "Failed to create the control pipe to start the "
+          "TCPStoreDaemon run");
+  }
+}
+
+void TCPStoreDaemon::closeStopSignal() {
+  CloseHandle(ghStopEvent_);
+}
+
+void TCPStoreDaemon::stop() {
+  SetEvent(ghStopEvent_);
+}
+
+void TCPStoreDaemon::run() {
+  std::vector<struct pollfd> fds;
+  tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
+
+  // receive the queries
+  bool finished = false;
+  while (!finished) {
+    for (size_t i = 0; i < sockets_.size(); i++) {
+      fds[i].revents = 0;
+    }
+
+    int res;
+    SYSCHECK_ERR_RETURN_NEG1(
+      res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
+    if (res == 0) {
+      auto rv = WaitForSingleObject(ghStopEvent_, 0);
+      if (rv != WAIT_TIMEOUT) {
+          finished = true;
+          break;
+      }
+      continue;
+    }
+
+    // TCPStore's listening socket has an event and it should now be able to
+    // accept new connections.
+    if (fds[0].revents != 0) {
+      if (!(fds[0].revents & POLLIN)) {
+        throw std::system_error(
+            ECONNABORTED,
+            std::system_category(),
+            "Unexpected poll revent on the master's listening socket: " +
+                std::to_string(fds[0].revents));
+      }
+      int sockFd = std::get<0>(tcputil::accept(storeListenSocket_));
+      sockets_.push_back(sockFd);
+      tcputil::addPollfd(fds, sockFd, POLLIN);
+    }
+    queryFds(fds);
+  }
+}
+#else
+void TCPStoreDaemon::initStopSignal() {
+  if (pipe(controlPipeFd_.data()) == -1) {
+    throw std::runtime_error(
+        "Failed to create the control pipe to start the "
+        "TCPStoreDaemon run");
+  }
+}
+
+void TCPStoreDaemon::closeStopSignal() {
+  for (auto fd : controlPipeFd_) {
+    if (fd != -1) {
+      ::close(fd);
+    }
+  }
+}
+
+void TCPStoreDaemon::stop() {
+  if (controlPipeFd_[1] != -1) {
+    // close the write end of the pipe
+    ::close(controlPipeFd_[1]);
+    controlPipeFd_[1] = -1;
+  }
+}
+
+void TCPStoreDaemon::run() {
+  std::vector<struct pollfd> fds;
+  tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
+  // Push the read end of the pipe to signal the stopping of the daemon run
+  tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
+
+  // receive the queries
+  bool finished = false;
+  while (!finished) {
+    for (size_t i = 0; i < sockets_.size(); i++) {
+      fds[i].revents = 0;
+    }
+
+    SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
+
+    // TCPStore's listening socket has an event and it should now be able to
+    // accept new connections.
+    if (fds[0].revents != 0) {
+      if (fds[0].revents ^ POLLIN) {
+        throw std::system_error(
+            ECONNABORTED,
+            std::system_category(),
+            "Unexpected poll revent on the master's listening socket: " +
+                std::to_string(fds[0].revents));
+      }
+      int sockFd = std::get<0>(tcputil::accept(storeListenSocket_));
+      sockets_.push_back(sockFd);
+      tcputil::addPollfd(fds, sockFd, POLLIN);
+    }
+
+    // The pipe receives an event which tells us to shutdown the daemon
+    if (fds[1].revents != 0) {
+      // Will be POLLUP when the pipe is closed
+      if (fds[1].revents ^ POLLHUP) {
+        throw std::system_error(
+            ECONNABORTED,
+            std::system_category(),
+            "Unexpected poll revent on the control pipe's reading fd: " +
+                std::to_string(fds[1].revents));
+      }
+      finished = true;
+      break;
+    }
+    queryFds(fds);
+  }
+}
+#endif
 
 // TCPStore class methods
 TCPStore::TCPStore(

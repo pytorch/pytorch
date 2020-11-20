@@ -9,13 +9,7 @@
 #ifdef _WIN32
 #include <c10d/WinSockUtils.hpp>
 #else
-#include <c10d/Utils.hpp>
-#endif
-
-#ifdef _WIN32
-#define CONNECT_SOCKET_OFFSET 1
-#else
-#define CONNECT_SOCKET_OFFSET 2
+#include <c10d/UnixSockUtils.hpp>
 #endif
 
 namespace c10d {
@@ -31,6 +25,7 @@ class TCPStoreDaemon {
   void run();
   void stop();
 
+  void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
 
   void setHandler(int socket);
@@ -44,6 +39,9 @@ class TCPStoreDaemon {
   bool checkKeys(const std::vector<std::string>& keys) const;
   void wakeupWaitingClients(const std::string& key);
 
+  void initStopSignal();
+  void closeStopSignal();
+
   std::thread daemonThread_;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of sockets waiting on it
@@ -55,7 +53,7 @@ class TCPStoreDaemon {
   int storeListenSocket_;
 #ifdef _WIN32
   const std::chrono::milliseconds checkTimeout_
-    = std::chrono::milliseconds(10);
+      = std::chrono::milliseconds(10);
   HANDLE ghStopEvent_;
 #else
   std::vector<int> controlPipeFd_{-1, -1};
