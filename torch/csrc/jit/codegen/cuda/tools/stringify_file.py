@@ -1,4 +1,6 @@
 
+# Generates a C++ header files embedding the original input as a string literal
+
 import argparse
 import pathlib
 from datetime import datetime
@@ -16,7 +18,7 @@ args = arg_parser.parse_args()
 
 with open(args.input, 'r') as fin:
     with open(args.output, 'w') as fout:
-        literal_name = pathlib.Path(args.input).stem
+        literal_name = f'{pathlib.Path(args.input).stem}_cu'
         fout.write(f'// Generated from "{args.input}"\n')
         fout.write(f'// {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n\n')
         fout.write('namespace nvfuser_resources {\n\n')

@@ -89,7 +89,6 @@ torch/lib/tmp_install
 torch/lib/torch_shm_manager
 torch/lib/site-packages/
 torch/lib/python*
-torch/lib/nvfuser_runtime/
 torch/lib64
 torch/include/
 torch/share/

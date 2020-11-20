@@ -9,16 +9,15 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/resource_guard.h>
 
-#ifdef _WIN32
-#include <windows.h>
-extern "C" IMAGE_DOS_HEADER __ImageBase;
-#else
-#include <dlfcn.h>
-#endif
+#include <nvfuser_resources/block_reduction.h>
+#include <nvfuser_resources/broadcast.h>
+#include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/helpers.h>
+#include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/tensor.h>
 
-#include <cstring>
 #include <fstream>
-#include <string>
 
 namespace torch {
 namespace jit {
@@ -30,54 +29,20 @@ std::string kernelPreamble() {
   std::stringstream ss;
 
 #ifndef __HIP_PLATFORM_HCC__
-  ss << R"(
-    #include <nvfuser_runtime/fp16_support.cu>
-  )";
+  ss << nvfuser_resources::fp16_support_cu;
 #endif
 
-  // clang-format off
-  ss << R"(
-    #include <nvfuser_runtime/tensor.cu>
-    #include <nvfuser_runtime/random_numbers.cu>
-    #include <nvfuser_runtime/helpers.cu>
-    #include <nvfuser_runtime/block_reduction.cu>
-    #include <nvfuser_runtime/grid_reduction.cu>
-    #include <nvfuser_runtime/broadcast.cu>
-  )";
-  // clang-format on
+  ss << nvfuser_resources::tensor_cu;
+  ss << nvfuser_resources::random_numbers_cu;
+  ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::block_reduction_cu;
+  ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::broadcast_cu;
 
   return ss.str();
 }
 
 namespace {
-
-std::string torchLibPath() {
-#ifdef _WIN32
-  constexpr char kPathSep = '\\';
-  char path_buffer[MAX_PATH] = {};
-  TORCH_INTERNAL_ASSERT(
-      ::GetModuleFileNameA(
-          reinterpret_cast<HMODULE>(&__ImageBase), path_buffer, MAX_PATH) <
-      MAX_PATH);
-  const char* lib_filename = path_buffer;
-#else
-  constexpr char kPathSep = '/';
-
-  // Used to lookup our library using dladdr()
-  static bool reference_symbol = false;
-
-  Dl_info dl_info = {};
-  TORCH_INTERNAL_ASSERT(dladdr(&reference_symbol, &dl_info));
-  const char* lib_filename = dl_info.dli_fname;
-#endif
-
-  // TODO: a much better solution would be to use C++17's std::filesystem::path,
-  //  although that's currently not available to us (in the PyTorch codebase)
-  const char* last_path_sep = std::strrchr(lib_filename, kPathSep);
-  TORCH_INTERNAL_ASSERT(last_path_sep != nullptr);
-
-  return std::string(lib_filename, last_path_sep);
-}
 
 // return false if arg's type, number of dimensions, and device, doesn't match
 // param and provided c10:device
@@ -353,10 +318,6 @@ NvrtcFunction nvrtcCompile(
           ", ignoring the option");
     }
   }
-
-  // --include-path
-  static const std::string include_path = "--include-path=" + torchLibPath();
-  args.push_back(include_path.c_str());
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
       program, func_name.c_str());

@@ -787,7 +787,7 @@ if(USE_CUDA)
   set(NVFUSER_STRINGIFY_TOOL "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tools/stringify_file.py")
   foreach(src ${NVFUSER_RUNTIME_FILES})
     get_filename_component(filename ${src} NAME_WE)
-    set(dst "${CMAKE_BINARY_DIR}/include/nvfuser_runtime/${filename}.h")
+    set(dst "${CMAKE_BINARY_DIR}/include/nvfuser_resources/${filename}.h")
     add_custom_command(
       COMMENT "Stringify NVFUSER runtime source file"
       OUTPUT ${dst}
@@ -797,6 +797,8 @@ if(USE_CUDA)
     add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
     add_dependencies(torch_cuda nvfuser_rt_${filename})
   endforeach()
+
+  target_include_directories(torch_cuda PRIVATE "${CMAKE_BINARY_DIR}/include")
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
