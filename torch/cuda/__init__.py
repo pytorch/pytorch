@@ -331,7 +331,7 @@ class set_cuda_device(object):
     introduced for jit compatibility
 
     Arguments:
-        device_jit (torch.device or int): device index to select. It's a no-op if
+        set_cuda_device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
     """
 
@@ -358,7 +358,7 @@ class StreamContext(object):
     stream.
 
     Arguments:
-        stream (Stream): selected stream. This manager is a no-op if it's
+        StreamContext (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
     .. note:: Streams are per-device. If the selected stream is not on the

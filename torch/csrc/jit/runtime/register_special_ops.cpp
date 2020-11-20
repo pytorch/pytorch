@@ -24,31 +24,6 @@ namespace jit {
 
 namespace {
 
-/*TORCH_LIBRARY(cuda, m) {
-  auto stream_class = m.class_<torch::jit::CUDAStream>("Stream").def(
-      torch::init<int64_t, int64_t>());
-  auto event_class = m.class_<torch::jit::CUDAEvent>("Event").def(
-      torch::init<bool, bool, bool>());
-
-  stream_class.def("query", &CUDAStream::query)
-      .def("record_event", &CUDAStream::recordEvent)
-      .def("synchronize", &CUDAStream::synchronize)
-      .def("wait_event", &CUDAStream::waitEvent)
-      .def("wait_stream", &CUDAStream::waitStream)
-      .def("setstream", &CUDAStream::setStream)
-      .def("device_index", &CUDAStream::device_index)
-      .def("device", &CUDAStream::device)
-      .def("pack", &CUDAStream::pack)
-      .def("id", &CUDAStream::id);
-
-  event_class.def("elapsed_time", &CUDAEvent::elapsedTime)
-      .def("ipc_handle", &CUDAEvent::ipcHandle)
-      .def("query", &CUDAEvent::query)
-      .def("record", &CUDAEvent::record)
-      .def("synchronize", &CUDAEvent::synchronize)
-      .def("wait", &CUDAEvent::wait);
-};*/
-
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
@@ -454,10 +429,6 @@ RegisterOperators reg({
     Operator(
         "aten::is_grad_enabled() -> bool",
         [](Stack* stack) { push(stack, torch::GradMode::is_enabled()); },
-        aliasAnalysisConservative()),
-    Operator(
-        "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
     Operator(
         "aten::current_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
