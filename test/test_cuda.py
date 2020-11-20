@@ -391,6 +391,35 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+    def test_set_per_process_memory_fraction(self):
+        # test invalid fraction value.
+        with self.assertRaisesRegex(TypeError, "Invalid type"):
+            torch.cuda.set_per_process_memory_fraction(int(1))
+        with self.assertRaisesRegex(ValueError, "Invalid fraction value"):
+            torch.cuda.set_per_process_memory_fraction(-0.1)
+        with self.assertRaisesRegex(ValueError, "Invalid fraction value"):
+            torch.cuda.set_per_process_memory_fraction(2.0)
+
+        tensor = torch.zeros(1024, device='cuda')
+        torch.cuda.empty_cache()
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        torch.cuda.set_per_process_memory_fraction(0.5, 0)
+
+        # test 0.499 allocation is ok.
+        application = int(total_memory * 0.499) - torch.cuda.max_memory_reserved()
+        tmp_tensor = torch.empty(application, dtype=torch.int8, device='cuda')
+        del tmp_tensor
+        torch.cuda.empty_cache()
+
+        application = int(total_memory * 0.5)
+        # it will get OOM when try to allocate more than half memory.
+        with self.assertRaisesRegex(RuntimeError, "out of memory"):
+            torch.empty(application, dtype=torch.int8, device='cuda')
+
+        # ensure out of memory error doesn't disturb subsequent kernel
+        tensor.fill_(1)
+        self.assertTrue((tensor == 1).all())
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_autogpu(self):
         x = torch.randn(5, 5).cuda()
