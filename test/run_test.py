@@ -309,7 +309,7 @@ def get_executable_command(options, allow_pytest):
 def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
-        unittest_args.append('--verbose')
+        unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
     if test_module in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
     if extra_unittest_args:
@@ -477,7 +477,8 @@ def parse_args():
     parser.add_argument(
         '-v',
         '--verbose',
-        action='store_true',
+        action='count',
+        default=0,
         help='print verbose information and test-by-test results')
     parser.add_argument(
         '--jit',
