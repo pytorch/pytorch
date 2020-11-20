@@ -4,6 +4,10 @@ from .dataset import IterableDataset as IterDataset
 
 from .common import get_file_pathnames_from_root, get_file_binaries_from_pathnames, extract_files_from_pathname_binaries
 
+from .decoder import Decoder
+from .decoder import basichandlers as decoder_basichandlers
+from .decoder import imagehandler as decoder_imagehandler
+
 from typing import List, Iterable, Union
 
 
@@ -102,7 +106,7 @@ class LoadFilesFromDiskIterDataset(IterDataset):
 #    unzip_recursive - whether to unzip recursively if unzip is allowed
 #    unzip_mask_tars - a unix style patten filter string for tar files which is going to be unzipped
 #    unzip_mask_zips - a unix style patten filter string for zip files which is going to be unzipped
-#    length    - a nominal length of the dataset
+#    length          - a nominal length of the dataset
 class ExtractFilesIterDataset(IterDataset):
     def __init__(
             self,
@@ -133,3 +137,34 @@ class ExtractFilesIterDataset(IterDataset):
 
     def __len__(self):
         return self.length
+
+
+# Dataset for decoding data in different format (eg, json, png, etc)
+# Yield tuple(pathname, decoded object)
+# args:
+#    input_dataset - iterable with tuple(pathname, binary stream or bytes)
+#    decoders      - user passed in decoders/handlers, if None, a set of default decoders will be initialized
+#    length        - a nominal length of the dataset
+class RoutedDecoderIterDataset(IterDataset):
+    def __init__(
+            self,
+            input_dataset : Iterable,
+            *,
+            decoders : Union[None, List[str]] = None,
+            length: int = -1):
+        super().__init__()
+        self.input_dataset : Iterable = input_dataset
+        if decoders:
+            self.decoder = Decoder(decoders)
+        else:
+            self.decoder = Decoder([decoder_basichandlers, decoder_imagehandler('torch')])
+        self.length : int = length
+
+    def add_decoder(self, decoder):
+        self.decoder.add_decoder(decoder)
+
+    def __iter__(self):
+        for data in self.input_dataset:
+            pathname = data[0]
+            result = self.decoder(data)
+            yield (pathname, result[pathname])
