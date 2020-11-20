@@ -161,7 +161,7 @@ TORCH_LIBRARY(cuda, m) {
       .def("synchronize", &CUDAStream::synchronize)
       .def("wait_event", &CUDAStream::waitEvent)
       .def("wait_stream", &CUDAStream::waitStream)
-      .def("setstream", &CUDAStream::setStream)
+      .def("set_stream", &CUDAStream::setStream)
       .def("device_index", &CUDAStream::device_index)
       .def("device", &CUDAStream::device)
       .def("pack", &CUDAStream::pack)
