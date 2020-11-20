@@ -111,7 +111,7 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
 KinetoThreadLocalState* getProfilerTLSState() {
   const auto& state = c10::ThreadLocalDebugInfo::get(
       c10::DebugInfoKind::PROFILER_STATE);
-  return static_cast<KinetoThreadLocalState*>(state.get());
+  return static_cast<KinetoThreadLocalState*>(state);
 }
 
 void pushProfilingCallbacks() {
