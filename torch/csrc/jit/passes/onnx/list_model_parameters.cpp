@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
@@ -85,6 +86,12 @@ std::vector<IValue> getParamAttributes(
           n->s(attr::name) == "num_batches_tracked") {
         n->destroy();
       } else if (n->kind() == prim::GetAttr) {
+        for (auto use : n->output()->uses()) {
+          if (use.user->kind() == prim::PythonOp)
+            throw ErrorReport(n->sourceRange())
+                << "Couldn't export Python method.";
+        }
+
         auto name = n->s(attr::name);
         auto attrModule = module_;
         auto input = n->inputs()[0];
