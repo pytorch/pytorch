@@ -384,8 +384,8 @@ class TestCuda(TestCase):
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device='cuda')
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 80.00 GiB"):
-            torch.empty(1024 * 1024 * 1024 * 80, dtype=torch.int8, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 8000000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
@@ -978,7 +978,6 @@ class TestCuda(TestCase):
         self.assertNotEqual(hash(s0), hash(s3))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_streams_priority(self):
         low, high = torch.cuda.Stream.priority_range()
         s0 = torch.cuda.Stream(device=0, priority=low)

@@ -279,6 +279,7 @@ Pointwise Ops
     clamp
     clip
     conj
+    copysign
     cos
     cosh
     deg2rad
@@ -297,6 +298,7 @@ Pointwise Ops
     fmod
     frac
     imag
+    ldexp
     lerp
     lgamma
     log
@@ -313,6 +315,7 @@ Pointwise Ops
     hypot
     i0
     igamma
+    igammac
     mul
     multiply
     mvlgamma
@@ -459,6 +462,7 @@ Other Operations
     flip
     fliplr
     flipud
+    kron
     rot90
     gcd
     histc
@@ -543,4 +547,4 @@ Utilities
     set_deterministic
     is_deterministic
     vmap
-    Assert
+    _assert

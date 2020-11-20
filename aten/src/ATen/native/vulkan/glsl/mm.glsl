@@ -1,31 +1,34 @@
 #version 450 core
 #define PRECISION $precision
+
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform PRECISION sampler3D uM1;
-layout(set = 0, binding = 2) uniform PRECISION sampler3D uM2;
-layout(set = 0, binding = 3) uniform constBlock {
-  ivec4 outputSize;
-  float beta;
-  float alpha;
-  int K;
-}
-uConstBlock;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uM1;
+layout(set = 0, binding = 2)          uniform PRECISION                    sampler3D uM2;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  if (all(lessThan(pos, uConstBlock.outputSize.xyz))) {
-    int K = uConstBlock.K;
-    vec4 mmv = vec4(0);
-    int ki = 0;
-    for (; ki < K; ++ki) {
-      vec4 m1ki = texelFetch(uM1, ivec3(ki, pos.y, pos.z), 0);
-      vec4 m2ki = texelFetch(uM2, ivec3(pos.x, ki, pos.z), 0);
-      mmv += m1ki * m2ki;
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
+
+  /* Dynamically Uniform */
+  const ivec3 size = imageSize(uOutput);
+  const int dim = textureSize(uM1, 0).x;
+
+  if (all(lessThan(pos, size))) {
+    vec4 sum = vec4(0);
+
+    for (int k = 0; k < dim; ++k) {
+      sum = fma(
+          texelFetch(uM1, ivec3(k, pos.y, pos.z), 0),
+          texelFetch(uM2, ivec3(pos.x, k, pos.z), 0),
+          sum);
     }
-    imageStore(uOutput, pos, uConstBlock.alpha * mmv);
+
+    imageStore(uOutput, pos, sum);
   }
 }

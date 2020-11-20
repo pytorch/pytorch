@@ -52,7 +52,6 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, Scalar al
 #define FOREACH_BINARY_OP_LIST(NAME, OP)                                                                    \
 void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {                  \
     check_foreach_api_restrictions(tensors1, tensors2);                                                     \
-                                                                                                            \
     if (!can_use_fast_route(tensors1, tensors2)) {                                                          \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2);                   \
     }                                                                                                       \
@@ -62,7 +61,6 @@ void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList t
                                                                                                             \
 std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {    \
     check_foreach_api_restrictions(tensors1, tensors2);                                                     \
-                                                                                                            \
     if (!can_use_fast_route(tensors1, tensors2)) {                                                          \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2);                    \
     }                                                                                                       \
@@ -73,8 +71,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
 #define FOREACH_BINARY_OP_LIST_ALPHA(NAME, OP)                                                                          \
 void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, Scalar alpha) {                \
     check_foreach_api_restrictions(tensors1, tensors2);                                                                 \
-                                                                                                                        \
-    if (!can_use_fast_route(tensors1, tensors2)) {                                                                      \
+    if (!can_use_fast_route(tensors1, tensors2, alpha)) {                                                               \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2, alpha);                        \
     }                                                                                                                   \
                                                                                                                         \
@@ -83,8 +80,7 @@ void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList t
                                                                                                                         \
 std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2, Scalar alpha) {  \
     check_foreach_api_restrictions(tensors1, tensors2);                                                                 \
-                                                                                                                        \
-    if (!can_use_fast_route(tensors1, tensors2)) {                                                                      \
+    if (!can_use_fast_route(tensors1, tensors2, alpha)) {                                                               \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2, alpha);                         \
     }                                                                                                                   \
                                                                                                                         \

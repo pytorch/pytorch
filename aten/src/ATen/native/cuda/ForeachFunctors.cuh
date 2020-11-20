@@ -163,7 +163,7 @@ struct BinaryOpScalarFunctor {
         opmath_t scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
@@ -183,7 +183,7 @@ struct BinaryOpScalarListFunctor {
         Op op) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
@@ -205,7 +205,7 @@ struct BinaryOpListAlphaFunctor {
         opmath_t alpha) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
@@ -254,7 +254,7 @@ struct UnaryOpFunctor {
         Op op) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
@@ -301,7 +301,7 @@ struct PointwiseOpScalarFunctor {
         opmath_t scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
@@ -321,7 +321,7 @@ struct PointwiseOpScalarListFunctor {
         Op op) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
@@ -342,7 +342,7 @@ struct PointwiseOpListFunctor {
         Op op) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
+            int n = tl.numel_for_tensor[tensor_loc];
 
             T* args[depth];
             bool all_aligned = init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);

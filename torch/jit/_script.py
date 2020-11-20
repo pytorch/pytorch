@@ -741,6 +741,19 @@ else:
         def __init__(self, arg=None):
             super().__init__()
 
+def call_prepare_scriptable_func(obj):
+    if not isinstance(obj, torch.nn.Module):
+        return obj
+    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore
+    for name in obj.__dict__:
+        sub_module = obj.__dict__.get(name)
+        if name == '_modules':
+            for k, v in sub_module.items():
+                sub_module[k] = call_prepare_scriptable_func(v)
+            obj.__setattr__(name, sub_module)
+        elif isinstance(sub_module, torch.nn.Module) and not isinstance(sub_module, ScriptModule):
+            obj.__setattr__(name, call_prepare_scriptable_func(sub_module)) 
+    return obj
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
@@ -894,6 +907,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
 
     if isinstance(obj, torch.nn.Module):
+        obj = call_prepare_scriptable_func(obj) 
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )

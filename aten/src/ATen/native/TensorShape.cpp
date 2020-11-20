@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <vector>
 #include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
@@ -1867,7 +1868,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
 }
 
 Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "diag", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
   return result;
@@ -1982,6 +1983,22 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
 
 Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
+}
+
+Tensor swapaxes(const Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose(axis0, axis1);
+}
+
+Tensor& swapaxes_(Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose_(axis0, axis1);
+}
+
+Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose(dim0, dim1);
+}
+
+Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose_(dim0, dim1);
 }
 
 }} // at::native

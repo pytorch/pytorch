@@ -249,6 +249,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: contiguous
    .. automethod:: copy_
    .. automethod:: conj
+   .. automethod:: copysign
+   .. automethod:: copysign_
    .. automethod:: cos
    .. automethod:: cos_
    .. automethod:: cosh
@@ -265,7 +267,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cummax
    .. automethod:: cummin
    .. automethod:: cumprod
+   .. automethod:: cumprod_
    .. automethod:: cumsum
+   .. automethod:: cumsum_
    .. automethod:: data_ptr
    .. automethod:: deg2rad
    .. automethod:: dequantize
@@ -351,6 +355,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: i0_
    .. automethod:: igamma
    .. automethod:: igamma_
+   .. automethod:: igammac
+   .. automethod:: igammac_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
@@ -390,6 +396,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: kthvalue
    .. automethod:: lcm
    .. automethod:: lcm_
+   .. automethod:: ldexp
+   .. automethod:: ldexp_
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: less_equal
@@ -583,6 +591,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
+   .. automethod:: swapaxes
+   .. automethod:: swapdims
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_

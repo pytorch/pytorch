@@ -10,6 +10,10 @@ bool canRunOutOfPlace(Node* n);
 std::function<void(const ProcessedNode*, std::vector<IValue>&)>
 getOutOfPlaceOperation(Node* n);
 
+bool canRunNatively(Node* n);
+std::function<void(const ProcessedNode*, std::vector<IValue>&)>
+getNativeOperation(Node* n);
+
 #define SUPPORTED_OPS(F) \
   F(aten::__getitem__)   \
   F(aten::add)           \
@@ -22,6 +26,7 @@ getOutOfPlaceOperation(Node* n);
   F(aten::flatten)       \
   F(aten::index_put_)    \
   F(aten::isnan)         \
+  F(aten::leaky_relu)    \
   F(aten::matmul)        \
   F(aten::mul)           \
   F(aten::permute)       \

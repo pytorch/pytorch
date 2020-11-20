@@ -201,7 +201,8 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   std::shared_ptr<SugaredValue> getitem(
       const SourceRange& loc,
       Function& m,
-      Value* idx) override;
+      Value* idx,
+      TypePtr type_hint) override;
 
  private:
   Value* self_;

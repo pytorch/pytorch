@@ -24,6 +24,8 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as c10d
 import torch.distributed as dist
+import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
+import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 from torch.nn.parallel import DistributedDataParallel
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
@@ -2756,7 +2758,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         if ddp_comm_hook is not None:
-            ddp_model._register_comm_hook(process_group, ddp_comm_hook)
+            ddp_model.register_comm_hook(process_group, ddp_comm_hook)
 
         def step_model(model, input, target):
             model.train()
@@ -3377,7 +3379,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
         # Register DDP Communication Hook
-        cpu_model._register_comm_hook(None, self._simple_hook)
+        cpu_model.register_comm_hook(None, self._simple_hook)
 
         # check whether the grads are equal to what then callback returns.
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
@@ -3394,7 +3396,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Register DDP Communication Hook if defined
         if hook is not None:
-            gpu_model._register_comm_hook(None, hook)
+            gpu_model.register_comm_hook(None, hook)
 
         return gpu_model
 
@@ -3472,7 +3474,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _test_ddp_comm_hook_allreduce_hook_nccl(self, gradient_as_bucket_view=False):
         """
         This unit test verifies whether a DDP communication hook that just calls
-        allreduce gives the same result result with the case of no hook registered.
+        allreduce gives the same result with the case of no hook registered.
         Without the then callback, the future_value in reducer is no longer
         a PyObject, and this unit test verifies future_value is properly checked.
         """
@@ -3489,16 +3491,40 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # check whether the grads are equal to what DDP without hook would return.
         self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
+    def _test_default_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether default Python DDP communication hooks ALLREDUCE and FP16_COMPRESS
+        can give the same result with the case of no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            return default.allreduce_hook(process_group, bucket)
+
+        def fp16_compress_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            return default.fp16_compress_hook(process_group, bucket)
+
+        def powerSGD_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            return powerSGD.powerSGD_hook(process_group, bucket)
+
+        for hook in [allreduce_hook, fp16_compress_hook, powerSGD_hook]:
+            # Get GPU model with the hook registered.
+            gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, hook, gradient_as_bucket_view)
+
+            # check whether the grads are equal to what DDP without hook would return.
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
     def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
-        This unit test verifies whether built-in DDP communication hooks ALLREDUCE and FP16_COMPRESS
-        can give the same result result with the case of no hook registered.
+        This unit test verifies whether built-in C++ DDP communication hooks ALLREDUCE and FP16_COMPRESS
+        can give the same result with the case of no hook registered.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         for comm_hook_type in [dist.BuiltinCommHookType.ALLREDUCE, dist.BuiltinCommHookType.FP16_COMPRESS]:
-            # Get GPU model with the built-in allreduce communication hook.
+            # Get GPU model with the built-in communication hook.
             gpu_model = self._gpu_model_with_builtin_ddp_comm_hook(
                 process_group, comm_hook_type, gradient_as_bucket_view)
 
@@ -3514,6 +3540,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
+    def test_default_ddp_comm_hooks_nccl(self):
+        self._test_default_ddp_comm_hooks_nccl()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_builtin_ddp_comm_hooks_nccl(self):
         self._test_builtin_ddp_comm_hooks_nccl()
 
@@ -3522,6 +3554,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_rocm
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_default_ddp_comm_hooks_nccl_is_view(self):
+        self._test_default_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -3578,7 +3616,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model = DistributedDataParallel(ModuleForDdpCommHook(), process_group=process_group)
 
         with self.assertRaisesRegex(TypeError, "Communication hook must be callable."):
-            model._register_comm_hook(state=None, hook=1)
+            model.register_comm_hook(state=None, hook=1)
 
         with self.assertRaisesRegex(
             ValueError, "bucket annotation should be dist._GradBucket."
@@ -3587,7 +3625,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
 
-            model._register_comm_hook(state=None, hook=comm_hook)
+            model.register_comm_hook(state=None, hook=comm_hook)
 
     @requires_gloo()
     def test_ddp_invalid_comm_hook_return_type(self):
@@ -3609,7 +3647,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def comm_hook(state: object, bucket: dist._GradBucket) -> int:
                 return torch.futures.Future()
 
-            model._register_comm_hook(state=None, hook=comm_hook)
+            model.register_comm_hook(state=None, hook=comm_hook)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -3619,7 +3657,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             def comm_hook(state: object, bucket: dist._GradBucket):
                 return 1
 
-            model._register_comm_hook(state=None, hook=comm_hook)
+            model.register_comm_hook(state=None, hook=comm_hook)
 
             # Run forward
             output = model(8, self.rank)
@@ -3643,12 +3681,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             fut.set_result(bucket.get_tensors())
             return fut
 
-        model._register_comm_hook(None, dummy_hook)
+        model.register_comm_hook(None, dummy_hook)
 
         with self.assertRaisesRegex(
             RuntimeError, "register_comm_hook or register_builtin_comm_hook can only be called once."
         ):
-            model._register_comm_hook(None, dummy_hook)
+            model.register_comm_hook(None, dummy_hook)
 
     @requires_gloo()
     def test_ddp_comm_hook_sparse_gradients(self):
@@ -3679,7 +3717,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             fut.set_result([t / self.world_size for t in bucket.get_tensors()])
             return fut
 
-        ddp_model._register_comm_hook(None, allreduce_hook_gloo)
+        ddp_model.register_comm_hook(None, allreduce_hook_gloo)
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
@@ -3916,6 +3954,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     def world_size(self):
         return 3
 
+    @property
+    def blocking_wait_error_msg(self):
+        return "Caught collective operation timeout"
+
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
 
@@ -3953,12 +3995,12 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # Operation would time out in blocking mode.
                 work.wait()
-            # Run some GPU operations to make sure cuda does not stuck to
-            # run new events. It was observed cuda could stuck if not
-            # aborting nccl communicators before throwing Operation timed out
+            # Run some GPU operations to make sure cuda has not gotten stuck.
+            # It was observed cuda could get stuck if NCCL communicators were
+            # not properly aborted before throwing RuntimeError.
             a = torch.rand(10).cuda(self.rank)
         elif self.rank == 1:
             # Clean up structures (ex: files for FileStore before going down)
@@ -4020,7 +4062,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             timeout=timedelta(seconds=self.op_timeout_sec))
         process_group.barrier().wait()
         if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # This should timeout
                 process_group.barrier().wait()
 
@@ -4069,7 +4111,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # This should timeout in about 1 second.
             start = time.time()
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
         else:
             # Sleep to ensure timeout.
