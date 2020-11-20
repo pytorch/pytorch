@@ -956,9 +956,7 @@ class JitRpcTest(
         dst_name = worker_name((self.rank + 1) % self.world_size)
         # Construct on remote end with rpc_sync
         created_script_module = rpc.rpc_sync(
-            dst_name,
-            MyScriptModule,
-            args=(self.rank, )
+            dst_name, MyScriptModule, args=(self.rank,)
         )
         # Forward should output a ones tensor of self.rank.
         self.assertTrue(isinstance(created_script_module, torch.jit.ScriptModule))
@@ -966,17 +964,21 @@ class JitRpcTest(
         self.assertEqual(torch.ones(self.rank), rank_ones_tensor)
 
         # Construct ScriptModule with rpc.remote.
-        remote_script_module = rpc.remote(
-            dst_name,
-            MyScriptModule,
-            args=(self.rank,)
-        )
+        remote_script_module = rpc.remote(dst_name, MyScriptModule, args=(self.rank,))
         # Verify it is an instance of ScriptModule on remote end.
-        remote_end_is_script = rpc.rpc_sync(remote_script_module.owner(), rref_isinstance, args=(remote_script_module, torch.jit.ScriptModule))
+        remote_end_is_script = rpc.rpc_sync(
+            remote_script_module.owner(),
+            rref_isinstance,
+            args=(remote_script_module, torch.jit.ScriptModule),
+        )
         self.assertTrue(remote_end_is_script)
         # Run forward pass remotely.
         # TODO: make RRef helper work with ScriptModule.
-        remote_forward_output = rpc.rpc_sync(remote_script_module.owner(), run, args=(remote_script_module, "forward", (), {}))
+        remote_forward_output = rpc.rpc_sync(
+            remote_script_module.owner(),
+            run,
+            args=(remote_script_module, "forward", (), {}),
+        )
         self.assertEqual(remote_forward_output, torch.ones(self.rank))
         # Ensure we can transfer ScriptModule RRef to this rank and run
         # forward pass.

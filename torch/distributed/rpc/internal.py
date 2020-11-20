@@ -106,7 +106,9 @@ class _InternalRPCPickler:
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
         # Add dispatch pickling for ScriptModule if needed.
         if isinstance(obj, torch.jit.ScriptModule):
-            p.dispatch_table[obj.__class__] = self._script_module_reducer
+            # Ignore type error because dispatch_table is defined in third-party package
+            p.dispatch_table[obj.__class__] = self._script_module_reducer  # type: ignore[index]
+
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "send_tables"):
