@@ -26,15 +26,12 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         float_model = SingleLayerLinearModel()
         float_model.eval()
 
-        model_to_quantize = copy.deepcopy(float_model)
-        model_to_quantize.eval()
-
         qengine = torch.backends.quantized.engine
         qconfig = get_default_qconfig(qengine)
 
         qconfig_dict = {"": qconfig}
 
-        prepared_model = prepare_fx(model_to_quantize, qconfig_dict)
+        prepared_model = prepare_fx(float_model, qconfig_dict)
 
         backup_prepared_model = copy.deepcopy(prepared_model)
         backup_prepared_model.eval()
@@ -72,17 +69,14 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         for float_model in model_list:
             float_model.eval()
 
-            model_to_quantize = copy.deepcopy(float_model)
-            model_to_quantize.eval()
-
-            backup_prepared_model = fuse_fx(float_model)
-            prepared_model = prepare_fx(model_to_quantize, qconfig_dict)
+            fused = fuse_fx(float_model)
+            prepared_model = prepare_fx(float_model, qconfig_dict)
 
             # Run calibration
             calibrate(prepared_model, self.img_data_2d)
             q_model = convert_fx(prepared_model)
 
-            compare_and_validate_results(backup_prepared_model, q_model)
+            compare_and_validate_results(fused, q_model)
 
     @skipIfNoFBGEMM
     def test_compare_weights_linear_static_fx(self):
@@ -105,14 +99,11 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         float_model = SingleLayerLinearModel()
         float_model.eval()
 
-        model_to_quantize = copy.deepcopy(float_model)
-        model_to_quantize.eval()
-
         qengine = torch.backends.quantized.engine
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        prepared_model = prepare_fx(model_to_quantize, qconfig_dict)
+        prepared_model = prepare_fx(float_model, qconfig_dict)
 
         backup_prepared_model = copy.deepcopy(prepared_model)
         backup_prepared_model.eval()
@@ -143,10 +134,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = torch.quantization.qconfig.default_dynamic_qconfig
         qconfig_dict = {"": qconfig}
 
-        model_to_quantize = copy.deepcopy(float_model)
-        model_to_quantize.eval()
-
-        prepared_model = prepare_fx(model_to_quantize, qconfig_dict)
+        prepared_model = prepare_fx(float_model, qconfig_dict)
 
         backup_prepared_model = copy.deepcopy(prepared_model)
         backup_prepared_model.eval()
