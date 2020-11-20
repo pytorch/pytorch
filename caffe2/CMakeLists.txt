@@ -771,6 +771,12 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_CUDA OR USE_ROCM)
+  if(USE_CUDA)
+    set(TORCHLIB_FLAVOR torch_cuda)
+  elseif(USE_ROCM)
+    set(TORCHLIB_FLAVOR torch_hip)
+  endif()
+
   # The list of NVFUSER runtime files
   list(APPEND NVFUSER_RUNTIME_FILES
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
@@ -795,14 +801,10 @@ if(USE_CUDA OR USE_ROCM)
       COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
     )
     add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
-    add_dependencies(torch_cuda nvfuser_rt_${filename})
+    add_dependencies(${TORCHLIB_FLAVOR} nvfuser_rt_${filename})
   endforeach()
 
-  if(USE_CUDA)
-    target_include_directories(torch_cuda PRIVATE "${CMAKE_BINARY_DIR}/include")
-  elseif(USE_ROCM)
-    target_include_directories(torch_hip PRIVATE "${CMAKE_BINARY_DIR}/include")
-  endif()
+  target_include_directories(${TORCHLIB_FLAVOR} PRIVATE "${CMAKE_BINARY_DIR}/include")
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
