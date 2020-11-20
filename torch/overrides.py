@@ -132,6 +132,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.result_type,
         torch.scalar_tensor,
         torch.sparse_coo_tensor,
+        torch.sparse_gcs_tensor,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
