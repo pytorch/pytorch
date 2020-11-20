@@ -9808,6 +9808,8 @@ class TestTorchDeviceType(TestCase):
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 
     @onlyCPU
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Fails with `ufunc 'ldexp' not supported for \
+                     the input types` on Windows")
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
