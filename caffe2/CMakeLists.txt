@@ -804,6 +804,11 @@ if(USE_CUDA OR USE_ROCM)
     )
     add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
     add_dependencies(${TORCHLIB_FLAVOR} nvfuser_rt_${filename})
+
+    # also generate the resource headers during the configuration step
+    # (so tools like clang-tidy can run w/o requiring a real build)
+    execute_process(COMMAND
+      ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst})
   endforeach()
 
   target_include_directories(${TORCHLIB_FLAVOR} PRIVATE "${CMAKE_BINARY_DIR}/include")
