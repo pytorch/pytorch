@@ -8,37 +8,69 @@ namespace ops {
 namespace {
 
 vTensor pack_weights(api::Resource::Pool& pool, const Tensor& weight_arg) {
-  return convert(weight_arg.vulkan());
+  if (weight_arg.is_vulkan()) {
+    return convert(weight_arg);
+  }
+  const Tensor weight = weight_arg.contiguous();
+  const IntArrayRef w_sizes = weight.sizes();
+  const float* const src_weight_ptr = weight.data_ptr<float>();
+
+  vTensor v_weight{
+      api::context(),
+      &pool,
+      w_sizes,
+      weight.options(),
+  };
+
+  using Future = vTensor::Future<void, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
+  Future::Payload v_weight_payload = v_weight_future.wait();
+
+  memcpy(
+      v_weight_payload.get(),
+      src_weight_ptr,
+      std::min(weight.nbytes(), v_weight.nbytes()));
+
+  return v_weight;
 }
 
 vTensor pack_biases(
     api::Resource::Pool& pool,
     const c10::optional<Tensor>& bias_arg,
     const Tensor& weight_arg) {
-  if (bias_arg) {
-    return convert(bias_arg->vulkan());
-  } else {
-    vTensor v_bias{
-        api::context(),
-        &pool,
-        {weight_arg.size(Layout::Parameter::width)},
-        weight_arg.options(),
-    };
+  if (bias_arg && bias_arg->is_vulkan()) {
+    return convert(*bias_arg);
+  }
 
+  vTensor v_bias{
+      api::context(),
+      &pool,
+      {weight_arg.sizes()[Layout::Parameter::width]},
+      weight_arg.options(),
+  };
+
+  {
     using Future = vTensor::Future<void, vTensor::Access::Write>;
     Future v_bias_future = v_bias.host<void, vTensor::Access::Write>();
     Future::Payload v_bias_payload = v_bias_future.wait();
 
-    memset(
-        v_bias_payload.get(),
-        // 2's complement integers and IEEE-754 floating point numbers both
-        // have identical bit representations for 0, so can use memset which
-        // only accepts uint8_t parameter.
-        0,
-        v_bias.nbytes());
-
-    return v_bias;
+    if (bias_arg) {
+      memcpy(
+          v_bias_payload.get(),
+          bias_arg->contiguous().data_ptr<float>(),
+          std::min(bias_arg->nbytes(), v_bias.nbytes()));
+    } else {
+      memset(
+          v_bias_payload.get(),
+          // 2's complement integers and IEEE-754 floating point numbers both
+          // have identical bit representations for 0, so can use memset which
+          // only accepts uint8_t parameter.
+          0,
+          v_bias.nbytes());
+    }
   }
+
+  return v_bias;
 }
 
 bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
@@ -55,8 +87,9 @@ bool usable(
     const Tensor& input,
     const Tensor& weight,
     const c10::optional<Tensor>& bias) {
-  return (input.sizes()[Layout::Parameter::width] ==
-       weight.sizes()[Layout::Parameter::height]);
+  return (
+      input.sizes()[Layout::Parameter::width] ==
+      weight.sizes()[Layout::Parameter::height]);
 }
 
 void addmm_impl(
@@ -263,7 +296,6 @@ LinearOpContext::State LinearOpContext::unpack() const {
       unpacked_.bias,
   };
 }
-
 
 c10::intrusive_ptr<LinearOpContext> linear_prepack(
     Tensor&& weight,
