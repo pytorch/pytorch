@@ -97,8 +97,8 @@ class LeakyReLU(torch.nn.LeakyReLU):
     """
     def __init__(self, scale: float, zero_point: int, negative_slope: float = 1e-2, inplace: bool = False):
         super().__init__(negative_slope, inplace)
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ops.quantized.leaky_relu(
@@ -113,7 +113,7 @@ class LeakyReLU(torch.nn.LeakyReLU):
         return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
 
 class Sigmoid(torch.nn.Sigmoid):
-    r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
+    r"""This is the quantized equivalent of :class:`~torch.nn.Sigmoid`.
 
     Args:
         scale: quantization scale of the output tensor
