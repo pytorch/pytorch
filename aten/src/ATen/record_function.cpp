@@ -352,8 +352,25 @@ void enableRecordFunction(bool enable) {
   rf_tls_.tls_record_function_enabled_ = enable;
 }
 
+bool isRecordingTopLevelOnly() {
+  return rf_tls_.tls_record_top_level_only_;
+}
+
+void recordTopLevelOnly(bool record) {
+  rf_tls_.tls_record_top_level_only_ = record;
+}
+
+bool isTopLevelRecordFunction() {
+  return rf_tls_.function_call_depth_ == 0;
+}
+
 RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
   auto* rf_tls_ptr = &rf_tls_;
+  // Keep track of nestedness of FUNCTION scopes to control the logging of
+  // non-top-level operators
+  if (scope_ == RecordScope::FUNCTION) {
+    rf_tls_ptr->function_call_depth_++;
+  }
   auto& m = manager();
   if (rf_tls_ptr->tls_record_function_enabled_ &&
       (!m.sorted_global_callbacks_.empty() || !rf_tls_ptr->sorted_tls_callbacks_.empty())) {
@@ -419,6 +436,9 @@ void RecordFunction::before(
 
 RecordFunction::~RecordFunction() {
   end();
+  if (scope_ == RecordScope::FUNCTION) {
+    rf_tls_.function_call_depth_--;
+  }
 }
 
 void RecordFunction::end() {

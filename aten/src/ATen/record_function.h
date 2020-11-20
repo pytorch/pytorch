@@ -512,10 +512,19 @@ struct TORCH_API RecordFunctionTLS {
   RecordFunctionCallbacks sorted_tls_callbacks_;
 
   bool tls_record_function_enabled_ = true;
+
+  bool tls_record_top_level_only_ = true;
+
+  uint64_t function_call_depth_ = 0;
 };
 
 TORCH_API const RecordFunctionTLS& get_record_function_tls_();
 
 TORCH_API void set_record_function_tls_(const RecordFunctionTLS& tls);
+
+// API to control the logging of non-top-level operators
+TORCH_API bool isRecordingTopLevelOnly();
+TORCH_API void recordTopLevelOnly(bool record);
+TORCH_API bool isTopLevelRecordFunction();
 
 } // namespace at
