@@ -976,7 +976,7 @@ class JitRpcTest(
         # Run forward pass remotely.
         remote_forward_output = remote_script_module.rpc_sync().forward()
         self.assertEqual(remote_forward_output, torch.ones(self.rank))
-        # Run function defined on SCriptModule remotely.
+        # Run function defined on ScriptModule remotely.
         remote_func_output = remote_script_module.rpc_sync().custom_func()
         self.assertEqual(remote_func_output, torch.ones(self.rank))
         # Ensure we can transfer ScriptModule RRef to this rank and run
