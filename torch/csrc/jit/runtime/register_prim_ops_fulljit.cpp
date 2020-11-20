@@ -29,7 +29,6 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -39,7 +38,6 @@ RegisterOperators reg(
      Operator(
          prim::profile_ivalue,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileIValueOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
