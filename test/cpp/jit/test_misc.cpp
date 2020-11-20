@@ -780,6 +780,7 @@ void checkScopeCallbacks() {
 }
 
 static bool should_run = false;
+
 static bool shouldRunCallback(const RecordFunctionCallback&) {
   return should_run;
 }
@@ -1068,7 +1069,7 @@ TEST(RecordFunctionTest, Basic) {
       RecordFunctionCallback(
           [&ran](const RecordFunction& fn) { ran = true; },
           [](const RecordFunction&) {})
-        .setShouldRun(shouldRunCallback));
+          .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
 
