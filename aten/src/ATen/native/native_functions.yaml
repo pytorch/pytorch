@@ -6220,6 +6220,28 @@
     CPU: _svd_helper_cpu
     CUDA: _svd_helper_cuda
 
+# swapaxes, alias for transpose
+- func: swapaxes(Tensor(a) self, int axis0, int axis1) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+
+- func: swapaxes_(Tensor(a!) self, int axis0, int axis1) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  device_guard: False
+
+# swapdims, alias for transpose
+- func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+
+- func: swapdims_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  device_guard: False
+
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     DefaultBackend: cholesky_out
@@ -6574,6 +6596,21 @@
   variants: method
   dispatch:
     CPU, CUDA: igamma_
+
+- func: igammac.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: igammac_out
+
+- func: igammac(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU, CUDA: igammac
+
+- func: igammac_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: igammac_
 
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
