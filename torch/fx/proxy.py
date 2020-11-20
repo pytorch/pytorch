@@ -153,7 +153,7 @@ def _create_friendly_names(a: Any, frames_up : int):
                     # into Python bytecode state to get the actual name used?
                     if not found_name or len(k) < len(found_name):
                         found_name = k
-            if found_name is not None and found_name != a.node.name:
+            if found_name is not None and not a.node.name.startswith(found_name):
                 a.node.name = a.tracer.graph._create_unique_name(found_name)
 
     _assign_friendly_name(a)
