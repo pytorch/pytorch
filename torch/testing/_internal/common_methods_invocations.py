@@ -21,8 +21,10 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
 
+if TEST_SCIPY:
+    import scipy.special
 
 class SkipInfo(object):
     """Describes which test, or type of tests, should be skipped when testing
@@ -468,6 +470,21 @@ op_db = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
 ]
+
+if TEST_SCIPY:
+    op_db_scipy_reference = [
+        UnaryUfuncInfo('digamma',
+                       ref=scipy.special.digamma,
+                       decorators=(precisionOverride({torch.float16: 5e-1}),),
+                       # 'expit' not supported for the input types
+                       skips=(SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                       device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       promotes_integers_to_float=True)
+    ]
+    op_db = op_db + op_db_scipy_reference
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
