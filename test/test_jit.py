@@ -44,6 +44,7 @@ from torch._six import PY37, StringIO
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.testing import FileCheck
+import torch.autograd.profiler
 import torch.cuda
 import torch.jit
 import torch.jit._logging
