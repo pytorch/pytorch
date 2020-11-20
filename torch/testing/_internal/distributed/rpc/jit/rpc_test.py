@@ -21,6 +21,11 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
+def run(rref, func_name, args, kwargs):
+    return getattr(rref.local_value(), func_name)(*args, **kwargs)
+
+def rref_isinstance(rref, cls_to_check):
+    return isinstance(rref.local_value(), cls_to_check)
 
 def sleep(t):
     time.sleep(t)
@@ -948,6 +953,41 @@ class JitRpcTest(
                 run_ref_script_module,
                 args=(remote_ref, torch.ones(self.rank)),
             )
+
+    @dist_init
+    def test_create_script_module_on_remote(self):
+        dst_name = worker_name((self.rank + 1) % self.world_size)
+        # Construct on remote end with rpc_sync
+        created_script_module = rpc.rpc_sync(
+            dst_name,
+            MyScriptModule,
+            args=(self.rank, )
+        )
+        # Forward should output a ones tensor of self.rank.
+        self.assertTrue(isinstance(created_script_module, torch.jit.ScriptModule))
+        rank_ones_tensor = created_script_module()
+        self.assertEqual(torch.ones(self.rank), rank_ones_tensor)
+
+        # Construct ScriptModule with rpc.remote.
+        remote_script_module = rpc.remote(
+            dst_name,
+            MyScriptModule,
+            args=(self.rank,)
+        )
+        # Verify it is an instance of ScriptModule on remote end.
+        ret = rpc.rpc_sync(remote_script_module.owner(), rref_isinstance, args=(remote_script_module, torch.jit.ScriptModule))
+        self.assertTrue(ret)
+        # Run forward pass remotely.
+        # TODO: make RRef helper work with ScriptModule.
+        remote_forward_output = rpc.rpc_sync(remote_script_module.owner(), run, args=(remote_script_module, "forward", (), {}))
+        self.assertEqual(remote_forward_output, torch.ones(self.rank))
+        # Ensure we can transfer ScriptModule RRef to this rank and run
+        # forward pass.
+        local_script_module = remote_script_module.to_here()
+        self.assertTrue(isinstance(local_script_module, torch.jit.ScriptModule))
+        rank_ones_tensor = local_script_module()
+        self.assertEqual(rank_ones_tensor, torch.ones(self.rank))
+
 
     @dist_init
     def test_load_script_module_with_pickled_rref(self):
