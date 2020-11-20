@@ -602,18 +602,16 @@ Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {
-  TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  Tensor result;
-  auto iter = TensorIterator::unary_float_op(result, self);
-  polygamma_stub(iter.device_type(), iter, n);
-  return iter.output();
+  Tensor result = at::empty({0}, self.options());
+  at::polygamma_out(result, n, self);
+  return result;
 }
 Tensor& polygamma_(Tensor& self, int64_t n) {
   return at::polygamma_out(self, n, self);
 }
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  auto iter = TensorIterator::unary_float_op(result, self);
+  auto iter = TensorIterator::unary_op(result, self);
   polygamma_stub(iter.device_type(), iter, n);
   return result;
 }
