@@ -209,12 +209,13 @@ def embedding_bag(g,
     import warnings
     warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
                   "Please use opset 11 or higher to export model for dynamic input shape.'")
-    if offsets.type().sizes() is not None:
+    offsets_dim_0 = sym_help._get_tensor_dim_size(offsets, 0)
+    if offsets_dim_0 is not None:
         if include_last_offset:
-            offset_len = offsets.type().sizes()[0] - 1
+            offset_len = offsets_dim_0 - 1
             offsets_extended = offsets
         else:
-            offset_len = offsets.type().sizes()[0]
+            offset_len = offsets_dim_0
             offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
             offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
         list_ = []

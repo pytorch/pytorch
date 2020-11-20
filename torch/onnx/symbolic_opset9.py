@@ -210,9 +210,9 @@ def matmul(g, self, other):
 @parse_args('v', 'v', 'v', 't', 't')
 def addmm(g, self, mat1, mat2, beta, alpha):
     dtype = None
-    self_dtype = self.type().scalarType()
-    mat1_dtype = mat1.type().scalarType()
-    mat2_dtype = mat2.type().scalarType()
+    self_dtype = sym_help._try_get_scalar_type(self)
+    mat1_dtype = sym_help._try_get_scalar_type(mat1)
+    mat2_dtype = sym_help._try_get_scalar_type(mat2)
     if self_dtype is not None:
         dtype = self_dtype
     elif mat1_dtype is not None:
@@ -220,8 +220,8 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     elif mat2_dtype is not None:
         dtype = mat2_dtype
 
-    mat1_rank = mat1.type().dim()
-    mat2_rank = mat2.type().dim()
+    mat1_rank = sym_help._get_tensor_rank(mat1)
+    mat2_rank = sym_help._get_tensor_rank(mat2)
 
     def isNotNoneAnd(v, u):
         return v is not None and v != u
@@ -461,8 +461,8 @@ def size(g, self, dim=None):
     if dim is None:
         return g.op("Shape", self)
     if sym_help._maybe_get_const(dim, 'i') < 0:
-        rank = self.type().dim()
-        if rank:
+        rank = sym_help._get_tensor_rank(self)
+        if rank is not None:
             dim = sym_help._maybe_get_const(dim, 'i') + rank
             dim = g.op("Constant", value_t=torch.tensor(dim))
     return sym_help._size_helper(g, self, dim)
@@ -511,7 +511,9 @@ def view_as(g, self, other):
 
 
 def prim_ConstantSplit(g, self, split_size, dim):
-    size = self.type().sizes()[dim]
+    size = sym_help._get_tensor_dim_size(self, dim)
+    if size is None:
+        return _unimplemented('prim::ConstantSplit', 'unknown dimension size')
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
@@ -524,7 +526,10 @@ def prim_ConstantSplit(g, self, split_size, dim):
 # TODO: Once we have proper scoping, stop reimplementing chunk, delete this
 # method, and use the desugared version
 def prim_ConstantChunk(g, self, chunks, dim):
-    split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
+    dim_size = sym_help._get_tensor_dim_size(self, dim)
+    if dim_size is None:
+        return _unimplemented('prim::ConstantChunk', 'unknown dimension size')
+    split_size = (dim_size + chunks - 1) // chunks
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
@@ -532,8 +537,10 @@ def prim_ConstantChunk(g, self, chunks, dim):
 def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if _outputs is None:
         return sym_help._onnx_opset_unsupported_detailed('unsafe_chunk', 9, 11, 'Dynamic number of outputs not supported')
-    split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
-    size = self.type().sizes()[dim]
+    size = sym_help._get_tensor_dim_size(self, dim)
+    if size is None:
+        return _unimplemented('unsafe_chunk', 'unknown dimension size')
+    split_size = (size + chunks - 1) // chunks
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
@@ -551,7 +558,9 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
     split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
     dim = sym_help._get_const(dim, 'i', 'dim')
 
-    size = self.type().sizes()[dim]
+    size = sym_help._get_tensor_dim_size(self, dim)
+    if size is None:
+        return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Unknown dimension size not supported')
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
@@ -606,8 +615,8 @@ def squeeze(g, self, dim=None):
     squeeze_dim = sym_help._get_const(dim, 'i', 'dim')
     # Handle negative dims
     if squeeze_dim < 0:
-        rank = self.type().dim()
-        if rank:
+        rank = sym_help._get_tensor_rank(self)
+        if rank is not None:
             warnings.warn("ONNX export squeeze with negative axis " + str(squeeze_dim) +
                           " might cause the onnx model to be incorrect. " +
                           "Negative axis is not supported in ONNX. " +
@@ -618,17 +627,17 @@ def squeeze(g, self, dim=None):
         else:
             return _unimplemented('squeeze', 'negative axis with unknown input rank')
 
-    input_shape = self.type().sizes()
-    if input_shape is None:
+    dim_size = sym_help._get_tensor_dim_size(self, squeeze_dim)
+    if dim_size is None:
         warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + " on an input " +
                       "with unknown shape. Note that if the size of dimension " + str(squeeze_dim) + " of the input " +
                       "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on " +
                       "non-singleton dimensions, it is recommended to export this model using opset " +
                       "version 11 or higher.")
         return g.op("Squeeze", self, axes_i=[squeeze_dim])
-    if input_shape[squeeze_dim] > 1:
+    if dim_size > 1:
         warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". The size of " +
-                      "this dimension in the given input is " + str(input_shape[squeeze_dim]) + ". The model will " +
+                      "this dimension in the given input is " + str(dim_size) + ". The model will " +
                       "be exported without the squeeze node. If the model is intended to be used with dynamic " +
                       "input shapes, please use opset version 11 to " +
                       "export the model.")
@@ -681,7 +690,9 @@ def leaky_relu(g, input, negative_slope, inplace=False):
 
 @parse_args('v', 'i')
 def glu(g, input, dim):
-    assert input.type().sizes()[dim] % 2 == 0
+    dim_size = sym_help._get_tensor_dim_size(input, dim)
+    if dim_size is not None:
+        assert dim_size % 2 == 0
 
     first, second = g.op('Split', input, axis_i=dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
@@ -709,7 +720,7 @@ def softmax(g, input, dim, dtype=None):
     # otherwise transpose the input to put the vectors to be normalized to the last dimension.
     # When input rank is not known at export time we compute softmax using a subgraph
     # with other operators
-    input_dim = input.type().dim()
+    input_dim = sym_help._get_tensor_rank(input)
     if input_dim is not None:
         # TODO: remove this as onnx opset 11 spec allows negative axes
         if dim < 0:
@@ -952,21 +963,21 @@ def constant_pad_nd(g, input, padding, value):
         return sym_help._onnx_opset_unsupported_detailed('Pad', 9, 11, 'The value for the padding must be constant')
 
     padding = _convert_padding_node(padding)
-    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
-    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
 def replication_pad(g, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
-    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
@@ -1136,7 +1147,7 @@ def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     # TODO: remove this as onnx opset 11 spec allows negative axes
-    input_dim = input.type().dim()
+    input_dim = sym_help._get_tensor_rank(input)
     if input_dim is None:
         return _unimplemented("dim",
                               "ONNX and PyTorch use different strategies to split the input. "
@@ -1162,11 +1173,19 @@ def log_softmax(g, input, dim, dtype=None):
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i', 'i')
 def _convolution(g, input, weight, bias, stride, padding, dilation,
                  transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32):
-    weight_size = weight.type().sizes()
+    weight_size = sym_help._get_tensor_sizes(weight)
+    try:
+        kernel_shape = weight_size[2:]
+    except Exception:
+        kernel_shape = None
+
+    if kernel_shape is None or any([i is None for i in kernel_shape]):
+        raise RuntimeError('Unsupported: ONNX export of convolution for kernel '
+                           'of unknown shape.')
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if not sym_help._is_none(bias) and bias.type().dim() == 1:
+    if not sym_help._is_none(bias) and sym_help._get_tensor_rank(bias) == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -1187,7 +1206,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if not sym_help._is_none(bias) and bias.type().dim() != 1:
+    if not sym_help._is_none(bias) and sym_help._get_tensor_rank(bias) != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -1226,16 +1245,20 @@ def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, gr
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
     sym_help.assert_training_mode(training, "batch_norm")
-    input_sizes = input.type().sizes()
+    channel_size = sym_help._get_tensor_dim_size(input, 1)
 
     if weight is None or sym_help._is_none(weight):
-        assert len(input_sizes) > 1
-        weight_value = torch.tensor([1.] * input_sizes[1]).type(
+        if channel_size is None:
+            raise RuntimeError('Unsupported: ONNX export of batch_norm for unknown '
+                               'channel size.')
+        weight_value = torch.tensor([1.] * channel_size).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or sym_help._is_none(bias):
-        assert len(input_sizes) > 1
-        bias_value = torch.tensor([0.] * input_sizes[1]).type(
+        if channel_size is None:
+            raise RuntimeError('Unsupported: ONNX export of batch_norm for unknown '
+                               'channel size.')
+        bias_value = torch.tensor([0.] * channel_size).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
 
@@ -1283,15 +1306,19 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
-    input_sizes = input.type().sizes()
+    channel_size = sym_help._get_tensor_dim_size(input, 1)
     if weight is None or sym_help._is_none(weight):
-        assert len(input_sizes) > 1
-        weight_value = torch.tensor([1.] * input_sizes[1]).type(
+        if channel_size is None:
+            raise RuntimeError('Unsupported: ONNX export of instance_norm for unknown '
+                               'channel size.')
+        weight_value = torch.tensor([1.] * channel_size).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or sym_help._is_none(bias):
-        assert len(input_sizes) > 1
-        bias_value = torch.tensor([0.] * input_sizes[1]).type(
+        if channel_size is None:
+            raise RuntimeError('Unsupported: ONNX export of instance_norm for unknown '
+                               'channel size.')
+        bias_value = torch.tensor([0.] * channel_size).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
     return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
@@ -1341,7 +1368,7 @@ def index_select(g, self, dim, index):
     # also produces a tensor with the same rank as the input.
 
     index_const = sym_help._maybe_get_scalar(index)
-    index_dim = index.type().dim()
+    index_dim = sym_help._get_tensor_rank(index)
     if not sym_help._is_value(index_const):
         # Index is a constant scalar. Make it a size 1 constant tensor.
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
@@ -1761,8 +1788,8 @@ def alias(g, self):
 def unsqueeze(g, self, dim):
     # Handle negative dim
     if dim < 0:
-        rank = self.type().dim()
-        if rank:
+        rank = sym_help._get_tensor_rank(self)
+        if rank is not None:
             warnings.warn("ONNX export unsqueeze with negative axis " + str(dim) +
                           " might cause the onnx model to be incorrect. " +
                           "Negative axis is not supported in ONNX. " +
@@ -1852,9 +1879,11 @@ def repeat(g, self, repeats):
 
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
-    dims = self.type().sizes()
+    dims = sym_help._get_tensor_sizes(self)
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
+    if any([i is None for i in dims[1:]]):
+        return _unimplemented("pixel_shuffle", "only support static input shape, except for batch size")
     output_channel = dims[1] // upscale_factor // upscale_factor
     after_view = view(g, self, g.op("Constant", value_t=torch.tensor([-1, output_channel, upscale_factor,
                                                                       upscale_factor, dims[2], dims[3]])))
@@ -1890,7 +1919,9 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         variant = 'RNN'
 
     w_hh = all_weights[1]
-    hidden_size = w_hh.type().sizes()[1]
+    hidden_size = sym_help._get_tensor_dim_size(w_hh, 1)
+    if hidden_size is None:
+        return _unimplemented("RNN/GRU/LSTM", "unknown hidden size")
 
     unidirectional = not bidirectional
 
@@ -2174,7 +2205,7 @@ def erf(g, input):
 
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
-    dim = input.type().dim()
+    dim = sym_help._get_tensor_rank(input)
     if dim is None:
         return _unimplemented("dim",
                               "ONNX and PyTorch use different strategies to split the input. "
@@ -2496,7 +2527,7 @@ def index(g, self, index):
         elif len(adv_idx_indices) == 1:
             return index_select(g, self, adv_idx_indices[0], indices[adv_idx_indices[0]])
         else:
-            rank = self.type().dim()
+            rank = sym_help._get_tensor_rank(self)
             if rank is None:
                 raise NotImplementedError("Unsupported aten::index operator of advanced indexing on tensor of unknown rank, " +
                                           "try turning on shape and type propagate during export: " +
@@ -2508,7 +2539,6 @@ def index(g, self, index):
                           " is achieved by combination of multiple ONNX operators, " +
                           "including Reshape, Transpose, Concat, and Gather. " +
                           "If indices include negative values, the exported graph will produce incorrect results.")
-            rank = self.type().dim()
             adv_idx_count = len(adv_idx_indices)
             shape_tensor = _shape_as_tensor(g, self)
             dim_tensor_list = [
@@ -2627,8 +2657,12 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
         return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
                     eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
 
-    input_sizes = input.type().sizes()
-    assert input_sizes[1] % num_groups == 0
+    channel_size = sym_help._get_tensor_dim_size(input, 1)
+    if channel_size is not None:
+        assert channel_size % num_groups == 0
+    input_rank = sym_help._get_tensor_rank(input)
+    if input_rank is None:
+        return _unimplemented("group_norm", "unknown input rank")
     # 0 in the shape list keeps dimension value unchanged.
     shape = [0, num_groups, -1]
     input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
@@ -2654,14 +2688,14 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
         bias = g.op("Constant", value_t=bias_value)
 
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
-    axes = list(range(1, len(input_sizes) - 1))
+    axes = list(range(1, input_rank - 1))
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
 
 
 @parse_args('v', 'v', 'i')
 def _weight_norm(g, weight_v, weight_g, dim):
-    rank = weight_v.type().dim()
-    if rank:
+    rank = sym_help._get_tensor_rank(weight_v)
+    if rank is not None:
         # W = g * ((v) / ||v||)
         # Compute norm_except_dim for l2 norm. dim = None means over all dims
         # torch's weight_norm module sets dim = -1 if it's None.

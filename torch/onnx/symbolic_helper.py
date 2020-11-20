@@ -193,6 +193,14 @@ def _get_tensor_sizes(x, allow_nonstatic=True):
     # e.g. [1, 'a', 'b'] -> None
     return x.type().sizes()
 
+def _get_tensor_dim_size(x, dim):
+    try:
+        sizes = _get_tensor_sizes(x)
+        return sizes[dim]
+    except Exception:
+        pass
+    return None
+
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
