@@ -37,7 +37,8 @@ if __name__ == '__main__':
     parser.add_argument('--profiling_tensor_size', default=1, type=int)
     parser.add_argument('--workload', default='loop', type=str)
     parser.add_argument('--internal_iter', default=256, type=int)
-    parser.add_argument('--timer_min_run_time', default=100, type=int)
+    parser.add_argument('--timer_min_run_time', default=10, type=int)
+    parser.add_argument('--cuda_only', action='store_true')
 
     args = parser.parse_args()
 
@@ -83,7 +84,8 @@ if __name__ == '__main__':
                 with torch.autograd.profiler.profile(
                         use_cuda=args.with_cuda,
                         with_stack=args.with_stack,
-                        use_kineto=args.use_kineto) as prof:
+                        use_kineto=args.use_kineto,
+                        use_cpu=not args.cuda_only) as prof:
                     x = workload(input_x)
                 return x
         else:
