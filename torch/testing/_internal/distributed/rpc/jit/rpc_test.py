@@ -906,10 +906,7 @@ class JitRpcTest(
         # the same code path as python call.
         ret = rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
 
-        # rpc_sync does not accept script module and script module method.
-        with self.assertRaisesRegex(RuntimeError, "ScriptModules cannot be deepcopied"):
-            ret = rpc.rpc_sync(dst_worker_name, MyScriptModule, args=(self.rank,))
-
+        # rpc_sync does not accept script module method.
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(TypeError, "pickle"):
