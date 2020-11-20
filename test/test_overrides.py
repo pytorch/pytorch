@@ -816,6 +816,15 @@ class TestEinsumOverride(TestCase):
 #             torch.add,
 #         })
 
+class TestNamedTuple(TestCase):
+    "Regression test for gh-47090"
+    def test_max(self):
+        x = torch.tensor([1, 2])
+        xs = x.as_subclass(SubTensor2)
+        r = torch.max(x, dim=0)
+        rs = torch.max(xs, dim=0)
+        self.assertEqual(type(r), type(rs))
+        self.assertEqual(r, rs)
 
 if __name__ == '__main__':
     unittest.main()
