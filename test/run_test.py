@@ -400,11 +400,15 @@ def test_rpc(test_module, test_directory, options):
         else:
             if options.verbose:
                 print_to_stderr("Running RPC tests with FILE init_method")
-        run_test(test_module, test_directory, options)
+        return_code = run_test(test_module, test_directory, options)
+        if return_code != 0:
+            return return_code
 
         # Clear environment variable for future runs
         if os.environ.get("RPC_INIT_WITH_TCP", None) is not None:
             del os.environ["RPC_INIT_WITH_TCP"]
+
+    return 0
 
 def test_distributed(test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
