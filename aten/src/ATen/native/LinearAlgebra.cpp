@@ -497,15 +497,18 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX(batch1.scalar_type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX(batch1.scalar_type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
-  } else if (at::hasMKL() && (at::native::is_floating_point(self_or_result) ||
+  } else if (at::hasMKL() && ((
+            self_or_result.scalar_type() != kHalf &&
+            self_or_result.scalar_type() != kBFloat16 &&
+            at::native::is_floating_point(self_or_result)) ||
             at::native::is_complex(self_or_result))
             && batch_items_contiguous_or_transposed(batch1)
             && batch_items_contiguous_or_transposed(batch2)
@@ -1599,6 +1602,58 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt
 // Frobenius and nuclear norms
 Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
+}
+
+Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
+  /*
+  The idea is to reduce the problem to 2D square matrix inversion.
+  Step 1. Calculate the shape of the result and the shape of the intermediate 2D matrix.
+  Step 2. Reshape `self` to 2D matrix.
+  Step 3. Invert the 2D matrix self.to_2D()
+          There is no quick way to find out whether the matrix is invertible,
+          so at this stage an error from at::inverse can be thrown.
+          Note that for CUDA this causes cross-device memory synchronization that can be slow.
+  Step 4. reshape the result.
+  */
+  TORCH_CHECK(ind > 0, "Expected a strictly positive integer for 'ind', but got ", ind);
+
+  // self[ind:]
+  std::vector<int64_t> shape_ind_end = self.sizes().slice(ind).vec();
+  // self[:ind]
+  std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
+
+  int64_t prod_ind_end = std::accumulate(shape_ind_end.cbegin(), shape_ind_end.cend(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t prod_start_ind = std::accumulate(shape_start_ind.cbegin(), shape_start_ind.cend(), int64_t{1}, std::multiplies<int64_t>());
+
+  // Check whether the self tensor can be reshaped to the 2D square matrix
+  TORCH_CHECK(prod_ind_end == prod_start_ind,
+    "Expected self to satisfy the requirement prod(self.shape[ind:]) == prod(self.shape[:ind]), but got ",
+    prod_ind_end, " != ", prod_start_ind);
+
+  // Concatenate shape_ind_end and shape_start_ind to form the shape of the result
+  // self[ind:] + self[:ind]
+  shape_ind_end.insert(shape_ind_end.cend(), shape_start_ind.cbegin(), shape_start_ind.cend());
+
+  // If the reshaped self is not invertible catch this error
+  Tensor result;
+  try {
+    result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
+  } catch (...) {
+    TORCH_CHECK(false, "Failed to invert the input tensor, because it is singular.");
+  }
+
+  return result.reshape(shape_ind_end);
+}
+
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+Tensor& linalg_tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+
+  Tensor result_tmp = at::linalg_tensorinv(self, ind);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
 }
 
 Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {

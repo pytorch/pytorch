@@ -2659,13 +2659,17 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.weight_norm(m)
 
     def test_parameterlistdict_setting_attributes(self):
-        mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        with warnings.catch_warnings(record=True) as w:
+            mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
+        self.assertTrue(len(w) == 0)
 
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterList is not supported"):
             torch.nn.utils.weight_norm(mod, "0")
 
-        mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        with warnings.catch_warnings(record=True) as w:
+            mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
+        self.assertTrue(len(w) == 0)
 
         with self.assertWarnsRegex(UserWarning,
                                    r"Setting attributes on ParameterDict is not supported"):
@@ -10196,7 +10200,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
     def test_Dropout(self, device):
-        input = torch.Tensor(1000)
+        input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
 
         self._test_dropout_discontiguous(nn.Dropout, device)
@@ -10204,7 +10208,7 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_dropout_stride_mean_preserve(nn.Dropout, device)
 
-        if self.device_type == 'cuda' and TEST_WITH_ROCM:
+        if self.device_type == 'cuda':
             input = input.bfloat16()
             self._test_dropout(nn.Dropout, device, input)
 
@@ -10213,7 +10217,7 @@ class TestNNDeviceType(NNTestCase):
         w = random.randint(1, 5)
         h = random.randint(1, 5)
         num_features = 1000
-        input = torch.Tensor(num_features, b, w, h)
+        input = torch.empty(num_features, b, w, h)
         self._test_dropout(nn.Dropout2d, device, input)
         self._test_dropout(nn.Dropout2d, device, input, memory_format=torch.channels_last)
 
@@ -10226,7 +10230,7 @@ class TestNNDeviceType(NNTestCase):
         h = random.randint(1, 5)
         d = random.randint(1, 2)
         num_features = 1000
-        input = torch.Tensor(num_features, b, d, w, h)
+        input = torch.empty(num_features, b, d, w, h)
         self._test_dropout(nn.Dropout3d, device, input)
 
         self._test_dropout_discontiguous(nn.Dropout3d, device)
@@ -12596,6 +12600,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
+    @tf32_on_and_off(0.005)
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
             if var.size(0) == length:

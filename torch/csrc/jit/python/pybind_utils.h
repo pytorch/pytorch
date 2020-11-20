@@ -320,8 +320,7 @@ InferredType tryToInferContainerType(py::handle input);
 inline InferredType tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
-    auto tensor = py::cast<at::Tensor>(input);
-    return InferredType(TensorType::create(tensor));
+    return InferredType(TensorType::get());
   }
 
   if (input.is(py::none())) {

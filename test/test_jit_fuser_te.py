@@ -119,10 +119,15 @@ class TestTEFuser(JitTestCase):
         def func(x):
             return x.sum((0, )) * 2
 
+        def func_neg(x):
+            return x.sum((-2, )) * 2
+
         with texpr_reductions_enabled():
             a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
+            self.assertLastGraphAllFused()
+            scripted = self.checkScript(func_neg, (a,))
             self.assertLastGraphAllFused()
 
     def test_sum_keepdim_cast(self):
@@ -1330,6 +1335,61 @@ class TestTEFuser(JitTestCase):
                 torch.testing.assert_allclose(test, ref)
         self.assertAllFused(script.graph_for(*inputs))
 
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_sub_gt_and(self):
+        def eager(t1, t2, t3, t4, t: float):
+            w = t1 - t2
+            h = t3 - t4
+            k = (w > t) & (h > t)
+            assert k.dtype == torch.bool
+            if t > 0.5:
+                # Putting a use of k in a never-executed conditional prevents
+                # profiling its type, which leaves it as "Tensor".  If we
+                # propagate Tensor back to the definition of k, we have to be
+                # careful not to create a fusion group containing it.
+                return k + 1
+            return w
+        t = torch.rand(8, dtype=torch.float, device='cuda')
+        scripted = self.checkScript(eager, (t, t, t, t, 0.1))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_chunk_mul_one(self):
+        def eager(x):
+            z, y, w = torch.chunk(x, 3, -1)
+            return z * 3, y, w
+        x = torch.rand(64, 1, 3072, dtype=torch.float, device='cuda')
+        script = self.checkScript(eager, (x,))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_eq_unsqueeze_type_as(self):
+        def eager(a, b):
+            mask = b == 1
+            mask = torch.unsqueeze(mask, -1)
+            x = mask.type_as(a)
+            return x, mask
+        a = torch.rand(1, 64, 1024, device='cuda', dtype=torch.float)
+        b = torch.randint(-2, 2, (1, 64), device='cuda', dtype=torch.long)
+        script = self.checkScript(eager, (a, b))
+
+    def test_neg_pow(self):
+        def eager_tt(a: torch.Tensor, b: torch.Tensor):
+            return torch.neg(torch.pow(a, b))
+
+        def eager_ts(a: torch.Tensor, b: float):
+            return torch.neg(torch.pow(a, b))
+
+        def eager_st(a: float, b: torch.Tensor):
+            return torch.neg(torch.pow(a, b))
+
+        a = torch.rand(1, dtype=torch.float)
+        b = torch.rand(1, dtype=torch.float)
+        s = b.item()
+        script = self.checkScript(eager_tt, (a, b))
+        self.assertAllFused(script.graph_for(a, b))
+        script = self.checkScript(eager_ts, (a, s))
+        self.assertAllFused(script.graph_for(a, s))
+        script = self.checkScript(eager_st, (s, b))
+        self.assertAllFused(script.graph_for(s, b))
 
 if __name__ == '__main__':
     run_tests()
