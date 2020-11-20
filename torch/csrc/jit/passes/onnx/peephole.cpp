@@ -696,7 +696,8 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // (%10)
         origLogSoftmaxNode = prev->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
-        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+        if (transpose->inputs().size() > 0)
+          origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
       } else if (
           prev->kind() == onnx::Reshape &&
           prev->input(0)->node()->kind() == onnx::Transpose &&
@@ -758,7 +759,6 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       } else {
         continue;
       }
-
       Node* softmaxCrossEntropyNode = b->owningGraph()->create(
           onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
       for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
@@ -828,6 +828,89 @@ static void removeSequenceSplitConcat(Block* b) {
   }
 }
 
+static bool checkFold(Node* node) {
+  if (node->input()->node()->kind() == onnx::Cast && node->input()->node()->input()->node()->kind() == onnx::Equal) {
+    auto equal_node = node->input()->node()->input()->node();
+    if (equal_node->inputs()[0]->node()->kind() == onnx::Constant && equal_node->inputs()[1]->node()->kind() == onnx::Constant) {
+      return true;
+    } else if (equal_node->inputs()[0]->node()->kind() == onnx::Size && equal_node->inputs()[1]->node()->kind() == onnx::Constant) {
+      return true;
+    }
+  } else if (node->input()->node()->kind() == onnx::Cast && (node->input()->node()->input()->node()->kind() == onnx::Constant || node->input()->node()->input()->node()->kind() == onnx::Identity)) {
+    return true;
+  } else if (node->input()->node()->kind() == onnx::Cast && node->input()->node()->input()->node()->kind() == onnx::Greater) {
+    return true;
+  }
+  return false;
+}
+
+static bool doConstantFolding(Node* node) {
+  if (node->input()->node()->kind() == onnx::Cast && node->input()->node()->input()->node()->kind() == onnx::Equal) {
+    auto equal_node = node->input()->node()->input()->node();
+    if (equal_node->inputs()[0]->node()->kind() == onnx::Constant && equal_node->inputs()[1]->node()->kind() == onnx::Constant) {
+      auto const_node1 = equal_node->inputs()[0]->node();
+      auto const_node2 = equal_node->inputs()[1]->node();
+      auto val1 = const_node1->t(attr::value);
+      auto val2 = const_node2->t(attr::value);
+      return at::equal(val1, val2);
+    }
+    if (equal_node->inputs()[0]->node()->kind() == onnx::Size) {
+      auto size_node = equal_node->inputs()[0]->node();
+      auto shape_node = size_node->inputs()[0]->node();
+      auto const_node2 = equal_node->inputs()[1]->node();
+      auto val2 = const_node2->t(attr::value);
+      auto v = shape_node->input()->type()->cast<TensorType>()->symbolic_sizes().rank();
+      auto res = at::eq(val2, (int)*v);
+      return at::is_nonzero(res);
+    }
+  } else if (node->input()->node()->kind() == onnx::Cast && node->input()->node()->input()->node()->kind() == onnx::Greater) {
+    auto greater_node = node->input()->node()->input()->node();
+    auto prod_node = greater_node->inputs()[0]->node();
+    auto const_node = greater_node->inputs()[1]->node();
+    auto shape_node = prod_node->input()->node();
+    auto val = const_node->t(attr::value);
+    auto v = shape_node->input()->type()->cast<TensorType>()->symbolic_sizes().rank();
+    auto res = at::less(val, (int)*v);
+    return at::is_nonzero(res);
+  }
+  return false;
+}
+
+static void foldIfNode(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      foldIfNode(child_block);
+    }
+    if (it->kind() == onnx::If) {
+      auto if_node = *it;
+      if (checkFold(if_node)) {
+        Block* then_block = it->blocks()[0];
+        Block* else_block = it->blocks()[1];
+        Block* block;
+        if (doConstantFolding(if_node)) {
+          block = then_block;
+        } else {
+          block = else_block;
+        }
+        std::vector<Node*> nodes_in_valid_path;
+        for (auto* valid_node : block->nodes()) {
+          nodes_in_valid_path.push_back(valid_node);
+        }
+        Node* cur = if_node;
+        for (auto* valid_node : nodes_in_valid_path) {
+          valid_node->moveAfter(cur);
+          cur = valid_node;
+        }
+        for(auto i = 0; i < block->return_node()->inputs().size(); ++i) {
+          if_node->outputs()[i]->replaceAllUsesWith(block->return_node()->inputs()[i]);
+        }
+        it->removeAllInputs();
+        it.destroyCurrent();
+      }
+    }
+  }
+ }
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -871,6 +954,7 @@ void PeepholeOptimizeONNX(
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
+  foldIfNode(graph->block());
 }
 
 } // namespace jit

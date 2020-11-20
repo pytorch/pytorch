@@ -179,9 +179,11 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
             typesFromTensors.emplace_back(scalar_type);
           }
         } else if (
-            auto scalar_type =
-                input->type()->cast<TensorType>()->scalarType()) {
-          typesFromTensors.emplace_back(*scalar_type);
+            auto tensor_type =
+                input->type()->cast<TensorType>()) {
+          auto scalar_type = tensor_type->scalarType();
+          if (scalar_type)
+            typesFromTensors.emplace_back(*scalar_type);
         }
       });
 
@@ -233,8 +235,10 @@ static void UpdateScalarTypeForInputs(
   }
 
   for (auto input : n->inputs()) {
+    c10::optional<c10::ScalarType> input_scalar_type = c10::nullopt;
     auto input_tensor_type = input->type()->cast<TensorType>();
-    auto input_scalar_type = input_tensor_type->scalarType();
+    if (input_tensor_type)
+      input_scalar_type = input_tensor_type->scalarType();
 
     if ((input->node()->kind() == onnx::Constant) ||
         (input_scalar_type && (*input_scalar_type != scalar_type))) {
