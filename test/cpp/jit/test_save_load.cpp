@@ -125,7 +125,7 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   std::vector<torch::jit::IValue> inputs;
   // Deserialize the ScriptModule from a file using torch::jit::load().
   // Load the model saved inside saved_models
-  model = torch::jit::load("./test/test_script_modelsr/saved_model.pt");
+  model = torch::jit::load("./test/test_script_models/saved_model.pt");
 
   auto output = model.forward(inputs);
   auto is_stream_s = output.toTuple()->elements()[0].toBool();
