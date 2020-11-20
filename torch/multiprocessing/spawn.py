@@ -6,7 +6,7 @@ import time
 import sys
 import warnings
 
-from . import _prctl_pr_set_pdeathsig
+from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
 
 class ProcessException(Exception):
@@ -115,7 +115,6 @@ class ProcessContext:
         method follows: check_data(), join(period) pattern in comparison to:
         join(timeout), check_data().  The second pattern will deadlock the
         writer thread.
-
         """
         deadline = self._get_deadline(timeout)
         period = 1  # one second
@@ -218,9 +217,7 @@ class ProcessContext:
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
         warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
-        super(SpawnContext, self).__init__(self, processes, error_queues)
-
-    pass
+        super(SpawnContext, self).__init__(processes, error_queues)
 
 
 # Note: [start_processes]

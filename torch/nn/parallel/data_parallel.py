@@ -155,6 +155,12 @@ class DataParallel(Module):
                                    "them on device: {}".format(self.src_device_obj, t.device))
 
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+        # for forward function without any inputs, empty list and dict will be created
+        # so the module can be executed on one device which is the first one in device_ids
+        if not inputs and not kwargs:
+            inputs = ((),)
+            kwargs = ({},)
+
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
         replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
@@ -190,7 +196,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
         output_device
     """
     if not isinstance(inputs, tuple):
-        inputs = (inputs,)
+        inputs = (inputs,) if inputs is not None else ()
 
     device_type = _get_available_device_type()
 
@@ -211,6 +217,12 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
                                "them on device: {}".format(src_device_obj, t.device))
 
     inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
+    # for module without any inputs, empty list and dict will be created
+    # so the module can be executed on one device which is the first one in device_ids
+    if not inputs and not module_kwargs:
+        inputs = ((),)
+        module_kwargs = ({},)
+
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])
     used_device_ids = device_ids[:len(inputs)]

@@ -22,7 +22,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
     const int64_t data_size,
     const InType* input,
     const IndexType* indices,
-    const int64_t* offsets,
+    const IndexType* offsets,
     const float* weights, // optional, can be null for sum reducer
     bool normalize_by_lengths,
     OutType* out) {
@@ -88,7 +88,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
           const int64_t data_size,                                                          \
           const uint8_t* input,                                                             \
           const IndexType* indices,                                                         \
-          const int64_t* offsets,                                                           \
+          const IndexType* offsets,                                                           \
           const float* weights,                                                             \
           bool normalize_by_lengths,                                                        \
           OutType* out) {                                                                   \
@@ -118,7 +118,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
       const int64_t data_size,                                                              \
       const uint8_t* input,                                                                 \
       const IndexType* indices,                                                             \
-      const int64_t* offsets,                                                               \
+      const IndexType* offsets,                                                               \
       const float* weights,                                                                 \
       bool normalize_by_lengths,                                                            \
       OutType* out) {                                                                       \
@@ -160,7 +160,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
       const int64_t data_size,                                                              \
       const uint8_t* input,                                                                 \
       const IndexType* indices,                                                             \
-      const int64_t* offsets,                                                               \
+      const IndexType* offsets,                                                               \
       const float* weights,                                                                 \
       bool normalize_by_lengths,                                                            \
       OutType* out) {                                                                       \

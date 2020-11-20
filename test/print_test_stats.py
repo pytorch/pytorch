@@ -84,6 +84,7 @@ def build_message(test_case):
             "build_sha1": os.environ.get("CIRCLE_SHA1"),
             "build_branch": os.environ.get("CIRCLE_BRANCH"),
             "build_job": os.environ.get("CIRCLE_JOB"),
+            "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
             "test_suite_name": test_case.class_name,
             "test_case_name": test_case.name,
         },

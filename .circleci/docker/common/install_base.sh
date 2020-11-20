@@ -18,7 +18,6 @@ install_ubuntu() {
   # Install common dependencies
   apt-get update
   # TODO: Some of these may not be necessary
-  # TODO: libiomp also gets installed by conda, aka there's a conflict
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
   numpy_deps="gfortran"
   apt-get install -y --no-install-recommends \
@@ -40,10 +39,6 @@ install_ubuntu() {
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
-    python \
-    python-dev \
-    python-setuptools \
-    python-wheel \
     software-properties-common \
     sudo \
     wget \

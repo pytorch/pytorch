@@ -79,6 +79,11 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
 
+// This should be used directly after every kernel launch to ensure
+// the launch happened correctly and provide an early, close-to-source
+// diagnostic if it didn't.
+#define TORCH_CUDA_KERNEL_LAUNCH_CHECK() AT_CUDA_CHECK(cudaGetLastError())
+
 // For CUDA Driver API
 //
 // This is here instead of in c10 because NVRTC is loaded dynamically via a stub

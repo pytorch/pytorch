@@ -36,7 +36,7 @@ using OperationCreator = Operation (*)(const Node*);
 /*
  * Note: JIT relies on Operator instances having static lifetime, because
  * it for example stores a non-owning FunctionSchema* pointer in the Node class,
- * which points to the function shema stored in the Operator instance.
+ * which points to the function schema stored in the Operator instance.
  * Also, jit::Operator is meant to store more operator related information like
  * symbolic derivatives, which also requires them to have static lifetime
  * so that changes to symbolic derivatives are remembered.

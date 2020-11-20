@@ -1,7 +1,10 @@
 import torch
 import functools
 import warnings
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 from torch._six import container_abcs, string_classes
 
 
@@ -144,7 +147,7 @@ def _cast(value, dtype):
         return value.to(dtype) if is_eligible else value
     elif isinstance(value, string_classes):
         return value
-    elif isinstance(value, np.ndarray):
+    elif np is not None and isinstance(value, np.ndarray):
         return value
     elif isinstance(value, container_abcs.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}

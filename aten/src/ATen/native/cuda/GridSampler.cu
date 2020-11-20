@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/GridSampler.cuh>
+#include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
@@ -50,11 +51,11 @@ namespace {
       const index_t grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y co-ordinates from grid
-      scalar_t ix = grid.data[grid_offset];
-      scalar_t iy = grid.data[grid_offset + grid_sCoor];
+      scalar_t x = grid.data[grid_offset];
+      scalar_t y = grid.data[grid_offset + grid_sCoor];
 
-      ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners);
-      iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
+      scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+      scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
@@ -104,6 +105,38 @@ namespace {
           } else {
             *out_ptr_NCHW = static_cast<scalar_t>(0);
           }
+        }
+      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+
+        ix = grid_sampler_unnormalize(x, inp_W, align_corners);
+        iy = grid_sampler_unnormalize(y, inp_H, align_corners);
+
+        scalar_t ix_nw = ::floor(ix);
+        scalar_t iy_nw = ::floor(iy);
+
+        const scalar_t tx = ix - ix_nw;
+        const scalar_t ty = iy - iy_nw;
+
+        auto inp_ptr_NC = input.data + n * inp_sN;
+        auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
+          scalar_t coefficients[4];
+
+          for (index_t i = 0; i < 4; ++i) {
+            coefficients[i] = cubic_interp1d(
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              tx);
+          }
+
+          *out_ptr_NCHW = cubic_interp1d(
+            coefficients[0],
+            coefficients[1],
+            coefficients[2],
+            coefficients[3],
+            ty);
         }
       }
     }
@@ -300,13 +333,13 @@ namespace {
       const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y co-ordinates from grid
-      scalar_t ix = grid.data[grid_offset];
-      scalar_t iy = grid.data[grid_offset + grid_sCoor];
+      scalar_t x = grid.data[grid_offset];
+      scalar_t y = grid.data[grid_offset + grid_sCoor];
 
       // multipliers for gradients on ix and iy
       scalar_t gix_mult, giy_mult;
-      ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
-      iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
+      scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+      scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
@@ -387,6 +420,57 @@ namespace {
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NHW[0] = static_cast<scalar_t>(0);
         gGrid_ptr_NHW[1] = static_cast<scalar_t>(0);
+      } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+
+        ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
+        iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
+
+        scalar_t ix_nw = ::floor(ix);
+        scalar_t iy_nw = ::floor(iy);
+
+        const scalar_t tx = ix - ix_nw;
+        const scalar_t ty = iy - iy_nw;
+
+        scalar_t x_coeffs[4];
+        scalar_t y_coeffs[4];
+        scalar_t x_coeffs_grad[4];
+        scalar_t y_coeffs_grad[4];
+
+        get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, tx);
+        get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, ty);
+        get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
+        get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+
+        scalar_t gix = static_cast<scalar_t>(0);
+        scalar_t giy = static_cast<scalar_t>(0);
+
+        scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+        scalar_t *gInp_ptr_NC = grad_input.data + n * gInp_sN;
+        scalar_t *inp_ptr_NC = input.data + n * inp_sN;
+
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
+          scalar_t gOut = *gOut_ptr_NCHW;
+
+          for (index_t i = 0; i < 4; ++i) {
+            for (index_t j = 0; j < 4; ++j) {
+
+              // set input gradient
+              add_value_bounded<scalar_t>(gInp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j, inp_W, inp_H,
+                gInp_sW, gInp_sH, gOut * x_coeffs[i] * y_coeffs[j], padding_mode, align_corners);
+
+              // set grid gradient
+              scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
+                inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
+
+              gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
+              giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
+            }
+          }
+        }
+
+        scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
+        gGrid_ptr_NHW[0] = gix_mult * gix;
+        gGrid_ptr_NHW[1] = giy_mult * giy;
       }
     }
   }
@@ -624,6 +708,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -634,6 +719,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }
@@ -663,16 +749,18 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
-      grid_sampler_3d_kernel<scalar_t>
-        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-          count,
-          getTensorInfo<scalar_t, int64_t>(input),
-          getTensorInfo<scalar_t, int64_t>(grid),
-          getTensorInfo<scalar_t, int64_t>(output),
-          static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+        grid_sampler_3d_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            count,
+            getTensorInfo<scalar_t, int64_t>(input),
+            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<scalar_t, int64_t>(output),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }
@@ -708,6 +796,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_2d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -720,6 +809,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }
@@ -756,6 +846,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_3d_backward_kernel<scalar_t>
           <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -768,6 +859,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
   }

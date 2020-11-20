@@ -14,11 +14,6 @@ C10_DEFINE_bool(
     "Attach AdjustBatch ops at input/outputs of the Onnxifi ops");
 
 C10_DEFINE_bool(
-    onnxifi_loop_test_mode,
-    false,
-    "For test purpose only. Build a dummy net just to test the functionality");
-
-C10_DEFINE_bool(
     enforce_fp32_inputs_into_fp16,
     false,
     "Whether to enforce fp32 to fp16 conversion for external inputs.");
@@ -146,7 +141,6 @@ void onnxifi(
   opts.load_model_by_blob = load_model_by_blob;
   opts.enforce_fp32_inputs_into_fp16 = FLAGS_enforce_fp32_inputs_into_fp16;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
-  opts.loop_test = FLAGS_onnxifi_loop_test_mode;
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
 
