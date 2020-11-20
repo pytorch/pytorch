@@ -313,6 +313,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void max_values_kernel_impl(TensorIterator& iter) {
+  std::cout << ">>>> 0 HELLOW\n";
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
@@ -320,6 +321,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
       [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); },
       lower_bound<scalar_t>());
   });
+  std::cout << ">>>> 1 HELLOW\n";
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {

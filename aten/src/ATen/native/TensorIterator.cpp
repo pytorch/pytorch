@@ -586,6 +586,7 @@ void TensorIterator::coalesce_dimensions() {
 }
 
 int64_t TensorIterator::numel() const {
+  if (ndim() == 0) return 0;
   int64_t numel = 1;
   for (int64_t size : shape_) {
     numel *= size;
@@ -651,6 +652,7 @@ void TensorIterator::permute_dimensions(IntArrayRef perm) {
 }
 
 int64_t TensorIterator::num_output_elements() const {
+  if (ndim() == 0) return 0;
   int64_t elem = 1;
   for (int dim = 0; dim < ndim(); dim++) {
     if (operands_[0].stride_bytes[dim] != 0 || shape_[dim] == 0)  {
