@@ -1278,6 +1278,70 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
 
+    @unittest.skipIf(not LLVM_ENABLED, "TODO: bugs in ir eval")
+    def test_binary_ops(self):
+        def apply(fn):
+            return lambda x, y: fn(x, y)
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+        ]
+        binary_ops = [
+            operator.__and__,
+            operator.__or__,
+            operator.__xor__,
+            torch.add,
+            torch.sub,
+            torch.mul,
+            torch.min,
+            torch.max,
+            # FIXME: comparison ops yield different results when fused
+            # torch.eq,
+            # torch.ne,
+            # torch.ge,
+            # torch.gt,
+            # torch.lt,
+
+            # FIXME: these ops produce different results with int dtype
+            # torch.pow,
+            # torch.atan2,
+
+            # TODO: test operators exercising division too
+            # torch.fmod,
+            # torch.remainder,
+            # operator.__rshift__,
+            # operator.__lshift__,
+            # torch.div,
+        ]
+        devices = self.devices
+        for dtype, op, device in product(dtypes, binary_ops, devices):
+            try:
+                x = self.data_for(dtype, device)
+                y = self.data_for(dtype, device)
+                fn = apply(op)
+                ref = fn(x, y)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, y))
+                self.assertEqual(ref, t(x, y))
+                self.assertAllFused(t.graph_for(x, y))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device])
+                )
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unsupported_dtypes(self):
         def fn(x):
