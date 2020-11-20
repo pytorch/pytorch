@@ -11577,6 +11577,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumsum(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumsum_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
@@ -11625,6 +11627,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumprod_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
@@ -17103,7 +17107,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 np_mod = mod.cpu().numpy()
             if not torch.is_tensor(mod):
                 np_mod = mod
-                if x.dtype in torch.testing.get_all_int_dtypes():
+                if dtype in torch.testing.get_all_int_dtypes():
                     np_mod = int(np_mod)
             exp = np.fmod(np_x, np_mod)
             exp = torch.from_numpy(exp)
@@ -17135,25 +17139,30 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         mod_nc = mod.t()
 
         # Mods: Integer, Float, Tensor, Non-contiguous Tensor
-        mods = [3, 2.3, mod, mod_nc]
-        for m in mods:
-            _reference_implementation(x, m)
-            _reference_implementation(x_nc, m)
+        # mods = [3, 2.3, mod, mod_nc]
+        # for m in mods:
+        #     _reference_implementation(x, m)
+        #     _reference_implementation(x_nc, m)
+
+        # For Debug on XLA
+        _reference_implementation(x, 3)
+        _reference_implementation(x_nc, 3)
+        _reference_implementation(x, 2.3)
+        _reference_implementation(x_nc, 2.3)
+        _reference_implementation(x, mod)
+        _reference_implementation(x_nc, mod)
+        _reference_implementation(x, mod_nc)
+        _reference_implementation(x_nc, mod_nc)
+
 
         # Integral Tensor fmod to floating-point Tensor
         # Can not cast floating-point result to original integral Tensor without type promotion
         if dtype in torch.testing.get_all_int_dtypes():
-            if device == 'cpu':
-                with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
-                                                          "can't be cast to the desired "
-                                                          "output type (Byte|Char|Short|Int|Long)"):
-                    res = torch.fmod(x, mod_float)
-            else:
-                res = torch.fmod(x, mod_float)
-                exp = np.fmod(x.cpu().numpy(), mod_float.cpu().numpy())
-                exp = torch.from_numpy(exp)
-                res = res.to(exp.dtype)
-                self.assertEqual(res, exp)
+            res = torch.fmod(x, mod_float)
+            exp = np.fmod(x.cpu().numpy(), mod_float.cpu().numpy())
+            exp = torch.from_numpy(exp)
+            res = res.to(exp.dtype)
+            self.assertEqual(res, exp)
             with self.assertRaisesRegex(RuntimeError, "result type (Half|Float|Double) "
                                                       "can't be cast to the desired "
                                                       "output type (Byte|Char|Short|Int|Long)"):
