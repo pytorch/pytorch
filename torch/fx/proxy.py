@@ -105,7 +105,7 @@ class TraceError(ValueError):
     pass
 
 
-def _create_friendly_names(args: Tuple[Any], kwargs: Dict[str, Any], frames_up : int):
+def _create_friendly_names(args: Tuple[Any, ...], kwargs: Dict[str, Any], frames_up : int):
     """
     Given an args/kwargs object, go through and try to pull out the names for
     each contained Proxy from the Python interpreter frame `frames_up` above
