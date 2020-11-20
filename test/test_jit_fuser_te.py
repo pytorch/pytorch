@@ -1308,6 +1308,7 @@ class TestTEFuser(JitTestCase):
             torch.max,
             lambda x, y: torch.lerp(x, y, 0.5),
             torch.atan2,
+            torch.div,
 
             # FIXME: comparison ops yield different results when fused
             # torch.eq,
@@ -1316,12 +1317,13 @@ class TestTEFuser(JitTestCase):
             # torch.gt,
             # torch.lt,
 
-            # TODO: test operators exercising division too
+            # TODO: fails on CPU backend with int8
             # torch.fmod,
             # torch.remainder,
+
+            # FIXME: segfaults on CPU backend
             # operator.__rshift__,
             # operator.__lshift__,
-            # torch.div,
         ]
         devices = self.devices
         for dtype, op, device in product(dtypes, binary_ops, devices):
@@ -1358,7 +1360,7 @@ class TestTEFuser(JitTestCase):
             torch.float16,
             torch.float32,
             torch.float64,
-            # torch.bool intentionally not included
+            torch.bool
         ]
         binary_ops = [
             operator.__and__,
@@ -1369,14 +1371,12 @@ class TestTEFuser(JitTestCase):
             torch.mul,
             torch.eq,
             torch.ne,
+            torch.div,
 
             # FIXME: fails with dtype=uint8, scalar=-1
             # torch.ge,
             # torch.lt,
             # torch.gt,
-
-            # FIXME: fails with integer dtype and scalar={3,0}
-            # torch.div,
 
             # FIXME: segfaults on CPU backend
             # operator.__rshift__,
