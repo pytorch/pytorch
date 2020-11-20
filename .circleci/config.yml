@@ -1203,7 +1203,7 @@ jobs:
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/python_doc_push_script.sh docs/'$target' master site") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/python_doc_push_script.sh docs/'$target' '$target' site") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -2991,6 +2991,16 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
       - binary_mac_build:
+          name: binary_macos_wheel_3_9_cpu_nightly_build
+          build_environment: "wheel 3.9 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
           name: binary_macos_conda_3_6_cpu_nightly_build
           build_environment: "conda 3.6 cpu"
           filters:
@@ -3013,6 +3023,16 @@ workflows:
       - binary_mac_build:
           name: binary_macos_conda_3_8_cpu_nightly_build
           build_environment: "conda 3.8 cpu"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+      - binary_mac_build:
+          name: binary_macos_conda_3_9_cpu_nightly_build
+          build_environment: "conda 3.9 cpu"
           filters:
             branches:
               only:
@@ -6361,6 +6381,20 @@ workflows:
           package_type: wheel
           upload_subfolder: cpu
       - binary_upload:
+          name: binary_macos_wheel_3_9_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_wheel_3_9_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: wheel
+          upload_subfolder: cpu
+      - binary_upload:
           name: binary_macos_conda_3_6_cpu_nightly_upload
           context: org-member
           requires:
@@ -6393,6 +6427,20 @@ workflows:
           context: org-member
           requires:
             - binary_macos_conda_3_8_cpu_nightly_build
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: conda
+          upload_subfolder: cpu
+      - binary_upload:
+          name: binary_macos_conda_3_9_cpu_nightly_upload
+          context: org-member
+          requires:
+            - binary_macos_conda_3_9_cpu_nightly_build
           filters:
             branches:
               only:
@@ -7785,7 +7833,7 @@ workflows:
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
           cuda_version: "11"
-          name: pytorch_windows_vs2019_py36_cuda11.0_build
+          name: pytorch_windows_vs2019_py36_cuda11.1_build
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
@@ -7801,10 +7849,10 @@ workflows:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cuda11.0_test1
+          name: pytorch_windows_vs2019_py36_cuda11.1_test1
           python_version: "3.6"
           requires:
-            - pytorch_windows_vs2019_py36_cuda11.0_build
+            - pytorch_windows_vs2019_py36_cuda11.1_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: Community
@@ -7820,10 +7868,10 @@ workflows:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cuda11.0_test2
+          name: pytorch_windows_vs2019_py36_cuda11.1_test2
           python_version: "3.6"
           requires:
-            - pytorch_windows_vs2019_py36_cuda11.0_build
+            - pytorch_windows_vs2019_py36_cuda11.1_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: Community
@@ -8991,6 +9039,15 @@ workflows:
               only:
                 - postnightly
       - smoke_mac_test:
+          name: smoke_macos_wheel_3_9_cpu_nightly
+          build_environment: "wheel 3.9 cpu"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+      - smoke_mac_test:
           name: smoke_macos_conda_3_6_cpu_nightly
           build_environment: "conda 3.6 cpu"
           requires:
@@ -9011,6 +9068,15 @@ workflows:
       - smoke_mac_test:
           name: smoke_macos_conda_3_8_cpu_nightly
           build_environment: "conda 3.8 cpu"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+      - smoke_mac_test:
+          name: smoke_macos_conda_3_9_cpu_nightly
+          build_environment: "conda 3.9 cpu"
           requires:
             - update_s3_htmls
           filters:
