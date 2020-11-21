@@ -9811,10 +9811,10 @@ class TestTorchDeviceType(TestCase):
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
-        exponents = torch.randint(-31, 31, (64,), device=device)
+        exponents = torch.randint(-31, 31, (64,), device=device, dtype=torch.int32)
 
         # basic test
-        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
         pt_outcome_1 = torch.ldexp(mantissas, exponents)
         pt_outcome_2 = mantissas.ldexp(exponents)
         self.assertEqual(np_outcome, pt_outcome_1)
@@ -9824,8 +9824,8 @@ class TestTorchDeviceType(TestCase):
 
         # test bounds
         mantissas = torch.tensor([float('inf'), float('-inf'), float('inf'), float('nan')], device=device)
-        exponents = torch.randint(0, 31, (4,), device=device)
-        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
+        exponents = torch.randint(0, 31, (4,), device=device, dtype=torch.int32)
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
         pt_outcome = torch.ldexp(mantissas, exponents)
         self.assertEqual(np_outcome, pt_outcome)
 
