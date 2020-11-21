@@ -45,7 +45,9 @@ class Backend {
 
 class DistributedC10d : public torch::CustomClassHolder {
  public:
-  DistributedC10d(){};
+  static c10::intrusive_ptr<DistributedC10d> get();
+
+  DistributedC10d() = default;
 
   void initProcessGroup(
       const std::string& backend,
@@ -210,6 +212,11 @@ class DistributedC10d : public torch::CustomClassHolder {
     c10::optional<std::string> group_name,
     int64_t timeout_milisesonds);
 
+  c10::intrusive_ptr<ProcessGroup> getProcessGroupByName(
+      const std::string& name) const;
+
+  std::string getNameOfProcessGroup(
+      const c10::intrusive_ptr<ProcessGroup>& pg) const;
 
  private:
 
