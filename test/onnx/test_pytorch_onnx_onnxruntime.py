@@ -4787,7 +4787,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
-        
+
     def test_derive_index(self):
         class MyModule(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -4798,6 +4798,37 @@ class TestONNXRuntime(unittest.TestCase):
                 return j
 
         x = torch.randn(5, 13)
+        self.run_test(MyModule(), x)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                j = []
+                for idx in range(-len(x), len(x) - 1, 2):
+                    y = x[idx]
+                    j += [x * y]
+                return j
+
+        x = torch.randn(5, 13)
+        self.run_test(MyModule(), x)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                j = []
+                for idx in range(len(x) - 1, -len(x), -3):
+                    y = x[idx]
+                    j += [x * y]
+                return j
+
+        self.run_test(MyModule(), x)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                j = []
+                for idx in range(-len(x), len(x) - 1, 3):
+                    y = x[idx]
+                    j += [x * y]
+                return j
+
         self.run_test(MyModule(), x)
 
     @skipIfONNXShapeInference(False)
