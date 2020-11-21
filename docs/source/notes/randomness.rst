@@ -165,4 +165,4 @@ TF32 Matrix multplications and convolutions can be toggled seperately, via the f
     # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
     torch.backends.cudnn.allow_tf32 = True
 
-See :ref:`tf32_on_ampere`  for details on this feature.
+See :ref:`tf32_on_ampere` for details on this feature.
