@@ -35,6 +35,26 @@ class Optimizer(object):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
+        self.state = defaultdict(dict)
+        self.param_groups = []
+
+        if isinstance(params, torch.Tensor):
+            raise TypeError("params argument given to the optimizer should be "
+                            "an iterable of Tensors or dicts, but got " +
+                            torch.typename(params))
+
+        param_groups = list(params)
+        if len(param_groups) == 0:
+            raise ValueError("optimizer got an empty parameter list")
+        if not isinstance(param_groups[0], dict):
+            param_groups = [{'params': param_groups}]
+
+        for param_group in param_groups:
+            self.add_param_group(param_group)
+
+    def __new__(cls):
+        self = super(Optimizer, cls).__new__(cls)
+
         self._zero_grad_profile_name = "{}#{}.{}".format("Optimizer.zero_grad", self.__class__.__name__, "zero_grad")
 
         hooked = getattr(self.__class__.step, "hooked", None)
@@ -53,22 +73,8 @@ class Optimizer(object):
             self.__class__.step = _step_with_profile(self.__class__.step)
             self.__class__.step.hooked = True
 
-        if isinstance(params, torch.Tensor):
-            raise TypeError("params argument given to the optimizer should be "
-                            "an iterable of Tensors or dicts, but got " +
-                            torch.typename(params))
+        return self
 
-        self.state = defaultdict(dict)
-        self.param_groups = []
-
-        param_groups = list(params)
-        if len(param_groups) == 0:
-            raise ValueError("optimizer got an empty parameter list")
-        if not isinstance(param_groups[0], dict):
-            param_groups = [{'params': param_groups}]
-
-        for param_group in param_groups:
-            self.add_param_group(param_group)
 
     def __getstate__(self):
         return {
