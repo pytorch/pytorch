@@ -317,28 +317,28 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
     input = input.contiguous();
   }
 
-  DimVector in_strides(signal_ndim + 1);
-  if (complex_input) {
-    for (int64_t i = 0; i < signal_ndim + 1; ++i) {
-      in_strides[i] = input.strides()[i] / 2;
-    }
-  } else {
-    in_strides.assign(input.strides().begin(), input.strides().end());
-  }
 
   Tensor output = at::empty(output_sizes, input.options());
-  DimVector out_strides(signal_ndim + 1);
-  if (complex_output) {
-    for (int64_t i = 0; i < signal_ndim + 1; ++i) {
-      out_strides[i] = output.strides()[i] / 2;
-    }
-  } else {
-    out_strides.assign(output.strides().begin(), output.strides().end());
-  }
 
   DimVector full_sizes(signal_ndim + 1);
   full_sizes[0] = self.size(0);
-  std::copy(checked_signal_sizes.begin(), checked_signal_sizes.end(), full_sizes.begin() + 1);
+  std::copy(checked_signal_sizes.cbegin(), checked_signal_sizes.cend(), full_sizes.begin() + 1);
+
+  // If "complex" is true, convert strides from complex viewed as real to complex strides.
+  // Otherwise, returns a copy of strides if "complex" is false.
+  auto convert_strides = [signal_ndim](IntArrayRef strides, bool complex) {
+    DimVector res(signal_ndim + 1);
+    if (complex) {
+      for (int64_t i = 0; i < res.size(); ++i) {
+        res[i] = strides[i] / 2;
+      }
+    } else {
+      res.assign(strides.cbegin(), strides.cend());
+    }
+    return res;
+  };
+  const auto in_strides = convert_strides(input.strides(), complex_input);
+  const auto out_strides = convert_strides(output.strides(), complex_output);
 
   auto descriptor = _plan_mkl_fft(
       in_strides, out_strides, full_sizes, complex_input, complex_output,
