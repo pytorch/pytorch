@@ -911,6 +911,17 @@ inline Tensor _move_memory_if_cuda_input(
     : mem;
 }
 
+inline at::ScalarType _coeff_dtype_from_input(const Tensor& t) {
+  switch (t.scalar_type()) {
+    case at::kComplexFloat:
+      return at::kFloat;
+    case at::kComplexDouble:
+      return at::kDouble;
+    default:
+      return t.scalar_type();
+  }
+}
+
 // convert a 1D blob to a 2D Tensor of size [1, blob.size()]
 // such that blob.device() == in.device())
 // designed to be used with _compute_linear_combination
@@ -924,8 +935,8 @@ inline Tensor _blob_to_Tensor(
   // Blob is assumed to be a 1D array, that is why
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
-  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
-    .unsqueeze(0);
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size(),
+    _coeff_dtype_from_input(in)).unsqueeze(0);
   return _move_memory_if_cuda_input(tensor, in);
 }
 
@@ -1056,10 +1067,9 @@ Tensor compute_T12(const Tensor& A) {
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
     reinterpret_cast<void*>(&b),
-    {num_prods, num_prods},
-    {num_prods, 1},
-    A.dtype()
-  );
+    num_prods * num_prods,
+    _coeff_dtype_from_input(A)
+  ).reshape({num_prods, num_prods});
   bs = _move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
@@ -1128,10 +1138,9 @@ Tensor compute_T18(const Tensor& A) {
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
     reinterpret_cast<void*>(&b),
-    {num_prods, num_prods},
-    {num_prods, 1},
-    A.dtype()
-  );
+    num_prods * num_prods,
+    _coeff_dtype_from_input(A)
+  ).reshape({num_prods, num_prods});
   bs = _move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
