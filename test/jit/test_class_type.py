@@ -144,7 +144,7 @@ class TestClassType(JitTestCase):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
-                    if True:
+                    if 1 == 1:
                         self.attr = x
 
     def test_class_type_as_param(self):
