@@ -347,7 +347,7 @@ class Quantizer:
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
-            additional_qat_module_mapping = prepare_custom_config_dict.get("additioanl_qat_module_mapping", {})
+            additional_qat_module_mapping = prepare_custom_config_dict.get("additional_qat_module_mapping", {})
             self._qat_swap_modules(model, additional_qat_module_mapping)
 
         self.modules = dict(model.named_modules())
