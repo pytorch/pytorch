@@ -33,8 +33,6 @@ std::deque<std::string> findSubModuleAttr(
     if (node->kind() == prim::GetAttr) {
       moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
-    } else {
-      return moduleNames;
     }
   }
 
