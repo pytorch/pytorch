@@ -62,8 +62,8 @@ from typing import Optional, Dict, Any, List, Union, Tuple
 # Define helper types
 
 QConfigAny = Union[torch.quantization.QConfig, torch.quantization.QConfigDynamic]
-MatchResult = Tuple[torch.fx.node.Node, List[torch.fx.node.Node],
-                    Optional[Pattern], QuantizeHandler, QConfigAny]
+MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
+                    QConfigAny]
 
 # ------------------------
 # Helper Functions
