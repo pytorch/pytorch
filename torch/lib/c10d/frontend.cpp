@@ -70,6 +70,37 @@ void Backend::registerBackend() {
   TORCH_CHECK(false, "Registering third-party backend is currently not supported by TorchScript-friendly c10d");
 }
 
+c10::intrusive_ptr<DistributedC10d> DistributedC10d::get() {
+  static c10::intrusive_ptr<DistributedC10d> singleton =
+      c10::make_intrusive<DistributedC10d>();
+
+  return singleton;
+}
+
+c10::intrusive_ptr<ProcessGroup> DistributedC10d::getProcessGroupByName(const std::string& name) const {
+  auto it = std::find_if(
+      pg_names_.begin(),
+      pg_names_.end(),
+      [&](const std::pair<c10::intrusive_ptr<ProcessGroup>, std::string>&
+              pg_name) { return pg_name.second == name; });
+
+  if (it == pg_names_.end()) {
+    c10::intrusive_ptr<ProcessGroup> null_process_group;
+    return null_process_group;
+  }
+
+  return it->first;
+}
+
+std::string DistributedC10d::getNameOfProcessGroup(const c10::intrusive_ptr<ProcessGroup>& pg) const {
+  auto it = pg_names_.find(pg);
+  if (it == pg_names_.end()) {
+    return "";
+  }
+
+  return it->second;
+}
+
 c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
     const int64_t world_size,
     const int64_t rank,
