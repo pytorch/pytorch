@@ -3499,15 +3499,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
-            return default.allreduce_hook(process_group, bucket)
-
-        def fp16_compress_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
-            return default.fp16_compress_hook(process_group, bucket)
-
-        for hook in [allreduce_hook, fp16_compress_hook]:
+        # For these default DDP comm hooks, the only state is process group.
+        state = process_group
+        for hook in [default.allreduce_hook, default.fp16_compress_hook]:
             # Get GPU model with the hook registered.
-            gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, hook, gradient_as_bucket_view)
+            # The first arg 'process_group' is used for initializing the test environment,
+            # so it cannot be replaced by 'state', although they have the same value.
+            gpu_model = self._gpu_model_with_ddp_comm_hook(
+                process_group, hook, gradient_as_bucket_view, state
+            )
 
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
@@ -3520,12 +3520,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
-            return powerSGD.powerSGD_hook(state, bucket)
-
         # Get GPU model with the hook registered.
         state = powerSGD.PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
-        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, hook, gradient_as_bucket_view, state)
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, powerSGD.powerSGD_hook, gradient_as_bucket_view, state)
 
         # check whether the grads are equal to what DDP without hook would return.
         self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
