@@ -2,6 +2,11 @@
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/Dispatch.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 namespace at { namespace native {
 
@@ -480,4 +485,67 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     return result;
   });
 }
-} }
+
+namespace {
+
+void addr_kernel_cuda(TensorIterator &iter, Scalar beta, Scalar alpha) {
+  if (iter.dtype() == ScalarType::Bool) {
+    using scalar_t = bool;
+    auto beta_val = beta.to<scalar_t>();
+    auto alpha_val = alpha.to<scalar_t>();
+
+    // when beta is false, values in self should be ignored,
+    // nans and infs in self should not propagate.
+    if (beta_val == false) {
+      gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (scalar_t self_val,
+                        scalar_t vec1_val, scalar_t vec2_val) -> scalar_t {
+          return alpha_val && vec1_val && vec2_val;
+        }
+      );
+    } else {
+      gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (scalar_t self_val,
+                        scalar_t vec1_val, scalar_t vec2_val) -> scalar_t {
+          return (beta_val && self_val) || (alpha_val && vec1_val && vec2_val);
+        }
+      );
+    }
+    return;
+  }
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf,
+                                         iter.dtype(), "addr_cuda", [&] {
+    auto beta_val = beta.to<scalar_t>();
+    auto alpha_val = alpha.to<scalar_t>();
+
+    scalar_t zero_val(0);
+    // when beta==0, values in self should be ignored,
+    // nans and infs in self should not propagate.
+    if (beta_val == zero_val) {
+      gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (scalar_t self_val,
+                        scalar_t vec1_val, scalar_t vec2_val) -> scalar_t {
+          return alpha_val * vec1_val * vec2_val;
+        }
+      );
+    } else {
+      gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (scalar_t self_val,
+                        scalar_t vec1_val, scalar_t vec2_val) -> scalar_t {
+          return beta_val * self_val + alpha_val * vec1_val * vec2_val;
+        }
+      );
+    }
+  });
+}
+
+} // anonymous namespace
+
+REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
+
+}}
