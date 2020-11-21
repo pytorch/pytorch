@@ -5,7 +5,11 @@ import torch.distributed as dist
 
 
 def _orthogonalize(matrix, epsilon=1e-8):
-    """Applies Gram-Schmidt procedure to orthogonalize a given 2D tensor."""
+    """
+    Applies Gram-Schmidt procedure to orthogonalize a given 2D tensor.
+    If epsilon is 0, this is equivalent to `torch.qr(matrix, out=(matrix, _))`,
+    but `torch.qr` is very slow, probably because it is not optimized for a matrix that has a small number of columns.
+    """
     num_cols = matrix.shape[1]
     for i in range(num_cols):
         # Normalize the i'th column.

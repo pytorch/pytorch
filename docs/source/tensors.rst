@@ -267,7 +267,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cummax
    .. automethod:: cummin
    .. automethod:: cumprod
+   .. automethod:: cumprod_
    .. automethod:: cumsum
+   .. automethod:: cumsum_
    .. automethod:: data_ptr
    .. automethod:: deg2rad
    .. automethod:: dequantize
@@ -394,6 +396,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: kthvalue
    .. automethod:: lcm
    .. automethod:: lcm_
+   .. automethod:: ldexp
+   .. automethod:: ldexp_
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: less_equal

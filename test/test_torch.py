@@ -9807,6 +9807,28 @@ class TestTorchDeviceType(TestCase):
         guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 
+    @onlyCPU
+    def test_ldexp(self, device):
+        # random values
+        mantissas = torch.randn(64, device=device)
+        exponents = torch.randint(-31, 31, (64,), device=device, dtype=torch.int32)
+
+        # basic test
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        pt_outcome_1 = torch.ldexp(mantissas, exponents)
+        pt_outcome_2 = mantissas.ldexp(exponents)
+        self.assertEqual(np_outcome, pt_outcome_1)
+        self.assertEqual(np_outcome, pt_outcome_2)
+        mantissas.ldexp_(exponents)
+        self.assertEqual(np_outcome, mantissas)
+
+        # test bounds
+        mantissas = torch.tensor([float('inf'), float('-inf'), float('inf'), float('nan')], device=device)
+        exponents = torch.randint(0, 31, (4,), device=device, dtype=torch.int32)
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        pt_outcome = torch.ldexp(mantissas, exponents)
+        self.assertEqual(np_outcome, pt_outcome)
+
     def test_lerp(self, device):
         start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
         for shapes in product(start_end_shapes, start_end_shapes):
@@ -11577,6 +11599,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumsum(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumsum_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
@@ -11625,6 +11649,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumprod_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
