@@ -24,20 +24,22 @@ unpack(at::PhiloxCudaState arg) {
 
 } // namespace philox
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+// Protects against enum cudaStreamCaptureStatus implementation changes.
+// Some compilers seem not to like static_assert without the messages.
+static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) == 0,
+              "unexpected int(cudaStreamCaptureStatusNone) value");
+static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) == 1,
+              "unexpected int(cudaStreamCaptureStatusActive) value");
+static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated) == 2,
+              "unexpected int(cudaStreamCaptureStatusInvalidated) value");
+#endif
+
 enum class CaptureStatus: int {
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  // protects against enum cudaStreamCaptureStatus implementation changes
-  // some compilers seem not to like static_assert without the messages.
-  static_assert(int(cudaStreamCaptureStatusNone) == 0,
-                "unexpected int(cudaStreamCaptureStatusNone) value");
-  static_assert(int(cudaStreamCaptureStatusActive) == 1,
-                "unexpected int(cudaStreamCaptureStatusActive) value");
-  static_assert(int(cudaStreamCaptureStatusInvalidated) == 2,
-                "unexpected int(cudaStreamCaptureStatusInvalidated) value");
-
-  None = int(cudaStreamCaptureStatusNone),
-  Active = int(cudaStreamCaptureStatusActive),
-  Invalidated = int(cudaStreamCaptureStatusInvalidated)
+  None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
+  Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
+  Invalidated = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated)
   #else
   None = 0
   #endif
@@ -69,7 +71,7 @@ inline CaptureStatus currentStreamCaptureStatus() {
   cudaStreamCaptureStatus is_capturing;
   AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
                                       &is_capturing));
-  return int(is_capturing);
+  return CaptureStatus(is_capturing);
   #else
   return CaptureStatus::None;
   #endif
