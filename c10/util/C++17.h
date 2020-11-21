@@ -24,6 +24,10 @@
 #error You need C++14 to compile PyTorch
 #endif
 
+#if defined(_WIN32) && (defined(min) || defined(max))
+#  error Macro clash with min and max -- define NOMINMAX when compiling your program on Windows
+#endif
+
 /*
  * This header adds some polyfills with C++17 functionality
  */
