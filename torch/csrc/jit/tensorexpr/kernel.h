@@ -65,8 +65,8 @@ class TORCH_API TensorExprKernel {
   ExprHandle chunk(
       Tensor* t,
       size_t chunkIdx,
-      size_t dim,
-      size_t chunks,
+      int64_t dim,
+      int64_t chunks,
       const std::vector<ExprHandle>& axes);
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
@@ -209,6 +209,7 @@ TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
 TORCH_API bool& getTEGenerateBlockCode();
+TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
 

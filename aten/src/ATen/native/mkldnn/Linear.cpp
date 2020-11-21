@@ -54,9 +54,11 @@ Tensor mkldnn_linear(
   output_size.push_back(weight.size(0));
 
   if (self.dim() > 2) {
-    return new_with_itensor_mkldnn(std::move(y), self.options()).reshape(output_size);
+    return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                   self.options().device_opt()).reshape(output_size);
   }
-  return new_with_itensor_mkldnn(std::move(y), self.options());
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
 }
 
 } // namespace native
