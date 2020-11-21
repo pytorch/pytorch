@@ -3544,7 +3544,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @unittest.skipIf(
-        True, "Reenable when DDP with multiple GPUs per process is confirmed to work"
+        True, "Re-enable when DDP with multiple GPUs per process is confirmed to work"
     )
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
