@@ -52,7 +52,7 @@ class Optimizer(object):
         for param_group in param_groups:
             self.add_param_group(param_group)
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         self = super(Optimizer, cls).__new__(cls)
 
         self._zero_grad_profile_name = "{}#{}.{}".format("Optimizer.zero_grad", self.__class__.__name__, "zero_grad")
