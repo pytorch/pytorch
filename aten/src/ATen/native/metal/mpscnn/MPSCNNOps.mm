@@ -152,7 +152,9 @@ Tensor max_pool2d(
       strideInPixelsX:stride[0]
       strideInPixelsY:stride[1]];
   [pool setEdgeMode:MPSImageEdgeModeClamp];
-  [pool setOffset:{.x = kernel_size[0] / 2, .y = kernel_size[1] / 2, .z = 0}];
+  [pool setOffset:{.x = static_cast<NSInteger>(kernel_size[0] / 2),
+                   .y = static_cast<NSInteger>(kernel_size[1] / 2),
+                   .z = 0}];
 
   int64_t oN = iN;
   int64_t oC = iC;
