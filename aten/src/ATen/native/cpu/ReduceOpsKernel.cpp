@@ -209,7 +209,7 @@ static void norm_kernel_tensor_iterator_impl(
       binary_kernel_reduce(
         iter,
         AbsMaxOps<scalar_t>(),
-        scalar_t(std::numeric_limits<scalar_t>::min())
+        scalar_t(0)
       );
     });
   } else if (val == -INFINITY) {
