@@ -7077,7 +7077,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_matrix_exp_analytic(self, device, dtype):
         # check zero matrix
         x = torch.zeros(20, 20, dtype=dtype, device=device)
@@ -7221,7 +7221,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_matrix_exp_compare_with_taylor(self, device, dtype):
 
         def normalize_to_1_operator_norm(sample, desired_norm):
@@ -7253,10 +7253,10 @@ class TestTorchDeviceType(TestCase):
             return res
 
         def scale_square(a, deg):
-            if a.norm() < 1.0:
+            if a.abs().pow(2).sum().sqrt() < 1.0:
                 return get_taylor_approximation(a, 12)
             else:
-                s = int(torch.log2(a.norm()).ceil().item())
+                s = int(torch.log2(a.abs().pow(2).sum().sqrt()).ceil().item())
                 b = a / (2 ** s)
                 b = get_taylor_approximation(b, 18)
                 for _ in range(s):
