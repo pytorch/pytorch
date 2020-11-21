@@ -195,6 +195,13 @@ class TestStaticRuntime(TestCase):
         o_test = tg_a(s, s, s)[0]
         torch.testing.assert_allclose(o_ref, o_test)
 
+    def test_leaky_relu(self):
+        s = torch.randn(5, 5)
+        tg = torch.jit.script(nn.LeakyReLU(0.1))
+        o_ref = tg(s)
+        tg_a = StaticRuntime(tg)
+        o_test = tg_a(s)[0]
+        torch.testing.assert_allclose(o_ref, o_test)
 
 if __name__ == "__main__":
     run_tests()

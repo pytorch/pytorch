@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include "test/cpp/tensorexpr/padded_buffer.h"
@@ -20,7 +22,7 @@ using namespace torch::jit::tensorexpr;
 
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
-void testExprBasicValueTest() {
+TEST(Expr, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
   ExprHandle c = Add::make(a, b);
@@ -28,7 +30,7 @@ void testExprBasicValueTest() {
   ASSERT_EQ(eval.value<int>(), 5);
 }
 
-void testExprBasicValueTest02() {
+TEST(Expr, BasicValueTest02) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
   ExprHandle b(3.0f);
@@ -39,7 +41,7 @@ void testExprBasicValueTest02() {
   ASSERT_EQ(eval.value<float>(), -4.0f);
 }
 
-void testExprLetTest01() {
+TEST(Expr, LetTest01) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
@@ -48,7 +50,7 @@ void testExprLetTest01() {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-void testExprLetTest02() {
+TEST(Expr, LetTest02) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
@@ -60,7 +62,7 @@ void testExprLetTest02() {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
 }
 
-void testExprLetStmtTest01() {
+TEST(Expr, LetStmtTest01) {
   KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {1});
   Placeholder b_buf("b", kFloat, {1});
@@ -84,7 +86,7 @@ void testExprLetStmtTest01() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-void testExprIntTest() {
+TEST(Expr, IntTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4));
@@ -93,7 +95,7 @@ void testExprIntTest() {
   ASSERT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
 }
 
-void testExprFloatTest() {
+TEST(Expr, FloatTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
@@ -102,7 +104,7 @@ void testExprFloatTest() {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-void testExprByteTest() {
+TEST(Expr, ByteTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
   ExprHandle body = ExprHandle((uint8_t)2) +
@@ -112,7 +114,7 @@ void testExprByteTest() {
   ASSERT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprCharTest() {
+TEST(Expr, CharTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kChar);
   ExprHandle body = ExprHandle((int8_t)2) +
@@ -122,7 +124,7 @@ void testExprCharTest() {
   ASSERT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprShortTest() {
+TEST(Expr, ShortTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kShort);
   ExprHandle body = ExprHandle((int16_t)2) +
@@ -132,7 +134,7 @@ void testExprShortTest() {
   ASSERT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprLongTest() {
+TEST(Expr, LongTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
   ExprHandle body = ExprHandle((int64_t)2) +
@@ -142,7 +144,7 @@ void testExprLongTest() {
   ASSERT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
 }
 
-void testExprHalfTest() {
+TEST(Expr, HalfTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
   ExprHandle body = ExprHandle((at::Half)2) +
@@ -152,7 +154,7 @@ void testExprHalfTest() {
   ASSERT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
 }
 
-void testExprDoubleTest() {
+TEST(Expr, DoubleTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kDouble);
   ExprHandle body = ExprHandle((double)2) +
@@ -162,7 +164,7 @@ void testExprDoubleTest() {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
-void testExprDisallowBoolArithmetic() {
+TEST(Expr, DisallowBoolArithmetic) {
   KernelScope kernel_scope;
   VarHandle x("x", kBool);
   VarHandle y("y", kBool);
@@ -180,7 +182,7 @@ void testExprDisallowBoolArithmetic() {
   ASSERT_THROWS_WITH(Min::make(x, y, /*propagate_nans=*/true), error);
 }
 
-void testExprVectorAdd01() {
+TEST(Expr, VectorAdd01) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
@@ -230,7 +232,7 @@ void testExprVectorAdd01() {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
-void testExprCompareSelectEQ() {
+TEST(Expr, CompareSelectEQ) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -263,7 +265,7 @@ void testExprCompareSelectEQ() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testExprCompareSelectDtypes() {
+TEST(Expr, CompareSelectDtypes) {
   // LHS and RHS expressions should have the same dtype, but this dtype could
   // differ from the dtype of the return values (but dtypes of true and false
   // return values should be the same).
@@ -308,7 +310,7 @@ void testExprCompareSelectDtypes() {
   ExpectAllNear(c_buffer, c_ref, 1e-7);
 }
 
-void testExprIntrinsicsDtypes() {
+TEST(Expr, IntrinsicsDtypes) {
   KernelScope kernel_scope;
   constexpr int N = 256;
   Placeholder a(BufHandle("A", {N}, kDouble));
@@ -330,7 +332,7 @@ void testExprIntrinsicsDtypes() {
   ExpectAllNear(b_buffer, b_ref, 1e-7);
 }
 
-void testExprSubstitute01() {
+TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
   const Var* x = new Var("x", kFloat);
   const Var* y = new Var("y", kFloat);
@@ -351,7 +353,7 @@ void testExprSubstitute01() {
   ASSERT_EQ(e2_str, e2_ref_str);
 }
 
-void testExprMath01() {
+TEST(Expr, Math01) {
   KernelScope kernel_scope;
   ExprHandle v = sin(ExprHandle(1.0f));
 
@@ -365,7 +367,7 @@ void testExprMath01() {
   ASSERT_NEAR(res, v_ref, 1e-6);
 }
 
-void testExprUnaryMath01() {
+TEST(Expr, UnaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
     std::function<ExprHandle(const ExprHandle&)> func;
@@ -426,7 +428,7 @@ void testExprUnaryMath01() {
   }
 }
 
-void testExprBinaryMath01() {
+TEST(Expr, BinaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
     std::function<ExprHandle(const ExprHandle&, const ExprHandle&)> func;
@@ -450,7 +452,7 @@ void testExprBinaryMath01() {
   }
 }
 
-void testExprBitwiseOps() {
+TEST(Expr, BitwiseOps) {
   KernelScope kernel_scope;
   ExprHandle a(59);
   ExprHandle b(11);
@@ -462,7 +464,7 @@ void testExprBitwiseOps() {
   ASSERT_EQ(eval.value<int>(), 11);
 }
 
-void testExprDynamicShapeAdd() {
+TEST(Expr, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
