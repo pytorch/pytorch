@@ -149,4 +149,20 @@ Use :meth:`worker_init_fn` to preserve reproducibility::
         worker_init_fn=seed_worker
     )
 
+TensorFloat-32 on Ampere GPUs
+......................................
 
+Since PyTorch 1.7, matrix multiplications and convolutions for FP32 values are computed 
+using TensorFloat32 (TF32) tensor cores on Ampere GPUs. This significantly accelerates 
+FP32 operations by truncating the mantissa to 10 bits, which may result in numeric 
+differences between Ampere and non-Ampere devices. 
+
+TF32 Matrix multplications and convolutions can be toggled seperately, via the following flags::
+
+    # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+    # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+    torch.backends.cudnn.allow_tf32 = True
+
+See :ref:`tf32_on_ampere`  for details on this feature.
