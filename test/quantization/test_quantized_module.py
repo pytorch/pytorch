@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nnq_fused
+import torch.nn.intrinsic.quantized._reference as nniqr
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.functional as F
 import torch.quantization
@@ -80,9 +82,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         # (use_fused, backend_independent) -> quantized class
         class_map = {
-            (True, True) : nnq_fused.LinearReLUBackendIndependent,
+            (True, True) : nniqr.LinearReLU,
             (True, False) : nnq_fused.LinearReLU,
-            (False, True) : nnq.LinearBackendIndependent,
+            (False, True) : nnqr.Linear,
             (False, False) : nnq.Linear,
         }
 

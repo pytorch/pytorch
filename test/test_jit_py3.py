@@ -53,7 +53,7 @@ class TestScriptPy3(JitTestCase):
         def fn():
             return NormalizationInfo(1, 2, 3, 4, 5)
 
-        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+        with self.assertRaisesRegex(OSError, "could not get source code"):
             torch.jit.script(fn)
 
     def test_optional_dict_construct(self):
@@ -555,7 +555,7 @@ class TestScriptPy3(JitTestCase):
             @torch.jit.script
             def foo():
                 x = 5
-                if True:
+                if 1 == 1:
                     x : Optional[int] = 7
 
     def test_module_inplace_construct(self):

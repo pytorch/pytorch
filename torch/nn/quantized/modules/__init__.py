@@ -7,7 +7,7 @@ from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
 from .conv import Conv1d, Conv2d, Conv3d
 from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
-from .linear import Linear, LinearBackendIndependent
+from .linear import Linear
 from .embedding_ops import Embedding, EmbeddingBag
 
 from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
@@ -103,7 +103,6 @@ __all__ = [
     'LayerNorm',
     'LeakyReLU',
     'Linear',
-    'LinearBackendIndependent',
     'MaxPool2d',
     'Quantize',
     'ReLU6',
