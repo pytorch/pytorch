@@ -736,6 +736,10 @@ ProcessedNode::ProcessedNode(
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to native impl for node: " << ss.str();
+  } else {
+    std::ostringstream ss;
+    node->print(ss, 0, nullptr, false);
+    VLOG(1) << "Fallback interpreter for node: " << ss.str();
   }
 }
 
