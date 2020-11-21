@@ -9,7 +9,7 @@ import torch
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings,
-     TEST_NUMPY, IS_MACOS, make_tensor)
+     TEST_NUMPY, IS_MACOS, make_tensor, TEST_SCIPY)
 from torch.testing._internal.common_methods_invocations import \
     (unary_ufuncs)
 from torch.testing._internal.common_device_type import \
@@ -19,6 +19,9 @@ from torch.testing import \
 
 if TEST_NUMPY:
     import numpy as np
+
+if TEST_SCIPY:
+    import scipy.special
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -489,6 +492,24 @@ class TestUnaryUfuncs(TestCase):
 
         x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
+
+    @unittest.skipIf(not TEST_SCIPY, "Requires SciPy")
+    @dtypes(torch.float, torch.double)
+    def test_digamma_special(self, device, dtype):
+        # Based on SciPy test for the following special values.
+        # Reference:
+        # https://github.com/scipy/scipy/blob/3a8a3a1d4657254a6611e77e9c28feafa26e6645/scipy/special/tests/test_digamma.py#L22
+        euler = 0.57721566490153286
+        dataset = [(0., -0.),
+                   (1, -euler),
+                   (0.5, -2 * math.log(2) - euler),
+                   (1 / 3, -math.pi / (2 * math.sqrt(3)) - 3 * math.log(3) / 2 - euler),
+                   (1 / 4, -math.pi / 2 - 3 * math.log(2) - euler),
+                   (1 / 6, -math.pi * math.sqrt(3) / 2 - 2 * math.log(2) - 3 * math.log(3) / 2 - euler),
+                   (1 / 8, -math.pi / 2 - 4 * math.log(2) -
+                       (math.pi + math.log(2 + math.sqrt(2)) - math.log(2 - math.sqrt(2))) / math.sqrt(2) - euler)]
+        x = torch.tensor(dataset, device=device, dtype=dtype)
+        self.compare_with_numpy(torch.digamma, scipy.special.digamma, x)
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
