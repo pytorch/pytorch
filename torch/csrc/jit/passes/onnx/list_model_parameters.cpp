@@ -139,11 +139,7 @@ std::vector<IValue> getParamAttributes(
           n->output()->replaceAllUsesWith(paramConst);
           n->removeAllInputs();
 
-          GRAPH_UPDATE(
-              "Folding GetAttr %",
-              n->outputs()[0]->debugName(),
-              " with ",
-              paramConst->debugName());
+          GRAPH_UPDATE("Folding GetAttr %", n->outputs()[0]->debugName());
         }
       }
     }
@@ -161,6 +157,8 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
   GRAPH_DEBUG("List attributes for function: " + function->name());
   auto graph = function->graph();
   auto attributes = getParamAttributes(graph, moduleClone, function);
+
+  modelParams.reserve(attributes.size());
   for (auto& attr_ : attributes) {
     modelParams.push_back(attr_);
   }
