@@ -35,6 +35,7 @@ from .pattern_utils import (
     get_default_quant_patterns,
     get_default_output_activation_post_process_map,
     input_output_observed,
+    Pattern,
 )
 
 from .observed_module import (
@@ -56,7 +57,11 @@ from collections import OrderedDict
 import warnings
 import re
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
+
+# Define helper types
+
+QConfigAny = Union[torch.quantization.QConfig, torch.quantization.QConfigDynamic]
 
 # ------------------------
 # Helper Functions
@@ -212,10 +217,10 @@ class Quantizer:
     def __init__(self):
         # mapping from matched node to activation_post_process
         # must be filled before convert
-        self.activation_post_process_map: Optional[Dict[Any, Any]] = None
+        self.activation_post_process_map: Optional[Dict[str, torch.quantization.observer.ObserverBase]] = None
         # mapping from node name to qconfig that should be used for that node
         # filled out for a model during _generate_qconfig_map
-        self.qconfig_map: Optional[Dict[Any, Any]] = None
+        self.qconfig_map: Optional[Dict[str, QConfigAny]] = None
         # mapping from fully qualified module name to module instance
         # for example,
         # {
@@ -223,7 +228,7 @@ class Quantizer:
         #   'linear': Linear(...),
         #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
         # }
-        self.modules: Optional[Dict[Any, Any]] = None
+        self.modules: Optional[Dict[str, torch.nn.Module]] = None
         # mapping from a tuple of nodes in reverse order to uninitialized
         #   QuantizeHandler subclass. For example,
         # {
@@ -234,7 +239,7 @@ class Quantizer:
         #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
         #     <class 'torch.quantization.fx.quantize.Add'>),
         # }
-        self.patterns = None
+        self.patterns: Optional[Dict[Pattern, torch.quantization.fx.quantization_patterns.QuantizeHandler]] = None
 
 
     def _qat_swap_modules(self, root, additional_qat_module_mapping):
@@ -697,11 +702,11 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
-        def is_output_quantized(node):
+        def is_output_quantized(node) -> bool:
             """ Check if output node is quantized or not """
             assert self.modules is not None
             if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
-                quantized = self.modules[node.target]._output_is_observed
+                quantized = bool(self.modules[node.target]._output_is_observed)
             else:
                 quantized = True
 
