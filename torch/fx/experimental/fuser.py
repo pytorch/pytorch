@@ -32,6 +32,7 @@ def matches_module_pattern(pattern: Iterable[Type], node: fx.Node, modules: Dict
 
 
 def replace_node_module(node: fx.Node, modules: Dict[str, Any], new_module: torch.nn.Module):
+    assert(isinstance(node.target, str))
     parent_name, name = _parent_name(node.target)
     setattr(modules[parent_name], name, new_module)
 
