@@ -1080,6 +1080,18 @@ Tensor& heaviside_(Tensor& self, const Tensor& values) {
   return at::heaviside_out(self, self, values);
 }
 
+Tensor& ldexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::mul_out(result, self, at::pow(2.0, other));
+}
+
+Tensor ldexp(const Tensor& self, const Tensor& other) {
+  return at::mul(self, at::pow(2.0, other));
+}
+
+Tensor& ldexp_(Tensor& self, const Tensor& other) {
+  return at::ldexp_out(self, self, other);
+}
+
 // TODO: Deduplicate this with the TensorIterator logic.  This would
 // also fix the TODOs below.
 Tensor binary_op_meta(const Tensor& self, const Tensor& other) {
