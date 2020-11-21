@@ -197,7 +197,7 @@ vTensor::Buffer allocate_buffer(
     return {
       VMA_MEMORY_USAGE_GPU_TO_CPU,
       0u,
-      0u,
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
     };
   }();
 
@@ -325,7 +325,7 @@ vTensor::Buffer allocate_staging(
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         {
-          VMA_MEMORY_USAGE_CPU_ONLY,
+          VMA_MEMORY_USAGE_CPU_COPY,
           0u,
           0u,
         },

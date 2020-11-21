@@ -44,7 +44,7 @@ struct Shader final {
       Signature
     */
 
-    typedef c10::SmallVector<VkDescriptorType, 8u> Signature;
+    typedef c10::SmallVector<VkDescriptorType, 6u> Signature;
 
     /*
       Descriptor

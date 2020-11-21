@@ -58,23 +58,15 @@ struct Descriptor final {
 
   class Set final {
    public:
-    Set(
-        VkDevice device,
-        VkDescriptorPool descriptor_pool,
-        const Shader::Layout::Object& shader_layout);
+    Set(VkDevice device, VkDescriptorSet descriptor_set);
     Set(const Set&) = delete;
     Set& operator=(const Set&) = delete;
     Set(Set&&);
     Set& operator=(Set&&);
     ~Set() = default;
 
-    Set& bind(
-        uint32_t binding,
-        const Resource::Buffer::Object& buffer);
-
-    Set& bind(
-        uint32_t binding,
-        const Resource::Image::Object& image);
+    Set& bind(uint32_t binding, const Resource::Buffer::Object& buffer);
+    Set& bind(uint32_t binding, const Resource::Image::Object& image);
 
     VkDescriptorSet handle() const;
 
@@ -82,6 +74,7 @@ struct Descriptor final {
     struct Item final {
       uint32_t binding;
       VkDescriptorType type;
+
       union {
         VkDescriptorBufferInfo buffer;
         VkDescriptorImageInfo image;
@@ -93,10 +86,9 @@ struct Descriptor final {
    private:
     VkDevice device_;
     VkDescriptorSet descriptor_set_;
-    Shader::Layout::Signature shader_layout_signature_;
 
     struct {
-      c10::SmallVector<Item, 8u> items;
+      c10::SmallVector<Item, 6u> items;
       mutable bool dirty;
     } bindings_;
   };
@@ -118,17 +110,29 @@ struct Descriptor final {
     void purge();
 
    private:
+    const Shader::Layout::Signature& signature();
+
+   private:
     struct Configuration final {
-      static constexpr uint32_t kQuantum = 64u;
-      static constexpr uint32_t kReserve = 1024u;
+      static constexpr uint32_t kQuantum = 16u;
+      static constexpr uint32_t kReserve = 64u;
     };
 
     VkDevice device_;
     Handle<VkDescriptorPool, VK_DELETER(DescriptorPool)> descriptor_pool_;
 
     struct {
-      std::vector<VkDescriptorSet> pool;
-      size_t in_use;
+      struct Type final {
+        std::vector<VkDescriptorSet> pool;
+        size_t in_use;
+      };
+
+      struct {
+        c10::SmallVector<VkDescriptorSetLayout, 16u> handles;
+        c10::SmallVector<Shader::Layout::Signature, 16u> signatures;
+      } layout;
+
+      std::vector<Type> types;
     } set_;
   } pool /* [thread_count] */;
 

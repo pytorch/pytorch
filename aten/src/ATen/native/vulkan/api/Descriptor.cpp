@@ -6,50 +6,41 @@ namespace vulkan {
 namespace api {
 namespace {
 
-VkDescriptorPool create_descriptor_pool(
-    const VkDevice device) {
+VkDescriptorPool create_descriptor_pool(const VkDevice device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device,
       "Invalid Vulkan device!");
 
   const struct {
     uint32_t capacity;
-    c10::SmallVector<VkDescriptorPoolSize, 8u> sizes;
+    c10::SmallVector<VkDescriptorPoolSize, 4u> sizes;
   } descriptor {
-    4096u,
+    1024u,
     {
-      // Note: It is OK for the sum of descriptors per type, below, to exceed
-      // the max total figure above, but be concenious of memory consumption.
-      // Considering how the descriptor pool must be frequently purged anyway
-      // as a result of the impracticality of having enormous pools that
-      // persist through the execution of the program, there is diminishing
-      // return in increasing max counts.
+      /*
+        Buffers
+      */
+
       {
-        /*
-          Buffers
-        */
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        1024u,
+      },
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        1024u,
+      },
 
-        {
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          3072u,
-        },
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          3072u,
-        },
+      /*
+        Images
+      */
 
-        /*
-          Images
-        */
-
-        {
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          3072u,
-        },
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          3072u,
-        },
+      {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1024u,
+      },
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        1024u,
       },
     },
   };
@@ -57,7 +48,7 @@ VkDescriptorPool create_descriptor_pool(
   const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
     nullptr,
-    0u, /* Do not use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT. */
+    0u,
     descriptor.capacity,
     static_cast<uint32_t>(descriptor.sizes.size()),
     descriptor.sizes.data(),
@@ -244,7 +235,7 @@ VkDescriptorSet Descriptor::Set::handle() const {
       }
     };
 
-    c10::SmallVector<VkWriteDescriptorSet, 8u> write_descriptor_sets;
+    c10::SmallVector<VkWriteDescriptorSet, 6u> write_descriptor_sets;
 
     for (const Item& item : bindings_.items) {
       VkWriteDescriptorSet write{
