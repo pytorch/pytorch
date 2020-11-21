@@ -227,14 +227,14 @@ class TestQuantizedOps(TestCase):
                     torch.relu,
                     torch.relu_,
                     torch.nn.functional.relu,
-                    torch.nn.quantized.functional.relu,
+                    torch.nn.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu
             },
             {
                 'quantized_fn': [
                     torch.nn.functional.relu,
-                    torch.nn.quantized.functional.relu,
+                    torch.nn.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu,
                 'extra_kwargs': {
@@ -2964,6 +2964,7 @@ class TestQuantizedEmbeddingOps(TestCase):
 
         self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, 2, optimized_qparams)
 
+
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
             embedding_dim, num_offsets,
@@ -3132,6 +3133,7 @@ class TestQuantizedEmbeddingOps(TestCase):
     """ Tests the correctness of the quantized embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
+    @skipIfNoFBGEMM
     def test_embedding_byte(self, num_embeddings, embedding_dim):
         quant_op = torch.ops.quantized.embedding_byte
         prepack_op = torch.ops.quantized.embedding_bag_prepack
@@ -3160,6 +3162,68 @@ class TestQuantizedEmbeddingOps(TestCase):
 
         ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
+
+
+    @skipIfNoFBGEMM
+    def test_embedding_2d_indices(self):
+        """
+        Tests the case where 2D indices are passed into the operator
+        In this case the operator computes the correct offsets argument.
+        Output shape is dependent on the indices dimension.
+        """
+        quant_op = torch.ops.quantized.embedding_byte
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+
+        indices = torch.tensor([[9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8], [3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3]])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+
+        ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
+        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        obs(weights)
+        qparams = obs.calculate_qparams()
+
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+        packed_weight = prepack_op(qweight)
+        qresult = quant_op(packed_weight, indices, pruned_weights=False)
+        torch.testing.assert_allclose(ref, qresult, atol=0.05, rtol=1e-3)
+
+    @skipIfNoFBGEMM
+    def test_embedding_bag_2d_indices(self):
+        """
+        Tests the case where 2D indices are passed into the operator
+        In this case the operator computes the correct offsets argument.
+        """
+        indices = torch.tensor([[9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8], [3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3]])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+
+        embedding_bag = torch.nn.EmbeddingBag(
+            num_embeddings=10,
+            embedding_dim=12,
+            include_last_offset=False, _weight=weights,
+            scale_grad_by_freq=False, mode='sum'
+        )
+        result = embedding_bag(indices)
+
+        pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
+        q_weights = pt_prepack_op(weights)
+        qresult = pt_op(q_weights, indices, mode=0, pruned_weights=False)
+        torch.testing.assert_allclose(result, qresult, atol=0.05, rtol=1e-3)
+
+        # Test TorchBind based embedding_bag operator
+        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        obs(weights)
+        # Get the scale and zero point for the weight tensor
+        qparams = obs.calculate_qparams()
+
+        # Quantize the weights to 8bits
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+
+        packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
+        qresult = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, mode=0)
+
+        torch.testing.assert_allclose(result, qresult, atol=0.05, rtol=1e-3)
+
 
 class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
@@ -4044,7 +4108,35 @@ class TestPadding(TestCase):
         y_ref = padding_op(x)
         qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
         qy_hat = padding_op(qx)
+        self.assertEqual(qy_ref, qy_hat)
 
+        # Out variant
+        qy_hat = torch._C._nn.reflection_pad1d(qx, padding, out=qy_hat)
+        self.assertEqual(qy_ref, qy_hat)
+
+    @given(batch_size=st.integers(1, 64),
+           channels=st.integers(1, 64),
+           height=st.integers(16, 128),
+           width=st.integers(16, 128),
+           qtype=st.sampled_from(hu._ALL_QINT_TYPES))
+    def test_reflection_pad2d(self, batch_size, channels, height, width, qtype):
+        padding = (width // 4, width // 4, height // 4, height // 4)
+
+        x = torch.arange(batch_size * channels * height * width).to(torch.float)
+        x = x.resize(batch_size, channels, height, width)
+        # Per-Tensor test
+        scale, zp = _calculate_dynamic_qparams(x, qtype)
+        qx = torch.quantize_per_tensor(x, scale, zp, qtype)
+
+        padding_op = torch.nn.ReflectionPad2d(padding)
+
+        y_ref = padding_op(x)
+        qy_ref = torch.quantize_per_tensor(y_ref, scale, zp, qtype)
+        qy_hat = padding_op(qx)
+        self.assertEqual(qy_ref, qy_hat)
+
+        # Out variant
+        qy_hat = torch._C._nn.reflection_pad2d(qx, padding, out=qy_hat)
         self.assertEqual(qy_ref, qy_hat)
 
     @given(batch_size=st.integers(1, 64),

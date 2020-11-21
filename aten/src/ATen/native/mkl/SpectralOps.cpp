@@ -329,28 +329,28 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
     input = input.contiguous();
   }
 
-  DimVector in_strides(signal_ndim + 1);
-  if (complex_input) {
-    for (int64_t i = 0; i < signal_ndim + 1; ++i) {
-      in_strides[i] = input.strides()[i] / 2;
-    }
-  } else {
-    in_strides.assign(input.strides().begin(), input.strides().end());
-  }
 
   Tensor output = at::empty(output_sizes, input.options());
-  DimVector out_strides(signal_ndim + 1);
-  if (complex_output) {
-    for (int64_t i = 0; i < signal_ndim + 1; ++i) {
-      out_strides[i] = output.strides()[i] / 2;
-    }
-  } else {
-    out_strides.assign(output.strides().begin(), output.strides().end());
-  }
 
   DimVector full_sizes(signal_ndim + 1);
   full_sizes[0] = self.size(0);
-  std::copy(checked_signal_sizes.begin(), checked_signal_sizes.end(), full_sizes.begin() + 1);
+  std::copy(checked_signal_sizes.cbegin(), checked_signal_sizes.cend(), full_sizes.begin() + 1);
+
+  // If "complex" is true, convert strides from complex viewed as real to complex strides.
+  // Otherwise, returns a copy of strides if "complex" is false.
+  auto convert_strides = [signal_ndim](IntArrayRef strides, bool complex) {
+    DimVector res(signal_ndim + 1);
+    if (complex) {
+      for (int64_t i = 0; i < res.size(); ++i) {
+        res[i] = strides[i] / 2;
+      }
+    } else {
+      res.assign(strides.cbegin(), strides.cend());
+    }
+    return res;
+  };
+  const auto in_strides = convert_strides(input.strides(), complex_input);
+  const auto out_strides = convert_strides(output.strides(), complex_output);
 
   auto descriptor = _plan_mkl_fft(
       in_strides, out_strides, full_sizes, complex_input, complex_output,
@@ -372,36 +372,41 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
 }
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
-static void _exec_fft(const Tensor& input, const Tensor& output, IntArrayRef dims, int64_t normalization, bool forward) {
-  // Create plan
-  auto iter = TensorIteratorConfig()
-      .add_output(output)
-      .add_input(input)
-      .resize_outputs(false)
-      .check_all_same_dtype(false)
-      .declare_static_shape(input.sizes(), dims)
-      .build();
+static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
+                         IntArrayRef dim, int64_t normalization, bool forward) {
+  const auto ndim = self.dim();
+  const int64_t signal_ndim = dim.size();
+  const auto batch_dims = ndim - signal_ndim;
 
-  DimVector in_strides(dims.size() + 1);
-  DimVector out_strides(dims.size() + 1);
-  DimVector signal_size(dims.size() + 1);
+  // Permute dimensions so batch dimensions come first, and in stride order
+  // This maximizes data locality when collapsing to a single batch dimension
+  DimVector dim_permute(ndim);
+  std::iota(dim_permute.begin(), dim_permute.end(), int64_t{0});
 
-  // NOTE: TensorIterator strides are in bytes
-  const auto in_element_size = iter.element_size(1);
-  const auto out_element_size = iter.element_size(0);
-  in_strides[0] = iter.strides(1)[0] / in_element_size;
-  out_strides[0] = iter.strides(0)[0] / out_element_size;
-  const auto batch_size = iter.shape()[0];
+  c10::SmallVector<bool, kDimVectorStaticSize> is_transformed_dim(ndim);
+  for (const auto& d : dim) {
+    is_transformed_dim[d] = true;
+  }
+  auto batch_end = std::partition(dim_permute.begin(), dim_permute.end(),
+                                  [&](int64_t d) {return !is_transformed_dim[d]; });
+  auto self_strides = self.strides();
+  std::sort(dim_permute.begin(), batch_end,
+            [&](int64_t a, int64_t b) { return self_strides[a] > self_strides[b]; });
+  std::copy(dim.cbegin(), dim.cend(), batch_end);
+  auto input = self.permute(dim_permute);
+
+  // Collapse batch dimensions into a single dimension
+  DimVector batched_sizes(signal_ndim + 1);
+  batched_sizes[0] = -1;
+  std::copy(input.sizes().cbegin() + batch_dims, input.sizes().cend(), batched_sizes.begin() + 1);
+  input = input.reshape(batched_sizes);
+
+  const auto batch_size = input.sizes()[0];
+  DimVector signal_size(signal_ndim + 1);
   signal_size[0] = batch_size;
-
-  const int64_t signal_ndim = dims.size();
   for (int64_t i = 0; i < signal_ndim; ++i) {
-    auto idim = dims[i];
-    in_strides[i + 1] = input.strides()[idim];
-    out_strides[i + 1] = output.strides()[idim];
-
-    auto in_size = input.sizes()[idim];
-    auto out_size = output.sizes()[idim];
+    auto in_size = input.sizes()[i + 1];
+    auto out_size = out_sizes[dim[i]];
     signal_size[i + 1] = std::max(in_size, out_size);
     TORCH_INTERNAL_ASSERT(in_size == signal_size[i + 1] ||
                           in_size == (signal_size[i + 1] / 2) + 1);
@@ -409,22 +414,47 @@ static void _exec_fft(const Tensor& input, const Tensor& output, IntArrayRef dim
                           out_size == (signal_size[i + 1] / 2) + 1);
   }
 
-  auto descriptor = _plan_mkl_fft(
-      in_strides, out_strides, signal_size, input.is_complex(), output.is_complex(),
-      normalization, forward, c10::toValueType(input.scalar_type()));
+  batched_sizes[0] = batch_size;
+  DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
+  for (size_t i = 0; i < dim.size(); ++i) {
+    batched_out_sizes[i + 1] = out_sizes[dim[i]];
+  }
 
-  // run
-  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t size) {
-    // Execute one batch of FFTs
-    TORCH_INTERNAL_ASSERT(size == batch_size);
-    TORCH_INTERNAL_ASSERT(strides[0] == out_strides[0] * out_element_size);
-    TORCH_INTERNAL_ASSERT(strides[1] == in_strides[0] * in_element_size);
-    if (forward) {
-      MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), data[1], data[0]));
-    } else {
-      MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), data[1], data[0]));
-    }
-  }, {0, iter.numel()});
+  const auto value_type = c10::toValueType(input.scalar_type());
+  out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
+
+  auto descriptor = _plan_mkl_fft(
+      input.strides(), out.strides(), signal_size, input.is_complex(),
+      out.is_complex(), normalization, forward, value_type);
+
+  // run the FFT
+  if (forward) {
+    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+  } else {
+    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+  }
+
+  // Inplace reshaping to original batch shape and inverting the dimension permutation
+  DimVector out_strides(ndim);
+  int64_t batch_numel = 1;
+  for (int64_t i = batch_dims - 1; i >= 0; --i) {
+    out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
+    batch_numel *= out_sizes[dim_permute[i]];
+  }
+  for (int64_t i = batch_dims; i < ndim; ++i) {
+    out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
+  }
+  return out.as_strided_(out_sizes, out_strides, out.storage_offset());
+}
+
+// Sort transform dimensions by input layout, for best performance
+// exclude_last is for onesided transforms where the last dimension cannot be reordered
+static DimVector _sort_dims(const Tensor& self, IntArrayRef dim, bool exclude_last=false) {
+  DimVector sorted_dims(dim.begin(), dim.end());
+  auto self_strides = self.strides();
+  std::sort(sorted_dims.begin(), sorted_dims.end() - exclude_last,
+            [&](int64_t a, int64_t b) { return self_strides[a] > self_strides[b]; });
+  return sorted_dims;
 }
 
 // n-dimensional complex to real IFFT
@@ -438,48 +468,45 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   // is okay.
   auto input = self;
   if (dim.size() > 1) {
-    auto temp = at::empty(self.sizes(), self.options());
-    _exec_fft(self, temp, dim.slice(0, dim.size() - 1), normalization, /*forward=*/false);
-    input = temp;
+    auto c2c_dims = dim.slice(0, dim.size() - 1);
+    input = _fft_c2c_mkl(self, c2c_dims, normalization, /*foward=*/false);
     dim = dim.slice(dim.size() - 1);
   }
 
-  auto in_shape = input.sizes();
-  DimVector out_shape(in_shape.begin(), in_shape.end());
-  out_shape[dim.back()] = last_dim_size;
-  auto output = at::empty(out_shape, self.options().dtype(c10::toValueType(self.scalar_type())));
-  _exec_fft(input, output, dim, normalization, /*forward=*/false);
-  return output;
+  auto in_sizes = input.sizes();
+  DimVector out_sizes(in_sizes.begin(), in_sizes.end());
+  out_sizes[dim.back()] = last_dim_size;
+  auto out = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  return _exec_fft(out, input, out_sizes, dim, normalization, /*forward=*/false);
 }
 
 // n-dimensional real to complex FFT
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
   TORCH_CHECK(self.is_floating_point());
-  auto input_shape = self.sizes();
-  DimVector out_shape(input_shape.begin(), input_shape.end());
+  auto input_sizes = self.sizes();
+  DimVector out_sizes(input_sizes.begin(), input_sizes.end());
   auto last_dim = dim.back();
-  auto last_dim_halfsize = (input_shape[last_dim]) / 2 + 1;
+  auto last_dim_halfsize = (input_sizes[last_dim]) / 2 + 1;
   if (onesided) {
-    out_shape[last_dim] = last_dim_halfsize;
+    out_sizes[last_dim] = last_dim_halfsize;
   }
 
-  auto output = at::empty(out_shape, self.options().dtype(c10::toComplexType(self.scalar_type())));
-  // Onesided slice view of output
-  auto out_slice = output.slice(last_dim, 0, last_dim_halfsize);
-  _exec_fft(self, out_slice, dim, normalization, /*forward=*/true);
+  auto sorted_dims = _sort_dims(self, dim, /*exclude_last=*/true);
+  auto out = at::empty(out_sizes, self.options().dtype(c10::toComplexType(self.scalar_type())));
+  _exec_fft(out, self, out_sizes, sorted_dims, normalization, /*forward=*/true);
 
   if (!onesided) {
-    at::native::_fft_fill_with_conjugate_symmetry_(output, dim);
+    at::native::_fft_fill_with_conjugate_symmetry_(out, dim);
   }
-  return output;
+  return out;
 }
 
 // n-dimensional complex to complex FFT/IFFT
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
   TORCH_CHECK(self.is_complex());
-  auto output = at::empty(self.sizes(), self.options());
-  _exec_fft(self, output, dim, normalization, forward);
-  return output;
+  const auto sorted_dims = _sort_dims(self, dim);
+  auto out = at::empty(self.sizes(), self.options());
+  return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
 }
 
 }} // namespace at::native
