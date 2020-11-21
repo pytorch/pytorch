@@ -1265,6 +1265,28 @@ static const auto ProcessGroupWorkTorchBind =
 // TODO: Support argument names in Python API.
 static const auto ProcessGroupTorchBind =
     torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup")
+        .def_pickle(
+            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
+              auto name =
+                  ::c10d::DistributedC10d::get()->getNameOfProcessGroup(self);
+              return std::vector<std::string>{name};
+            },
+            [](std::vector<std::string> state) {
+                TORCH_CHECK(
+                  state.size() == 1,
+                  "Expecting exactly 1 state when restoring ProcessGroup, got: ",
+                  state.size());
+              const auto& process_group_name = state.front();
+              auto process_group =
+                  ::c10d::DistributedC10d::get()->getProcessGroupByName(
+                      process_group_name);
+              TORCH_CHECK(
+                  process_group.defined(),
+                  "Needed process group not found, ",
+                  "please create a process group with name: ",
+                  process_group_name);
+              return process_group;
+            })
         .def(
             "rank",
             [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
@@ -1529,6 +1551,38 @@ static const auto ProcessGroupNCCLOptionsTorchBind =
 
 static const auto ProcessGroupNCCLTorchBind =
     torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
+        .def_pickle(
+            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+              auto base_process_group =
+                  static_intrusive_pointer_cast<::c10d::ProcessGroup>(self);
+              auto name =
+                  ::c10d::DistributedC10d::get()->getNameOfProcessGroup(self);
+              return std::vector<std::string>{name};
+            },
+            [](std::vector<std::string> state) {
+              TORCH_CHECK(
+                  state.size() == 1,
+                  "Expecting exactly 1 state when restoring ProcessGroupNCCL, got: ",
+                  state.size());
+              const auto& process_group_name = state.front();
+              auto base_process_group =
+                  ::c10d::DistributedC10d::get()->getProcessGroupByName(
+                      process_group_name);
+              TORCH_CHECK(
+                  base_process_group.defined(),
+                  "Needed process group not found, ",
+                  "please create a process group with name: ",
+                  process_group_name);
+              c10::intrusive_ptr<::c10d::ProcessGroupNCCL> process_group_nccl =
+                  dynamic_intrusive_pointer_cast<::c10d::ProcessGroupNCCL>(
+                      base_process_group);
+              TORCH_CHECK(
+                  process_group_nccl.defined(),
+                  "Process group ",
+                  process_group_name,
+                  " isn't configured for NCCL backend");
+              return process_group_nccl;
+            })
         .def(torch::init<
              const c10::intrusive_ptr<::c10d::Store>&,
              int64_t,
@@ -1551,14 +1605,23 @@ static const auto ProcessGroupNCCLTorchBind =
 #endif
 
 static const auto DistributedC10dFrontendTorchBind =
-    torch::class_<::c10d::DistributedC10d>("c10d", "frontend")
-        .def(torch::init([]() {
-          static c10::intrusive_ptr<::c10d::DistributedC10d>
-              c10d_frontend_singleton =
-                  c10::make_intrusive<::c10d::DistributedC10d>();
-          return c10d_frontend_singleton;
-        }))
-        .def("new_process_group_helper", &::c10d::DistributedC10d::newProcessGroupHelper);
+    torch::class_<::c10d::DistributedC10d>("dist_c10d", "frontend")
+        .def(torch::init([]() { return ::c10d::DistributedC10d::get(); }))
+        .def(
+            "new_process_group_helper",
+            &::c10d::DistributedC10d::newProcessGroupHelper)
+        .def(
+            "get_process_group_by_name",
+            &::c10d::DistributedC10d::getProcessGroupByName)
+        .def(
+            "get_name_of_process_group",
+            &::c10d::DistributedC10d::getNameOfProcessGroup)
+        .def(
+            "set_test_value",
+            &::c10d::DistributedC10d::setTestValue)
+        .def(
+            "get_test_value",
+            &::c10d::DistributedC10d::getTestValue);
 
 } // namespace
 
