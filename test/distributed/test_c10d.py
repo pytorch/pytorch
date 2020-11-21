@@ -3385,7 +3385,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
 
-    def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None, gradient_as_bucket_view=False):
+    def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None, gradient_as_bucket_view=False, state=None):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
@@ -3394,9 +3394,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             gradient_as_bucket_view=gradient_as_bucket_view,
         )
 
-        # Register DDP Communication Hook if defined
+        # Register a DDP communication hook if any.
         if hook is not None:
-            gpu_model.register_comm_hook(None, hook)
+            gpu_model.register_comm_hook(state, hook)
 
         return gpu_model
 
@@ -3499,21 +3499,33 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
-            return default.allreduce_hook(process_group, bucket)
-
-        def fp16_compress_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
-            return default.fp16_compress_hook(process_group, bucket)
-
-        def powerSGD_hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
-            return powerSGD.powerSGD_hook(process_group, bucket)
-
-        for hook in [allreduce_hook, fp16_compress_hook, powerSGD_hook]:
+        # For these default DDP comm hooks, the only state is process group.
+        state = process_group
+        for hook in [default.allreduce_hook, default.fp16_compress_hook]:
             # Get GPU model with the hook registered.
-            gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, hook, gradient_as_bucket_view)
+            # The first arg 'process_group' is used for initializing the test environment,
+            # so it cannot be replaced by 'state', although they have the same value.
+            gpu_model = self._gpu_model_with_ddp_comm_hook(
+                process_group, hook, gradient_as_bucket_view, state
+            )
 
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
+    def _test_powerSGD_ddp_comm_hook_nccl(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether Python DDP communication hook POWER_SGD
+        can give the same result with the case of no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Get GPU model with the hook registered.
+        state = powerSGD.PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, powerSGD.powerSGD_hook, gradient_as_bucket_view, state)
+
+        # check whether the grads are equal to what DDP without hook would return.
+        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
     def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
@@ -3552,6 +3564,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
+    def test_powerSGD_ddp_comm_hook_nccl(self):
+        self._test_powerSGD_ddp_comm_hook_nccl()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
@@ -3566,6 +3584,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_rocm
     def test_builtin_ddp_comm_hooks_nccl_grad_is_view(self):
         self._test_builtin_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_powerSGD_ddp_comm_hook_nccl_grad_is_view(self):
+        self._test_powerSGD_ddp_comm_hook_nccl(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
