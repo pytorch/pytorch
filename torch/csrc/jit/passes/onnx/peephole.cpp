@@ -875,6 +875,94 @@ static bool doConstantFolding(Node* node) {
   }
   return false;
 }
+// -------------------------- before peephole pass ---------------------- graph(%input.1 : Float(3, 5, 2, 7, strides=[70, 14, 7, 1], requires_grad=0, device=cpu),
+//       %target.1 : Long(3, 2, 7, strides=[14, 7, 1], requires_grad=0, device=cpu)):
+//   %3 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
+//   %5 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={-1}]()
+//   %6 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={1}]()
+//   %8 : Float(5, strides=[1], requires_grad=0, device=cpu) = onnx::Constant[value= 0.0616  0.5556 -0.3703 -0.1451 -0.7339 [ CPUFloatType{5} ]]()
+//   %9 : Float(3, 7, 2, 5, strides=[70, 10, 5, 1], device=cpu) = onnx::Transpose[perm=[0, 3, 2, 1]](%input.1)
+//   %10 : Float(3, 7, 2, 5, strides=[70, 10, 5, 1], device=cpu) = onnx::LogSoftmax[axis=3](%9)
+//   %11 : Float(3, 5, 2, 7, strides=[70, 14, 7, 1], device=cpu) = onnx::Transpose[perm=[0, 3, 2, 1]](%10) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2246:16
+//   %12 : Long(4, strides=[1], device=cpu) = onnx::Shape(%11)
+//   %13 : Long(device=cpu) = onnx::Size(%12) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2227:10
+//   %14 : Long(4, strides=[1], device=cpu) = onnx::Shape(%11)
+//   %16 : Long(device=cpu) = onnx::Constant[value={0}]()
+//   %17 : Long(device=cpu) = onnx::Gather[axis=0](%14, %16) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2231:7
+//   %49 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
+//   %18 : Bool(device=cpu) = onnx::Equal(%13, %49) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2234:7
+//   %48 : bool = onnx::Cast[to=9](%18)
+//   %19 : Tensor = onnx::If(%48) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2234:4
+//     block0():
+//       %20 : Float(device=cpu) = onnx::NegativeLogLikelihoodLoss[ignore_index=1, reduction="mean"](%11, %target.1, %8) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2235:14
+//       -> (%20)
+//     block1():
+//       %50 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={4}]()
+//       %21 : Bool(device=cpu) = onnx::Equal(%13, %50) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2236:9
+//       %47 : bool = onnx::Cast[to=9](%21)
+//       %22 : Tensor = onnx::If(%47) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2236:4
+//         block0():
+//           %23 : Float(device=cpu) = onnx::NegativeLogLikelihoodLoss[ignore_index=1, reduction="mean"](%11, %target.1, %8) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2237:14
+//           -> (%23)
+//         block1():
+//           %24 : Long(4, strides=[1], device=cpu) = onnx::Shape(%11)
+//           %26 : Long(device=cpu) = onnx::Constant[value={1}]()
+//           %27 : Long(device=cpu) = onnx::Gather[axis=0](%24, %26) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2241:12
+//           %28 : Long(4, strides=[1], device=cpu) = onnx::Shape(%11)
+//           %29 : Long(device=cpu) = onnx::ReduceProd[keepdims=0](%28) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2249:11
+//           %51 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
+//           %30 : Bool(device=cpu) = onnx::Greater(%29, %51) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2249:11
+//           %36 : bool = onnx::Cast[to=9](%30)
+//           %31 : Tensor = onnx::If(%36) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2249:8
+//             block0():
+//               %32 : int[] = prim::ListConstruct(%17, %27, %6, %5)
+//               %33 : FloatTensor = onnx::Reshape(%11, %32) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2250:20
+//               -> (%33)
+//             block1():
+//               %34 : int[] = prim::ListConstruct(%17, %27, %3, %3)
+//               %35 : FloatTensor = onnx::Reshape(%11, %34) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2252:20
+//               -> (%35)
+//           %37 : Long(3, strides=[1], device=cpu) = onnx::Shape(%target.1)
+//           %38 : Long(device=cpu) = onnx::ReduceProd[keepdims=0](%37) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2253:11
+//           %52 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
+//           %39 : Bool(device=cpu) = onnx::Greater(%38, %52) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2253:11
+//           %45 : bool = onnx::Cast[to=9](%39)
+//           %40 : Tensor = onnx::If(%45) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2253:8
+//             block0():
+//               %41 : int[] = prim::ListConstruct(%17, %6, %5)
+//               %42 : LongTensor = onnx::Reshape(%target.1, %41) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2254:21
+//               -> (%42)
+//             block1():
+//               %43 : int[] = prim::ListConstruct(%17, %3, %3)
+//               %44 : LongTensor = onnx::Reshape(%target.1, %43) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2256:21
+//               -> (%44)
+//           %46 : Tensor = onnx::NegativeLogLikelihoodLoss[ignore_index=1, reduction="mean"](%31, %40, %8) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2259:18
+//           -> (%46)
+//       -> (%22)
+//   return (%19)
+
+// -------------------------- after peephole pass ------------------------- graph(%input.1 : Float(3, 5, 2, 7, strides=[70, 14, 7, 1], requires_grad=0, device=cpu),
+//       %target.1 : Long(3, 2, 7, strides=[14, 7, 1], requires_grad=0, device=cpu)):
+//   %3 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
+//   %5 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={-1}]()
+//   %6 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={1}]()
+//   %8 : Float(5, strides=[1], requires_grad=0, device=cpu) = onnx::Constant[value= 0.0616  0.5556 -0.3703 -0.1451 -0.7339 [ CPUFloatType{5} ]]()
+//   %9 : Float(3, 7, 2, 5, strides=[70, 10, 5, 1], device=cpu) = onnx::Transpose[perm=[0, 3, 2, 1]](%input.1)
+//   %10 : Float(3, 7, 2, 5, strides=[70, 10, 5, 1], device=cpu) = onnx::LogSoftmax[axis=3](%input.1)
+//   %11 : Float(3, 5, 2, 7, strides=[70, 14, 7, 1], device=cpu) = onnx::Transpose[perm=[0, 3, 2, 1]](%10) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2246:16
+//   %12 : Long(4, strides=[1], device=cpu) = onnx::Shape(%11)
+//   %13 : Long(device=cpu) = onnx::Size(%12) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2227:10
+//   %14 : Long(4, strides=[1], device=cpu) = onnx::Shape(%11)
+//   %16 : Long(device=cpu) = onnx::Constant[value={0}]()
+//   %17 : Long(device=cpu) = onnx::Gather[axis=0](%14, %16) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2231:7
+//   %49 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
+//   %18 : Bool(device=cpu) = onnx::Equal(%13, %49) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2234:7
+//   %48 : bool = onnx::Cast[to=9](%18)
+//   %50 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={4}]()
+//   %21 : Bool(device=cpu) = onnx::Equal(%13, %50) # /home/ksenija/anaconda3/envs/pytorch/lib/python3.7/site-packages/torch/nn/functional.py:2236:9
+//   %47 : bool = onnx::Cast[to=9](%21)
+//   %54 : Float(device=cpu) = onnx::SoftmaxCrossEntropyLoss[ignore_index=1, reduction="mean"](%input.1, %target.1, %8)
+//   return (%54)
 
 static void foldIfNode(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {

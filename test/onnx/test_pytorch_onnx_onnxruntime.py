@@ -4323,21 +4323,21 @@ class TestONNXRuntime(unittest.TestCase):
     #@disableScriptTest()  # shape/type inference
     def test_crossentropyloss(self):
         for ignore_index in [-100, 1]:
-            # x = torch.randn(3, 5)
-            # y = torch.empty(3, dtype=torch.long).random_(5)
-            # y[y == 1] = ignore_index
-
-            # self._crossentropyloss(x, y, ignore_index)
-
-            x = torch.randn(3, 5, 2)
-            y = torch.empty(3, 2, dtype=torch.long).random_(5)
+            x = torch.randn(3, 5)
+            y = torch.empty(3, dtype=torch.long).random_(5)
             y[y == 1] = ignore_index
+
             self._crossentropyloss(x, y, ignore_index)
 
-            # x = torch.randn(3, 5, 2, 7)
-            # y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+            # x = torch.randn(3, 5, 2)
+            # y = torch.empty(3, 2, dtype=torch.long).random_(5)
             # y[y == 1] = ignore_index
             # self._crossentropyloss(x, y, ignore_index)
+
+            x = torch.randn(3, 5, 2, 7)
+            y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+            y[y == 1] = ignore_index
+            self._crossentropyloss(x, y, ignore_index)
 
     def _crossentropyloss(self, x, y, ignore_index):
         class CrossEntropyLossNone(torch.nn.Module):
@@ -4353,70 +4353,70 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(CrossEntropyLossNone(ignore_index), input=(x, y))
 
-        # class CrossEntropyLossNoneWeight(torch.nn.Module):
-        #     def __init__(self, ignore_index):
-        #         super(CrossEntropyLossNoneWeight, self).__init__()
-        #         if ignore_index == -100:
-        #             self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5))
-        #         else:
-        #             self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5), ignore_index=ignore_index)
+        class CrossEntropyLossNoneWeight(torch.nn.Module):
+            def __init__(self, ignore_index):
+                super(CrossEntropyLossNoneWeight, self).__init__()
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5))
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='none', weight=torch.randn(5), ignore_index=ignore_index)
 
-        #     def forward(self, input, target):
-        #         return self.loss(input, target)
+            def forward(self, input, target):
+                return self.loss(input, target)
 
-        # self.run_test(CrossEntropyLossNoneWeight(ignore_index), input=(x, y))
+        self.run_test(CrossEntropyLossNoneWeight(ignore_index), input=(x, y))
 
-        # class CrossEntropyLossSum(torch.nn.Module):
-        #     def __init__(self, ignore_index):
-        #         super(CrossEntropyLossSum, self).__init__()
-        #         if ignore_index == -100:
-        #             self.loss = torch.nn.CrossEntropyLoss(reduction='sum')
-        #         else:
-        #             self.loss = torch.nn.CrossEntropyLoss(reduction='sum', ignore_index=ignore_index)
+        class CrossEntropyLossSum(torch.nn.Module):
+            def __init__(self, ignore_index):
+                super(CrossEntropyLossSum, self).__init__()
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum')
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum', ignore_index=ignore_index)
 
-        #     def forward(self, input, target):
-        #         return self.loss(input, target)
+            def forward(self, input, target):
+                return self.loss(input, target)
 
-        # self.run_test(CrossEntropyLossSum(ignore_index), input=(x, y))
+        self.run_test(CrossEntropyLossSum(ignore_index), input=(x, y))
 
-        # class CrossEntropyLossSumWeight(torch.nn.Module):
-        #     def __init__(self, ignore_index):
-        #         super(CrossEntropyLossSumWeight, self).__init__()
-        #         if ignore_index == -100:
-        #             self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5))
-        #         else:
-        #             self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5), ignore_index=ignore_index)
+        class CrossEntropyLossSumWeight(torch.nn.Module):
+            def __init__(self, ignore_index):
+                super(CrossEntropyLossSumWeight, self).__init__()
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5))
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(reduction='sum', weight=torch.randn(5), ignore_index=ignore_index)
 
-        #     def forward(self, input, target):
-        #         return self.loss(input, target)
+            def forward(self, input, target):
+                return self.loss(input, target)
 
-        # self.run_test(CrossEntropyLossSumWeight(ignore_index), input=(x, y))
+        self.run_test(CrossEntropyLossSumWeight(ignore_index), input=(x, y))
 
-        # class CrossEntropyLossMean(torch.nn.Module):
-        #     def __init__(self, ignore_index):
-        #         super(CrossEntropyLossMean, self).__init__()
-        #         if ignore_index == -100:
-        #             self.loss = torch.nn.CrossEntropyLoss()
-        #         else:
-        #             self.loss = torch.nn.CrossEntropyLoss(ignore_index=ignore_index)
+        class CrossEntropyLossMean(torch.nn.Module):
+            def __init__(self, ignore_index):
+                super(CrossEntropyLossMean, self).__init__()
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss()
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(ignore_index=ignore_index)
 
-        #     def forward(self, input, target):
-        #         return self.loss(input, target)
+            def forward(self, input, target):
+                return self.loss(input, target)
 
-        # self.run_test(CrossEntropyLossMean(ignore_index), input=(x, y))
+        self.run_test(CrossEntropyLossMean(ignore_index), input=(x, y))
 
-        # class CrossEntropyLossMeanWeight(torch.nn.Module):
-        #     def __init__(self, ignore_index):
-        #         super(CrossEntropyLossMeanWeight, self).__init__()
-        #         if ignore_index == -100:
-        #             self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5))
-        #         else:
-        #             self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5), ignore_index=ignore_index)
+        class CrossEntropyLossMeanWeight(torch.nn.Module):
+            def __init__(self, ignore_index):
+                super(CrossEntropyLossMeanWeight, self).__init__()
+                if ignore_index == -100:
+                    self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5))
+                else:
+                    self.loss = torch.nn.CrossEntropyLoss(weight=torch.randn(5), ignore_index=ignore_index)
 
-        #     def forward(self, input, target):
-        #         return self.loss(input, target)
+            def forward(self, input, target):
+                return self.loss(input, target)
 
-        # self.run_test(CrossEntropyLossMeanWeight(ignore_index), input=(x, y))
+        self.run_test(CrossEntropyLossMeanWeight(ignore_index), input=(x, y))
 
 
     @skipIfUnsupportedMinOpsetVersion(9)
