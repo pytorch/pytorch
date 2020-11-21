@@ -839,7 +839,7 @@ class TestGradNewOnesOverride(TestCase):
         self.assertEqual(type(n), SubTensor2)
 
 class TestBroadcastAllOverride(TestCase):
-    " test for gh-37141
+    """ test for gh-37141 """
     def test_broadcast_all(self):
         from torch.distributions.utils import broadcast_all
         a = torch.tensor([1.2, 3.4, 5.6])
