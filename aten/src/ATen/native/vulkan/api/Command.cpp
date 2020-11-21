@@ -49,6 +49,10 @@ void allocate_command_buffers(
       command_pool,
       "Invalid Vulkan command pool!");
 
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffers && (count > 0u),
+      "Invalid usage!");
+
   const VkCommandBufferAllocateInfo command_buffer_allocate_info{
     VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
     nullptr,
@@ -377,8 +381,8 @@ void Command::Pool::purge() {
       "This command pool is in an invalid state! "
       "Potential reason: This command pool is moved from.");
 
-  VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
   buffer_.in_use = 0u;
+  VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
 }
 
 } // namespace api
