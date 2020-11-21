@@ -19,8 +19,6 @@
 
 namespace at {
 
-using native::tensor;
-
 ${function_declarations}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
