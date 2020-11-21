@@ -127,6 +127,7 @@ std::vector<IValue> getParamAttributes(
           } else if (
               attr.isObject() && !attr.toObjectRef().type()->is_module()) {
             // Only below registered torch classes are supported.
+            auto type = attr.type();
             TORCH_CHECK(
                 (type ==
                  getCustomClass(
