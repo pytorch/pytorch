@@ -25,7 +25,7 @@ unpack(at::PhiloxCudaState arg) {
 } // namespace philox
 
 enum class CaptureStatus: int {
-  #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // protects against enum cudaStreamCaptureStatus implementation changes
   // some compilers seem not to like static_assert without the messages.
   static_assert(int(cudaStreamCaptureStatusNone) == 0,
@@ -48,7 +48,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
     case CaptureStatus::None:
       os << "cudaStreamCaptureStatusNone";
       break;
-    #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
+    #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
     case CaptureStatus::Active:
       os << "cudaStreamCaptureStatusActive";
       break;
@@ -65,7 +65,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 }
 
 inline CaptureStatus currentStreamCaptureStatus() {
-  #if defined(CUDA_VERSION) && CUDA_VERSION > 11000
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   cudaStreamCaptureStatus is_capturing;
   AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
                                       &is_capturing));
