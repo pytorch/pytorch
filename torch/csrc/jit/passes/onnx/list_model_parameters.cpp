@@ -106,7 +106,7 @@ std::vector<IValue> getParamAttributes(
 
         std::string fullName("self_");
         for (auto& name : moduleNames) {
-          fullName += name + '_';
+          fullName += name + '.';
         }
         fullName += name;
 
@@ -128,10 +128,23 @@ std::vector<IValue> getParamAttributes(
             paramConst = addParamAsArgument(function_, fullName, attr);
           } else if (
               attr.isObject() && !attr.toObjectRef().type()->is_module()) {
+            // Only below registered torch classes are supported.
+            TORCH_CHECK(
+                (type ==
+                 getCustomClass(
+                     "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
+                    (type ==
+                     getCustomClass(
+                         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) ||
+                    (type ==
+                     getCustomClass(
+                         "__torch__.torch.classes.quantized.LinearPackedParamsBase")),
+                "Unknown type ",
+                type->repr_str(),
+                " encountered in handling model params. This type is not supported in ONNX export.");
             attrValues.emplace_back(
                 script::Object(attr.toObject()).run_method("__getstate__"));
             paramConst = addParamAsArgument(function_, fullName, attr);
-
           } else if (attr.isNone() || name == "training") {
             auto attrVal = tryInsertConstant(*graph, attr);
             paramConst = *attrVal;
@@ -156,6 +169,8 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
 
   GRAPH_DEBUG("List attributes for function: " + function->name());
   auto graph = function->graph();
+  // Add model_parameters and model_buffers as model inputs. Order is based on
+  // the appearance in the graph.
   auto attributes = getParamAttributes(graph, moduleClone, function);
 
   modelParams.reserve(attributes.size());
