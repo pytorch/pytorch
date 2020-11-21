@@ -745,6 +745,7 @@ def get_dep_modules(test):
 
 
 def determine_target(test, touched_files, options):
+    return True
     test = parse_test_module(test)
     # Some tests are faster to execute than to determine.
     if test not in SLOW_TESTS:

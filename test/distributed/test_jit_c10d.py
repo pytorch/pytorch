@@ -107,3 +107,53 @@ class ProcessGroupNCCLJitTest(TestCase):
             return work.result()
 
         run_pg_nccl_alltoall(nccl_pg, output, input)
+
+    def test_process_group_nccl_serialization(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.pg = self._create_nccl_pg()
+
+            def forward(self, input: torch.Tensor):
+                if self.pg is None:
+                    return input + 1
+                else:
+                    return input + 2
+
+        self.checkModule(TestModule, torch.rank((2, 3)))
+
+
+class C10dFrontendJitTest(TestCase):
+    def test_frontend_singleton(self):
+        frontend1 = torch.classes.dist_c10d.frontend()
+        frontend2 = torch.classes.dist_c10d.frontend()
+
+        addr = "localhost"
+        port = common.find_free_port()
+        tcp_store = torch.classes.dist_c10d.TCPStore(addr, port, 1, True)
+
+        ProcessGroupNCCL1 = frontend1.newProcessGroupHelper(
+            self.world_size, self.rank, [], "NCCL", tcp_store, "test_process_group", 0)
+
+        ProcessGroupNCCL2 = frontend2.get_process_group_by_name("test_process_group")
+        self.assertEqual(ProcessGroupNCCL1, ProcessGroupNCCL2)
+
+class C10dProcessGroupSerialization(TestCase):
+    def test_process_group_as_module_member(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                addr = "localhost"
+                port = common.find_free_port()
+                tcp_store = torch.classes.dist_c10d.TCPStore(addr, port, 1, True)
+
+                self.pg = torch.classes.dist_c10d.frontend().newProcessGroupHelper(
+                    self.world_size, self.rank, [], "NCCL", tcp_store, "test_process_group_2", 0)
+
+            def forward(self, input: torch.Tensor):
+                if self.pg is None:
+                    return input + 1
+                else:
+                    return input + 2
+
+        self.checkModule(TestModule, torch.rank((2, 3)))
