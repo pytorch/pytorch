@@ -20881,9 +20881,7 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('erf', ref_backend='scipy'),
-                  _TorchMathTestMeta('erfc', ref_backend='scipy'),
-                  _TorchMathTestMeta('exp'),
+torch_op_tests = [_TorchMathTestMeta('exp'),
                   _TorchMathTestMeta('expm1'),
                   _TorchMathTestMeta('floor'),
                   _TorchMathTestMeta('ceil'),
