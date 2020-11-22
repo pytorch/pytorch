@@ -71,7 +71,7 @@ class ConvBNReLUFusion():
         conv_parent_name, conv_name = _parent_name(self.conv_node.target)
         fuser_method = get_fuser_method(op_type_list, additional_fuser_method_mapping)
         if fuser_method is None:
-            raise NotImplementedError("Cannot fuse modules: {}".format(types))
+            raise NotImplementedError("Cannot fuse modules: {}".format(op_type_list))
         fused = fuser_method(*op_list)
         setattr(quantizer.modules[conv_parent_name], conv_name, fused)
 

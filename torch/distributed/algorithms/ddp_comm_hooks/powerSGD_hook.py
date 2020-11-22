@@ -28,10 +28,17 @@ def _orthogonalize(matrix, epsilon=1e-8):
             rest -= torch.sum(col * rest, dim=0) * col
 
 
+class PowerSGDState(object):
+    __slots__ = ["process_group", "matrix_approximation_rank"]
+
+    def __init__(self, process_group, matrix_approximation_rank=1):
+        self.process_group = process_group
+        self.matrix_approximation_rank = matrix_approximation_rank
+
+
 def powerSGD_hook(
-    process_group: dist.ProcessGroup,
+    state: PowerSGDState,
     bucket: dist._GradBucket,
-    matrix_approximation_rank: int = 1,
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
@@ -53,7 +60,7 @@ def powerSGD_hook(
     For warm start, can take one such step at a time, and alternate between them.
 
     Arguments:
-        process_group (dist.ProcessGroup): Process group to communicate.
+        state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
@@ -64,9 +71,10 @@ def powerSGD_hook(
         Future handler of the communication, which updates the gradients in place.
 
     Example::
-        PowerSGDState state(process_group, 1)
+        state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1)
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
     """
+    process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = (
         process_group.size() if process_group is not None else dist.get_world_size()
@@ -94,11 +102,11 @@ def powerSGD_hook(
                 # TODO(wayi@): Should read the random seed from the state of this hook provided by the constructor.
                 torch.manual_seed(total_length)
                 return torch.randn(
-                    square_side_length, matrix_approximation_rank, device=device
+                    square_side_length, state.matrix_approximation_rank, device=device
                 )
         else:
             return torch.empty(
-                square_side_length, matrix_approximation_rank, device=device
+                square_side_length, state.matrix_approximation_rank, device=device
             )
 
     p = create_low_rank_tensor(fill_random_values=False)
