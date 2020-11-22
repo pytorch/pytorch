@@ -368,6 +368,10 @@ TEST(ATenNativeBatchNormTest, Basic) {
 }
 
 TEST(CustomFusionTest, Basic) {
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
+
   auto graph_string = R"IR(
     graph(%0 : Float(2, 3, 4),
           %1 : Float(2, 3, 4)):
@@ -402,6 +406,10 @@ TEST(CustomFusionTest, Basic) {
 }
 
 TEST(CustomFusionTest, NestedBlocks) {
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
+
   auto graph_string = R"IR(
   graph(%0 : Float(2, 3, 4),
         %1 : Float(2, 3, 4),
