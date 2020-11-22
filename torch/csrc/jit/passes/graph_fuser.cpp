@@ -1124,6 +1124,13 @@ struct GraphFuser {
   }
 
   void run() {
+    // TODO: old fuser is not maintained internally, somewhere it is being turned on
+    // inadvertently for certain workflows. make this a no-op until we identify
+    // location
+    #if defined(FBCODE_CAFFE2)
+        return;
+    #endif
+
     // Run the pass until no changes are made.
     // This is necessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:
