@@ -498,7 +498,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           // find a better way, Perhaps sending an empty message?
           if ((error.isOfType<tensorpipe::PipeClosedError>() &&
                !rpcAgentRunning_.load()) ||
-              error.isOfType<tensorpipe::transport::EOFError>()) {
+              error.isOfType<tensorpipe::EOFError>()) {
             // This is expected.
           } else {
             LOG(WARNING)
