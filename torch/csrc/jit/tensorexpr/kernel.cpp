@@ -780,7 +780,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::div: {
       return computeTwoOperand(
           "aten_div", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return boolToInteger(lhs) / boolToInteger(rhs);
+            return promoteIntegerToFloat(lhs) / promoteIntegerToFloat(rhs);
           });
     } break;
 
@@ -1147,7 +1147,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::atan2: {
       return computeTwoOperand(
           "aten_atan2", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return atan2(lhs, rhs);
+            return atan2(
+                promoteIntegerToFloat(lhs), promoteIntegerToFloat(rhs));
           });
     } break;
 
