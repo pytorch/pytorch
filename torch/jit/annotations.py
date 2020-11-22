@@ -10,7 +10,7 @@ from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, StreamObjType, FutureType, EnumType
+    DeviceObjType, StreamObjType, FutureType, EnumType, GeneratorType
 
 
 from textwrap import dedent
@@ -318,6 +318,8 @@ def try_ann_to_type(ann, loc):
         return StreamObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
+    if ann is torch.Generator:
+        return GeneratorType.get()
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         qualified_name = _qualified_name(ann)
         if _get_script_class(qualified_name) is None:

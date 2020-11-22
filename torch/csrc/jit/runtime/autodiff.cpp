@@ -66,8 +66,7 @@ bool isDifferentiable(Node* n) {
     return true;
 
   if (n->matches(
-          "aten::dropout(Tensor input, float p, bool train, Generator? generator) -> Tensor",
-          attr::train)) {
+          "aten::dropout(Tensor input, float p, bool train, Generator? generator) -> Tensor")) {
     return n->get<bool>(attr::train).value();
   }
 

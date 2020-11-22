@@ -760,6 +760,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<StreamObjType, Type, std::shared_ptr<StreamObjType>>(
       m, "StreamObjType")
       .def_static("get", &StreamObjType::get);
+  py::class_<GeneratorType, Type, std::shared_ptr<GeneratorType>>(
+      m, "GeneratorType")
+      .def_static("get", &GeneratorType::get);
   py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
       m, "PyObjectType")
       .def_static("get", &PyObjectType::get);

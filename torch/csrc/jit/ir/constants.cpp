@@ -114,6 +114,9 @@ c10::optional<Value*> tryInsertConstant(
     auto stream = val.toStream();
     n->i_(attr::value, stream.pack());
     n->output()->setType(StreamObjType::get());
+  } else if (val.isGenerator()) {
+    n->ival_(attr::value, val);
+    n->output()->setType(GeneratorType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
   } else if (val.isTuple()) {
@@ -185,6 +188,9 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type == StreamObjType::get()) {
     auto s = c10::Stream::unpack(node->i(attr::value));
     return s;
+  } else if (type == GeneratorType::get()) {
+    const auto& g = node->ival(attr::value);
+    return g;
   } else if (node->mustBeNone()) {
     return IValue();
   } else if (type->cast<EnumType>()) {

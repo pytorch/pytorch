@@ -3,16 +3,15 @@ import warnings
 import math
 
 import torch
-from torch._C import _infer_size, _add_docstr, Generator
+from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
-from torch import _VF
+from torch import _VF, Generator
 from .._jit_internal import boolean_dispatch, List, Optional, _overload, Tuple
 from ..overrides import has_torch_function, handle_torch_function
 from torch._torch_docs import reproducibility_notes, tf32_notes
-
 
 Tensor = torch.Tensor
 
