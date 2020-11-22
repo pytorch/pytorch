@@ -18720,43 +18720,42 @@ else:
                                             with_extremal=False, atol=None, rtol=None,
                                             exact_dtype=True, with_keepdim=False, dim_as_int=False):
         # Test 0-d to 3-d tensors.
-        for ndims in range(0, 4):
-            for n in range(ndims + 1):
-                shape = self._rand_shape(ndims, min_size=5, max_size=10)
-                if dim_as_int:
-                    x = self._generate_input(shape, dtype, device, with_extremal)
-
-                    if with_keepdim:
-                        torch_func_partial = partial(torch_func, keepdim=True, dim=n-1)
-                        np_func_partial = partial(np_func, keepdims=True, axis=n-1)
-                    else:
-                        torch_func_partial = partial(torch_func, dim=n-1)
-                        np_func_partial = partial(np_func, axis=n-1)
-                    print("x: ", x)
-                    print("axis: ", n)
-                    self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
-                            atol=atol, rtol=rtol, exact_dtype=exact_dtype)
-            continue
-            for n in range(ndims + 1):
-                for c in combinations(list(range(ndims)), n):
-                    for count_dim in permutations(c):
-                        # Generate Input.
+        if dim_as_int:
+            for ndims in range(0, 4):
+                for n in range(ndims + 1):
+                    shape = self._rand_shape(ndims, min_size=5, max_size=10)
                         x = self._generate_input(shape, dtype, device, with_extremal)
 
-                        if count_dim == ():
-                            # Default `dims=None` case
-                            self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None,
-                                                    atol=atol, rtol=rtol, exact_dtype=exact_dtype)
+                        if with_keepdim:
+                            torch_func_partial = partial(torch_func, keepdim=True, dim=n-1)
+                            np_func_partial = partial(np_func, keepdims=True, axis=n-1)
                         else:
-                            # With `dims: tuple of ints` case
-                            if with_keepdim:
-                                torch_func_partial = partial(torch_func, keepdim=True, dim=count_dim)
-                                np_func_partial = partial(np_func, keepdims=True, axis=count_dim)
+                            torch_func_partial = partial(torch_func, dim=n-1)
+                            np_func_partial = partial(np_func, axis=n-1)
+                        self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
+                                atol=atol, rtol=rtol, exact_dtype=exact_dtype)
+        else:
+            for ndims in range(0, 4):
+                for n in range(ndims + 1):
+                    for c in combinations(list(range(ndims)), n):
+                        for count_dim in permutations(c):
+                            # Generate Input.
+                            x = self._generate_input(shape, dtype, device, with_extremal)
+
+                            if count_dim == ():
+                                # Default `dims=None` case
+                                self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None,
+                                                        atol=atol, rtol=rtol, exact_dtype=exact_dtype)
                             else:
-                                torch_func_partial = partial(torch_func, dim=count_dim)
-                                np_func_partial = partial(np_func, axis=count_dim)
-                            self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
-                                                    atol=atol, rtol=rtol, exact_dtype=exact_dtype)
+                                # With `dims: tuple of ints` case
+                                if with_keepdim:
+                                    torch_func_partial = partial(torch_func, keepdim=True, dim=count_dim)
+                                    np_func_partial = partial(np_func, keepdims=True, axis=count_dim)
+                                else:
+                                    torch_func_partial = partial(torch_func, dim=count_dim)
+                                    np_func_partial = partial(np_func, axis=count_dim)
+                                self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
+                                                        atol=atol, rtol=rtol, exact_dtype=exact_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
