@@ -386,7 +386,7 @@ class profile(object):
             with_stack=False,
             use_kineto=False,
             use_cpu=True):
-        self.enabled:bool = enabled
+        self.enabled: bool = enabled
         if not self.enabled:
             return
         self.use_cuda = use_cuda
