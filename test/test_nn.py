@@ -13498,7 +13498,7 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv1d(self):
         self._check_lazy_conv(nn.Conv1d, nn.LazyConv1d, torch.nn.functional.conv1d,
-                             (32, 2), (192, 16, 50), (32, 16, 2))
+                              (32, 2), (192, 16, 50), (32, 16, 2))
 
     @suppress_warnings
     def test_lazy_conv1d_pickle(self):
@@ -13507,13 +13507,13 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv1d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv1d(16, 32, 2),
-                                   lambda: nn.LazyConv1d(32, 2),
-                                   (32, 16, 2))
+                                    lambda: nn.LazyConv1d(32, 2),
+                                    (32, 16, 2))
 
     @suppress_warnings
     def test_lazy_conv2d(self):
         self._check_lazy_conv(nn.Conv2d, nn.LazyConv2d, torch.nn.functional.conv2d,
-                             (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (32, 16, 2, 2))
 
     @suppress_warnings
     def test_lazy_conv2d_pickle(self):
@@ -13522,13 +13522,13 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv2d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv2d(16, 32, 2),
-                                   lambda: nn.LazyConv2d(32, 2),
-                                   (32, 16, 2, 2))
+                                    lambda: nn.LazyConv2d(32, 2),
+                                    (32, 16, 2, 2))
 
     @suppress_warnings
     def test_lazy_conv3d(self):
         self._check_lazy_conv(nn.Conv3d, nn.LazyConv3d, torch.nn.functional.conv3d,
-                             (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (32, 16, 2, 2, 2))
 
     @suppress_warnings
     def test_lazy_conv3d_pickle(self):
@@ -13537,13 +13537,13 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv3d_state(self):
         self._check_lazy_conv_state(lambda: nn.Conv3d(16, 32, 2),
-                                   lambda: nn.LazyConv3d(32, 2),
-                                   (32, 16, 2, 2, 2))
+                                    lambda: nn.LazyConv3d(32, 2),
+                                    (32, 16, 2, 2, 2))
 
     @suppress_warnings
     def test_lazy_conv_transposed1d(self):
         self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
-                             (32, 2), (192, 16, 50), (16, 32, 2))
+                              (32, 2), (192, 16, 50), (16, 32, 2))
 
     @suppress_warnings
     def test_lazy_conv_transpose1d_pickle(self):
@@ -13552,13 +13552,13 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv_transpose1d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose1d(16, 32, 2),
-                                   lambda: nn.LazyConvTranspose1d(32, 2),
-                                   (16, 32, 2))
+                                    lambda: nn.LazyConvTranspose1d(32, 2),
+                                    (16, 32, 2))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d(self):
         self._check_lazy_conv(nn.ConvTranspose2d, nn.LazyConvTranspose2d, torch.nn.functional.conv_transpose2d,
-                             (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
+                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_pickle(self):
@@ -13567,13 +13567,13 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv_transpose2d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose2d(16, 32, 2),
-                                   lambda: nn.LazyConvTranspose2d(32, 2),
-                                   (16, 32, 2, 2))
+                                    lambda: nn.LazyConvTranspose2d(32, 2),
+                                    (16, 32, 2, 2))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d(self):
         self._check_lazy_conv(nn.ConvTranspose3d, nn.LazyConvTranspose3d, torch.nn.functional.conv_transpose3d,
-                             (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
+                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_pickle(self):
@@ -13582,8 +13582,8 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv_transpose3d_state(self):
         self._check_lazy_conv_state(lambda: nn.ConvTranspose3d(16, 32, 2),
-                                   lambda: nn.LazyConvTranspose3d(32, 2),
-                                   (16, 32, 2, 2, 2))
+                                    lambda: nn.LazyConvTranspose3d(32, 2),
+                                    (16, 32, 2, 2, 2))
 
     @suppress_warnings
     def test_materialize_dtype(self):
