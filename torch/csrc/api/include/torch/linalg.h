@@ -20,6 +20,22 @@ inline Tensor det(const Tensor& self) {
   return torch::linalg_det(self);
 }
 
+inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
+  return torch::linalg_eigh(self, uplo);
+}
+
+inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+  return torch::linalg_eigh_out(eigvals, eigvecs, self, uplo);
+}
+
+inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
+  return torch::linalg_eigvalsh(self, uplo);
+}
+
+inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+  return torch::linalg_eigvalsh_out(result, self, uplo);
+}
+
 inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -77,6 +93,28 @@ inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
 /// See the documentation of torch.linalg.det
 inline Tensor linalg_det(const Tensor& self) {
   return detail::det(self);
+}
+
+/// Computes eigenvalues and eigenvectors
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigh
+inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
+  return detail::eigh(self, uplo);
+}
+
+inline std::tuple<Tensor&, Tensor&> eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+  return detail::eigh_out(eigvals, eigvecs, self, uplo);
+}
+
+/// Computes eigenvalues
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.eigvalsh
+inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
+  return detail::eigvalsh(self, uplo);
+}
+
+inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+  return detail::eigvalsh_out(result, self, uplo);
 }
 
 inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
