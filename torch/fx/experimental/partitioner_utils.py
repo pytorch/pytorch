@@ -1,5 +1,6 @@
 from typing import NamedTuple, Dict, List, Set
 from torch.fx.node import Node, map_arg
+from enum import Enum
 class Partition:
     """Partition class contains all the information about an individual partition.
     It also provides necessary methods for manipulation the partition.
@@ -67,10 +68,15 @@ class PartitionLatency(NamedTuple):
     # Latency of the critical path
     overall_latency_sec: float
 
+class PartitionMode(Enum):
+    size_based = 0
+    sparse_nn = 1
+    cost_aware = 2
+    kl_based = 3
+
 class PartitionerConfig(NamedTuple):
     devices: List[Device]
-    is_sparse_nn: bool = False
-    is_cost_aware: bool = False
+    mode: PartitionMode = PartitionMode.size_based
     transfer_rate_bytes_per_sec: float = 0.
     node_to_latency_mapping: Dict[Node, NodeLatency] = {}
 

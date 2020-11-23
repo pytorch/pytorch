@@ -4860,6 +4860,26 @@ class TestTorchDeviceType(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
+    # Ensure that assertEqual handles numpy arrays properly
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=True)))
+    def test_assertEqual_numpy(self, device, dtype):
+        S = 10
+        test_sizes = [
+            (),
+            (0,),
+            (S,),
+            (S, S),
+            (0, S),
+            (S, 0)]
+        for test_size in test_sizes:
+            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a_n = a.cpu().numpy()
+            msg = f'size: {test_size}'
+            self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
+
     # Verifies that the inplace dunders (like idiv) actually are in place
     @onlyOnCPUAndCUDA
     def test_inplace_dunders(self, device):
@@ -9806,6 +9826,28 @@ class TestTorchDeviceType(TestCase):
         jitted = torch.jit.script(torch.pca_lowrank)
         guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
+
+    @onlyCPU
+    def test_ldexp(self, device):
+        # random values
+        mantissas = torch.randn(64, device=device)
+        exponents = torch.randint(-31, 31, (64,), device=device, dtype=torch.int32)
+
+        # basic test
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        pt_outcome_1 = torch.ldexp(mantissas, exponents)
+        pt_outcome_2 = mantissas.ldexp(exponents)
+        self.assertEqual(np_outcome, pt_outcome_1)
+        self.assertEqual(np_outcome, pt_outcome_2)
+        mantissas.ldexp_(exponents)
+        self.assertEqual(np_outcome, mantissas)
+
+        # test bounds
+        mantissas = torch.tensor([float('inf'), float('-inf'), float('inf'), float('nan')], device=device)
+        exponents = torch.randint(0, 31, (4,), device=device, dtype=torch.int32)
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        pt_outcome = torch.ldexp(mantissas, exponents)
+        self.assertEqual(np_outcome, pt_outcome)
 
     def test_lerp(self, device):
         start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
