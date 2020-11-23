@@ -134,7 +134,7 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_kineto_api(self):
+    def test_kineto_profiler_api(self):
         called_num = [0]
         def test_output_fn(p):
             print(p.key_averages().table(

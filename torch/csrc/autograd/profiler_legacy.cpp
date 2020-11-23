@@ -147,7 +147,10 @@ const CUDAStubs default_stubs;
 constexpr const CUDAStubs* default_stubs_addr = &default_stubs;
 // Constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerCUDAMethods
-static const CUDAStubs* cuda_stubs = default_stubs_addr;
+inline const CUDAStubs*& cuda_stubs() {
+  static const CUDAStubs* stubs_ = default_stubs_addr;
+  return stubs_;
+}
 }
 
 // Profiler state
@@ -177,7 +180,7 @@ void ProfilerThreadLocalState::mark(std::string name, bool include_cuda) {
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
-    cuda_stubs->nvtxMarkA(name.c_str());
+    cuda_stubs()->nvtxMarkA(name.c_str());
   } else {
     LegacyEvent evt(
         EventKind::Mark,
@@ -209,7 +212,7 @@ void ProfilerThreadLocalState::pushRange(
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
-    cuda_stubs->nvtxRangePushA(getNvtxStr(
+    cuda_stubs()->nvtxRangePushA(getNvtxStr(
         fn.name(), msg, fn.seqNr(), shapes).c_str());
   } else {
     LegacyEvent evt(
@@ -243,7 +246,7 @@ void ProfilerThreadLocalState::popRange(const at::RecordFunction& fn, const bool
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
-    cuda_stubs->nvtxRangePop();
+    cuda_stubs()->nvtxRangePop();
   } else {
     // In some cases RecordFunction (and popRange) may be
     // called on a different thread than pushRange
@@ -452,7 +455,7 @@ const int kCUDAWarmupStart = 5;
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
-  cuda_stubs = stubs;
+  cuda_stubs() = stubs;
 }
 
 at::IValue ProfilerConfig::toIValue() const {
@@ -496,7 +499,7 @@ bool profilerEnabled() {
 }
 
 void enableProfilerLegacy(const ProfilerConfig& new_config) {
-  TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs->enabled(),
+  TORCH_CHECK(new_config.state != ProfilerState::NVTX || cuda_stubs()->enabled(),
     "Can't use NVTX profiler - PyTorch was compiled without CUDA");
 
   TORCH_CHECK(new_config.state != ProfilerState::KINETO);
@@ -512,16 +515,16 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording synchronization events
     for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
-      cuda_stubs->onEachDevice([state](int /* unused */) {
+      cuda_stubs()->onEachDevice([state](int /* unused */) {
           state->mark("__cuda_startup");
-          cuda_stubs->synchronize();
+          cuda_stubs()->synchronize();
       });
     }
 
     // cuda events must be on the same device, so we need a start event recorded
     // for each gpu. we then use this event to synchronize time on the GPU
     // with the CPU clock.
-    cuda_stubs->onEachDevice([state](int d) {
+    cuda_stubs()->onEachDevice([state](int d) {
         state->mark("__cuda_start_event");
     });
   }
@@ -564,7 +567,7 @@ void addEventList(std::vector<LegacyEvent>&& profiledEvents) {
 
 void LegacyEvent::record(bool record_cuda) {
   if (record_cuda) {
-    cuda_stubs->record(&device_, &cuda_event, &cpu_ns_);
+    cuda_stubs()->record(&device_, &cuda_event, &cpu_ns_);
     return;
   }
   cpu_ns_ = getTime();
@@ -668,7 +671,7 @@ double LegacyEvent::cudaElapsedUs(const LegacyEvent& e) const {
     TORCH_INTERNAL_ASSERT(cuda_us_ >= 0 && e.cuda_us_ >= 0);
     return static_cast<double>(e.cuda_us_ - cuda_us_);
   }
-  return cuda_stubs->elapsed(&cuda_event, &e.cuda_event);
+  return cuda_stubs()->elapsed(&cuda_event, &e.cuda_event);
 }
 
 CUDAStubs::~CUDAStubs() = default;
@@ -751,9 +754,6 @@ RecordProfile::~RecordProfile() {
     }
   }
   processEvents(events);
-  if (file_){
-    file_->close();
-  }
 }
 
 void RecordProfile::processEvents(const std::vector<LegacyEvent*>& events) {
