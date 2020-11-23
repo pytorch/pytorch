@@ -30,6 +30,7 @@ from torch._C._distributed_c10d import (
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
+_UCC_AVAILABLE = True
 
 
 try:
@@ -46,6 +47,11 @@ try:
     from torch._C._distributed_c10d import ProcessGroupGloo
 except ImportError:
     _GLOO_AVAILABLE = False
+
+try:
+    from torch._C._distributed_c10d import ProcessGroupUCC
+except ImportError:
+    _UCC_AVAILABLE = False
 
 # Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
@@ -82,6 +88,7 @@ class Backend(object):
     NCCL = "nccl"
     MPI = "mpi"
     TCP = "tcp"
+    UCC = "ucc"
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -94,7 +101,7 @@ class Backend(object):
                              "on CPU tensors.")
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
-        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
+        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI and value != Backend.UCC:
             value = name
         return value
 
@@ -300,6 +307,13 @@ def is_gloo_available():
     Checks if the Gloo backend is available.
     """
     return _GLOO_AVAILABLE
+
+
+def is_ucc_available():
+    """
+    Checks if the UCC backend is available.
+    """
+    return _UCC_AVAILABLE
 
 
 def is_initialized():
@@ -563,6 +577,16 @@ def _new_process_group_helper(world_size,
                 world_size,
                 timeout)
             _pg_map[pg] = (Backend.NCCL, store)
+            _pg_names[pg] = group_name
+        elif backend == Backend.UCC:
+            if not is_ucc_available():
+                raise RuntimeError("Distributed package doesn't have UCC "
+                                   "built in")
+            pg = ProcessGroupUCC(
+                prefix_store,
+                rank,
+                world_size)
+            _pg_map[pg] = (Backend.UCC, store)
             _pg_names[pg] = group_name
         else:
             pg = getattr(Backend, backend.upper())(

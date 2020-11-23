@@ -162,6 +162,8 @@ def require_backends_available(backends):
             return dist.is_nccl_available()
         if backend == dist.Backend.MPI:
             return dist.is_mpi_available()
+        if backend == dist.Backend.UCC:
+            return dist.is_ucc_available()
         return False
     if not all(check(dist.Backend(backend)) for backend in backends):
         return unittest.skip(
@@ -2145,7 +2147,8 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(
-            BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+            BACKEND != "mpi" and BACKEND != "ucc",
+            "Only MPI supports CPU all_to_all_single"
         )
         def test_all_to_all_single_equal_split(self):
             group, group_id, rank = self._init_global_test()
@@ -2153,7 +2156,8 @@ class DistributedTest:
 
         @unittest.skip("NCCL A2A is not enabled for OSS builds")
         @unittest.skipIf(
-            BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+            BACKEND != "nccl" and BACKEND != "ucc",
+            "Only Nccl and UCC supports CUDA all_to_all_single"
         )
         @skip_if_no_gpu
         @skip_if_rocm
