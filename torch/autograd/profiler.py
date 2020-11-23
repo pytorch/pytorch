@@ -58,7 +58,8 @@ class EventList(list):
                 if (self[idx].cpu_parent is not None and
                         self[idx].cpu_parent.name == self[idx].name and
                         len(self[idx].cpu_parent.cpu_children) == 1):
-                    self[idx].cpu_parent.cpu_children += self[idx].cpu_children
+                    self[idx].cpu_parent.cpu_children = self[idx].cpu_children
+                    self[idx].cpu_parent.kernels = self[idx].kernels  # lift kernels up
                     for ch in self[idx].cpu_children:
                         ch.cpu_parent = self[idx].cpu_parent
                     to_delete.append(idx)
@@ -279,7 +280,7 @@ class EventList(list):
         stats: Dict[Tuple[str, ...], FunctionEventAvg] = defaultdict(FunctionEventAvg)
 
         def get_key(event, group_by_input_shapes, group_by_stack_n) -> Tuple[str, ...]:
-            key = [str(event.key), str(event.node_id)]
+            key = [str(event.key), str(event.node_id), str(event.device_type), str(event.is_legacy)]
             if group_by_input_shapes:
                 key.append(str(event.input_shapes))
             if group_by_stack_n > 0:
@@ -953,6 +954,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_cuda_memory_usage: int = 0
         self.cpu_children: Optional[List[FunctionEvent]] = None
         self.cpu_parent: Optional[FunctionEvent] = None
+        self.device_type: DeviceType = DeviceType.CPU
+        self.is_legacy: bool = False
 
     def add(self, other):
         if self.key is None:
@@ -968,6 +971,8 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.input_shapes = other.input_shapes
             self.stack = other.stack
             self.scope = other.scope
+            self.device_type = other.device_type
+            self.is_legacy = other.is_legacy
 
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
@@ -1444,7 +1449,16 @@ def build_table(
         result.append('\n')  # Yes, newline after the end as well
 
     self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
-    cuda_time_total = sum([evt.self_cuda_time_total for evt in events])
+    cuda_time_total = 0
+    for evt in events:
+        if evt.device_type == DeviceType.CPU:
+            # in legacy profiler, kernel info is stored in cpu events
+            if evt.is_legacy:
+                cuda_time_total += evt.self_cuda_time_total
+        elif evt.device_type == DeviceType.CUDA:
+            # in kineto mode, there're events with the correct device type (e.g. CUDA)
+            cuda_time_total += evt.self_cuda_time_total
+
     # Actual printing
     if header is not None:
         append('=' * line_length)
