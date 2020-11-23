@@ -9,8 +9,8 @@ from torch.testing._internal.common_utils import TestCase
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
-    _get_overridable_functions,
-    _get_testing_overrides,
+    get_overridable_functions,
+    get_testing_overrides,
     is_tensor_method_or_property
 )
 
@@ -314,8 +314,8 @@ def implements_tensor_like(torch_function):
 def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
-    testing_overrides = _get_testing_overrides()
-    for namespace, funcs in _get_overridable_functions().items():
+    testing_overrides = get_testing_overrides()
+    for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
             if func not in testing_overrides:
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
@@ -620,7 +620,7 @@ def generate_tensor_like_override_tests(cls):
 
         return test
 
-    for func, override in _get_testing_overrides().items():
+    for func, override in get_testing_overrides().items():
         test_method = test_generator(func, override)
         if func.__name__ == "__get__":
             # Note: properties and __get__

@@ -31,6 +31,9 @@ import torch
 from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
 
 __all__ = [
+    "get_ignored_functions",
+    "get_overridable_functions",
+    "get_testing_overrides",
     "handle_torch_function",
     "has_torch_function",
     "is_tensor_like",
@@ -39,7 +42,7 @@ __all__ = [
 ]
 
 @functools.lru_cache(None)
-def _get_ignored_functions() -> Set[Callable]:
+def get_ignored_functions() -> Set[Callable]:
     """
     Return public functions that cannot be overridden by ``__torch_function__``.
 
@@ -202,7 +205,7 @@ def _get_ignored_functions() -> Set[Callable]:
 
 
 @functools.lru_cache(None)
-def _get_testing_overrides() -> Dict[Callable, Callable]:
+def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
     Returns
@@ -216,9 +219,9 @@ def _get_testing_overrides() -> Dict[Callable, Callable]:
     Examples
     --------
     >>> import inspect
-    >>> my_lambda = torch.overrides.get_testing_overrides()[torch.add]
-    >>> inspect.getfullargspec(my_lambda)
-    FullArgSpec(...)
+    >>> my_add = torch.overrides.get_testing_overrides()[torch.add]
+    >>> inspect.signature(my_add)
+    <Signature (input, other, out=None)>
     """
     # Every function in the PyTorchAPI that can be overriden needs an entry
     # in this dict.
@@ -973,7 +976,7 @@ def _get_testing_overrides() -> Dict[Callable, Callable]:
     }
 
     ret2 = {}
-    ignored = _get_ignored_functions()
+    ignored = get_ignored_functions()
 
     for k, v in ret.items():
         # Generate methods like __add__ and add_ by default from add
@@ -1184,7 +1187,7 @@ def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     )
 
 @functools.lru_cache(None)
-def _get_overridable_functions() -> Dict[Any, List[Callable]]:
+def get_overridable_functions() -> Dict[Any, List[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns
@@ -1238,10 +1241,10 @@ def _get_overridable_functions() -> Dict[Any, List[Callable]]:
                 continue
 
             # cannot be overriden by __torch_function__
-            if func in _get_ignored_functions():
+            if func in get_ignored_functions():
                 msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                        "but still has an explicit override")
-                assert func not in _get_testing_overrides(), msg.format(namespace, func.__name__)
+                assert func not in get_testing_overrides(), msg.format(namespace, func.__name__)
                 continue
             overridable_funcs[namespace].append(func)
     return overridable_funcs
@@ -1249,7 +1252,7 @@ def _get_overridable_functions() -> Dict[Any, List[Callable]]:
 @functools.lru_cache(None)
 def _get_tensor_methods() -> Set[Callable]:
     """ Returns a set of the overridable methods on ``torch.Tensor`` """
-    overridable_funcs = _get_overridable_functions()
+    overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
     return methods
 

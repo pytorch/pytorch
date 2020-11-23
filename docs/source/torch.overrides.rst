@@ -10,6 +10,12 @@ protocol. See :ref:`extending-torch` for more detail on the
 Functions
 ~~~~~~~~~
 
+.. autofunction::  get_ignored_functions
+
+.. autofunction::  get_overridable_functions
+
+.. autofunction::  get_testing_overrides
+
 .. autofunction::  handle_torch_function
 
 .. autofunction::  has_torch_function
