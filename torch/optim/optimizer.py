@@ -19,8 +19,6 @@ required = _RequiredParameter()
 class _MetaOptimizer(type):
     def __new__(metacls, name, bases, attrs):
         def wrap_with_profile(attrs, profile_prefix, func_name):
-            if not attrs.__contains__(func_name):
-                return
             func = attrs[func_name]
 
             @functools.wraps(func)
@@ -31,8 +29,10 @@ class _MetaOptimizer(type):
                     return func(*args, **kwargs)
             attrs[func_name] = wrapper
             return
-        wrap_with_profile(attrs, "Optimizer.step", "step")
-        wrap_with_profile(attrs, "Optimizer.zero_grad", "zero_grad")
+        if attrs.__contains__("step"):
+            wrap_with_profile(attrs, "Optimizer.step", "step")
+        if attrs.__contains__("zero_grad"):
+            wrap_with_profile(attrs, "Optimizer.zero_grad", "zero_grad")
         return super().__new__(metacls, name, bases, attrs)
 
 
