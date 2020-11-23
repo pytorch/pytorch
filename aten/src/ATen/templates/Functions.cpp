@@ -7,8 +7,6 @@
 
 namespace at {
 
-using native::tensor;
-
 ${function_definitions}
 
 }
