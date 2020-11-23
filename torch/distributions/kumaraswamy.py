@@ -40,9 +40,9 @@ class Kumaraswamy(TransformedDistribution):
         finfo = torch.finfo(self.concentration0.dtype)
         base_dist = Uniform(torch.full_like(self.concentration0, 0),
                             torch.full_like(self.concentration0, 1))
-        transforms = [AffineTransform(loc=1., scale=-torch.ones_like(self.concentration1)),
+        transforms = [AffineTransform(loc=1., scale=-1.),
                       PowerTransform(exponent=self.concentration0.reciprocal()),
-                      AffineTransform(loc=1., scale=-torch.ones_like(self.concentration0)),
+                      AffineTransform(loc=1., scale=-1.),
                       PowerTransform(exponent=self.concentration1.reciprocal())]
         super(Kumaraswamy, self).__init__(base_dist, transforms, validate_args=validate_args)
 
@@ -63,5 +63,5 @@ class Kumaraswamy(TransformedDistribution):
     def entropy(self):
         t1 = (1 - self.concentration1.reciprocal())
         t0 = (1 - self.concentration0.reciprocal())
-        H1 = torch.digamma(self.concentration0 + 1) + euler_constant
-        return t0 + t1 * H1 - torch.log(self.concentration1) - torch.log(self.concentration0)
+        H0 = torch.digamma(self.concentration0 + 1) + euler_constant
+        return t0 + t1 * H0 - torch.log(self.concentration1) - torch.log(self.concentration0)
