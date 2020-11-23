@@ -378,8 +378,8 @@ Tensor& arctanh_out(Tensor& result, const Tensor& self) { return at::atanh_out(r
 Tensor arctanh(const Tensor& self) { return self.atanh(); }
 Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
-Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
-Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
+Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sqrt_stub); }
+Tensor sqrt(const Tensor& self) { return unary_op_impl_float(self, sqrt_stub); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 
 Tensor square(const Tensor& self) { return at::pow(self, 2); }

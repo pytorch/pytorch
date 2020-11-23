@@ -115,7 +115,8 @@ def split_module(
                     if not hasattr(target_attr, atom):
                         raise RuntimeError(f'Operator target {node.target} not found!')
                     target_attr = getattr(target_attr, atom)
-                target = target_atoms[-1]
+                # target = target_atoms[-1]
+                target = '_'.join(target_atoms)
                 partition.targets[target] = target_attr
 
             assert isinstance(gathered_args, tuple)

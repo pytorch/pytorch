@@ -30,7 +30,7 @@ import threading
 from typing import TYPE_CHECKING, Deque, Generator, List, Optional, Tuple, Union
 
 import torch
-from torch import ByteTensor, Tensor
+from torch import Tensor
 import torch.autograd
 
 from .dependency import fork, join
@@ -45,7 +45,7 @@ TensorOrTensors = Union[Tensor, Tensors]
 
 # Types for shared memory between Checkpoint and Recompute.
 Recomputed = Tuple[TensorOrTensors, Tensors]  # (output, input_leaf)
-RNGStates = Tuple[ByteTensor, Optional[ByteTensor]]  # (cpu_rng_state, gpu_rng_state)
+RNGStates = Tuple[Tensor, Optional[Tensor]]  # (cpu_rng_state, gpu_rng_state)
 
 
 if TYPE_CHECKING:
@@ -207,7 +207,7 @@ def save_rng_states(device: torch.device, rng_states: Deque[RNGStates],) -> None
     """
     cpu_rng_state = torch.get_rng_state()
 
-    gpu_rng_state: Optional[ByteTensor]
+    gpu_rng_state: Optional[Tensor]
     if device.type == "cuda":
         gpu_rng_state = torch.cuda.get_rng_state(device)
     else:
