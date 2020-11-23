@@ -17,7 +17,7 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MetalTensor::Impl {
         _numel(std::accumulate(
             std::begin(_sizes),
             std::end(_sizes),
-            1,
+            (int64_t)1,
             std::multiplies<int64_t>())),
         _textureImpl(std::make_unique<MPSImageWrapper>(sizes)) {}
 

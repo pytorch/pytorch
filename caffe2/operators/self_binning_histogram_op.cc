@@ -35,7 +35,11 @@ OPERATOR_SCHEMA(SelfBinningHistogram)
         "logspace_start",
         "A float that's used as the starting point for logarithmic spacing. "
         "Since logarithmic spacing cannot contain <=0 values this value will "
-        "be used to represent all such values.");
+        "be used to represent all such values.")
+    .Arg(
+        "abs",
+        "Apply abs() on every input value."
+    );
 
 SHOULD_NOT_DO_GRADIENT(SelfBinningHistogram);
 } // namespace caffe2

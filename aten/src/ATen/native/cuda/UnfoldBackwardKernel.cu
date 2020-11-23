@@ -41,11 +41,11 @@ static void _launch_unfold_backward_kernel(int total_n_elems, func_t f) {
   dim3 block(n_threads);
   constexpr int total_work_block = n_threads * n_elems_per_thread;
   dim3 grid((total_n_elems + total_work_block - 1) / total_work_block);
-  
+
   auto stream = at::cuda::getCurrentCUDAStream();
   _unfold_backward_elementwise_kernel<n_threads, n_elems_per_thread, func_t>
     <<<grid, block, 0, stream>>>(total_n_elems, f);
-  AT_CUDA_CHECK(cudaGetLastError());
+  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t>

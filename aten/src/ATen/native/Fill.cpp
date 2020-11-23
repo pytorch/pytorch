@@ -4,20 +4,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Fill.h>
+#include <ATen/Utils.h>
 
 namespace at {
 namespace native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-namespace {
-  template <typename scalar_t>
-  inline void fill_fast(Tensor& self, Scalar value_scalar) {
-    auto value = value_scalar.to<scalar_t>();
-    scalar_t * dptr = static_cast<scalar_t *>(self.data_ptr());
-    *dptr = value;
-  }
-} // namspace
-
 Tensor& fill_out(Tensor& self, Scalar value) {
   if (self.is_quantized()) {
     at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
@@ -26,15 +18,8 @@ Tensor& fill_out(Tensor& self, Scalar value) {
     self.copy_(out);
     return self;
   }
-  // When filling a number to 1-element CPU tensor, we want to skip
-  // everything but manipulate data ptr directly.
-  // Ideally this fast pass should be implemented in TensorIterator,
-  // but we also want to skip compute_types which in not avoidable
-  // in TensorIterator for now.
   if (self.device() == at::kCPU && self.numel() == 1 && !self.is_complex() && !value.isComplex()) {
-     AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
-        fill_fast<scalar_t>(self, value);});
-     return self;
+    return at::detail::scalar_fill(self, value);
   }
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)  // Fill is idempotent, so overlap is okay

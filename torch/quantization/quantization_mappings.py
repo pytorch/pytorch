@@ -14,6 +14,7 @@ from .fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
 )
+from .utils import get_combined_dict
 
 # Default map for swapping float module to quantized ones
 DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
@@ -38,7 +39,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
     nn.LeakyReLU: nnq.LeakyReLU,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
-    nn.ReLU: nnq.ReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
@@ -48,7 +48,9 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS = {
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
+    nniqat.ConvBn1d: nnq.Conv1d,
     nniqat.ConvBn2d: nnq.Conv2d,
+    nniqat.ConvBnReLU1d: nniq.ConvReLU1d,
     nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.LinearReLU: nniq.LinearReLU,
@@ -62,7 +64,9 @@ DEFAULT_QAT_MODULE_MAPPINGS = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Linear: nnqat.Linear,
     # Intrinsic modules:
+    nni.ConvBn1d: nniqat.ConvBn1d,
     nni.ConvBn2d: nniqat.ConvBn2d,
+    nni.ConvBnReLU1d: nniqat.ConvBnReLU1d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
     nni.ConvReLU2d: nniqat.ConvReLU2d,
     nni.LinearReLU: nniqat.LinearReLU
@@ -113,10 +117,7 @@ def get_static_quant_module_class(float_module_class, additional_static_quant_ma
     """
     if additional_static_quant_mapping is None:
         additional_static_quant_mapping = {}
-    all_mappings = DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.copy()
-    for k, v in additional_static_quant_mapping.items():
-        all_mappings[k] = v
-
+    all_mappings = get_combined_dict(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
         "Floating point module class {}".format(str(float_module_class)) + \
@@ -170,14 +171,14 @@ def get_quantized_operator(float_op):
         'Operator {} does not have corresponding quantized op'.format(str(float_op))
     return quantized_op
 
-def get_default_special_act_post_process(module_cls):
+def _get_special_act_post_process(module):
     r""" Get the special activation post process for `module`, this has
     higher priority than the activation post process in `qconfig`
     e.g.
     input: torch.nn.Sigmoid
     output: default_affine_fixed_qparam_fake_quant
     """
-    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(module_cls, None)
+    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(type(module), None)
 
-def has_special_act_post_process(module_cls):
-    return module_cls in DEFAULT_MODULE_TO_ACT_POST_PROCESS
+def _has_special_act_post_process(module):
+    return module.training and type(module) in DEFAULT_MODULE_TO_ACT_POST_PROCESS

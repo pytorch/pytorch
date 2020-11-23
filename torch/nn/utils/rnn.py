@@ -215,7 +215,8 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
 
     Arguments:
         input (Tensor): padded batch of variable length sequences.
-        lengths (Tensor): list of sequences lengths of each batch element.
+        lengths (Tensor or list(int)): list of sequence lengths of each batch
+            element (must be on the CPU if provided as a tensor).
         batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
         enforce_sorted (bool, optional): if ``True``, the input is expected to
