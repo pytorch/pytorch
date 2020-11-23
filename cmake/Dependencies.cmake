@@ -1774,8 +1774,21 @@ if(USE_KINETO)
     set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
     set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
 
+    message(STATUS "In kineto dep setup")
+    message(STATUS "CAFFE2_THIRD_PARTY_ROOT = ${CAFFE2_THIRD_PARTY_ROOT}")
+    message(STATUS "KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
+    message(STATUS "KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+    message(STATUS "KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
+    message(STATUS "CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
+    if(NOT DEFINED CUDA_cupti_LIBRARY)
+      message(STATUC "CUDA_cupti_LIBRARY NOT DEFINED")
+    else()
+      message(STATUC "CUDA_cupti_LIBRARY DEFINED : ${CUDA_cupti_LIBRARY}")
+    endif()
+
     add_subdirectory("${KINETO_SOURCE_DIR}")
     message(STATUS "Configured libkineto as a dependency.")
+
   endif()
 
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
