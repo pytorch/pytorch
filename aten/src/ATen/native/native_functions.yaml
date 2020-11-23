@@ -6779,6 +6779,16 @@
 - func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
 
+- func: msort.values(Tensor self, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    Math: msort_out
+
+- func: msort(Tensor self, bool descending=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    Math: msort
+
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
