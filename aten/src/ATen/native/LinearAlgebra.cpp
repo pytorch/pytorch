@@ -78,10 +78,11 @@ Tensor logdet(const Tensor& self) {
   return logdet_vals;
 }
 
-std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point tensor as input");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
+              "linalg_slogdet(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "of floating types");
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -91,6 +92,27 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   // Since abslogdet_val cannot take nan, no special case handling is required.
   auto abslogdet_val = diag_U.abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
+}
+
+std::tuple<Tensor&, Tensor&> linalg_slogdet_out(Tensor& sign, Tensor& logabsdet, const Tensor& input) {
+  TORCH_CHECK(sign.scalar_type() == input.scalar_type(),
+    "sign dtype ", sign.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(logabsdet.scalar_type() == input.scalar_type(),
+    "logabsdet dtype ", logabsdet.scalar_type(), " does not match input dtype ", input.scalar_type());
+
+  Tensor sign_tmp, logabsdet_tmp;
+  std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
+
+  at::native::resize_output(sign, sign_tmp.sizes());
+  sign.copy_(sign_tmp);
+  at::native::resize_output(logabsdet, logabsdet_tmp.sizes());
+  logabsdet.copy_(logabsdet_tmp);
+
+  return std::tuple<Tensor&, Tensor&>(sign, logabsdet);
+}
+
+std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+  return at::linalg_slogdet(self);
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {

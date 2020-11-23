@@ -88,6 +88,43 @@ linalg.det(input) -> Tensor
 Alias of :func:`torch.det`.
 """)
 
+slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
+linalg.slogdet(input) -> (Tensor, Tensor)
+
+Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
+
+.. note::
+    If ``input`` has zero determinant, this returns ``(0, -inf)``.
+
+.. note::
+    Backward through :math:`slogdet` internally uses SVD results when :attr:`input`
+    is not invertible. In this case, double backward through :math:`slogdet`
+    will be unstable in when :attr:`input` doesn't have distinct singular values.
+    See :math:`~torch.svd` for details.
+
+Arguments:
+    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
+                batch dimensions.
+
+Returns:
+    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
+    value of the absolute determinant.
+
+Example::
+
+    >>> A = torch.randn(3, 3)
+    >>> A
+    tensor([[ 0.0032, -0.2239, -1.1219],
+            [-0.6690,  0.1161,  0.4053],
+            [-1.6218, -0.9273, -0.0082]])
+    >>> torch.linalg.det(A)
+    tensor(-0.7576)
+    >>> torch.linalg.logdet(A)
+    tensor(nan)
+    >>> torch.linalg.slogdet(A)
+    torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
+""")
+
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
 linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
 

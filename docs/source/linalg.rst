@@ -14,6 +14,7 @@ Functions
 
 .. autofunction:: cholesky
 .. autofunction:: det
+.. autofunction:: slogdet
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
 .. autofunction:: norm

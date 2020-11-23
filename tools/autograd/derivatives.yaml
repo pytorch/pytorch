@@ -971,6 +971,10 @@
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
+- name: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+  self: slogdet_backward(grad, self, sign, logabsdet)
+  output_differentiability: [false, true]
+
 - name: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
   self: solve_backward_self(grad, self, A)
   A: solve_backward_A(grad, self, A, solution)
