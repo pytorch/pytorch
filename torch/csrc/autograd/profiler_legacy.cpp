@@ -746,14 +746,20 @@ void RecordProfile::init() {
 }
 
 RecordProfile::~RecordProfile() {
-  thread_event_lists event_lists = disableProfilerLegacy();
-  std::vector<LegacyEvent*> events;
-  for (auto& l : event_lists) {
-    for (auto& e : l) {
-        events.push_back(&e);
+  try {
+    thread_event_lists event_lists = disableProfilerLegacy();
+    std::vector<LegacyEvent*> events;
+    for (auto& l : event_lists) {
+      for (auto& e : l) {
+          events.push_back(&e);
+      }
     }
+    processEvents(events);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << e.what() << std::endl;
+  } catch (...) {
+    LOG(ERROR) << "Unknown error" << std::endl;
   }
-  processEvents(events);
 }
 
 void RecordProfile::processEvents(const std::vector<LegacyEvent*>& events) {

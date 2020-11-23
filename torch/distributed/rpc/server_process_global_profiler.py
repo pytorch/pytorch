@@ -103,7 +103,7 @@ class _server_process_global_profile(profile):
         if not self.enabled:
             return
 
-        if self.entered:
+        if self.entered:  # type: ignore[has-type]
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
 
