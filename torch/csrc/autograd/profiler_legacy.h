@@ -32,35 +32,35 @@ struct Node;
 namespace profiler {
 
 struct TORCH_API CUDAStubs {
-  virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
+  virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const {
     fail();
   }
-  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) {
+  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const {
     fail();
     return 0.f;
   }
-  virtual void nvtxMarkA(const char* name) {
+  virtual void nvtxMarkA(const char* name) const {
     fail();
   }
-  virtual void nvtxRangePushA(const char* name) {
+  virtual void nvtxRangePushA(const char* name) const {
     fail();
   }
-  virtual void nvtxRangePop() {
+  virtual void nvtxRangePop() const {
     fail();
   }
-  virtual bool enabled() {
+  virtual bool enabled() const {
     return false;
   }
-  virtual void onEachDevice(std::function<void(int)> op) {
+  virtual void onEachDevice(std::function<void(int)> op) const {
     fail();
   }
-  virtual void synchronize() {
+  virtual void synchronize() const {
     fail();
   }
   virtual ~CUDAStubs();
 
 private:
-  void fail() {
+  void fail() const {
     AT_ERROR("CUDA used in profiler but not enabled.");
   }
 };
