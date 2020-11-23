@@ -144,7 +144,7 @@ static const char* unary_op_type2string(UnaryOpType t) {
     case UnaryOpType::Rsqrt:
       return "rsqrtf";
     case UnaryOpType::Round:
-      return "roundf";
+      return "nearbyintf";
     case UnaryOpType::Set:
       return "set";
     case UnaryOpType::Sigmoid:
@@ -388,7 +388,7 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
     case at::ScalarType::Long:
       return DataType::Int;
     default:
-      TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
+      return DataType::Null;
   }
 }
 

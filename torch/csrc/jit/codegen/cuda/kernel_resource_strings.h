@@ -171,7 +171,9 @@ __device__ float relu(const float x) {
   return x <= 0.f ? 0.f : x;
 }
 __device__ float remainder(const float a, const float b) {
-  return a - b * floorf(a / b);
+  auto mod = ::fmod(a, b);
+  if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
+  return mod;
 }
 __device__ float sigmoid(const float x) {
   return 1.f / (1.f + expf(-x));

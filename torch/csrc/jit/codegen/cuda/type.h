@@ -146,6 +146,8 @@ ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
 bool is_logical_op(const BinaryOpType& bot);
 
+// If type cannot be found (i.e. codegen does not support provided type) returns
+// DataType::Null
 DataType aten_to_data_type(const at::ScalarType& scalar_type);
 at::ScalarType data_type_to_aten(const DataType& data_type);
 

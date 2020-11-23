@@ -33,7 +33,7 @@ static c10::optional<c10::Device> getDevice(const Node* node) {
   return c10::nullopt;
 }
 
-static bool isFusableDevice(const Node* node, const c10::Device device) {
+static bool isFusibleDevice(const Node* node, const c10::Device device) {
   for (auto value : node->outputs()) {
     auto output_device = getDevice(value);
     if (output_device.has_value() && output_device.value() != device) {
@@ -44,7 +44,7 @@ static bool isFusableDevice(const Node* node, const c10::Device device) {
 }
 
 // TODO: we need to check input type when we handle `to()`
-static bool isFusableDevice(const Node* node) {
+static bool isFusibleDevice(const Node* node) {
   auto device = getDevice(node);
   if (!device.has_value()) {
     return true;
@@ -52,10 +52,31 @@ static bool isFusableDevice(const Node* node) {
   return device->is_cuda();
 }
 
-inline bool isFusableNode(const Node* node) {
-  // checks if node is compatible with parser:
-  // 1. if we have a parsing rule; or 2. if the node is already a fusion group.
-  return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
+bool allCompatableTensorTypes(c10::ArrayRef<const torch::jit::Value*> values) {
+  return std::all_of(
+      values.begin(), values.end(), [](const torch::jit::Value* val) {
+        if (auto tensor_type = val->type()->cast<c10::TensorType>()) {
+          if (tensor_type->scalarType().has_value()) {
+            if (aten_to_data_type(tensor_type->scalarType().value()) ==
+                DataType::Null) {
+              return false;
+            }
+          }
+        }
+        return true;
+      });
+}
+
+inline bool isFusibleNode(const Node* node) {
+  if (node->kind() == prim::CudaFusionGroup)
+    return true;
+  // Check we have a parsing rule
+  bool isFusible = isNodeParsible(node);
+  // Check if we have a tensor type it's one we support
+  isFusible = isFusible && allCompatableTensorTypes(node->inputs());
+  isFusible = isFusible && allCompatableTensorTypes(node->outputs());
+  // Check if already part of a fusion group
+  return isFusible;
 }
 
 bool hasReductionOperation(const Node* node) {
@@ -289,28 +310,28 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
 
 } // namespace
 
-bool isFusableCudaFusionGroup(const Node* node) {
-  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
+bool isFusibleCudaFusionGroup(const Node* node) {
+  FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
 
-  if (isFusableNode(node)) {
-    return isFusableDevice(node);
+  if (isFusibleNode(node)) {
+    return isFusibleDevice(node);
   }
   return false;
 }
 
-bool isFusableCudaFusionGroup(const Node* fusion, const Node* node) {
-  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
+bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
+  FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
 
   // TODO: lift the restriction of not fusing producer containing reduction when
   //       we have proper scheduling.
-  if (isFusableCudaFusionGroup(node) && !hasReductionOperation(node) &&
+  if (isFusibleCudaFusionGroup(node) && !hasReductionOperation(node) &&
       !createTrickyBroadcast(fusion, node)) {
     // ensure if the node has a designated device, it's on the same device with
     // fusion.
     // TODO: is there a danger of us fusing operations that's supposed to be on
     //       separate GPUs? And is that necessarily bad?
     auto device = getDevice(fusion);
-    return (!device.has_value() || isFusableDevice(node, device.value()));
+    return (!device.has_value() || isFusibleDevice(node, device.value()));
   }
   return false;
 }

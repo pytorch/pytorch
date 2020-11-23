@@ -64,7 +64,6 @@ class IrParser {
     }
   }
 
-  // Fuses pointwise ops with loop unrolling (factor = 4).
   std::unique_ptr<Fusion> parse() {
     auto fusion = std::make_unique<Fusion>();
     FusionGuard fg(fusion.get());
@@ -74,7 +73,10 @@ class IrParser {
     for (auto val : block->inputs()) {
       TORCH_INTERNAL_ASSERT(
           registerValue(val),
-          "Error trying to register value with code generation.");
+          "Failure when register value: ",
+          *(val->node()),
+          " with type: ",
+          val->type());
       fusion->addInput(value_map_[val->unique()]);
 
       auto opt_dtype = value_map_[val->unique()]->getDataType();
@@ -827,7 +829,17 @@ class IrParser {
 
   bool registerTensor(const JitValue* val) {
     CgValue cg_val;
-    if (auto tensor_type = val->type()->cast<TensorType>()) {
+    // Don't register if we don't support the type
+    if (auto tensor_type = val->type()->cast<c10::TensorType>()) {
+      if (!tensor_type->scalarType().has_value()) {
+        return false;
+      }
+
+      if (aten_to_data_type(tensor_type->scalarType().value()) ==
+          DataType::Null) {
+        return false;
+      }
+
       // TODO: make this a static function in Tensor class;
       // create tensor;
       cg_val = new TensorView(tensor_type);
