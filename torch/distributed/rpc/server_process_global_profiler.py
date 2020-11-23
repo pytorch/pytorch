@@ -151,8 +151,8 @@ class _server_process_global_profile(profile):
             )
             thread_local_function_events.sort(
                 key=lambda function_event: [
-                    function_event.cpu_interval.start,
-                    -(function_event.cpu_interval.end),
+                    function_event.time_range.start,
+                    -(function_event.time_range.end),
                 ]
             )
             process_global_function_events.append(thread_local_function_events)
@@ -165,6 +165,7 @@ class _server_process_global_profile(profile):
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory,
         )
+        self.function_events._build_tree()
 
         self.process_global_function_events = process_global_function_events
 

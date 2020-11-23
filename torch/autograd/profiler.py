@@ -425,7 +425,8 @@ class profile(object):
             ), """Requested Kineto profiling but Kineto is not available,
                   make sure PyTorch is built with USE_KINETO=1"""
 
-        self.config = torch.autograd.ProfilerConfig(
+    def config(self):
+        return torch.autograd.ProfilerConfig(
             self.profiler_kind,
             self.record_shapes,
             self.profile_memory,
@@ -438,20 +439,20 @@ class profile(object):
             raise RuntimeError("profiler context manager is not reentrant")
         self.entered = True
         if self.kineto_activities:
-            torch.autograd._prepare_profiler(self.config, self.kineto_activities)
-            torch.autograd._enable_profiler(self.config, self.kineto_activities)
+            torch.autograd._prepare_profiler(self.config(), self.kineto_activities)
+            torch.autograd._enable_profiler(self.config(), self.kineto_activities)
         else:
-            torch.autograd._enable_profiler_legacy(self.config)
+            torch.autograd._enable_profiler_legacy(self.config())
         return self
 
     def _prepare_kineto_trace(self):
         assert self.kineto_activities
         self.entered = True
-        torch.autograd._prepare_profiler(self.config, self.kineto_activities)
+        torch.autograd._prepare_profiler(self.config(), self.kineto_activities)
 
     def _start_kineto_trace(self):
         assert self.kineto_activities
-        torch.autograd._enable_profiler(self.config, self.kineto_activities)
+        torch.autograd._enable_profiler(self.config(), self.kineto_activities)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
