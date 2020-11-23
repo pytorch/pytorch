@@ -72,7 +72,7 @@ inline Tensor inv(const Tensor& input) {
   return torch::linalg_inv(input);
 }
 
-inline Tensor inv_out(Tensor& result, const Tensor& input) {
+inline Tensor& inv_out(Tensor& result, const Tensor& input) {
   return torch::linalg_inv_out(result, input);
 }
 
@@ -184,7 +184,7 @@ inline Tensor inv(const Tensor& input) {
   return detail::inv(input);
 }
 
-inline Tensor inv_out(Tensor& result, const Tensor& input) {
+inline Tensor& inv_out(Tensor& result, const Tensor& input) {
   return detail::inv_out(result, input);
 }
 
