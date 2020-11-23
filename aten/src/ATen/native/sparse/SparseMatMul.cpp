@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/Resize.h>
 
 namespace at { namespace native {
 
@@ -43,7 +44,7 @@ int64_t _csr_matmult_maxnnz(
     const int64_t Bp[],
     const int64_t Bj[]) {
   /*
-    Compute needed buffer size for matrix `C` in `C = A*B` operation.
+    Compute needed buffer size for matrix `C` in `C = A@B` operation.
 
     The matrices should be in proper CSR structure, and their dimensions
     should be compatible.
@@ -83,7 +84,7 @@ void _csr_matmult(
     int64_t Cj[],
     scalar_t Cx[]) {
   /* 
-    Compute CSR entries for matrix C = A*B.
+    Compute CSR entries for matrix C = A@B.
 
     The matrices `A` and 'B' should be in proper CSR structure, and their dimensions
     should be compatible.
@@ -188,10 +189,9 @@ void sparse_matmul_kernel(
   auto output_values = output._values();
 
   Tensor output_indptr = at::empty({M + 1}, kLong);
-
-  output_indices.resize_({2, nnz});
-  output_values.resize_(nnz);
-
+  at::native::resize_output(output_indices, {2, nnz});
+  at::native::resize_output(output_values, nnz);
+  
   LongTensor output_row_indices = output_indices.select(0, 0);
   LongTensor output_col_indices = output_indices.select(0, 1);
 
@@ -233,6 +233,8 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
   TORCH_CHECK(mat1_.dim() == 2);
   TORCH_CHECK(mat2_.dim() == 2);
+  TORCH_CHECK(mat1_.dense_dim() == 0, "sparse_sparse_matmul_cpu: scalar values expected, got ", mat1_.dense_dim(), "D values");
+  TORCH_CHECK(mat2_.dense_dim() == 0, "sparse_sparse_matmul_cpu: scalar values expected, got ", mat2_.dense_dim(), "D values");
 
   TORCH_CHECK(
       mat1_.size(1) == mat2_.size(0), "mat1 and mat2 shapes cannot be multiplied (",
@@ -242,7 +244,7 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
            "mat1 dtype ", mat1_.scalar_type(), " does not match mat2 dtype ", mat2_.scalar_type());
 
   auto output = at::native::empty_like(mat1_);
-  output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), mat1_.dense_dim());
+  output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
   AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
     sparse_matmul_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());

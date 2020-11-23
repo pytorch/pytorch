@@ -6,7 +6,6 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <cuda_runtime.h>
-#include <cusparse_v2.h>
 #include <type_traits>
 
 #include <thrust/device_ptr.h>
@@ -18,7 +17,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
-
+#include <cusparse.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
 
@@ -72,28 +71,9 @@ void create_general_description_(cusparseMatDescr_t& description_) {
   TORCH_CUDASPARSE_CHECK(cusparseSetMatIndexBase(description_, CUSPARSE_INDEX_BASE_ZERO));
 }
 
-struct csrOutput {
-  IntTensor csr_indices_{};
-  IntTensor csr_pointers_{};
-  at::Tensor csr_values_{};
-  int nnz_{0};
-  std::vector<int> size_;
-
-  cusparseMatDescr_t description_{0};
-
-  csrOutput(const std::vector<int> &size) : size_{size} {
-    create_general_description_(description_);
-  }
-
-  ~csrOutput() {
-    cusparseDestroyMatDescr(description_);
-  }
-
-  int size(int index) const {
-    return size_.at(index);
-  }
-};
-
+// csrMatrixRef is used to have a representation of a raw CSR matrix representation 
+// comming from `sparse_sparse_matmul_cuda_kernel` function. 
+// Moreover this implements a RAII guard for a cusparse descriptor
 template<class scalar_t> 
 struct csrMatrixRef {
   int* csr_indices_{nullptr};
@@ -127,9 +107,9 @@ struct csrMatrixRef {
         size_{size} {
     #if IS_CUSPARSE11_AVAILABLE()
       cudaDataType cuda_data_type;
-      if constexpr ( std::is_same<float, scalar_t>::value ) {
+      if ( std::is_same<float, scalar_t>::value ) {
         cuda_data_type = CUDA_R_32F;
-      } else if constexpr ( std::is_same<double, scalar_t>::value) {
+      } else if ( std::is_same<double, scalar_t>::value) {
         cuda_data_type = CUDA_R_64F;
       } else {
         TORCH_CHECK(false, "Tensor types must be either float32 or float64");
@@ -164,8 +144,36 @@ struct csrMatrixRef {
   } 
 };
 
+// csrOutput is used to represent the output for `CusparseMatrixMultiplyOp`  
+// Note that `csrOutput` is different from `csrMatrixRef` and the purpose 
+// of this was to have a materialized  version of a CSR matrix.
+// Moreover this implements a RAII guard for a cusparse descriptor  
+struct csrOutput {
+  IntTensor csr_indices_{};
+  IntTensor csr_pointers_{};
+  at::Tensor csr_values_{};
+  int nnz_{0};
+  std::vector<int> size_;
+
+  cusparseMatDescr_t description_{0};
+
+  csrOutput(const std::vector<int> &size) : size_{size} {
+    create_general_description_(description_);
+  }
+
+  ~csrOutput() {
+    cusparseDestroyMatDescr(description_);
+  }
+
+  int size(int index) const {
+    return size_.at(index);
+  }
+};
+
 #if IS_CUSPARSE11_AVAILABLE()
 
+// RAII guard helps to support cuSparse 11 API for `A @ B` operation
+// This generic template exists because with cuSparse the `scalar_t` type could be a double or float  
 template <class scalar_t>
 struct CusparseMatrixMultiplyOp { 
   
@@ -354,12 +362,13 @@ template struct CusparseMatrixMultiplyOp<float>;
 
 template struct CusparseMatrixMultiplyOp<double>;
 
-#else
-
+#else // if not IS_CUSPARSE11_AVAILABLE()
 
 using DcsrMatrixRef = csrMatrixRef<double>;
 using ScsrMatrixRef = csrMatrixRef<float>; 
 
+// RAII guard helps to support cuSparse 10 API for `A @ B` operation
+// This generic template exists because with cuSparse the `scalar_t` type could be a double or float  
 template <class scalar_t>
 struct CusparseMatrixMultiplyOp { 
   csrOutput operator()(
@@ -372,6 +381,7 @@ struct CusparseMatrixMultiplyOp {
   }
 };
 
+// Specializacion for `A @ B` operation for double values with cuSparse
 template<> struct CusparseMatrixMultiplyOp<double> {
   cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
@@ -506,6 +516,8 @@ template<> struct CusparseMatrixMultiplyOp<double> {
     return out;
   }
 };
+
+// Specializacion for `A @ B` operation for float values with cuSparse
 template<> struct CusparseMatrixMultiplyOp<float> {
   cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
@@ -636,7 +648,7 @@ template<> struct CusparseMatrixMultiplyOp<float> {
 
 
  
-#endif
+#endif // IS_CUSPARSE11_AVAILABLE()
 
 template <typename scalar_t>
 void sparse_sparse_matmul_cuda_kernel(
@@ -716,7 +728,8 @@ void sparse_sparse_matmul_cuda_kernel(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
-
+  
+  // Filling the COO row indices 
   thrust::for_each(
       policy,
       thrust::make_counting_iterator(int64_t(0)),
@@ -733,6 +746,7 @@ void sparse_sparse_matmul_cuda_kernel(
         }
       });
 
+  // Filling the COO column indices 
   thrust::for_each(
     policy,
     thrust::make_counting_iterator(int64_t(0)),
@@ -783,6 +797,8 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
   TORCH_CHECK(mat1_.dim() == 2);
   TORCH_CHECK(mat2_.dim() == 2);
+  TORCH_CHECK(mat1_.dense_dim() == 0, "sparse_mm: scalar values expected, mat1 got ", mat1_.dense_dim(), "D values");
+  TORCH_CHECK(mat2_.dense_dim() == 0, "sparse_mm: scalar values expected, mat2 got ", mat2_.dense_dim(), "D values");
 
   TORCH_CHECK(
       mat1_.size(1) == mat2_.size(0), "mat1 and mat2 shapes cannot be multiplied (",
@@ -792,7 +808,7 @@ Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
            "mat1 dtype ", mat1_.scalar_type(), " does not match mat2 dtype ", mat2_.scalar_type());
 
   auto output = at::native::empty_like(mat1_);
-  output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), mat1_.dense_dim());
+  output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
   AT_DISPATCH_FLOATING_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
     sparse_sparse_matmul_cuda_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());

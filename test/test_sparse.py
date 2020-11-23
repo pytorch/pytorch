@@ -11,17 +11,15 @@ import random
 from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
 
-try:
+if TEST_SCIPY:
     import scipy.sparse
-    scipy_available = True
-except ImportError:
-    scipy_available = False
+
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -3081,7 +3079,7 @@ class TestSparse(TestCase):
                     values.append(d[i, j])
                 return torch.sparse_coo_tensor(torch.tensor([i3, j3]), torch.tensor(values), (n, m))
 
-        def test_grad_with_custom_sparsity_pattern(sparse_dims, nnz, shape_a, shape_b):
+        def grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b):
             def test_grad_dense(a, b, g):
                 a = a.to_dense().detach()
                 b = b.to_dense().detach()
@@ -3114,7 +3112,7 @@ class TestSparse(TestCase):
             b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
 
             # python implementation
-            r1 = sparse_mm(a, b, 'scipy' if scipy_available else 'direct')
+            r1 = sparse_mm(a, b, 'scipy' if TEST_SCIPY else 'direct')
 
             self.assertEqual(r1.to_dense(), torch.mm(a.to_dense(), b.to_dense()))
 
@@ -3129,7 +3127,7 @@ class TestSparse(TestCase):
             def fn(D1, D2):
                 return torch.sparse.mm(D1, D2).to_dense()
             gradcheck(fn, (a, b), check_sparse_nnz=True)
-            test_grad_with_custom_sparsity_pattern(sparse_dims, nnz, shape_a, shape_b)
+            grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
             def fn(sparse_dims, nnz, shape_a, shape_b):
@@ -3150,13 +3148,17 @@ class TestSparse(TestCase):
                 r2 = torch.sparse.mm(a.to(torch.float64), a.to(torch.float32))
 
             self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
-
+            
         for n in range(2, 5):
             for m in range(2, 8):
                 for p in range(2, 8):
                     test_sparse_matmul(2, 10, [n, m], [m, p])
+
+        test_sparse_matmul(2, 0, [0, 0], [0, 0])
+        test_sparse_matmul(2, 0, [0, 10], [10, 0])
+
         test_error_cases()
-        
+
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
         super(TestUncoalescedSparse, self).setUp()
