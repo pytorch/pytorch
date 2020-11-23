@@ -169,15 +169,15 @@ def gen_autograd(aten_path, native_functions_path, out, autograd_dir, operator_s
 
     # Parse and load derivatives.yaml
     from .load_derivatives import load_derivatives
-    autograd_functions = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), full_aten_decls)
+    differentiability_infos = load_derivatives(
+        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate VariableType.h/cpp
     if not disable_autograd:
         from .gen_variable_type import gen_variable_type
-        gen_variable_type(out, aten_decls, template_path)
+        gen_variable_type(out, aten_decls, differentiability_infos, template_path)
 
         from . import gen_trace_type
         # operator filter not applied as tracing sources are excluded in selective build
@@ -186,30 +186,24 @@ def gen_autograd(aten_path, native_functions_path, out, autograd_dir, operator_s
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
     gen_autograd_functions_lib(
-        out, autograd_functions, template_path)
+        out, differentiability_infos, template_path)
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    # Some non-selectable ops (e.g. prim ops) need factory methods so we pass in `full_aten_decls` here.
     gen_variable_factories(out, native_functions_path, template_path)
 
 
 def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
-    # TODO Deduplicate these four variable assignments
-
-    aten_decls = load_aten_declarations(aten_path)
-
-    # Parse and load derivatives.yaml
     from .load_derivatives import load_derivatives
-    autograd_functions = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), aten_decls)
+    differentiability_infos = load_derivatives(
+        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_python
     gen_autograd_functions_python(
-        out, autograd_functions, template_path)
+        out, differentiability_infos, template_path)
 
     # Generate Python bindings
     from . import gen_python_functions

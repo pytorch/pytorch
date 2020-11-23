@@ -1,5 +1,5 @@
 import torch
-from torch.fx import (
+from torch.fx import (  # type: ignore
     GraphModule,
     Proxy,
     map_arg
@@ -35,6 +35,7 @@ from .pattern_utils import (
     get_default_quant_patterns,
     get_default_output_activation_post_process_map,
     input_output_observed,
+    Pattern,
 )
 
 from .observed_module import (
@@ -56,7 +57,11 @@ from collections import OrderedDict
 import warnings
 import re
 
-from typing import Optional
+from typing import Optional, Dict, Any, List, Union
+
+# Define helper types
+
+QConfigAny = Union[torch.quantization.QConfig, torch.quantization.QConfigDynamic]
 
 # ------------------------
 # Helper Functions
@@ -119,7 +124,7 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     # since we traced back from node to getattrr
     producer_nodes.reverse()
     graph = Graph()
-    env = {}
+    env: Dict[Any, Any] = {}
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node])
@@ -212,10 +217,10 @@ class Quantizer:
     def __init__(self):
         # mapping from matched node to activation_post_process
         # must be filled before convert
-        self.activation_post_process_map = None
+        self.activation_post_process_map: Optional[Dict[str, torch.quantization.observer.ObserverBase]] = None
         # mapping from node name to qconfig that should be used for that node
         # filled out for a model during _generate_qconfig_map
-        self.qconfig_map = None
+        self.qconfig_map: Optional[Dict[str, QConfigAny]] = None
         # mapping from fully qualified module name to module instance
         # for example,
         # {
@@ -223,7 +228,7 @@ class Quantizer:
         #   'linear': Linear(...),
         #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
         # }
-        self.modules = None
+        self.modules: Optional[Dict[str, torch.nn.Module]] = None
         # mapping from a tuple of nodes in reverse order to uninitialized
         #   QuantizeHandler subclass. For example,
         # {
@@ -234,7 +239,7 @@ class Quantizer:
         #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
         #     <class 'torch.quantization.fx.quantize.Add'>),
         # }
-        self.patterns = None
+        self.patterns: Optional[Dict[Pattern, torch.quantization.fx.quantization_patterns.QuantizeHandler]] = None
 
 
     def _qat_swap_modules(self, root, additional_qat_module_mapping):
@@ -278,6 +283,7 @@ class Quantizer:
         # fallback to module_name_regex_qconfig, module_type_qconfig, global_qconfig
         # if necessary
         def get_qconfig(module_name):
+            assert self.modules is not None
             module_type_qconfig = \
                 get_module_type_qconfig(type(self.modules[module_name]))
             module_name_regex_qconfig = \
@@ -311,6 +317,7 @@ class Quantizer:
                 # regex is not supported eager mode propagate_qconfig_, we'll need to
                 # set the qconfig explicitly here in case regex
                 # is used
+                assert self.modules is not None
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
 
@@ -360,7 +367,7 @@ class Quantizer:
         quants = self._find_quants(model.graph, matches)
 
         self.activation_post_process_map = dict()
-        env = {}
+        env: Dict[Any, Any] = {}
         observed_graph = Graph()
         observed_node_names_set = set()
 
@@ -393,6 +400,7 @@ class Quantizer:
             observer_name = get_new_observer_name(model)
             setattr(model, observer_name, observer)
             # put observer instance activation_post_process map
+            assert self.activation_post_process_map is not None
             self.activation_post_process_map[node.name] = observer
             # insert observer call
             env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
@@ -404,6 +412,7 @@ class Quantizer:
               to be observed by parent module
             """
             standalone_module_input_idxs = None
+            assert self.modules is not None
             if isinstance(quantize_handler, CustomModuleQuantizeHandler):
                 custom_module = self.modules[node.target]
                 custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
@@ -416,7 +425,7 @@ class Quantizer:
             elif isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
                 # observe standalone module
                 standalone_module = self.modules[node.target]
-                prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
+                prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore
                 observed_standalone_module = prepare(standalone_module, {"": qconfig})
                 observed_standalone_module.qconfig = qconfig
                 standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
@@ -436,6 +445,7 @@ class Quantizer:
             """
             # don't need to insert observer for output if activation does not
             # need to be statically quantized
+            assert self.modules is not None
             if activation_is_statically_quantized(qconfig):
                 if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) and model.training:
                     # we only insert fake quantize module in qat
@@ -609,8 +619,8 @@ class Quantizer:
         quants = self._find_quants(model.graph, matches)
 
         self.quantized_graph = Graph()
-        env = {}
-        quant_env = {}
+        env: Dict[Any, Any] = {}
+        quant_env: Dict[Any, Any] = {}
 
         graph_inputs = []
         for node in model.graph.nodes:
@@ -692,10 +702,11 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
-        def is_output_quantized(node):
+        def is_output_quantized(node) -> bool:
             """ Check if output node is quantized or not """
+            assert self.modules is not None
             if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
-                quantized = self.modules[node.target]._output_is_observed
+                quantized = bool(self.modules[node.target]._output_is_observed)
             else:
                 quantized = True
 
@@ -719,6 +730,7 @@ class Quantizer:
 
         def insert_quantize_node(node):
             """ Given a activation_post_process module call node, insert a quantize node"""
+            assert self.modules is not None
             observer_module = self.modules[node.target]
             prev_node = node.args[0]
             if observer_module.dtype == torch.float16:
@@ -781,7 +793,7 @@ class Quantizer:
         act_post_process_removed_graph = Graph()
         env = {}
 
-        def load_arg(a):
+        def load_arg(a):  # type: ignore
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'output':
@@ -821,7 +833,7 @@ class Quantizer:
 
         # remove folded nodes and replace the prepacking node with getattr
         folded_graph = Graph()
-        env = {}
+        env: Dict[Any, Any] = {}
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
@@ -887,7 +899,7 @@ class Quantizer:
         if standalone_module_names is None:
             standalone_module_names = []
 
-        match_map = {}
+        match_map: Dict[Any, Any] = {}
         all_matched = set()
 
         def record_match(pattern, node, matched):
@@ -900,11 +912,12 @@ class Quantizer:
             else:
                 matched.append(node)
 
+        assert self.qconfig_map is not None
         for node in reversed(graph.nodes):
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
-                        matched = []
+                        matched: List[Any] = []
                         record_match(pattern, node, matched)
                         for n in matched:
                             match_map[n.name] = (node, matched, pattern, value(self, node), self.qconfig_map[n.name])
@@ -913,6 +926,7 @@ class Quantizer:
                         break
 
         # add custom module instances to the match result
+        assert self.modules is not None
         for node in graph.nodes:
             if node.op == 'call_module' and \
                type(self.modules[node.target]) in custom_module_classes:
@@ -921,6 +935,7 @@ class Quantizer:
                     node, [node], None, CustomModuleQuantizeHandler(self, node), custom_module_qconfig)
 
         def is_standalone_module(node_target):
+            assert self.modules is not None
             return node_target in standalone_module_names or \
                 type(self.modules[node_target]) in standalone_module_classes
 
@@ -949,14 +964,14 @@ class Quantizer:
          node_name -> (QuantizeHandler instance (always DefaultQuantizeHandler),
          activation_post_process (observer/fake_quantize module) constructor)
         """
-        quants = {}
+        quants: Dict[Any, Any] = {}
 
         def visit(node, matched_pattern, qconfig):
             def visit_arg(arg):
                 is_weight = False
                 if isinstance(node, Node) and node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
                     for i, node_arg in enumerate(node.args):
-                        if arg is node_arg and i in WEIGHT_INDEX_DICT[node.target]:
+                        if arg is node_arg and i in WEIGHT_INDEX_DICT[node.target]:  # type: ignore
                             is_weight = True
                 if qconfig is not None and \
                    (activation_is_statically_quantized(qconfig) or is_weight):
