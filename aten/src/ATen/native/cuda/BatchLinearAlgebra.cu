@@ -1889,6 +1889,8 @@ static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor& self, int64_t n, 
 
 std::tuple<Tensor&, Tensor&> eig_cuda_out(Tensor& e, Tensor& v, const Tensor& self, bool eigenvectors) {
   TORCH_CHECK(self.dim() == 2, "Expected a two-dimensional input but got ", self.dim(), " dimensions");
+  TORCH_CHECK(e.dtype() == self.dtype(), "Expected 'e' to have dtype ", self.dtype(), " but got ", e.dtype());
+  TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
