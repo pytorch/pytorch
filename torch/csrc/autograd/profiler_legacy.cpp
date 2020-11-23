@@ -143,11 +143,11 @@ std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
 //
 
 namespace {
-CUDAStubs default_stubs;
-constexpr CUDAStubs* default_stubs_addr = &default_stubs;
+const CUDAStubs default_stubs;
+constexpr const CUDAStubs* default_stubs_addr = &default_stubs;
 // Constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerCUDAMethods
-static CUDAStubs* cuda_stubs = default_stubs_addr;
+static const CUDAStubs* cuda_stubs = default_stubs_addr;
 }
 
 // Profiler state
