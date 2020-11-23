@@ -17,5 +17,6 @@ Functions
 .. autofunction:: eigh
 .. autofunction:: eigvalsh
 .. autofunction:: norm
+.. autofunction:: pinv
 .. autofunction:: tensorinv
 .. autofunction:: tensorsolve

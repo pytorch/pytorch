@@ -93,22 +93,57 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
-Tensor pinverse(const Tensor& self, double rcond) {
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
-              "pinverse(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
+Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
+  TORCH_CHECK((at::isFloatingType(input.scalar_type()) || at::isComplexType(input.scalar_type())) && input.dim() >= 2,
+              "linalg_pinv(", input.scalar_type(), "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of floating types");
-  if (self.numel() == 0) {
+  if (input.numel() == 0) {
     // Match NumPy
-    auto self_sizes = self.sizes().vec();
-    std::swap(self_sizes[self.dim() - 1], self_sizes[self.dim() - 2]);
-    return at::empty(self_sizes, self.options());
+    auto input_sizes = input.sizes().vec();
+    std::swap(input_sizes[input.dim() - 1], input_sizes[input.dim() - 2]);
+    return at::empty(input_sizes, input.options());
   }
-  Tensor U, S, V;
-  std::tie(U, S, V) = self.svd();
-  Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
-  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options())).to(self.dtype());
-  // computes V.conj() @ diag(S_pseudoinv) @ U.T.conj()
-  return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
+
+  // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
+  if (!hermitian) {
+    // until https://github.com/pytorch/pytorch/issues/45821 is resolved
+    // svd() returns conjugated V for complex-valued input
+    Tensor U, S, V_conj;
+    // TODO: replace input.svd with linalg_svd
+    std::tie(U, S, V_conj) = input.svd();
+    Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
+    Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    // computes V @ diag(S_pseudoinv) @ U.T.conj()
+    // TODO: replace V_conj.conj() -> V once https://github.com/pytorch/pytorch/issues/45821 is resolved
+    return at::matmul(V_conj.conj() * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+  } else {
+    Tensor S, U;
+    // TODO: replace self.symeig with linalg_eigh
+    std::tie(S, U) = input.symeig(/*eigenvectors=*/true);
+    // For Hermitian matrices, singular values equal to abs(eigenvalues)
+    Tensor S_abs = S.abs();
+    // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
+    Tensor max_val = std::get<0>(S_abs.max(/*dim=*/-1));
+    Tensor S_pseudoinv = at::where(S_abs > (rcond * max_val).unsqueeze_(-1), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    // computes U @ diag(S_pseudoinv) @ U.conj().T
+    return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+  }
+
+}
+
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
+
+  Tensor result_tmp = at::linalg_pinv(input, rcond, hermitian);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
+Tensor pinverse(const Tensor& self, double rcond) {
+  return at::linalg_pinv(self, rcond, /*hermitian=*/false);
 }
 
 static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {

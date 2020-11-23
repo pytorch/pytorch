@@ -1638,6 +1638,150 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_pinv(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix, \
+                                                         random_fullrank_matrix_distinct_singular_value as fullrank
+
+        def run_test_main(A, hermitian):
+            # Testing against definition for pseudo-inverses
+            A_pinv = torch.linalg.pinv(A, hermitian=hermitian)
+            if A.numel() > 0:
+                self.assertEqual(A, A @ A_pinv @ A)
+                self.assertEqual(A_pinv, A_pinv @ A @ A_pinv)
+                self.assertEqual(A @ A_pinv, (A @ A_pinv).conj().transpose(-2, -1))
+                self.assertEqual(A_pinv @ A, (A_pinv @ A).conj().transpose(-2, -1))
+            else:
+                self.assertEqual(A.shape, A_pinv.shape[:-2] + (A_pinv.shape[-1], A_pinv.shape[-2]))
+
+            # Check out= variant
+            out = torch.empty_like(A_pinv)
+            ans = torch.linalg.pinv(A, hermitian=hermitian, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, A_pinv)
+
+        def run_test_numpy(A, hermitian):
+            # Check against NumPy output
+            rcond = float(torch.rand(1))
+            actual = torch.linalg.pinv(A, rcond=rcond, hermitian=hermitian)
+            expected = np.linalg.pinv(A.cpu().numpy(), rcond=rcond, hermitian=hermitian)
+            self.assertEqual(actual, expected)
+
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
+                      (3, 2), (5, 3, 2), (7, 5, 3, 2),  # fat matrices
+                      (2, 3), (5, 2, 3), (7, 5, 2, 3),  # thin matrices
+                      (0, 0), (0, 2), (2, 0), (3, 0, 0), (0, 3, 0), (0, 0, 3)]:  # zero numel matrices
+            A = torch.randn(*sizes, dtype=dtype, device=device)
+            hermitian = False
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
+
+        # Check hermitian = True
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
+                      (0, 0), (3, 0, 0), ]:  # zero numel square matrices
+            A = random_hermitian_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
+            hermitian = True
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
+
+    # TODO(@ivanyashchuk): implement rcond to be matrix-wise tolerance (tensor of floats for each matrix)
+    @unittest.expectedFailure
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_pinv_rcond_xfailing(self, device, dtype):
+            # for input shape (3, 2, 2) it should be possible to specify rcond for each matrix in the batch
+            A = torch.randn(3, 2, 2, dtype=dtype, device=device)
+            rcond = torch.rand(3, dtype=torch.float64, device=device)
+            expected = np.linalg.pinv(A.cpu().numpy(), rcond=rcond.cpu().numpy())
+            actual = torch.linalg.pinv(A, rcond=rcond)
+            self.assertEqual(actual, expected)
+
+    # TODO: implement tests using OpInfo
+    # This test is here insead of method_tests of common_methods_invocations.py because
+    # adding 'linalg.' functions there breaks some Facebook internal tests
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64)
+    def test_pinv_autograd(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        n = 5
+        for batches in ([], [2], [2, 3]):
+            # using .to(device) instead of device=device because @xwang233 claims it's faster
+            a = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
+            a.requires_grad_()
+
+            def func(a, hermitian):
+                if hermitian == True:
+                    a = a + a.conj().transpose(-2, -1)
+                return torch.linalg.pinv(a, hermitian=hermitian)
+
+            for hermitian in [False, True]:
+                gradcheck(func, [a, hermitian])
+                gradgradcheck(func, [a, hermitian])
+
+    # TODO: RuntimeError: svd does not support automatic differentiation for outputs with complex dtype.
+    # See https://github.com/pytorch/pytorch/pull/47761
+    @unittest.expectedFailure
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex128)
+    def test_pinv_autograd_complex_xfailed(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        n = 5
+        batches = (2, 3)
+        # using .to(device) instead of device=device because @xwang233 claims it's faster
+        a = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
+        a.requires_grad_()
+
+        def func(a, hermitian):
+            if hermitian == True:
+                a = a + a.conj().transpose(-2, -1)
+            return torch.linalg.pinv(a, hermitian=hermitian)
+
+        for hermitian in [False, True]:
+            gradcheck(func, [a, hermitian])
+            gradgradcheck(func, [a, hermitian])
+
+    @precisionOverride({torch.float32: 5e-3, torch.complex64: 5e-3})
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_pinverse(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+
+        def run_test(M):
+            # Testing against definition for pseudo-inverses
+            MPI = torch.pinverse(M)
+            MPI_ = MPI.cpu().numpy()
+            M_ = M.cpu().numpy()
+            if M.numel() > 0:
+                self.assertEqual(M_, np.matmul(np.matmul(M_, MPI_), M_))
+                self.assertEqual(MPI_, np.matmul(np.matmul(MPI_, M_), MPI_))
+                self.assertEqual(np.matmul(M_, MPI_), np.matmul(M_, MPI_).swapaxes(-2, -1).conj())
+                self.assertEqual(np.matmul(MPI_, M_), np.matmul(MPI_, M_).swapaxes(-2, -1).conj())
+            else:
+                self.assertEqual(M.shape, MPI.shape[:-2] + (MPI.shape[-1], MPI.shape[-2]))
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
+                      (3, 2), (5, 3, 2), (7, 5, 3, 2),  # fat matrices
+                      (2, 3), (5, 2, 3), (7, 5, 2, 3),  # thin matrices
+                      (0, 0), (0, 2), (2, 0), (3, 0, 0), (0, 3, 0), (0, 0, 3)]:  # zero numel matrices
+            M = torch.randn(*sizes, dtype=dtype, device=device)
+            run_test(M)
+
+        # Test inverse and pseudo-inverse for invertible matrix
+        for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5)]:
+            matsize = sizes[-1]
+            batchdims = sizes[:-2]
+            M = fullrank(matsize, *batchdims, dtype=dtype, device=device)
+            self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
+                             atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
+
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 

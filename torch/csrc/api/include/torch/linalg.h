@@ -52,6 +52,14 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
+inline Tensor pinv(const Tensor& input, double rcond, bool hermitian) {
+  return torch::linalg_pinv(input, rcond, hermitian);
+}
+
+inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
+  return torch::linalg_pinv_out(result, input, rcond, hermitian);
+}
+
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv(self, ind);
 }
@@ -131,6 +139,17 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scal
 
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// Computes pseudo-inverse
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
+inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false) {
+  return detail::pinv(input, rcond, hermitian);
+}
+
+inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond=1e-15, bool hermitian=false) {
+  return detail::pinv_out(result, input, rcond, hermitian);
 }
 
 /// Computes the inverse of a tensor

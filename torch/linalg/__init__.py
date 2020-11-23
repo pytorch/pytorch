@@ -339,6 +339,77 @@ Using the :attr:`dim` argument to compute matrix norms::
     (tensor(3.7417), tensor(11.2250))
 """)
 
+pinv = _add_docstr(_linalg.linalg_pinv, r"""
+linalg.pinv(input, rcond=1e-15, hermitian=False) -> Tensor
+
+Computes the pseudo-inverse (also known as the Moore-Penrose inverse) of a matrix :attr:`input`, or of each matrix in a batched :attr:`input`.
+The pseudo-inverse is computed using singular value decomposition (see :func:`torch.linalg.svd`) by default.
+If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors (see :func:`torch.linalg.eigh`).
+The singular values (or the absolute eigenvalues when :attr:`hermitian` is ``True``) that are below the specified :attr:`rcond` threshold
+are treated to be zero and discarded in the computation.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+                    where `*` is one or more batch dimensions.
+    rcond (float, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
+
+Examples::
+
+    >>> input = torch.randn(3, 5)
+    >>> input
+    tensor([[ 0.5495,  0.0979, -1.4092, -0.1128,  0.4132],
+            [-1.1143, -0.3662,  0.3042,  1.6374, -0.9294],
+            [-0.3269, -0.5745, -0.0382, -0.5922, -0.6759]])
+    >>> torch.linalg.pinv(input)
+    tensor([[ 0.0600, -0.1933, -0.2090],
+            [-0.0903, -0.0817, -0.4752],
+            [-0.7124, -0.1631, -0.2272],
+            [ 0.1356,  0.3933, -0.5023],
+            [-0.0308, -0.1725, -0.5216]])
+
+    Batched linalg.pinv example
+    >>> a = torch.randn(2, 6, 3)
+    >>> b = torch.linalg.pinv(a)
+    >>> torch.matmul(b, a)
+    tensor([[[ 1.0000e+00,  1.6391e-07, -1.1548e-07],
+            [ 8.3121e-08,  1.0000e+00, -2.7567e-07],
+            [ 3.5390e-08,  1.4901e-08,  1.0000e+00]],
+
+            [[ 1.0000e+00, -8.9407e-08,  2.9802e-08],
+            [-2.2352e-07,  1.0000e+00,  1.1921e-07],
+            [ 0.0000e+00,  8.9407e-08,  1.0000e+00]]])
+
+    Hermitian input example
+    >>> a = torch.randn(3, 3, dtype=torch.complex64)
+    >>> a = a + a.t().conj()  # creates a Hermitian matrix
+    >>> b = torch.linalg.pinv(a, hermitian=True)
+    >>> torch.matmul(b, a)
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.1921e-07-2.3842e-07j,
+            5.9605e-08-2.3842e-07j],
+            [ 5.9605e-08+2.3842e-07j,  1.0000e+00+2.3842e-07j,
+            -4.7684e-07+1.1921e-07j],
+            [-1.1921e-07+0.0000e+00j, -2.3842e-07-2.9802e-07j,
+            1.0000e+00-1.7897e-07j]])
+
+    Non-default rcond example
+    >>> rcond = 0.5
+    >>> a = torch.randn(3, 3)
+    >>> torch.linalg.pinv(a)
+    tensor([[ 0.2971, -0.4280, -2.0111],
+            [-0.0090,  0.6426, -0.1116],
+            [-0.7832, -0.2465,  1.0994]])
+    >>> torch.linalg.pinv(a, rcond)
+    tensor([[-0.2672, -0.2351, -0.0539],
+            [-0.0211,  0.6467, -0.0698],
+            [-0.4400, -0.3638, -0.0910]])
+""")
+
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 
