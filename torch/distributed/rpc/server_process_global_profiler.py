@@ -94,7 +94,6 @@ class _server_process_global_profile(profile):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.entered:bool = False
 
     def __enter__(self):
         """
