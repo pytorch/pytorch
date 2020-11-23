@@ -31,6 +31,7 @@ class Optimizer(object):
             options (used when a parameter group doesn't specify them).
     """
 
+    # Put the profiling hook logic here in order to support deepcopy, multiprocessing pickle/unpickle.
     def __new__(cls, *args, **kwargs):
 
         def profile_function(func):
@@ -46,6 +47,7 @@ class Optimizer(object):
             wrapper.profile_hooked = True
             return wrapper
 
+        # In each class, a function is hooked only once.
         if not getattr(cls.step, "profile_hooked", None):
             cls.step = profile_function(cls.step)
         if not getattr(cls.zero_grad, "profile_hooked", None):
