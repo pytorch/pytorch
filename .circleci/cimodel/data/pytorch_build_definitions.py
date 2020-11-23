@@ -31,6 +31,7 @@ class Conf:
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+    is_kineto: bool = False
 
     @staticmethod
     def is_test_phase(phase):
@@ -55,6 +56,8 @@ class Conf:
             leading.append("pure_torch")
         if self.parallel_backend is not None and not for_docker:
             leading.append(self.parallel_backend)
+        if self.is_kineto and not for_docker:
+            leading.append("kineto")
 
         cuda_parms = []
         if self.cuda_version:
@@ -329,6 +332,7 @@ def instantiate_configs():
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
         parallel_backend = fc.find_prop("parallel_backend") or None
+        is_kineto = fc.find_prop("is_kineto") or False
         build_only = fc.find_prop("build_only") or False
         shard_test = fc.find_prop("shard_test") or False
         # TODO: fix pure_torch python test packaging issue.
@@ -357,6 +361,7 @@ def instantiate_configs():
             is_libtorch=is_libtorch,
             is_important=is_important,
             parallel_backend=parallel_backend,
+            is_kineto=is_kineto,
         )
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
@@ -370,6 +375,7 @@ def instantiate_configs():
             and parallel_backend is None
             and not is_vulkan
             and not is_pure_torch
+            and not is_kineto
             and compiler_name == "gcc"
             and fc.find_prop("compiler_version") == "5.4"
         ):
@@ -386,6 +392,7 @@ def instantiate_configs():
             and not is_libtorch
             and not is_vulkan
             and not is_pure_torch
+            and not is_kineto
             and parallel_backend is None
         ):
             bc_breaking_check = Conf(

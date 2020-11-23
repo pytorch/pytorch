@@ -10,6 +10,7 @@ CONFIG_TREE_DATA = [
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
                     ("pure_torch", [X(True)]),
+                    ("kineto", [XImportant(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -178,8 +179,20 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
+            "kineto": KinetoTorchConfigNode,
         }
         return next_nodes[experimental_feature]
+
+
+class KinetoTorchConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "KINETO=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_kineto"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 
 class PureTorchConfigNode(TreeConfigNode):

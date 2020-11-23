@@ -31,7 +31,9 @@ jobs:
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             echo 'ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
           fi
-          echo "Parallel backend flags: "${PARALLEL_FLAGS}
+          if [[ ${BUILD_ENVIRONMENT} == *"kineto"* ]]; then
+            echo 'USE_KINETO=1' >> "${BASH_ENV}"
+          fi
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
@@ -63,6 +65,8 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
             elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
+            elif [[ ${BUILD_ENVIRONMENT} == *"kineto"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-kineto
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
@@ -117,6 +121,8 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
+          elif [[ ${BUILD_ENVIRONMENT} == *"kineto"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-kineto
           elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-vulkan
           else
@@ -130,7 +136,9 @@ jobs:
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             echo 'ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
           fi
-          echo "Parallel backend flags: "${PARALLEL_FLAGS}
+          if [[ ${BUILD_ENVIRONMENT} == *"kineto"* ]]; then
+            echo 'USE_KINETO=1' >> "${BASH_ENV}"
+          fi
 
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
@@ -176,7 +184,6 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
-          ${PARALLEL_FLAGS}
           cd workspace
           EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
