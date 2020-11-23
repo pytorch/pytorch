@@ -427,6 +427,7 @@ class profile(object):
                   make sure PyTorch is built with USE_KINETO=1"""
 
     def config(self):
+        assert self.profiler_kind is not None
         return torch.autograd.ProfilerConfig(
             self.profiler_kind,
             self.record_shapes,

@@ -120,8 +120,8 @@ class profile(object):
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.step_num = 0
-        self.profiler = None
-        self.step_rec_fn = None
+        self.profiler: Optional[prof.profile] = None
+        self.step_rec_fn: Optional[prof.record_function] = None
 
         if not self.enable_pred:
             print("Warning: using profiler without enable predicate may result in the skewed " +
@@ -162,6 +162,7 @@ class profile(object):
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
 
     def _run_actions(self, step_num):
+        assert self.enable_pred
         for act in self.enable_pred.actions(self.step_num):
             self._run_action(act)
 
@@ -182,6 +183,7 @@ class profile(object):
         elif act == EnablePred.Action.STOP_TRACE:
             assert self.profiler is not None
             self.profiler.__exit__(None, None, None)
+            assert self.enable_pred
             if self.enable_pred.output_fn:
                 self.enable_pred.output_fn(self.profiler)
             if not keep_profiler:
