@@ -9578,3 +9578,9 @@
 - func: _test_string_default(Tensor dummy, str a="\"'\\", str b='"\'\\') -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+
+- func: foo(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CUDA: foo_cuda
