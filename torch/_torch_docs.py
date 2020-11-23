@@ -558,15 +558,6 @@ of size `m`, then :attr:`input` must be
 :math:`(n \times m)` and :attr:`out` will be a matrix of size
 :math:`(n \times m)`.
 
-For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
-:attr:`alpha` must be real numbers, otherwise they should be integers
-
-.. warning::
-    This function is deprecated and may be removed in a future release.
-    It can be implemented using :func:`torch.outer` as
-    ``alpha * torch.outer(vec1, vec2) + beta * input`` when :attr:`beta` is not zero,
-    and as ``alpha * torch.outer(vec1, vec2)`` when :attr:`beta` is zero.
-
 Args:
     input (Tensor): matrix to be added
     vec1 (Tensor): the first vector of the outer product
@@ -3927,6 +3918,35 @@ Example::
     >>> c = torch.tensor([3])
     >>> torch.lcm(a, c)
     tensor([15, 30, 15])
+""".format(**common_args))
+
+add_docstr(torch.ldexp, r"""
+ldexp(input, other, *, out=None) -> Tensor
+
+Multiplies :attr:`input` by 2**:attr:`other`.
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i * 2^\text{{other}}_i
+""" + r"""
+
+Typically this function is used to construct floating point numbers by multiplying
+mantissas in :attr:`input` with integral powers of two created from the exponents
+in :attr:'other'.
+
+Args:
+    {input}
+    other (Tensor): a tensor of exponents, typically integers.
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.ldexp(torch.tensor([1.]), torch.tensor([1]))
+    tensor([2.])
+    >>> torch.ldexp(torch.tensor([1.0]), torch.tensor([1, 2, 3, 4]))
+    tensor([ 2.,  4.,  8., 16.])
+
+
 """.format(**common_args))
 
 add_docstr(torch.le, r"""
