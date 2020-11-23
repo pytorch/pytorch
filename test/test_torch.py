@@ -4860,6 +4860,26 @@ class TestTorchDeviceType(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
+    # Ensure that assertEqual handles numpy arrays properly
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=True)))
+    def test_assertEqual_numpy(self, device, dtype):
+        S = 10
+        test_sizes = [
+            (),
+            (0,),
+            (S,),
+            (S, S),
+            (0, S),
+            (S, 0)]
+        for test_size in test_sizes:
+            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a_n = a.cpu().numpy()
+            msg = f'size: {test_size}'
+            self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
+
     # Verifies that the inplace dunders (like idiv) actually are in place
     @onlyOnCPUAndCUDA
     def test_inplace_dunders(self, device):
