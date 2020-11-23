@@ -2038,11 +2038,6 @@ bool sizes_equal(const Tensor& self, IntArrayRef size_other) {
   return self.sizes().equals(size_other);
 }
 
-bool native_is_expandable_to_nt_other(IntArrayRef metadata_nested_size, const Tensor& grad) {
-  TORCH_CHECK(false, "native_is_expandable_to_nt_other NOT IMPLEMENTED.");
-  return false;
-}
-
 bool native_is_expandable_to(IntArrayRef metadata_shape, const Tensor& grad) {
   return at::is_expandable_to(metadata_shape, grad.sizes());
 }

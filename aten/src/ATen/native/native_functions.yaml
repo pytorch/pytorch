@@ -3759,8 +3759,6 @@
 
 - func: sizes_equal(Tensor size_self, int[1] size_other) -> bool
 
-- func: native_is_expandable_to_nt_other(int[1] metadata_nested_size, Tensor grad) -> bool
-
 - func: native_is_expandable_to(int[1] metadata_shape, Tensor grad) -> bool
 
 - func: expand_nt(Tensor(a) self, Tensor nested_size, *, bool implicit=False) -> Tensor(a)

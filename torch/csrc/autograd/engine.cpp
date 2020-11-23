@@ -594,7 +594,7 @@ void validate_outputs(
     }
     if (metadata.is_nested_tensor()) {
       if (!at::sizes_equal_nt_other(grad, metadata.nested_size())) {
-        if (!at::native_is_expandable_to_nt_other(metadata.nested_size(), grad)) {
+        if (!at::native_is_expandable_to(metadata.nested_size(), grad)) {
           std::cout << "at::is_nested_tensor_impl(grad): " << at::is_nested_tensor_impl(grad) << std::endl;
           std::cout << "grad: " << grad << std::endl;
           std::stringstream ss;
@@ -607,7 +607,7 @@ void validate_outputs(
       }
     } else {
       if (!at::sizes_equal(grad, metadata.shape())) {
-        if (!at::native::native_is_expandable_to(metadata.shape(), grad)) {
+        if (!at::native_is_expandable_to(metadata.shape(), grad)) {
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - got ";
           ss << grad.sizes() << " but expected shape compatible with ";
