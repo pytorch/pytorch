@@ -55,24 +55,23 @@ class Optimizer(object):
     def __new__(cls, *args, **kwargs):
         self = super(Optimizer, cls).__new__(cls)
 
-        def hook(func_to_hook, profile_type, func_name):
-            profile_name = "{}#{}.{}".format(profile_type, self.__class__.__name__, func_name)
+        def hook(func_to_hook, profile_type):
+            profile_name = "{}#{}.{}".format(profile_type, self.__class__.__name__, func_to_hook.__name__)
 
-            def _step_with_profile(func, name):
+            def _func_profile(func):
                 @functools.wraps(func)
                 def wrapper(*args, **kwargs):
-                    with torch.autograd.profiler.record_function(name):
+                    with torch.autograd.profiler.record_function(profile_name):
                         return func(*args, **kwargs)
                 return wrapper
             # Replace method's function, which don't influence re-wrapped by _LRScheduler.
-            return _step_with_profile(func_to_hook, profile_name)
+            f = _func_profile(func_to_hook)
+            f.hooked = True
+            return f
         if not getattr(self.__class__.step, "hooked", None):  # Each sub class is hooked only once.
-            self.__class__.step = hook(self.__class__.step, "Optimizer.step", "step")
-            self.__class__.step.hooked = True
+            self.__class__.step = hook(self.__class__.step, "Optimizer.step")
         if not getattr(self.__class__.zero_grad, "hooked", None):  # Each sub class is hooked only once.
-            self.__class__.zero_grad = hook(self.__class__.zero_grad, "Optimizer.zero_grad", "zero_grad")
-            self.__class__.zero_grad.hooked = True
-
+            self.__class__.zero_grad = hook(self.__class__.zero_grad, "Optimizer.zero_grad")
         return self
 
 
