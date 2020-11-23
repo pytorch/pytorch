@@ -28,6 +28,36 @@ class TestForeach(TestCase):
         torch.div,
     ]
 
+    unary_ops = [
+        # foreach_op, foreach_op_, torch_op, bf16, complex64/128
+        (torch._foreach_sqrt, torch._foreach_sqrt_, torch.sqrt, True , True),
+        (torch._foreach_exp, torch._foreach_exp_, torch.exp, True, True),
+        (torch._foreach_acos, torch._foreach_acos_, torch.acos, False, True),
+        (torch._foreach_asin, torch._foreach_asin_, torch.asin, False, True),
+        (torch._foreach_atan, torch._foreach_atan_, torch.atan, False, True),
+        (torch._foreach_cos, torch._foreach_cos_, torch.cos, True, True),
+        (torch._foreach_cosh, torch._foreach_cosh_, torch.cosh, False, True),
+        (torch._foreach_log, torch._foreach_log_, torch.log, True, True),
+        (torch._foreach_log10, torch._foreach_log10_, torch.log10, True, True),
+        (torch._foreach_log2, torch._foreach_log2_, torch.log2, True, True),
+        (torch._foreach_neg, torch._foreach_neg_, torch.neg, True, True),
+        (torch._foreach_tan, torch._foreach_tan_, torch.tan, False, True),
+        (torch._foreach_tanh, torch._foreach_tanh_, torch.tanh, True, True),
+        (torch._foreach_sin, torch._foreach_sin_, torch.sin, False, True),
+        (torch._foreach_sinh, torch._foreach_sinh_, torch.sinh, False, True),
+        (torch._foreach_ceil, torch._foreach_ceil_, torch.ceil, False, False),
+        (torch._foreach_erf, torch._foreach_erf_, torch.erf, True, False),
+        (torch._foreach_erfc, torch._foreach_erfc_, torch.erfc, False, False),
+        (torch._foreach_expm1, torch._foreach_expm1_, torch.expm1, False, False),
+        (torch._foreach_floor, torch._foreach_floor_, torch.floor, False, False),
+        (torch._foreach_log1p, torch._foreach_log1p_, torch.log1p, True, False),
+        (torch._foreach_round, torch._foreach_round_, torch.round, False, False),
+        (torch._foreach_frac, torch._foreach_frac_, torch.frac, False, False),
+
+        # See test_abs
+        # (torch._foreach_abs, torch._foreach_abs_, torch.abs, True, True),
+    ]
+
     def _get_test_data(self, device, dtype, N):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
             tensors = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
@@ -50,21 +80,6 @@ class TestForeach(TestCase):
                                  tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = foreach_op(tensors1, tensors2)
             foreach_op_(tensors1, tensors2)
-            self.assertEqual(res, tensors1)
-            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                self.assertEqual(tensors1, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
-            else:
-                self.assertEqual(tensors1, expected)
-
-    def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
-        for N in N_values:
-            tensors1 = self._get_test_data(device, dtype, N)
-            # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
-                                              (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
-            expected = [torch_op(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
-            res = foreach_op(tensors1)
-            foreach_op_(tensors1)
             self.assertEqual(res, tensors1)
             if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
                 self.assertEqual(tensors1, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
@@ -149,13 +164,81 @@ class TestForeach(TestCase):
     #
     # Unary ops
     #
-    @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
-    def test_sqrt(self, device, dtype):
-        self._test_unary_op(device, dtype, torch._foreach_sqrt, torch._foreach_sqrt_, torch.sqrt)
+    @dtypes(*(torch.testing.floating_and_complex_types_and(torch.bfloat16, torch.half)))
+    def test_unary_ops(self, device, dtype):
+        for fe_op, fe_op_, torch_op, support_bfloat16, support_complex in self.unary_ops:
+            for N in N_values:
+                tensors1 = self._get_test_data(device, dtype, N)
+                # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and
+                                                  (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
 
-    @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
-    def test_exp(self, device, dtype):
-        self._test_unary_op(device, dtype, torch._foreach_exp, torch._foreach_exp_, torch.exp)
+                if self.device_type == 'cpu' and dtype == torch.half and torch_op not in [torch.neg, torch.frac]:
+                    with self.assertRaisesRegex(RuntimeError, r"not implemented for \'Half\'"):
+                        expected = [torch_op(tensors1[i]) for i in range(N)]
+
+                    with self.assertRaisesRegex(RuntimeError, r"not implemented for \'Half\'"):
+                        res = fe_op(tensors1)
+                    break
+
+                if dtype == torch.bfloat16 and not support_bfloat16:
+                    if self.device_type == 'cuda' or torch_op in [torch.sinh, torch.cosh]:
+                        with self.assertRaisesRegex(RuntimeError, r"not implemented for \'BFloat16\'"):
+                            expected = [torch_op(tensors1[i]) for i in range(N)]
+
+                        with self.assertRaisesRegex(RuntimeError, r"not implemented for \'BFloat16\'"):
+                            res = fe_op(tensors1)
+                        break
+
+                if dtype in [torch.complex64, torch.complex128] and not support_complex:
+                    # not using assertRaisesRegex due to different error messages
+                    with self.assertRaises(RuntimeError):
+                        expected = [torch_op(tensors1[i]) for i in range(N)]
+
+                    with self.assertRaises(RuntimeError):
+                        res = fe_op(tensors1)
+                    break
+
+                expected = [torch_op(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+                res = fe_op(tensors1)
+                if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                    self.assertEqual(res, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+
+                    fe_op_(tensors1)
+                    self.assertEqual(res, tensors1)
+                else:
+                    self.assertEqual(res, expected)
+
+                    fe_op_(tensors1)
+                    self.assertEqual(res, tensors1)
+
+    # Separate test for abs due to a lot of special cases
+    # Absolute value of a complex number a + bj is defined as sqrt(a^2 + b^2), i.e. a floating point
+    @dtypes(*(torch.testing.floating_and_complex_types_and(torch.bfloat16, torch.half)))
+    def test_abs(self, device, dtype):
+        for N in N_values:
+            tensors1 = self._get_test_data(device, dtype, N)
+            # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and
+                                              (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+
+            expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+            res = torch._foreach_abs(tensors1)
+            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                self.assertEqual(res, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+
+                torch._foreach_abs_(tensors1)
+                self.assertEqual(res, tensors1)
+            else:
+                expected = [torch.abs(tensors1[i]) for i in range(N)]
+                self.assertEqual(res, expected)
+
+                if dtype in [torch.complex64, torch.complex128]:
+                    with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
+                        torch._foreach_abs_(tensors1)
+                else:
+                    torch._foreach_abs_(tensors1)
+                    self.assertEqual(res, tensors1)
 
     #
     # Pointwise ops

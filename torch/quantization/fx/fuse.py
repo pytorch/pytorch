@@ -1,4 +1,6 @@
-from torch.fx import (
+from typing import Dict, Any
+
+from torch.fx import (  # type: ignore
     GraphModule,
     map_arg
 )
@@ -30,7 +32,7 @@ class Fuser:
         # find fusion
         fusion_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
         self.fused_graph = Graph()
-        env = {}
+        env: Dict[Any, Any] = {}
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
