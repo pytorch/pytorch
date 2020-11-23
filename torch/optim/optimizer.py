@@ -31,6 +31,27 @@ class Optimizer(object):
             options (used when a parameter group doesn't specify them).
     """
 
+    def __new__(cls, *args, **kwargs):
+
+        def profile_function(func):
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                # The first argument is self, which we use it to get the actual class of the object.
+                obj, *_ = args
+                profile_name = "Optimizer.{}#{}.{}".format(func.__name__, obj.__class__.__name__, func.__name__)
+                with torch.autograd.profiler.record_function(profile_name):
+                    return func(*args, **kwargs)
+
+            wrapper.profile_hooked = True
+            return wrapper
+
+        if not getattr(cls.step, "profile_hooked", None):
+            cls.step = profile_function(cls.step)
+        if not getattr(cls.zero_grad, "profile_hooked", None):
+            cls.zero_grad = profile_function(cls.zero_grad)
+        return super().__new__(cls)
+
     def __init__(self, params, defaults):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
@@ -51,29 +72,6 @@ class Optimizer(object):
 
         for param_group in param_groups:
             self.add_param_group(param_group)
-
-    def __new__(cls, *args, **kwargs):
-        self = super(Optimizer, cls).__new__(cls)
-
-        def hook(func_to_hook, profile_type):
-            profile_name = "{}#{}.{}".format(profile_type, self.__class__.__name__, func_to_hook.__name__)
-
-            def _func_profile(func):
-                @functools.wraps(func)
-                def wrapper(*args, **kwargs):
-                    with torch.autograd.profiler.record_function(profile_name):
-                        return func(*args, **kwargs)
-                return wrapper
-            # Replace method's function, which don't influence re-wrapped by _LRScheduler.
-            f = _func_profile(func_to_hook)
-            f.hooked = True
-            return f
-        if not getattr(self.__class__.step, "hooked", None):  # Each sub class is hooked only once.
-            self.__class__.step = hook(self.__class__.step, "Optimizer.step")
-        if not getattr(self.__class__.zero_grad, "hooked", None):  # Each sub class is hooked only once.
-            self.__class__.zero_grad = hook(self.__class__.zero_grad, "Optimizer.zero_grad")
-        return self
-
 
     def __getstate__(self):
         return {
