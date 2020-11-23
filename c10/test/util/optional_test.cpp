@@ -1,4 +1,5 @@
 #include <c10/util/Optional.h>
+#include <c10/core/DispatchKey.h>
 
 #include <gtest/gtest.h>
 
@@ -32,6 +33,10 @@ std::string getSampleValue() {
   return "hello";
 }
 
+template<>
+c10::DispatchKey getSampleValue() {
+  return c10::DispatchKey::CPU;
+}
 
 using OptionalTypes = ::testing::Types<
   // 32-bit scalar optimization.
@@ -39,7 +44,9 @@ using OptionalTypes = ::testing::Types<
   // Trivially destructible but not 32-bit scalar.
   uint64_t,
   // Non-trivial destructor.
-  std::string
+  std::string,
+  // c10 class
+  c10::DispatchKey
   >;
 
 
