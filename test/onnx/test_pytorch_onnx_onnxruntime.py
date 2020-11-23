@@ -3251,7 +3251,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = ChunkModel()
         model.eval()
-        f = io.BytesIO()
         x = torch.randn(1, 18)
 
         for dim_size_ in range(13, 16):
