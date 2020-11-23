@@ -10,7 +10,6 @@ CONFIG_TREE_DATA = [
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
                     ("pure_torch", [X(True)]),
-                    ("kineto", [XImportant(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -56,6 +55,7 @@ CONFIG_TREE_DATA = [
                             ('build_only', [X(True)]),
                         ]),
                     ]),
+                    ("kineto", [XImportant(True)]),
                 ]),
             ]),
             ("11.1", [
