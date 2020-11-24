@@ -1923,7 +1923,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
 
   auto unpacked_pivots_sizes = LU_pivots.sizes().vec();
   unpacked_pivots_sizes[LU_pivots.dim() - 1] = m;
-  auto unpacked_pivots = at::zeros(
+  auto unpacked_pivots = at::empty(
     unpacked_pivots_sizes,
     LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
   );
@@ -1958,21 +1958,21 @@ std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
     return std::tie(unpacked_pivots, L, U);
   }
 
+  // The permutation matrix is converted to LU_data.dtype
+  // because `matmul` does not work with integer matrices.
   unpacked_pivots_sizes.push_back(m);
   auto permutation_matrix = at::zeros(
     unpacked_pivots_sizes,
-    LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
+    LU_data.options().memory_format(at::MemoryFormat::Contiguous)
   );
 
   // now that we know the final permutation,
   // scatter 1s at proper locations.
-  // The resulting matrix is converted to LU_data.dtype
-  // because `matmul` does not work with integer matrices.
-  permutation_matrix = permutation_matrix.scatter_add_(
+  permutation_matrix.scatter_add_(
     -2,
     unpacked_pivots.unsqueeze(-2).to(at::kLong),
     at::ones(permutation_matrix.sizes(), permutation_matrix.options())
-  ).to(LU_data.dtype());
+  );
 
   return std::tie(permutation_matrix, L, U);
 }
