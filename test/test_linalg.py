@@ -1421,6 +1421,13 @@ class TestLinalg(TestCase):
         self.assertEqual(evals, out_evals)
         # check that out_evecs was NOT touched at all
         assert out_evecs.tolist() == [1, 2, 3]
+        #
+        # check that we complain if we pass an out vector of the wrong dtype
+        wrong_out = torch.empty((0, 0), dtype=int)
+        with self.assertRaisesRegex(RuntimeError, r"Expected 'e' to have dtype .* but got long int"):
+            torch.eig(t, eigenvectors=True, out=(wrong_out, out_evecs))
+        with self.assertRaisesRegex(RuntimeError, r"Expected 'v' to have dtype .* but got long int"):
+            torch.eig(t, eigenvectors=True, out=(out_evals, wrong_out))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
