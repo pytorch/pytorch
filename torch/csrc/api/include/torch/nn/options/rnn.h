@@ -38,6 +38,8 @@ struct TORCH_API RNNOptionsBase {
   TORCH_ARG(double, dropout) = 0.0;
   /// Whether to make the RNN bidirectional.
   TORCH_ARG(bool, bidirectional) = false;
+  /// Cell projection dimension. If 0, projections are not added. Can only be used for LSTMs.
+  TORCH_ARG(int64_t, proj_size) = 0;
 };
 
 } // namespace detail
@@ -108,6 +110,8 @@ struct TORCH_API LSTMOptions {
   TORCH_ARG(double, dropout) = 0.0;
   /// If ``true``, becomes a bidirectional LSTM. Default: ``false``
   TORCH_ARG(bool, bidirectional) = false;
+  /// Cell projection dimension. If 0, projections are not added
+  TORCH_ARG(int64_t, proj_size) = 0;
 };
 
 /// Options for the `GRU` module.
@@ -148,7 +152,7 @@ namespace detail {
 struct TORCH_API RNNCellOptionsBase {
   RNNCellOptionsBase(int64_t input_size, int64_t hidden_size, bool bias, int64_t num_chunks);
   virtual ~RNNCellOptionsBase() = default;
-  
+
   TORCH_ARG(int64_t, input_size);
   TORCH_ARG(int64_t, hidden_size);
   TORCH_ARG(bool, bias);
