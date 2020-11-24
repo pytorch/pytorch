@@ -77,7 +77,7 @@ struct Command final {
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
     Pool& operator=(Pool&&);
-    ~Pool() = default;
+    ~Pool();
 
     Buffer allocate();
     void purge();

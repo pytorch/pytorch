@@ -6,6 +6,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 VkFormat vk_format(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -22,6 +24,14 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
   }
 
   return VK_FORMAT_UNDEFINED;
+}
+
+VkExtent3D vk_extent(const uvec3& extent) {
+  return {
+    extent.data[0u],
+    extent.data[1u],
+    extent.data[2u],
+  };
 }
 
 vTensor::Access::Flags access(
@@ -149,10 +159,10 @@ VkDeviceSize buffer_bytes(
 
   if (requires_image(sizes)) {
     // Forward declaration
-    VkExtent3D image_extents(IntArrayRef);
+    uvec3 image_extents(IntArrayRef);
 
-    const VkExtent3D extents = image_extents(sizes);
-    size *= extents.width * extents.height * (4u * extents.depth);
+    const uvec3 extents = image_extents(sizes);
+    size *= extents.data[0u] * extents.data[1u] * (4u * extents.data[2u]);
   }
   else {
     size *= prod_intlist(sizes);
@@ -215,7 +225,7 @@ bool requires_image(const IntArrayRef sizes) {
   return (1u <= sizes.size()) && (sizes.size() <= 4u);
 }
 
-VkExtent3D image_extents(const IntArrayRef sizes) {
+uvec3 image_extents(const IntArrayRef sizes) {
   int64_t width = 1;
   int64_t height = 1;
   int64_t depth = 1;
@@ -251,7 +261,7 @@ VkExtent3D image_extents(const IntArrayRef sizes) {
   return {
     width,
     height,
-    api::utils::div_up(depth, 4),
+    div_up(depth, INT64_C(4)),
   };
 }
 
@@ -834,20 +844,22 @@ void vTensor::View::CMD::copy_buffer_to_image(
           },
         }));
 
-  const VkExtent3D extents = view_.extents();
-  const uint32_t plane = extents.width * extents.height;
+  const uvec3 extents = view_.extents();
+  const uint32_t plane = extents.data[0u] * extents.data[1u];
 
   const struct {
-    VkExtent3D extents;
+    uvec3 extents;
     uint32_t block;
-    uint32_t offset_x, offset_y, offset_z, offset_w;
+    uvec4 offset;
   } block {
     extents,
     4u * plane,
-    0u * plane,
-    1u * plane,
-    2u * plane,
-    3u * plane,
+    {
+      0u * plane,
+      1u * plane,
+      2u * plane,
+      3u * plane,
+    },
   };
 
   view_.context_->dispatch(
@@ -889,20 +901,22 @@ void vTensor::View::CMD::copy_image_to_buffer(
           },
         }));
 
-  const VkExtent3D extents = view_.extents();
-  const uint32_t plane = extents.width * extents.height;
+  const uvec3 extents = view_.extents();
+  const uint32_t plane = extents.data[0u] * extents.data[1u];
 
   const struct {
-    VkExtent3D extents;
+    uvec3 extents;
     uint32_t block;
-    uint32_t offset_x, offset_y, offset_z, offset_w;
+    uvec4 offset;
   } block {
     extents,
     4u * plane,
-    0u * plane,
-    1u * plane,
-    2u * plane,
-    3u * plane,
+    {
+      0u * plane,
+      1u * plane,
+      2u * plane,
+      3u * plane,
+    },
   };
 
   view_.context_->dispatch(
@@ -1006,7 +1020,7 @@ vTensor::Image& vTensor::View::image() const {
   if (!image_ && state_.is_available(Component::Image)) {
     image_ = allocate_image(
         pool_,
-        extents(),
+        vk_extent(extents()),
         options());
   }
 

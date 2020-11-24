@@ -244,7 +244,9 @@ Resource::Pool::Pool(const GPU& gpu)
 
 Resource::Pool::~Pool() {
   try {
-    purge();
+    if (device_ && allocator_) {
+      purge();
+    }
   }
   catch (const std::exception& e) {
     LOG(WARNING)

@@ -281,14 +281,14 @@ void Command::Buffer::dispatch(
   vkCmdDispatch(
       command_buffer_,
       utils::div_up(
-          global_work_group.width,
-          bound_.pipeline.local_work_group.width),
+          global_work_group.data[0u],
+          bound_.pipeline.local_work_group.data[0u]),
       utils::div_up(
-          global_work_group.height,
-          bound_.pipeline.local_work_group.height),
+          global_work_group.data[1u],
+          bound_.pipeline.local_work_group.data[1u]),
       utils::div_up(
-          global_work_group.depth,
-          bound_.pipeline.local_work_group.depth));
+          global_work_group.data[2u],
+          bound_.pipeline.local_work_group.data[2u]));
 }
 
 void Command::Buffer::submit(
@@ -352,6 +352,23 @@ Command::Pool& Command::Pool::operator=(Pool&& pool) {
   };
 
   return *this;
+}
+
+Command::Pool::~Pool() {
+  try {
+    if (device_ && command_pool_) {
+      purge();
+    }
+  }
+  catch (const std::exception& e) {
+    LOG(WARNING)
+        << "Vulkan: Command pool destructor raised an exception!  Error: "
+        << e.what();
+  }
+  catch (...) {
+    LOG(WARNING)
+        << "Vulkan: Command pool destructor raised an unknown exception!";
+  }
 }
 
 Command::Buffer Command::Pool::allocate() {

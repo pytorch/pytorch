@@ -197,23 +197,23 @@ TEST(VulkanAPITest, addmm_expand) {
   ASSERT_TRUE(check);
 }
 
-// TEST(VulkanAPITest, avg_pool2d) {
-//   if (!at::is_vulkan_available()) {
-//     return;
-//   }
+TEST(VulkanAPITest, avg_pool2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
 
-//   const auto in_cpu = at::rand({3, 19, 43, 79}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-//   const auto out_cpu = at::avg_pool2d(in_cpu, {5, 3}, {1, 2}, {2, 0}, true);
-//   const auto out_vulkan = at::avg_pool2d(in_cpu.vulkan(), {5, 3}, {1, 2}, {2, 0}, true);
+  const auto in_cpu = at::rand({3, 19, 43, 79}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::avg_pool2d(in_cpu, {5, 3}, {1, 2}, {2, 0}, true);
+  const auto out_vulkan = at::avg_pool2d(in_cpu.vulkan(), {5, 3}, {1, 2}, {2, 0}, true);
 
-//   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-//   if (!check) {
-//     std::cout << "Expected:\n" << out_cpu << std::endl;
-//     std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
-//   }
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Expected:\n" << out_cpu << std::endl;
+    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+  }
 
-//   ASSERT_TRUE(check);
-// }
+  ASSERT_TRUE(check);
+}
 
 TEST(VulkanAPITest, clamp) {
   if (!at::is_vulkan_available()) {
@@ -647,25 +647,25 @@ TEST(VulkanAPITest, reshape_) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, upsample_nearest2d) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
+// TEST(VulkanAPITest, upsample_nearest2d) {
+//   if (!at::is_vulkan_available()) {
+//     return;
+//   }
 
-  const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6});
+//   const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+//   const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6});
 
-  const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::upsample_nearest2d(in_vulkan, {4, 6});
+//   const auto in_vulkan = in_cpu.vulkan();
+//   const auto out_vulkan = at::upsample_nearest2d(in_vulkan, {4, 6});
 
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    std::cout << "Expected:\n" << out_cpu << std::endl;
-    std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
-  }
+//   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+//   if (!check) {
+//     std::cout << "Expected:\n" << out_cpu << std::endl;
+//     std::cout << "Got:\n" << out_vulkan.cpu() << std::endl;
+//   }
 
-  ASSERT_TRUE(check);
-}
+//   ASSERT_TRUE(check);
+// }
 
 enum class OpType {
   addmm,
@@ -909,24 +909,24 @@ class MobileNetV2 final : public OpsList {
   }
 };
 
-TEST(VulkanAPITest, mobilenetv2) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
+// TEST(VulkanAPITest, mobilenetv2) {
+//   if (!at::is_vulkan_available()) {
+//     return;
+//   }
 
-  MobileNetV2 mn2;
+//   MobileNetV2 mn2;
 
-  const auto input = at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto output = mn2.run(input, input.vulkan());
+//   const auto input = at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
+//   const auto output = mn2.run(input, input.vulkan());
 
-  const auto check = almostEqual(output.first, output.second.cpu());
-  if (!check) {
-    std::cout << "Expected:\n" << output.first << std::endl;
-    std::cout << "Got:\n" << output.second.cpu() << std::endl;
-  }
+//   const auto check = almostEqual(output.first, output.second.cpu());
+//   if (!check) {
+//     std::cout << "Expected:\n" << output.first << std::endl;
+//     std::cout << "Got:\n" << output.second.cpu() << std::endl;
+//   }
 
-  ASSERT_TRUE(check);
-}
+//   ASSERT_TRUE(check);
+// }
 
 } // namespace
 

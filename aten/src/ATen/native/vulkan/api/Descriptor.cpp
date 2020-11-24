@@ -269,6 +269,7 @@ VkDescriptorSet Descriptor::Set::handle() const {
         0u,
         nullptr);
 
+    // Reset
     bindings_.dirty = false;
   }
 
@@ -309,9 +310,25 @@ Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
   return *this;
 }
 
+Descriptor::Pool::~Pool() {
+  try {
+    if (device_ && descriptor_pool_) {
+      purge();
+    }
+  }
+  catch (const std::exception& e) {
+    LOG(WARNING)
+        << "Vulkan: Descriptor pool destructor raised an exception!  Error: "
+        << e.what();
+  }
+  catch (...) {
+    LOG(WARNING)
+        << "Vulkan: Descriptor pool destructor raised an unknown exception!";
+  }
+}
+
 Descriptor::Set Descriptor::Pool::allocate(
-    const Shader::Layout::Object& shader_layout)
-{
+    const Shader::Layout::Object& shader_layout) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && descriptor_pool_,
       "This descriptor pool is in an invalid state! "

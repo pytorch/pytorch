@@ -7,6 +7,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 vTensor pack_weights(
     api::Resource::Pool& pool,
     const Tensor& weight_arg) {
@@ -134,10 +136,8 @@ Tensor mm(
   command_buffer.begin();
   {
     if (v_mat1.has_image() && v_mat2.has_image()) {
-      using namespace api::utils;
-
       const struct {
-        VkExtent3D size;
+        uvec3 size;
         int32_t K;
       } block{
         v_output.extents(),
@@ -254,21 +254,21 @@ Tensor LinearOpContext::run(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    using namespace api::utils;
-
     if (v_output.has_image() &&
         v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
       const struct {
-        VkExtent3D size;
+        uvec3 size;
         int32_t K;
-        float alpha, beta;
+        vec2 multiplier;
       } block{
           v_output.extents(),
           safe_downcast<int32_t>(v_input.sizes()[Layout::Parameter::width]),
-          alpha,
-          beta,
+          {
+            alpha,
+            beta,
+          },
       };
 
       context->dispatch(

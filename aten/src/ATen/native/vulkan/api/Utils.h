@@ -12,21 +12,24 @@ namespace utils {
 // Alignment
 //
 
-inline int64_t align_down(
-    const int64_t number,
-    const int64_t multiple) {
+template<typename Type>
+inline constexpr Type align_down(
+    const Type number,
+    const Type multiple) {
   return (number / multiple) * multiple;
 }
 
-inline int64_t align_up(
-    const int64_t number,
-    const int64_t multiple) {
+template<typename Type>
+inline constexpr Type align_up(
+    const Type number,
+    const Type multiple) {
   return align_down(number + multiple - 1, multiple);
 }
 
-inline int64_t div_up(
-    const int64_t numerator,
-    const int64_t denominator) {
+template<typename Type>
+inline constexpr Type div_up(
+    const Type numerator,
+    const Type denominator) {
   return (numerator + denominator - 1) / denominator;
 }
 
@@ -76,8 +79,8 @@ inline constexpr To safe_downcast(const From v) {
 namespace detail {
 
 template<typename Type, uint32_t N>
-struct /* alignas() */ vec final {
-  Type elements[N];
+struct vec final {
+  Type data[N];
 };
 
 } // namespace detail

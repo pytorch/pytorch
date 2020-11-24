@@ -8,6 +8,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 Tensor adaptive_avg_pool2d(
     const at::Tensor& self_arg,
     const IntArrayRef output_size) {
@@ -35,27 +37,27 @@ Tensor adaptive_avg_pool2d(
   command_buffer.begin();
   {
     if (v_self.has_image()) {
-      const VkExtent3D v_output_size = v_output.extents();
-      const VkExtent3D v_self_size = v_self.extents();
+      const uvec3 v_output_size = v_output.extents();
+      const uvec3 v_self_size = v_self.extents();
 
-      const struct Stride final {
-        float x, y;
-      } stride {
-        static_cast<float>(v_self_size.width) / v_output_size.width,
-        static_cast<float>(v_self_size.height) / v_output_size.height,
+      const vec2 stride {
+        static_cast<float>(v_self_size.data[0u]) / v_output_size.data[0u],
+        static_cast<float>(v_self_size.data[1u]) / v_output_size.data[1u],
       };
 
       const struct {
-        VkExtent3D size;
+        uvec3 size;
         uint32_t _;
-        Stride stride;
-        float kernel_x, kernel_y;
+        vec2 stride;
+        vec2 kernel;
       } block{
         v_output.extents(),
         0u,
         stride,
-        v_self_size.width - (v_output_size.width - 1u) * stride.x,
-        v_self_size.height - (v_output_size.height - 1u) * stride.y,
+        {
+          v_self_size.data[0u] - (v_output_size.data[0u] - 1u) * stride.data[0u],
+          v_self_size.data[1u] - (v_output_size.data[1u] - 1u) * stride.data[1u],
+        },
       };
 
       context->dispatch(
@@ -172,17 +174,25 @@ Tensor avg_pool2d(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    using namespace api::utils;
+    using namespace utils;
 
     if (v_self.has_image()) {
       const struct {
-        VkExtent3D extents;
-        int32_t kernel_range;
-        VkExtent2D iextents;
-        int32_t stride_x, stride_y;
-        int32_t padding_x, padding_y;
-        int32_t kernel_width, kernel_height;
+        uvec3 extents;
+        int32_t range;
+        uvec2 iextents;
+        ivec2 stride;
+        ivec2 padding;
+        ivec2 kernel;
       } block {
+        v_output.extents(),
+        safe_downcast<int32_t>(
+            kernel[Layout::Parameter::width] *
+            kernel[Layout::Parameter::height]),
+        {
+          v_self.extents().data[0u],
+          v_self.extents().data[1u],
+        },
         safe_downcast<int32_t>(stride[Layout::Parameter::width]),
         safe_downcast<int32_t>(stride[Layout::Parameter::height]),
         safe_downcast<int32_t>(padding[Layout::Parameter::width]),

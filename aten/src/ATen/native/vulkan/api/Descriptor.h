@@ -108,7 +108,7 @@ struct Descriptor final {
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
     Pool& operator=(Pool&&);
-    ~Pool() = default;
+    ~Pool();
 
     Set allocate(const Shader::Layout::Object& shader_layout);
     void purge();

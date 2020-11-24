@@ -7,6 +7,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 Tensor mul_scalar(
     const Tensor& self_arg,
     const Scalar other) {
@@ -26,7 +28,7 @@ Tensor mul_scalar(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
-        VkExtent3D extents;
+        uvec3 extents;
         float other;
       } block {
         v_output.extents(),
@@ -83,7 +85,7 @@ Tensor& mul_scalar_(
   {
     if (v_self.has_image()) {
       const struct {
-        VkExtent3D extents;
+        uvec3 extents;
         float other;
       } block {
         v_self.extents(),

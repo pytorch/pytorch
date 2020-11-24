@@ -104,20 +104,20 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
     // X
     {
       0u,
-      offsetof(Shader::WorkGroup, width),
-      sizeof(Shader::WorkGroup::width),
+      offsetof(Shader::WorkGroup, data[0u]),
+      sizeof(Shader::WorkGroup::data[0u]),
     },
     // Y
     {
       1u,
-      offsetof(Shader::WorkGroup, height),
-      sizeof(Shader::WorkGroup::height),
+      offsetof(Shader::WorkGroup, data[1u]),
+      sizeof(Shader::WorkGroup::data[1u]),
     },
     // Z
     {
       2u,
-      offsetof(Shader::WorkGroup, depth),
-      sizeof(Shader::WorkGroup::depth),
+      offsetof(Shader::WorkGroup, data[2u]),
+      sizeof(Shader::WorkGroup::data[2u]),
     },
   };
 
