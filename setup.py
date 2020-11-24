@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_KINETO=1
+#     enables experimental usage of libkineto
+#
 #   USE_NUMPY=0
 #     disables the NumPy build
 #

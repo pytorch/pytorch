@@ -714,7 +714,6 @@ else()
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
-
 # ---[ LMDB
 if(USE_LMDB)
   find_package(LMDB)
@@ -1765,3 +1764,19 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+
+# ---[ Kineto
+if(USE_KINETO)
+  if(USE_KINETO AND NOT TARGET kineto)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
+    set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
+    set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
+
+    add_subdirectory("${KINETO_SOURCE_DIR}")
+    message(STATUS "Configured libkineto as a dependency.")
+  endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
+endif()
