@@ -1649,6 +1649,16 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_solve(self, device, dtype):
+        n = 5
+        k = 1
+        b, A = self.solve_test_helper((n,), (n, k), device, dtype)
+        x = torch.linalg.solve(A, b)
+        self.assertEqual(b, A.mm(x))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_solve(self, device, dtype):
         for (k, n) in zip([2, 3, 5], [3, 5, 7]):
             b, A = self.solve_test_helper((n,), (n, k), device, dtype)
             x = torch.solve(b, A)[0]
@@ -1657,7 +1667,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched(self, device, dtype):
+    def test_old_solve_batched(self, device, dtype):
         def solve_batch_helper(A_dims, b_dims):
             b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
             x_exp_list = []
@@ -1675,7 +1685,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched_non_contiguous(self, device, dtype):
+    def test_old_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
@@ -1688,7 +1698,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched_many_batches(self, device, dtype):
+    def test_old_solve_batched_many_batches(self, device, dtype):
         for A_dims, b_dims in zip([(5, 256, 256), (3, )], [(5, 1), (512, 512, 3, 1)]):
             b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
             x, _ = torch.solve(b, A)
@@ -1698,7 +1708,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_batched_broadcasting(self, device, dtype):
+    def test_old_solve_batched_broadcasting(self, device, dtype):
         from numpy.linalg import solve
 
         def run_test(A_dims, b_dims):

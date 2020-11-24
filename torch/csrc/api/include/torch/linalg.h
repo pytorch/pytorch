@@ -52,6 +52,14 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve_out(result, input, other);
+}
+
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv(self, ind);
 }
@@ -131,6 +139,17 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scal
 
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// Computes a tensor `x` such that `dot(input, x) = other`.
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return detail::solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return detail::solve_out(result, input, other);
 }
 
 /// Computes the inverse of a tensor
