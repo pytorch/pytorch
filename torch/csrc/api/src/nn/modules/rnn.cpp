@@ -510,10 +510,14 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
   std::tuple<Tensor, Tensor> hx;
   if (!hx_opt.has_value()) {
     int64_t num_directions = options.bidirectional() ? 2 : 1;
-    auto zeros = torch::zeros({options.num_layers() * num_directions,
-                     max_batch_size, options.hidden_size()},
-                     torch::dtype(input.dtype()).device(input.device()));
-    hx = std::make_tuple(zeros, zeros);
+    int64_t real_hidden_size = options.proj_size() > 0 ? options.proj_size() : options.hidden_size();
+    auto h_zeros = torch::zeros({options.num_layers() * num_directions,
+                       max_batch_size, real_hidden_size},
+                       torch::dtype(input.dtype()).device(input.device()));
+    auto c_zeros = torch::zeros({options.num_layers() * num_directions,
+                       max_batch_size, options.hidden_size()},
+                       torch::dtype(input.dtype()).device(input.device()));
+    hx = std::make_tuple(h_zeros, c_zeros);
   } else {
     hx = hx_opt.value();
     // Each batch of the hidden state should match the input sequence that

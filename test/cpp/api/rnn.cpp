@@ -14,8 +14,13 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto nhid = 32;
   auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(1, nhid), "l1");
-  auto rnn = model->add(model_maker(nhid), "rnn");
-  auto lo = model->add(Linear(nhid, 1), "lo");
+  auto rnn_model = model_maker(nhid);
+  auto rnn = model->add(rnn_model, "rnn");
+  auto nout = nhid;
+  if (rnn_model.get()->options_base.proj_size() > 0) {
+    nout = rnn_model.get()->options_base.proj_size();
+  }
+  auto lo = model->add(Linear(nout, 1), "lo");
 
   torch::optim::Adam optimizer(model->parameters(), 1e-2);
   auto forward_op = [&](torch::Tensor x) {
@@ -44,7 +49,6 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
         torch::rand({nlen, bs, 1}, backend).round().to(torch::kFloat32);
     auto labels = inputs.sum(0).detach();
     inputs.set_requires_grad(true);
-
     auto outputs = forward_op(inputs);
     torch::Tensor loss = torch::mse_loss(outputs, labels);
 
@@ -192,6 +196,11 @@ TEST_F(RNNTest, EndToEndLSTM) {
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }));
 }
 
+TEST_F(RNNTest, EndToEndLSTMProj) {
+  ASSERT_TRUE(test_RNN_xor<LSTM>(
+      [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }));
+}
+
 TEST_F(RNNTest, EndToEndGRU) {
   ASSERT_TRUE(
       test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }));
@@ -238,6 +247,11 @@ TEST_F(RNNTest, Sizes_CUDA) {
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }, true));
+}
+
+TEST_F(RNNTest, EndToEndLSTMProj_CUDA) {
+  ASSERT_TRUE(test_RNN_xor<LSTM>(
+      [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }, true));
 }
 
 TEST_F(RNNTest, EndToEndGRU_CUDA) {
