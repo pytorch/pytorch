@@ -15,6 +15,7 @@ import math
 from functools import partial
 import inspect
 import io
+import locale
 import operator
 import argparse
 import unittest
@@ -332,6 +333,8 @@ else:
     def TemporaryDirectoryName(suffix=None):
         with tempfile.TemporaryDirectory(suffix=suffix) as d:
             yield d.name
+
+IS_UTF8_ENCODING = locale.getlocale()[1] == 'UTF-8'
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**

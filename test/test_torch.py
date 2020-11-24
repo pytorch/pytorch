@@ -29,7 +29,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, r
 from torch.testing._internal.common_utils import \
     (TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ASAN, TEST_WITH_ROCM, run_tests,
      skipIfNoLapack, suppress_warnings, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN,
-     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
+     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_UTF8_ENCODING, load_tests, slowTest,
      skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
      skipIfRocm, torch_to_numpy_dtype_dict, skipIfNoSciPy, IS_MACOS, IS_PPC,
      wrapDeterministicFlagAPITest, make_tensor, TemporaryFileName, TemporaryDirectoryName)
@@ -3112,8 +3112,9 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
-                assert_with_filename(fname)
+            if IS_UTF8_ENCODING:
+                with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+                    assert_with_filename(fname)
 
         def test_torch_from_file(self):
             def assert_with_filename(filename):
@@ -3142,8 +3143,9 @@ class AbstractTestCases:
             with TemporaryFileName() as fname:
                 assert_with_filename(fname)
 
-            with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
-                assert_with_filename(fname)
+            if IS_UTF8_ENCODING:
+                with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+                    assert_with_filename(fname)
 
         def test_print(self):
             default_type = torch.Tensor().type()

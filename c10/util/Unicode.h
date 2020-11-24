@@ -1,18 +1,8 @@
 #pragma once
 
 #if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef NOGDI
-#define NOGDI
-#endif
-#include <windows.h>
-
 #include <string>
+#include <c10/util/win32-headers.h>
 #include <c10/util/Exception.h>
 #endif
 
