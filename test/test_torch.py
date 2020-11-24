@@ -691,11 +691,6 @@ class AbstractTestCases:
             self.assertEqual('cuda', cuda90.type)
             self.assertEqual(90, cuda90.index)
 
-            cuda23333 = torch.device('cuda', 23333)
-            self.assertEqual('cuda:23333', str(cuda23333))
-            self.assertEqual('cuda', cuda23333.type)
-            self.assertEqual(23333, cuda23333.index)
-
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
             self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
@@ -4477,7 +4472,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(output3, output1)
                     self.assertEqual(output3, output2)
 
-        @unittest.skipIf(True, "Skip due to catchAll -> Math")
         def test_empty_meta(self):
             x = torch.empty_meta(2 ** 20, 2 ** 20)
             y = torch.empty_meta(2 ** 20)
@@ -4865,6 +4859,26 @@ class TestTorchDeviceType(TestCase):
                 if fn_name == 'angle':
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
+
+    # Ensure that assertEqual handles numpy arrays properly
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=True)))
+    def test_assertEqual_numpy(self, device, dtype):
+        S = 10
+        test_sizes = [
+            (),
+            (0,),
+            (S,),
+            (S, S),
+            (0, S),
+            (S, 0)]
+        for test_size in test_sizes:
+            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a_n = a.cpu().numpy()
+            msg = f'size: {test_size}'
+            self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
+            self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @onlyOnCPUAndCUDA
@@ -9813,6 +9827,28 @@ class TestTorchDeviceType(TestCase):
         guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 
+    @onlyCPU
+    def test_ldexp(self, device):
+        # random values
+        mantissas = torch.randn(64, device=device)
+        exponents = torch.randint(-31, 31, (64,), device=device, dtype=torch.int32)
+
+        # basic test
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        pt_outcome_1 = torch.ldexp(mantissas, exponents)
+        pt_outcome_2 = mantissas.ldexp(exponents)
+        self.assertEqual(np_outcome, pt_outcome_1)
+        self.assertEqual(np_outcome, pt_outcome_2)
+        mantissas.ldexp_(exponents)
+        self.assertEqual(np_outcome, mantissas)
+
+        # test bounds
+        mantissas = torch.tensor([float('inf'), float('-inf'), float('inf'), float('nan')], device=device)
+        exponents = torch.randint(0, 31, (4,), device=device, dtype=torch.int32)
+        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        pt_outcome = torch.ldexp(mantissas, exponents)
+        self.assertEqual(np_outcome, pt_outcome)
+
     def test_lerp(self, device):
         start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
         for shapes in product(start_end_shapes, start_end_shapes):
@@ -11583,6 +11619,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumsum(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumsum_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
@@ -11631,6 +11669,8 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.Tensor().to(device)
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
+        x.cumprod_(1)
+        self.assertEqual(res1, x)
 
         a = torch.tensor([[True, False, True],
                           [False, False, False],
@@ -13384,6 +13424,8 @@ class TestTorchDeviceType(TestCase):
             ("hypot", True, True, 'cuda'),
             ("igamma", True, True, 'cpu'),
             ("igamma", True, True, 'cuda'),
+            ("igammac", True, True, 'cpu'),
+            ("igammac", True, True, 'cuda'),
             ("nextafter", True, True, 'cpu'),
             ("nextafter", True, True, 'cuda'),
             ("le", True, True, 'cpu'),
@@ -16106,6 +16148,70 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_eig(self, device, dtype):
+        a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
+                          (-6.49, 3.80, 0.00, 0.00, 0.00),
+                          (-0.47, -6.39, 4.17, 0.00, 0.00),
+                          (-7.20, 1.50, -1.51, 5.70, 0.00),
+                          (-0.65, -6.34, 2.67, 1.80, -7.10))).t().contiguous().to(dtype=dtype, device=device)
+        e = torch.eig(a)[0]
+        ee, vv = torch.eig(a, True)
+        te = torch.tensor((), dtype=dtype, device=device)
+        tv = torch.tensor((), dtype=dtype, device=device)
+        eee, vvv = torch.eig(a, True, out=(te, tv))
+        self.assertEqual(e, ee, atol=1e-12, rtol=0)
+        self.assertEqual(ee, eee, atol=1e-12, rtol=0)
+        self.assertEqual(ee, te, atol=1e-12, rtol=0)
+        self.assertEqual(vv, vvv, atol=1e-12, rtol=0)
+        self.assertEqual(vv, tv, atol=1e-12, rtol=0)
+
+        # test reuse
+        X = torch.randn(4, 4, dtype=dtype, device=device)
+        X = torch.mm(X.t(), X)
+        e = torch.zeros(4, 2, dtype=dtype, device=device)
+        v = torch.zeros(4, 4, dtype=dtype, device=device)
+        torch.eig(X, True, out=(e, v))
+        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+
+        torch.eig(X, True, out=(e, v))
+        Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+
+        # test non-contiguous
+        X = torch.randn(4, 4, dtype=dtype, device=device)
+        X = torch.mm(X.t(), X)
+        e = torch.zeros(4, 2, 2, dtype=dtype, device=device)[:, 1]
+        v = torch.zeros(4, 2, 4, dtype=dtype, device=device)[:, 1]
+        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+        self.assertFalse(e.is_contiguous(), 'E is contiguous')
+        torch.eig(X, True, out=(e, v))
+        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+
+        # test invalid input
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be 2 dimensional',
+            lambda: torch.eig(torch.ones((2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be square',
+            lambda: torch.eig(torch.ones((2, 3))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.inf * torch.ones((2, 2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.nan * torch.ones((2, 2))))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -17066,7 +17172,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected)
 
-    def _helper_test_igamma(self, loglo, loghi, device, dtype):
+    def _helper_test_igamma(self, loglo, loghi, device, dtype,
+                            torch_fcn, scipy_fcn):
         exp1 = 2.71828182846
         vec1 = torch.logspace(loglo, loghi, steps=500, base=exp1,
                               dtype=torch.float64, device=device).unsqueeze(-1)
@@ -17082,11 +17189,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         ]
         half_prec = dtype in [torch.bfloat16, torch.float16]
         for input0, input1 in inputs:
-            actual = torch.igamma(input0, input1)
+            actual = torch_fcn(input0, input1)
             if half_prec:
                 input0 = input0.to(torch.float)
                 input1 = input1.to(torch.float)
-            expected = scipy.special.gammainc(input0.cpu().numpy(), input1.cpu().numpy())
+            expected = scipy_fcn(input0.cpu().numpy(), input1.cpu().numpy())
             expected = torch.from_numpy(expected).to(dtype)
             self.assertEqual(actual, expected)
 
@@ -17099,7 +17206,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
         loghi = 4  # approx 54.6
-        self._helper_test_igamma(loglo, loghi, device, dtype)
+        self._helper_test_igamma(loglo, loghi, device, dtype,
+                                 torch.igamma, scipy.special.gammainc)
+
+    @skipCUDAIfRocm
+    @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @onlyOnCPUAndCUDA
+    def test_igammac_common(self, device, dtype):
+        # test igammac for reasonable range of values
+        loglo = -4  # approx 0.018
+        loghi = 4  # approx 54.6
+        self._helper_test_igamma(loglo, loghi, device, dtype,
+                                 torch.igammac, scipy.special.gammaincc)
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
@@ -17125,6 +17245,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for inputs, output in inpouts:
             input0, input1 = inputs
             calc = torch.igamma(input0, input1)
+            if torch.all(torch.isnan(output)):
+                self.assertTrue(torch.all(torch.isnan(calc)))
+            else:
+                self.assertEqual(calc, output)
+
+    @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @onlyOnCPUAndCUDA
+    def test_igammac_edge_cases(self, device, dtype):
+        tkwargs = {"dtype": dtype, "device": device}
+        infs = torch.zeros((3,), **tkwargs) + float("inf")
+        zeros = torch.zeros((3,), **tkwargs)
+        ones = torch.ones((3,), **tkwargs)
+        zero_to_large = torch.tensor([0., 1., 1e3], **tkwargs)
+        small_to_inf = torch.tensor([1e-3, 1., float("inf")], **tkwargs)
+        nans = torch.zeros((3,), **tkwargs) + float("nan")
+        inpouts = [
+            # (a    ,    x),       out
+            ((zeros, small_to_inf), zeros),
+            ((small_to_inf, zeros), ones),
+            ((infs, zero_to_large), ones),
+            ((zero_to_large, infs), zeros),
+            ((zeros, zeros), nans),
+            ((infs, infs), nans),
+            ((-small_to_inf, small_to_inf), nans),
+        ]
+        for inputs, output in inpouts:
+            input0, input1 = inputs
+            calc = torch.igammac(input0, input1)
             if torch.all(torch.isnan(output)):
                 self.assertTrue(torch.all(torch.isnan(calc)))
             else:

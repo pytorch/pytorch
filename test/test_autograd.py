@@ -2904,6 +2904,14 @@ class TestAutograd(TestCase):
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 
+    def test_igammac(self):
+        # 1e-3 offset to avoid zeros in s
+        # NOTE: derivative for s is not implemented
+        s = (torch.rand(100, dtype=torch.double) + 1e-3)
+        x = (torch.rand(100, dtype=torch.double)).requires_grad_()
+        gradcheck(torch.igamma, (s, x))
+        gradgradcheck(torch.igamma, (s, x))
+
     @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
@@ -5013,7 +5021,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv'] + separate_complex_tests
+                'addcdiv', 'linalg.tensorinv', ] + separate_complex_tests
 
 def add_test(
         name,
