@@ -13,10 +13,10 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex, all_types_and_complex_and, all_types_and)
+     all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
-     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack,
+     expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -51,7 +51,7 @@ class SampleInput(object):
         self.kwargs = kwargs if kwargs is not None else {}
 
 
-_NOTHING = object() # Unique value to distinguish default anything else
+_NOTHING = object()  # Unique value to distinguish default anything else
 def _getattr_qual(obj, name, default=_NOTHING):
     try:
         for path in name.split('.'):
