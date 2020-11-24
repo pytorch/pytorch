@@ -2029,11 +2029,6 @@ Tensor serialize_nested_size(const Tensor& tensor) {
   return at::empty({}, at::kLong);
 }
 
-bool sizes_equal_nt_other(const Tensor& self, IntArrayRef size_other) {
-  TORCH_CHECK(false, "sizes_equal_nt_other NOT IMPLEMENTED.");
-  return false;
-}
-
 bool sizes_equal(const Tensor& self, IntArrayRef size_other) {
   return self.sizes().equals(size_other);
 }

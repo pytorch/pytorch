@@ -3755,8 +3755,6 @@
 # This is used in autograd/engine.cpp and input_metadata doesn't store Tensors, so we use a catchall
 # to also support the Tensor vs. NestedTensor case.
 
-- func: sizes_equal_nt_other(Tensor size_self, int[1] nested_size_other) -> bool
-
 - func: sizes_equal(Tensor size_self, int[1] size_other) -> bool
 
 - func: native_is_expandable_to(int[1] metadata_shape, Tensor grad) -> bool
