@@ -38,7 +38,7 @@ from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
-    ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, slowTest
+    ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
