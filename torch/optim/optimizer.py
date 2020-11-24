@@ -41,7 +41,10 @@ class Optimizer(object):
                 # The first argument is self, which we use it to get the actual class of the object.
                 obj, *_ = args
                 profile_name = "Optimizer.{}#{}.{}".format(func.__name__, obj.__class__.__name__, func.__name__)
-                with torch.autograd.profiler.record_function(profile_name):
+                if obj.hooked_functions_for_profiling.__contains__(func.__qualname__):
+                    with torch.autograd.profiler.record_function(profile_name):
+                        return func(*args, **kwargs)
+                else:
                     return func(*args, **kwargs)
 
             wrapper.profile_hooked = True
@@ -52,7 +55,9 @@ class Optimizer(object):
             cls.step = profile_function(cls.step)
         if not getattr(cls.zero_grad, "profile_hooked", None):
             cls.zero_grad = profile_function(cls.zero_grad)
-        return super().__new__(cls)
+        obj = super().__new__(cls)
+        setattr(obj, "hooked_functions_for_profiling", {obj.step.__qualname__, obj.zero_grad.__qualname__})
+        return obj
 
     def __init__(self, params, defaults):
         torch._C._log_api_usage_once("python.optimizer")
