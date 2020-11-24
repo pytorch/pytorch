@@ -131,7 +131,7 @@ def fuse_fx(model, fuse_custom_config_dict=None):
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
-    graph_module = torch.fx.symbolic_trace(model)
+    graph_module = torch.fx.symbolic_trace(model)  # type: ignore
     return _fuse_fx(graph_module, fuse_custom_config_dict)
 
 def prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None):
