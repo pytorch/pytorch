@@ -283,7 +283,11 @@ class DeviceTypeTestBase(TestCase):
             for op in test.op_list:
                 # Acquires dtypes, using the op data if unspecified
                 dtypes = cls._get_dtypes(test)
-                if dtypes is None:
+                if dtypes is not None:
+                    want_supported = not test.unsupported_dtypes_only
+                    dtypes = [t for t in dtypes
+                              if op.supports_dtype(t, cls.device_type) == want_supported]
+                else:
                     if cls.device_type == 'cpu' and op.dtypesIfCPU is not None:
                         dtypes = op.dtypesIfCPU
                     elif (cls.device_type == 'cuda' and not TEST_WITH_ROCM
@@ -295,9 +299,10 @@ class DeviceTypeTestBase(TestCase):
                     else:
                         dtypes = op.dtypes
 
-                # Inverts dtypes if the function wants unsupported dtypes
-                if test.unsupported_dtypes_only is True:
-                    dtypes = [d for d in get_all_dtypes() if d not in dtypes]
+                    # Inverts dtypes if the function wants unsupported dtypes
+                    if test.unsupported_dtypes_only is True:
+                        dtypes = [d for d in get_all_dtypes() if d not in dtypes]
+
                 dtypes = dtypes if dtypes is not None else (None,)
                 for dtype in dtypes:
                     instantiate_test_helper(cls,
