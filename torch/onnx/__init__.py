@@ -42,15 +42,35 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
     Arguments:
         model (torch.nn.Module): the model to be exported.
-        args (tuple of arguments or torch.Tensor): the inputs to
-            the model, e.g., such that ``model(*args)`` is a valid
-            invocation of the model.  Any non-Tensor arguments (including None) will
-            be hard-coded into the exported model; any Tensor arguments
-            will become inputs of the exported model, in the order they
-            occur in args.  If args is a Tensor, this is equivalent
-            to having called it with a 1-ary tuple of that Tensor.
-            (Note: passing keyword arguments to the model is not currently
-            supported.  Give us a shout if you need it.)
+        args (tuple of arguments or torch.Tensor, a dictionary consisting of named arguments (optional)): 
+            a dictionary to specify the input to the corresponding named parameter: 
+            - KEY: str, named parameter 
+            - VALUE: corresponding input 
+            args can be structured either as: 
+        
+            1. ONLY A TUPLE OF ARGUMENTS or torch.Tensor:: 
+            
+                ‘’args = (x, y, z)’'  
+        
+            The inputs to the model, e.g., such that ``model(*args)`` is a 	valid invocation 
+            of the model. Any non-Tensor arguments will be hard-coded into the exported model;
+            any Tensor arguments will become inputs of the exported model, in the order they 
+            occur in args. If args is a Tensor, this is equivalent to having 
+            called it with a 1-ary tuple of that Tensor. 
+            
+            2. A TUPLE OF ARGUEMENTS WITH A DICTIONARY OF NAMED PARAMETERS:: 
+        
+                ‘’args = (x, 
+                        { 
+                        ‘y’: input_y, 
+                        ‘z’: input_z 
+                        }) ‘’ 
+            
+            The inputs to the model are structured as a tuple consisting of  
+            non-keyword arguments and the last value of this tuple being a 	dictionary 
+            consisting of named parameters and the corresponding inputs as key-value pairs. 
+            If certain named argument is not present in the dictionary, it is assigned  
+            the default value, or None if default value is not provided. 
         f: a file-like object (has to implement fileno that returns a file descriptor)
             or a string containing a file name.  A binary Protobuf will be written
             to this file.
@@ -65,8 +85,26 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             TrainingMode.PRESERVE: export the model in inference mode if model.training is
             False and to a training friendly mode if model.training is True.
             TrainingMode.TRAINING: export the model in a training friendly mode.
-        input_names(list of strings, default empty list): names to assign to the
-            input nodes of the graph, in order
+        input_names(list of strings or dict<string, string>, default empty list): names 
+        to assign to the input nodes of the graph 
+            the dictionary specify the input names for inputs 
+            - KEY: str, input name in forward function 
+            - VALUE: str, input name to be assigned 
+            input_names can be structured as follows: 
+        
+            1. LIST OF STRINGS:: 
+        
+                ‘’input_names = [‘input_1’, 
+                            ‘input_2’]’’	 
+        
+            names to assign to the input nodes of the graph in order. 
+        
+            2. DICTIONARY WITH INPUT-INPUT NAMES PAIRS:: 
+                
+                ‘’input_names = { 
+                            ‘y’: ‘input_y’, 
+                            ‘z’: ‘input_z’ 
+                                }) 
         output_names(list of strings, default empty list): names to assign to the
             output nodes of the graph, in order
         aten (bool, default False): [DEPRECATED. use operator_export_type] export the
