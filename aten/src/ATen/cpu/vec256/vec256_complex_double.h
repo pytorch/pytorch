@@ -218,7 +218,82 @@ public:
     AT_ERROR("not supported for complex numbers");
   }
   Vec256<c10::complex<double>> exp() const {
-    return map(std::exp);
+    // For reference to [Step *] below,
+    // refer the implementation in vec256_complex_float.h
+    auto pos_inf = __m256d{INFINITY, INFINITY, INFINITY, INFINITY};
+    auto neg_inf = __m256d{-INFINITY, -INFINITY, -INFINITY, -INFINITY};
+    auto nan_vec = __m256d{NAN, NAN, NAN, NAN};
+    auto one_vec = __m256d{1, 1, 1, 1};
+    auto zero_vec = _mm256_setzero_pd();
+    auto real_mask = __m256d{-NAN, 0, -NAN, 0};
+    auto imag_mask = __m256d{0, -NAN, 0, -NAN};
+
+    auto zero_mask = _mm256_cmp_pd(values, zero_vec, _CMP_EQ_OQ);
+    auto pos_inf_mask = _mm256_cmp_pd(values, pos_inf, _CMP_EQ_OQ);
+    auto neg_inf_mask = _mm256_cmp_pd(values, neg_inf, _CMP_EQ_OQ);
+    auto is_inf_mask = _mm256_or_pd(pos_inf_mask, neg_inf_mask);
+    auto not_nan_mask = _mm256_cmp_pd(values, values, _CMP_EQ_OQ);
+    auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
+    auto not_is_finite_mask = _mm256_or_pd(is_inf_mask, nan_mask);
+
+    // if real is neginf and imag is not finite [Step 1]
+    auto neg_inf_real_mask = _mm256_permute_pd(neg_inf_mask, 0x05);
+    auto real_neg_inf_imag_not_finite = _mm256_and_pd(not_is_finite_mask, neg_inf_real_mask);
+    auto real_neg_inf_imag_not_finite_mask = _mm256_and_pd(real_neg_inf_imag_not_finite, imag_mask);
+    auto updated_values = _mm256_blendv_pd(values, one_vec, real_neg_inf_imag_not_finite_mask);
+
+    // if real is pos_inf and imag is 0 or not-finite [Step 2]
+    auto pos_inf_real_mask = _mm256_permute_pd(pos_inf_mask, 0x05);
+
+    auto zero_or_not_finite = _mm256_or_pd(zero_mask, not_is_finite_mask);
+    auto zero_or_not_finite_imag = _mm256_and_pd(zero_or_not_finite, imag_mask);
+    auto pos_inf_real_zero_or_not_finite_imag =
+        _mm256_and_pd(zero_or_not_finite_imag, pos_inf_real_mask);
+
+    // if real is pos_inf and imag is inf [Step 2.1]
+    auto infinity_imag = _mm256_and_pd(is_inf_mask, imag_mask);
+    auto pos_inf_real_zero_or_infinity_imag =
+        _mm256_and_pd(infinity_imag, pos_inf_real_mask);
+    auto pos_inf_real_not_finite_imag =
+        _mm256_blendv_pd(values, nan_vec, pos_inf_real_zero_or_infinity_imag);
+    auto pos_inf_real_not_finite_imag_mask = _mm256_blend_pd(
+        pos_inf_real_zero_or_not_finite_imag,
+        _mm256_permute_pd(pos_inf_real_zero_or_not_finite_imag, 0x05),
+        0x05);
+
+    //(std::isnan(__x.real()) && __x.imag() == 0) [Step 3]
+    auto real_is_nan = _mm256_and_pd(nan_mask, real_mask);
+    auto imag_is_zero = _mm256_and_pd(zero_mask, imag_mask);
+    auto imag_is_zero_shift = _mm256_permute_pd(imag_is_zero, 0x05);
+    auto real_is_nan_imag_zero_mask = _mm256_and_pd(real_is_nan, imag_is_zero_shift);
+    real_is_nan_imag_zero_mask = _mm256_blend_pd(
+        real_is_nan_imag_zero_mask,
+        _mm256_permute_pd(real_is_nan_imag_zero_mask, 0x05),
+        0x0A);
+
+    // Exp MUL
+    auto exp = Sleef_expd4_u10(updated_values);                               //exp(a)           exp(b)
+    exp = _mm256_blend_pd(exp, _mm256_permute_pd(exp, 0x05), 0x0A);   //exp(a)           exp(a)
+
+    auto sin_cos = Sleef_sincosd4_u10(updated_values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
+    auto cos_sin = _mm256_blend_pd(_mm256_permute_pd(sin_cos.y, 0x05),
+                                   sin_cos.x, 0x0A);                  //cos(b)           sin(b)
+    auto exp_computed = _mm256_mul_pd(exp, cos_sin);
+
+    // Handle inf in computation.
+    auto computed_pos_inf_mask = _mm256_cmp_pd(exp, pos_inf, _CMP_EQ_OQ);
+    auto computed_pos_inf_real_mask_exp = _mm256_permute_pd(computed_pos_inf_mask, 0x05);
+    auto computed_zero_mask = _mm256_and_pd(zero_mask, imag_mask);
+    auto pos_inf_real_zero_imag_exp = _mm256_and_pd(computed_zero_mask, computed_pos_inf_real_mask_exp);
+    exp_computed = _mm256_blendv_pd(exp_computed, values, pos_inf_real_zero_imag_exp);
+
+    // Handle previously computed extremal values [Step 1, Step 2]
+    exp_computed = _mm256_blendv_pd(
+        exp_computed,
+        pos_inf_real_not_finite_imag,
+        pos_inf_real_not_finite_imag_mask);
+    exp_computed = _mm256_blendv_pd(exp_computed, values, real_is_nan_imag_zero_mask);
+    return exp_computed;
   }
   Vec256<c10::complex<double>> expm1() const {
     AT_ERROR("not supported for complex numbers");
