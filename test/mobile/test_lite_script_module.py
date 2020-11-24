@@ -112,9 +112,7 @@ class TestLiteScriptModule(unittest.TestCase):
                 self.B0 = B()
 
             def forward(self, x):
-                z = self.B0(x)
-                return self.A0(z)
-                # return self.A0(self.B0(x)) + 1
+                return self.A0(self.B0(x)) + 1
 
         input = torch.tensor([5])
         scripted_module = torch.jit.script(C(), input)
@@ -123,18 +121,17 @@ class TestLiteScriptModule(unittest.TestCase):
 
         exported_module = scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
         optimized_exported_module = optimized_scripted_module._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=True)
-
         assert(b"mobile_debug.pkl" in exported_module)
         assert(b"module_debug_info" in exported_module)
         assert(b"top(C).forward" in exported_module)
         assert(b"top(C).A0(A).forward" in exported_module)
-        assert(b"top(C).A0(A).forward.B0(B).forward" in exported_module)
+        assert(b"top(C).B0(B).forward" in exported_module)
 
         assert(b"mobile_debug.pkl" in optimized_exported_module)
         assert(b"module_debug_info" in optimized_exported_module)
         assert(b"top(C).forward" in optimized_exported_module)
         assert(b"top(C).A0(A).forward" in optimized_exported_module)
-        assert(b"top(C).A0(A).forward.B0(B).forward" in optimized_exported_module)
+        assert(b"top(C).B0(B).forward" in optimized_exported_module)
 
     def test_load_mobile_module_with_debug_info(self):
         class MyTestModule(torch.nn.Module):

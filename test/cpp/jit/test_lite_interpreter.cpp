@@ -636,7 +636,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   //     super(A, self).__init__()
 
   //   def forward(self, x):
-  //     return x + 1
+  //     return x + 5
 
   // class B(nn.Module):
   //   def __init__(self):
@@ -645,7 +645,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   //     self.A1 = A()
 
   //   def forward(self, x):
-  //     return self.A0(x) + self.A1(x)
+  //     return self.A0.forward(x) + self.A1.forward(x)
 
   // There are 3 module information strings here.
   // "top(B).forward": for the add operator in top.

@@ -1914,13 +1914,13 @@ std::vector<Value*> inlineCallTo(
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
   for (const auto& kv : value_map) {
-    /* Find if the old value is the graph input, and skip it if it is.
+    /* Skip the old value if it is the graph input.
      * The reason is that, value_map contains values not all for the nodes of
      * the graph but primary inputs as well, and it will create duplicates when
      * the first inlined graph is input to the next one. To avoid this issue,
      * skip the old value when it is one of the
-     * callee->optimized_graph()->inputs(). Use optimized_graph here because it
-     * was used to generate value_map.
+     * callee->optimized_graph()->inputs(). Use optimized_graph() here because
+     * it was used to generate value_map.
      */
     auto is_graph_input = std::find(
         callee->optimized_graph()->inputs().begin(),
