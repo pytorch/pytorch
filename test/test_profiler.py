@@ -132,6 +132,9 @@ class TestProfiler(TestCase):
             def __init__(self, *args, **kwargs):
                 super(CustomSGD, self).__init__(*args, **kwargs)
 
+            def step(self):
+                return super(CustomSGD, self).step()
+
         def train():
             for _, data in enumerate(dataloader):
                 x, y = data[0], data[1]
