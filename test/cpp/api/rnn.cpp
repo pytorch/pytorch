@@ -94,6 +94,35 @@ void check_lstm_sizes(std::tuple<torch::Tensor, std::tuple<torch::Tensor, torch:
   ASSERT_GT(cx.norm().item<float>(), 0);
 }
 
+void check_lstm_sizes_proj(std::tuple<torch::Tensor, std::tuple<torch::Tensor, torch::Tensor>> lstm_output) {
+  // Expect the LSTM to have 32 outputs and 3 layers, with an input of batch
+  // 10 and 16 time steps (10 x 16 x n)
+
+  torch::Tensor output = std::get<0>(lstm_output);
+  std::tuple<torch::Tensor, torch::Tensor> state = std::get<1>(lstm_output);
+  torch::Tensor hx = std::get<0>(state);
+  torch::Tensor cx = std::get<1>(state);
+
+  ASSERT_EQ(output.ndimension(), 3);
+  ASSERT_EQ(output.size(0), 10);
+  ASSERT_EQ(output.size(1), 16);
+  ASSERT_EQ(output.size(2), 32);
+
+  ASSERT_EQ(hx.ndimension(), 3);
+  ASSERT_EQ(hx.size(0), 3); // layers
+  ASSERT_EQ(hx.size(1), 16); // Batchsize
+  ASSERT_EQ(hx.size(2), 32); // 32 hidden dims
+
+  ASSERT_EQ(cx.ndimension(), 3);
+  ASSERT_EQ(cx.size(0), 3); // layers
+  ASSERT_EQ(cx.size(1), 16); // Batchsize
+  ASSERT_EQ(cx.size(2), 64); // 64 cell dims
+
+  // Something is in the hiddens
+  ASSERT_GT(hx.norm().item<float>(), 0);
+  ASSERT_GT(cx.norm().item<float>(), 0);
+}
+
 struct RNNTest : torch::test::SeedingFixture {};
 
 TEST_F(RNNTest, CheckOutputSizes) {
@@ -119,6 +148,33 @@ TEST_F(RNNTest, CheckOutputSizes) {
   torch::Tensor diff = torch::cat({next_hx, next_cx}, 0) - torch::cat({output_hx, output_cx}, 0);
 
   // Hiddens changed
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
+}
+
+TEST_F(RNNTest, CheckOutputSizesProj) {
+  LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32));
+  // Input size is: sequence length, batch size, input size
+  auto x = torch::randn({10, 16, 128}, torch::requires_grad());
+  auto output = model->forward(x);
+  auto y = x.mean();
+
+  y.backward();
+  check_lstm_sizes_proj(output);
+
+  auto next = model->forward(x, std::get<1>(output));
+
+  check_lstm_sizes_proj(next);
+
+  auto output_hx = std::get<0>(std::get<1>(output));
+  auto output_cx = std::get<1>(std::get<1>(output));
+
+  auto next_hx = std::get<0>(std::get<1>(next));
+  auto next_cx = std::get<1>(std::get<1>(next));
+
+  torch::Tensor diff = next_hx - output_hx;
+  // Hiddens changed
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
+  diff = next_cx - output_cx;
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
