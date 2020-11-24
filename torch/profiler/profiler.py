@@ -31,13 +31,15 @@ class EnablePred(object):
         self.warmup = warmup
         self.active = active
         self.output_fn = output_fn
+
         def active_active_fn(step):
             if self._mod_step(step) == 1:
                 return [EnablePred.Action.STOP_TRACE, EnablePred.Action.START_WARMUP, EnablePred.Action.START_TRACE]
             else:
                 return []
+
         def inactive_warmup_fn(_):
-            assert False, "incorrect state sequence"
+            raise RuntimeError("Incorrect profiler state sequence")
 
         self.actions_map = {
             EnablePred.State.ACTIVE: {
@@ -57,14 +59,14 @@ class EnablePred(object):
             }
         }
 
-    def _mod_step(self, step:int):
+    def _mod_step(self, step: int):
         sum_states = self.wait + self.warmup + self.active
         r = step % sum_states
         if r == 0:
             r = sum_states
         return r
 
-    def _num_state(self, step:int):
+    def _num_state(self, step: int):
         mod_step = self._mod_step(step)
         if mod_step <= self.wait:
             return EnablePred.State.INACTIVE
@@ -73,7 +75,7 @@ class EnablePred(object):
         else:
             return EnablePred.State.ACTIVE
 
-    def actions(self, step:int):
+    def actions(self, step: int):
         if step == 1:
             st = self._num_state(step)
             if st == EnablePred.State.ACTIVE:
@@ -109,8 +111,8 @@ class profile(object):
     """
     def __init__(
             self,
-            activities:Iterable[ProfilerActivity],
-            enable_pred:Optional[EnablePred] = None,
+            activities: Iterable[ProfilerActivity],
+            enable_pred: Optional[EnablePred] = None,
             record_shapes=False,
             profile_memory=False,
             with_stack=False):
@@ -125,7 +127,7 @@ class profile(object):
 
         if not self.enable_pred:
             print("Warning: using profiler without enable predicate may result in the skewed " +
-                "results, use enable_pred to control the warmup time")
+                    "results, use enable_pred to control the warmup time")
 
     def __enter__(self):
         self.next_step()
@@ -153,11 +155,11 @@ class profile(object):
         self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
         self.step_rec_fn.__enter__()
 
-    def export_chrome_trace(self, path:str):
+    def export_chrome_trace(self, path: str):
         assert self.profiler
         return self.profiler.export_chrome_trace(path)
 
-    def key_averages(self, group_by_input_shape:bool=False, group_by_stack_n:int=0):
+    def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
         assert self.profiler
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
 
