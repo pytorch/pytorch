@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/Resize.h>
 #include <cuda_runtime.h>
 #include <type_traits>
 
@@ -23,6 +24,11 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/functional.h>
+#include <thrust/binary_search.h>
+#include <thrust/execution_policy.h>
+
 
 #if defined(__CUDACC__) && (CUSPARSE_VERSION >= 11000)
 #define IS_CUSPARSE11_AVAILABLE() 1
@@ -763,33 +769,57 @@ void sparse_sparse_matmul_cuda_kernel(
 
 } // end anonymous namespace
 
-Tensor fill_with_ones_cuda(const Tensor& input){
-  Tensor output = at::ones(input.sizes(), input.options().layout(kStrided));
 
-  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "fill_with_ones", [&] {
-    auto input_indices = input._indices();
-    auto input_values = input._values();
-    auto nnz = input._nnz();
+Tensor sparse_matrix_mask_helper_cuda(
+  int64_t r_nnz,
+  const SparseTensor& t,
+  const LongTensor& mask_indices
+) {
+  auto t_v = t._values();
+  Tensor r_values = at::zeros({r_nnz}, t_v.options());
+  
+  auto mask_indices_accessor = mask_indices.packed_accessor<int64_t, 2>();
+  auto t_i = t._indices();
+  auto t_nnz = t._nnz();
+  auto t_indices = t_i.packed_accessor<int64_t, 2>(); 
+  Tensor flatten_indices = at::zeros({t._nnz()}, mask_indices.options()); 
+  auto flatten_indices_accessor = flatten_indices.packed_accessor<int64_t, 1>();
 
-    auto input_indices_accessor = input_indices.packed_accessor<int64_t, 2>();
-    auto input_values_accessor = input_values.packed_accessor<scalar_t, 1>();
-    auto output_values_accessor = output.packed_accessor<scalar_t, 2>();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+  auto t_n_cols = t.size(1);
 
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-    auto policy = thrust::cuda::par(allocator).on(stream);
+  thrust::for_each(
+    policy,
+    thrust::make_counting_iterator(int64_t(0)),
+    thrust::make_counting_iterator(int64_t(t._nnz())),
+    [t_indices, flatten_indices_accessor, t_n_cols] __device__ (int64_t i) mutable {
+      auto index = t_indices[0][i] * t_n_cols + t_indices[1][i];
+      flatten_indices_accessor[i] = index; 
+  });
+
+  AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
+    auto i_ptr = flatten_indices.data_ptr<int64_t>();
+    scalar_t* r_values_accessor = r_values.data_ptr<scalar_t>();
+    scalar_t* t_values = t_v.data_ptr<scalar_t>(); 
 
     thrust::for_each(
-        policy,
-        thrust::make_counting_iterator(int64_t(0)),
-        thrust::make_counting_iterator(int64_t(nnz)),
-        [output_values_accessor, input_indices_accessor, input_values_accessor] __device__(int64_t index) mutable {
-          auto x = input_indices_accessor[0][index];
-          auto y = input_indices_accessor[1][index];
-          output_values_accessor[x][y] = input_values_accessor[index];
-        });
+      policy,
+      thrust::make_counting_iterator(int64_t(0)),
+      thrust::make_counting_iterator(int64_t(r_nnz)),
+      [mask_indices_accessor, r_values_accessor, t_values, t_n_cols, t_nnz, i_ptr] __device__ (int64_t i) mutable {
+        auto x = mask_indices_accessor[0][i];
+        auto y = mask_indices_accessor[1][i];
+        int64_t index = x * t_n_cols + y;
+        auto iter = thrust::lower_bound(thrust::device, i_ptr, i_ptr + t_nnz, index);
+        auto j = iter - i_ptr;
+        if (j < t_nnz && index == i_ptr[j]) {
+          r_values_accessor[i] = t_values[j];
+        }
+    });
   });
-  return output;
+  return r_values;
 }
 
 Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {

@@ -3148,7 +3148,7 @@ class TestSparse(TestCase):
                 r2 = torch.sparse.mm(a.to(torch.float64), a.to(torch.float32))
 
             self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
-            
+
         for n in range(2, 5):
             for m in range(2, 8):
                 for p in range(2, 8):

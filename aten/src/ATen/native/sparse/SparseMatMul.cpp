@@ -7,6 +7,12 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
 
+#include <thrust/device_ptr.h>
+#include <thrust/for_each.h>
+#include <thrust/functional.h>
+#include <thrust/binary_search.h>
+#include <thrust/execution_policy.h>
+
 namespace at { namespace native {
 
 using namespace at::sparse;
@@ -204,28 +210,47 @@ void sparse_matmul_kernel(
 
 } // end anonymous namespace
 
-Tensor fill_with_ones_cpu(const Tensor& input){
 
-  Tensor output = at::ones(input.sizes(), input.options().layout(kStrided));
+Tensor sparse_matrix_mask_helper_cpu(
+  int64_t r_nnz,
+  const SparseTensor& t,
+  const LongTensor& mask_indices
+) {
+  auto t_v = t._values();
+  Tensor r_values = at::zeros({r_nnz}, t_v.options());  
+
+  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
+  auto t_i = t._indices();
+  auto t_indices = t_i.accessor<int64_t, 2>(); 
+  Tensor flatten_indices = at::zeros({t._nnz()}, mask_indices.options()); 
   
-  AT_DISPATCH_FLOATING_TYPES(output.scalar_type(), "fill_with_ones", [&] {
-        auto input_indices = input._indices();
-        auto input_values = input._values();
-        auto nnz = input._nnz();
-        auto input_indices_accessor = input_indices.accessor<int64_t, 2>();
-        auto input_values_accessor = input_values.accessor<scalar_t, 1>();
-
-        auto output_values_accessor = output.accessor<scalar_t, 2>();
-
-        at::parallel_for(0, nnz, 0, [&](int64_t start, int64_t end) {
-          for (auto index = start; index < end; index++) {
-            auto x = input_indices_accessor[0][index];
-            auto y = input_indices_accessor[1][index];
-            output_values_accessor[x][y] = input_values_accessor[index];
-          }
-        });
-      });
-  return output;
+  at::parallel_for(0, t._nnz(), 1000, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      auto index = t_indices[0][i] * t.size(1) + t_indices[1][i];
+      flatten_indices[i] = index; 
+    }
+  });
+  
+  AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
+    auto i_ptr = flatten_indices.data_ptr<int64_t>();
+    auto r_values_accessor = r_values.accessor<scalar_t, 1>();
+    auto t_values = t_v.accessor<scalar_t, 1>(); 
+  
+    at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        auto x = mask_indices_accessor[0][i];
+        auto y = mask_indices_accessor[1][i];
+        
+        int64_t index = x * t.size(1) + y;
+        auto iter = thrust::lower_bound(i_ptr, i_ptr + t._nnz(), index);
+        auto j = iter - i_ptr;
+        if (j < t._nnz() && index == i_ptr[j]) {
+          r_values_accessor[i] = t_values[j];
+        }
+      }
+    });
+  });
+  return r_values;
 }
 
 Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
