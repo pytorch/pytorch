@@ -593,7 +593,7 @@ void validate_outputs(
       continue;
     }
     if (!grad.sizes().equals(metadata.shape())) {
-      grad = at::sum_to_size(std::move(grad), metadata.shape());
+      grad = at::native::sum_to_size(std::move(grad), metadata.shape());
     }
 
     bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
