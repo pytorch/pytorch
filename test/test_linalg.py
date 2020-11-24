@@ -1335,8 +1335,13 @@ class TestLinalg(TestCase):
         v = torch.zeros(4, 4, dtype=dtype, device=device)
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        rtol = 1e-5 if dtype is torch.float else 0
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=rtol, msg='VeV\' wrong')
+        if dtype is torch.float:
+            atol = 1e-7
+            rtol = 1e-5
+        else:
+            atol = 1e-8
+            rtol = 0
+        self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
         torch.eig(X, True, out=(e, v))
@@ -1356,8 +1361,13 @@ class TestLinalg(TestCase):
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        rtol = 1e-5 if dtype is torch.float else 0
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=rtol, msg='VeV\' wrong')
+        if dtype is torch.float:
+            atol = 1e-7
+            rtol = 1e-5
+        else:
+            atol = 1e-8
+            rtol = 0
+        self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
