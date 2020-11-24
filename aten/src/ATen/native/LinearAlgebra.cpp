@@ -1900,6 +1900,10 @@ std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
     const Tensor& LU_pivots,
     bool pivots_as_permutation_matrix
     ) {
+  TORCH_CHECK(LU_pivots.is_contiguous() && (LU_pivots.scalar_type() == at::kInt),
+      "LU_pivots is expected to be a contiguous tensor of torch.int32 dtype."
+      "Desigend to be used with the output produced by torch.lu");
+
   // In the generalized LU factorization, the following shape relations hold:
   // A.shape[-2:] == (m, n),
   // P.shape[-2:] == (m, m),

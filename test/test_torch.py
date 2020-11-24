@@ -15379,6 +15379,18 @@ class TestTorchDeviceType(TestCase):
         if self.device_type == 'cuda':
             run_test(False)
 
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.double)
+    def test__lu_unpack_check_input(self, device, dtype):
+        x = torch.rand(5, 5, 5, device=device, dtype=dtype)
+        lu_data, lu_pivots = torch.lu(x, pivot=True)
+
+        with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
+            torch._lu_unpack(lu_data, lu_pivots.long())
+        with self.assertRaisesRegex(RuntimeError, "contiguous tensor"):
+            torch._lu_unpack(lu_data, lu_pivots.transpose(-1, -2))
+
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_max_with_inf(self, device, dtype):
