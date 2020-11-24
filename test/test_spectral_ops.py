@@ -404,7 +404,7 @@ class TestFFT(TestCase):
     @onlyOnCPUAndCUDA
     @dtypes(torch.double, torch.complex128)  # gradcheck requires double
     @ops([op for op in spectral_funcs if op.ndimensional])
-    def test_fftn_backward(self, device, dtype, op):
+    def test_backward_nd(self, device, dtype, op):
         # input_ndim, s, dim
         transform_desc = [
             *product((2, 3), (None,), (None, (0,), (0, -1))),

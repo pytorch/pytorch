@@ -217,17 +217,7 @@ class UnaryUfuncInfo(OpInfo):
 
 # Metadata class for Fast Fourier Transforms in torch.fft.
 class SpectralFuncInfo(OpInfo):
-    """Operator information for 'universal unary functions (unary ufuncs).'
-    These are functions of a single tensor with common properties like:
-      - they are elementwise functions
-      - the input shape is the output shape
-      - they typically have method and inplace variants
-      - they typically support the out kwarg
-      - they typically have NumPy or SciPy references
-    See NumPy's universal function documentation
-    (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
-    about the concept of ufuncs.
-    """
+    """Operator information for torch.fft transforms. """
 
     def __init__(self,
                  name,  # the string name of the function
@@ -250,10 +240,10 @@ class SpectralFuncInfo(OpInfo):
             skips.append(SkipInfo('TestGradients', 'test_fn_gradgrad'))
 
         if not TEST_MKL:
-            skips.append(SkipInfo(device='cpu'))
+            skips.append(SkipInfo(device_type='cpu'))
 
         if TEST_WITH_ROCM:
-            skips.append(SkipInfo(device='cuda'))
+            skips.append(SkipInfo(device_type='cuda'))
 
         super().__init__(name=name,
                          dtypes=dtypes,
@@ -401,8 +391,16 @@ op_db = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
-    SpectralFuncInfo('fft.ifft',
-                     ref=np.fft.ifft,
+    SpectralFuncInfo('fft.fftn',
+                     ref=np.fft.fftn,
+                     ndimensional=True,
+                     dtypes=all_types_and_complex_and(torch.bool),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,
+                     decorators=[precisionOverride(
+                         {torch.float: 1e-4, torch.cfloat: 1e-4})],),
+    SpectralFuncInfo('fft.hfft',
+                     ref=np.fft.hfft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      supports_tensor_out=False,
@@ -413,15 +411,22 @@ op_db = [
                      dtypes=all_types_and(torch.bool),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
-    SpectralFuncInfo('fft.irfft',
-                     ref=np.fft.irfft,
+    SpectralFuncInfo('fft.rfftn',
+                     ref=np.fft.rfftn,
+                     ndimensional=True,
+                     dtypes=all_types_and(torch.bool),
+                     supports_tensor_out=False,
+                     test_inplace_grad=False,
+                     decorators=[precisionOverride({torch.float: 1e-4})],),
+    SpectralFuncInfo('fft.ifft',
+                     ref=np.fft.ifft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
-    SpectralFuncInfo('fft.hfft',
-                     ref=np.fft.hfft,
-                     ndimensional=False,
+    SpectralFuncInfo('fft.ifftn',
+                     ref=np.fft.ifftn,
+                     ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
@@ -431,27 +436,12 @@ op_db = [
                      dtypes=all_types_and(torch.bool),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
-    SpectralFuncInfo('fft.fftn',
-                     ref=np.fft.fftn,
-                     ndimensional=True,
-                     dtypes=all_types_and_complex_and(torch.bool),
-                     supports_tensor_out=False,
-                     test_inplace_grad=False,
-                     decorators=[precisionOverride(
-                         {torch.float: 1e-4, torch.cfloat: 1e-4})],),
-    SpectralFuncInfo('fft.ifftn',
-                     ref=np.fft.ifftn,
-                     ndimensional=True,
+    SpectralFuncInfo('fft.irfft',
+                     ref=np.fft.irfft,
+                     ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
-    SpectralFuncInfo('fft.rfftn',
-                     ref=np.fft.rfftn,
-                     ndimensional=True,
-                     dtypes=all_types_and(torch.bool),
-                     supports_tensor_out=False,
-                     test_inplace_grad=False,
-                     decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.irfftn',
                      ref=np.fft.irfftn,
                      ndimensional=True,
