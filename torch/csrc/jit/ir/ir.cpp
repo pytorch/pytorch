@@ -1879,28 +1879,21 @@ std::vector<Value*> inlineCallTo(
   WithInsertPoint guard(to_replace);
   TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
-  std::unordered_map<Node*, Node*> node_map;
   std::vector<torch::jit::Value*> new_outputs;
 
-  std::cout << "start inline_optimized_graph" << std::endl;
   if (inline_optimized_graph) {
-    to_replace->dump();
-    std::cout << "callee: " << callee->doc_string() << std::endl;
     new_outputs = insertGraph(
         *to_replace->owningGraph(),
         *(callee->optimized_graph()),
         to_replace->inputs(),
-        value_map,
-        node_map);
+        value_map);
   } else {
     new_outputs = insertGraph(
         *to_replace->owningGraph(),
         *(callee->graph()),
         to_replace->inputs(),
-        value_map,
-        node_map);
+        value_map);
   }
-  std::cout << "finish inline_optimized_graph" << std::endl;
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
@@ -1920,41 +1913,24 @@ std::vector<Value*> inlineCallTo(
   // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
-//  for (const auto& kv : value_map) {
-//    Node* new_node = kv.second->node();
-//
-//    std::cout << "new node: ";
-//    new_node->dump();
-//    if (!updated_nodes.insert(new_node).second) {
-//      continue;
-//    }
-//
-//    auto new_node_cs = new_node->callstack();
-//
-//    InlinedCallStack* raw_callstack_ptr =
-//        new_node_cs ? new_node_cs->get() : nullptr;
-//
-//    if (!new_callstack_entries.count(raw_callstack_ptr)) {
-//      if (new_node_cs) {
-//        new_callstack_entries[raw_callstack_ptr] =
-//            c10::make_intrusive<InlinedCallStack>(
-//                *new_node_cs,
-//                callee,
-//                to_replace->sourceRange(),
-//                module_instance_info);
-//      } else {
-//        new_callstack_entries[raw_callstack_ptr] =
-//            c10::make_intrusive<InlinedCallStack>(
-//                callee, to_replace->sourceRange(), module_instance_info);
-//      }
-//    }
-//    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
-//  }
-  for (const auto& kv : node_map) {
-    Node* new_node = kv.second;
+  for (const auto& kv : value_map) {
+    /* Find if the old value is the graph input, and skip it if it is.
+     * The reason is that, value_map contains values not all for the nodes of
+     * the graph but primary inputs as well, and it will create duplicates when
+     * the first inlined graph is input to the next one. To avoid this issue,
+     * skip the old value when it is one of the
+     * callee->optimized_graph()->inputs(). Use optimized_graph here because it
+     * was used to generate value_map.
+     */
+    auto is_graph_input = std::find(
+        callee->optimized_graph()->inputs().begin(),
+        callee->optimized_graph()->inputs().end(),
+        kv.first);
+    if (is_graph_input != callee->optimized_graph()->inputs().end()) {
+      continue;
+    }
 
-    std::cout << "new node: ";
-    new_node->dump();
+    Node* new_node = kv.second->node();
     if (!updated_nodes.insert(new_node).second) {
       continue;
     }
@@ -1980,7 +1956,6 @@ std::vector<Value*> inlineCallTo(
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
   }
-
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
@@ -2017,8 +1992,7 @@ std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs,
-    std::unordered_map<Value*, Value*>& value_map,
-    std::unordered_map<Node*, Node*>& node_map) {
+    std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -2029,7 +2003,6 @@ std::vector<Value*> insertGraph(
     for (size_t i = 0; i < node->outputs().size(); ++i) {
       value_map[node->outputs()[i]] = new_node->outputs()[i];
     }
-    node_map[node] = new_node;
   }
 
   std::vector<Value*> outputs;
@@ -2045,8 +2018,7 @@ std::vector<Value*> insertGraph(
     Graph& callee,
     ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
-  std::unordered_map<Node*, Node*> node_map;
-  return insertGraph(g, callee, inputs, value_map, node_map);
+  return insertGraph(g, callee, inputs, value_map);
 }
 
 void ProfileOp::cloneFrom(Node* other_) {

@@ -118,9 +118,6 @@ class TestLiteScriptModule(unittest.TestCase):
 
         input = torch.tensor([5])
         scripted_module = torch.jit.script(C(), input)
-        print("start")
-        print(scripted_module._c.dump_to_str())
-        print("end")
 
         optimized_scripted_module = optimize_for_mobile(scripted_module)
 
