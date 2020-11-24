@@ -342,7 +342,7 @@ use_c10_dispatcher: 'full'
 
 This will indicate the level of integration with the c10 dispatcher.
 If setting this to 'full' works for your operator, please do.
-This will enabled the full templated boxing and unboxing for your operator.
+This will enable the full templated boxing and unboxing for your operator.
 Some ops use features that aren't supported by those templates yet,
 and enabling `use_c10_dispatcher: full` for those will result in a compiler error.
 For those, use `use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'` instead,

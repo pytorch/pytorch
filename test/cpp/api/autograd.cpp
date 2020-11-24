@@ -496,7 +496,7 @@ TEST(CustomAutogradTest, InvalidGradients) {
 
   auto input1 = torch::randn({5,5}, torch::dtype(torch::kFloat).requires_grad(true));
   ASSERT_THROWS_WITH(
-    MyFunction::apply(input1).sum().backward(), "expected shape");
+    MyFunction::apply(input1).sum().backward(), "is not expandable to size");
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
 }
 
