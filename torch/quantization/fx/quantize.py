@@ -450,8 +450,8 @@ class Quantizer:
             elif isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
                 # observe standalone module
                 standalone_module = self.modules[node.target]
-                prepare = torch.quantization.quantize_fx.\
-                    _prepare_standalone_module_fx  # type: ignore
+                prepare = \
+                    torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore
                 observed_standalone_module = \
                     prepare(standalone_module, {"": qconfig})
                 observed_standalone_module.qconfig = qconfig
