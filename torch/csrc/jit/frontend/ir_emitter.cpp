@@ -4020,7 +4020,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
-    bool shouldMangle) const {
+    bool shouldMangle,
+    int temp_switch) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -4048,7 +4049,7 @@ std::unique_ptr<Function> CompilationUnit::define(
   if (shouldMangle) {
     // If `shouldMangle` is set, we should generate a unique name for this
     // function if there is already an existing one.
-    if (auto fn = find_function(name)) {
+    if (find_function(name) or find_hook(name) or find_pre_hook(name)) {
       name = mangle(name);
     }
   }
@@ -4056,7 +4057,13 @@ std::unique_ptr<Function> CompilationUnit::define(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    self->getClassType()->addMethod(fn.get());
+    if(temp_switch == 1) {
+      self->getClassType()->addForwardHook(fn.get());
+    } else if (temp_switch == 2) { 
+      self->getClassType()->addForwardPreHook(fn.get());
+    } else {
+      self->getClassType()->addMethod(fn.get()); 
+    }
   }
   return fn;
 }
@@ -4127,6 +4134,64 @@ std::vector<Function*> CompilationUnit::define(
   }
 
   return functions;
+}
+
+std::vector<Function*> CompilationUnit::define_hooks(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Def>& hookDefinitions,
+    const std::vector<ResolverPtr>& hookDefResolvers,
+    const std::vector<Def>& preHookDefinitions,
+    const std::vector<ResolverPtr>& preHookDefResolvers,
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(hookDefinitions.size() == hookDefResolvers.size());
+  TORCH_INTERNAL_ASSERT(preHookDefinitions.size() == preHookDefResolvers.size());
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table; // TODO idk if this is needed???
+
+  for (size_t i = 0; i < hookDefinitions.size(); i++) {
+    auto fn = define(
+        prefix,
+        hookDefinitions[i],
+        hookDefResolvers[i],
+        self,
+        function_table,
+        true,
+        1);
+
+    // function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_hook(std::move(fn));
+  }
+
+  for (size_t i = 0; i < preHookDefinitions.size(); i++) {
+    auto fn = define(
+        prefix,
+        preHookDefinitions[i],
+        preHookDefResolvers[i],
+        self,
+        function_table,
+        true,
+        2);
+
+    // function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_pre_hook(std::move(fn));
+  }
+
+  // We need to compile `__init__` first, since it can determine what attributes
+  // are available to other methods. So reorder the definitions accordingly.
+  //for (auto& kv : function_table) {
+  //  if (kv.first == "__init__") {
+  //    kv.second->ensure_defined();
+  //  }
+  //}
+
+  for (Function* function : functions) { // TODO I hope this works???
+    function->ensure_defined();
+  }
+
+  return functions; // TODO idk if return is needed
 }
 
 std::vector<Function*> CompilationUnit::define(

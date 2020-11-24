@@ -151,7 +151,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
-    if (auto method = classType->findMethod(field)) {
+    //if (auto method = classType->findMethod(field)) 
+    if (classType->findMethod(field) || classType->findForwardHook(field) || classType->findForwardPreHook(field)) {
+      std::cout << "in atter with field: " << field << std::endl;
       return std::make_shared<MethodValue>(getValue(), field);
     }
     if (classType->hasAttribute(field)) {
@@ -606,7 +608,6 @@ std::shared_ptr<SugaredValue> ClassValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   AT_ASSERT(n_binders <= 1);
-
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();

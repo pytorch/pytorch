@@ -489,7 +489,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field),
         ConcreteModuleType::fromJitType(selfType->getAttribute(field)));
-  } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
+  } else if (selfType->hasAttribute(field) || selfType->findMethod(field) || selfType->findForwardHook(field) || selfType->findForwardPreHook(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
@@ -575,6 +575,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     // If we reach here, it's because this is a "normal" method that just hasn't
     // been compiled yet (directly exported methods would have been returned by
     // step 1). Just compile it.
+    std::cout << "omg we found it captain!!" << std::endl;
     auto stub =
         py::module::import("torch.jit._recursive")
             .attr("compile_unbound_method")(concreteType_, unboundMethod);

@@ -178,8 +178,32 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    return attr(loc, caller, "forward")
+      std::cout << "source range: " << loc.text() << std::endl;
+      caller.graph()->dump();
+
+      auto& last_arg = args.back();
+      std::cout << "node at back " << last_arg.value(*caller.graph())->debugName() << std::endl; //->node()->debugName() << std::endl;
+
+      caller.graph()->dump();
+      // TODO need to figure out how to change args from list of args to tuple of args
+      for (const auto val : args){
+        //std::cout << " val name: " << val.type()->str() << std::endl;
+      }
+
+      std::cout << "class name: " << concreteType_->getJitType()->annotation_str() << std::endl;
+      for (const auto& hook : concreteType_->getJitType()->expect<ClassType>()->getForwardPreHooks()){
+        std::cout << "- name of prehook about to call: " << hook->qualname().qualifiedName() << std::endl;
+        //attr(loc, caller, hook->name())->call(loc, caller, args, kwargs, n_binders); 
+      }
+      for (const auto& prehook : concreteType_->getJitType()->expect<ClassType>()->getForwardHooks()){
+        std::cout << "- name of hook: " << prehook->qualname().qualifiedName() << std::endl;
+      }
+      std::cout << "compiling forward: " << std::endl;
+  
+    auto pause = attr(loc, caller, "forward")
         ->call(loc, caller, args, kwargs, n_binders);
+    caller.graph()->dump();
+    return pause; 
   }
 
   std::shared_ptr<SugaredDict> getSugaredDict(

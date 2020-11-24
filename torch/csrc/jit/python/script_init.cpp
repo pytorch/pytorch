@@ -1675,6 +1675,77 @@ void initJitScriptBindings(PyObject* module) {
               ++defs_it;
               ++defaults_it;
             }
+          })
+      .def(
+          "_create_hooks",
+          [](std::shared_ptr<ConcreteModuleType> concreteType,
+             const std::vector<Def>& hookDefs,
+             const std::vector<ResolutionCallback>& hookRcbs,
+             const std::vector<FunctionDefaults>& hookDefaults,
+             const std::vector<Def>& preHookDefs,
+             const std::vector<ResolutionCallback>& preHookRcbs,
+             const std::vector<FunctionDefaults>& preHookDefaults) {
+            TORCH_INTERNAL_ASSERT(hookDefs.size() == hookRcbs.size());
+            TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookRcbs.size());
+            std::vector<ResolverPtr> hookResolvers, preHookResolvers;
+
+            hookResolvers.reserve(hookRcbs.size());
+            for (auto& callback : hookRcbs) {
+              hookResolvers.push_back(pythonResolver(callback));
+            }
+            preHookResolvers.reserve(preHookRcbs.size());
+            for (auto& callback : preHookRcbs) {
+              preHookResolvers.push_back(pythonResolver(callback));
+            }
+
+            auto str_name = concreteType->getJitType()->str(); 
+            const auto& selfType =
+                concreteType->getJitType()->expect<ClassType>();
+            const auto& prefix = selfType->name().value();
+            const auto self = ModuleSelf(std::move(concreteType));
+            auto cu = selfType->compilation_unit();
+            std::cout << str_name << ": before hooks cu->define(), prefix: " << prefix.qualifiedName() << std::endl;
+            cu->define_hooks(
+                prefix,
+                hookDefs,
+                hookResolvers,
+                preHookDefs,
+                preHookResolvers,
+                &self,
+                true);
+            std::cout << str_name << ": after hooks cu->define()" << std::endl;
+            // Stitch in default arguments for each Def if provided
+            auto defaults_it = hookDefaults.begin();
+            auto defs_it = hookDefs.begin();
+            while (defs_it != hookDefs.end()) {
+              const auto hook_name =
+                  QualifiedName(prefix, (*defs_it).name().name());
+              auto& hook = cu->get_hook(hook_name);
+              std::cout << "str_name's method name : " << hook_name.name() << std::endl;
+              hook.setSchema(getSchemaWithNameAndDefaults(
+                  defs_it->range(),
+                  hook.getSchema(),
+                  at::nullopt,
+                  *defaults_it));
+              ++defs_it;
+              ++defaults_it;
+            }
+
+            defaults_it = preHookDefaults.begin(); // TODO make sure don't need new vars here
+            defs_it = preHookDefs.begin();
+            while (defs_it != preHookDefs.end()) {
+              const auto pre_hook_name =
+                  QualifiedName(prefix, (*defs_it).name().name());
+              auto& pre_hook = cu->get_pre_hook(pre_hook_name);
+              std::cout << "str_name's method name : " << pre_hook_name.name() << std::endl;
+              pre_hook.setSchema(getSchemaWithNameAndDefaults(
+                  defs_it->range(),
+                  pre_hook.getSchema(),
+                  at::nullopt,
+                  *defaults_it));
+              ++defs_it;
+              ++defaults_it;
+            }
           });
 
   m.def(

@@ -89,6 +89,8 @@ void insertEnterMethodCalls(Graph& g) {
   std::vector<Node*> enter_nodes;
   block_queue.emplace_back(g.block());
 
+  // std::cout << "called during execution!" << std::endl;
+
   // Traverse the graph while drilling down into blocks belonging to
   // a node and add all encountered prim::Enter nodes to enter_nodes.
   while (!block_queue.empty()) {

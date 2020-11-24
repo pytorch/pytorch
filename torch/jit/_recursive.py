@@ -285,6 +285,8 @@ class ConcreteTypeStore(object):
         self.type_store = {}
         # ConcreteTypes that have had their methods already compiled
         self.methods_compiled = set()
+        # ConcreteTypes that have had their prehooks and hooks already compiled
+        self.hooks_compiled = set()
 
     def get_or_create_concrete_type(self, nn_module):
         """
@@ -320,6 +322,23 @@ def create_methods_and_properties_from_stubs(concrete_type, method_stubs, proper
     property_rcbs = [p.resolution_callback for p in property_stubs]
 
     concrete_type._create_methods_and_properties(property_defs, property_rcbs, method_defs, method_rcbs, method_defaults)
+
+def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs):
+    hook_defs = [h.def_ for h in hook_stubs]
+    hook_rcbs = [h.resolution_callback for h in hook_stubs]
+    hook_defaults = [get_default_args(h.original_method) for h in hook_stubs]
+
+    pre_hook_defs = [h.def_ for h in pre_hook_stubs]
+    pre_hook_rcbs = [h.resolution_callback for h in pre_hook_stubs]
+    pre_hook_defaults = [get_default_args(h.original_method) for h in pre_hook_stubs]
+
+    print(f"pre_hook_stubs: {pre_hook_stubs}")
+    print(f"pre_hook_rcbs: {pre_hook_rcbs}")
+    print(f"pre_hook_defs: {pre_hook_defs}")
+    print(f"pre_hook_defaults: {pre_hook_defaults}")
+
+    concrete_type._create_hooks(hook_defs, hook_rcbs, hook_defaults, pre_hook_defs, pre_hook_rcbs, pre_hook_defaults)
+    print("done with _create_hooks")
 
 
 def get_module_concrete_type(nn_module, share_types=True):
@@ -379,8 +398,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
     """
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
-    method_stubs = stubs_fn(nn_module)
+    method_stubs = stubs_fn(nn_module) #infer_methods_to_compile is stubs func
     property_stubs = get_property_stubs(nn_module)
+    hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
 
     def init_fn(script_module):
         # Initialize the ScriptModule:
@@ -424,6 +444,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
 
     # Actually create the ScriptModule, initializing it with the function we just defined
     script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
+    
+    # Compile forward hooks and forward prehooks if necessary
+    if concrete_type not in concrete_type_store.hooks_compiled:
+        create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs)
+        # torch._C._run_emit_module_hook(cpp_module) // TODO what is this and do we need it for hooks???
+        concrete_type_store.hooks_compiled.add(concrete_type)
 
     # Compile methods if necessary
     if concrete_type not in concrete_type_store.methods_compiled:
@@ -617,6 +643,30 @@ def infer_methods_to_compile(nn_module):
     for method in uniqued_methods:
         stubs.append(make_stub_from_method(nn_module, method))
     return overload_stubs + stubs
+
+
+def get_hook_stubs(nn_module):
+    """
+    Returns forward hook and pre_hook ScriptModuleStubs
+    """
+    check_module_initialized(nn_module)
+
+    methods: List[str] = []
+    if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
+        forward_func = getattr(nn_module.forward, "__func__", None)
+        module_forward = get_function_from_type(torch.nn.Module, "forward")
+        if forward_func != module_forward:
+            methods = ['forward']
+
+    hook_stubs = []
+    for hook in nn_module._forward_hooks.values():
+        hook_stubs.append(make_stub(hook, hook.__name__)) # TODO not sure if function have name attribute, TODO what if same hook is ran twice?
+
+    pre_hook_stubs = []
+    for pre_hook in nn_module._forward_pre_hooks.values():
+        pre_hook_stubs.append(make_stub(pre_hook, pre_hook.__name__)) # TODO not sure if function have name attribute, TODO what if same prehook is ran twice?
+
+    return hook_stubs, pre_hook_stubs
 
 
 def get_property_stubs(nn_module):
