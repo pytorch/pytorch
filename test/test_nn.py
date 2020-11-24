@@ -11053,7 +11053,7 @@ class TestNNDeviceType(NNTestCase):
             # test non-persistent softmax kernel
             _test_helper((4, 1536))
 
-    @slowTest
+    @onlyCUDA
     @largeTensorTest('12GB')
     def test_conv_large_nosplit(self, device):
         # Here we just test the convolution correctly route to the fallback implementation
@@ -11255,7 +11255,7 @@ class TestNNDeviceType(NNTestCase):
             small_image.grad.zero_()
             large_view.grad.zero_()
 
-    @slowTest
+    @onlyCUDA
     @largeTensorTest('12GB')
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
@@ -11272,7 +11272,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff2, 0)
         self.assertEqual(maxdiff3, 0)
 
-    @slowTest
+    @onlyCUDA
     @skipCUDAIfRocm
     @largeTensorTest('12GB')
     def test_conv_large(self, device):
