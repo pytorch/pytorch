@@ -286,6 +286,7 @@ class TestFFT(TestCase):
 
     def _fft_grad_check_helper(self, torch_fn, input, args):
         inputs = (input.detach().requires_grad_(),)
+
         def test_fn(x):
             return torch_fn(x, *args)
 
