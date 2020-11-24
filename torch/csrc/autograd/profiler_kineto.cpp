@@ -80,6 +80,24 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
   }
 
+  // TODO: use kineto
+  void reportMemoryUsage(
+      void* /* unused */,
+      int64_t alloc_size,
+      c10::Device device) override {
+    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+      uint64_t thread_id = at::RecordFunction::currentThreadId();
+      LegacyEvent evt(
+          EventKind::MemoryAlloc,
+          at::StringView(""),
+          thread_id,
+          config_.state == ProfilerState::CUDA);
+      evt.setCpuUs(getTimeUs()); // upd. time using Kineto's clock
+      evt.updateMemoryStats(alloc_size, device);
+      getEventList(thread_id).record(std::move(evt));
+    }
+  }
+
   void addTraceEvents(libkineto::ActivityTraceInterface& trace) {
     const auto& events = *(trace.activities());
     for (const auto& ev_ptr : events) {

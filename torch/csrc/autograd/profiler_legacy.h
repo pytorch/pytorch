@@ -186,6 +186,10 @@ struct TORCH_API LegacyEvent {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
 
+  void setCpuUs(int64_t cpu_us) {
+    cpu_ns_ = cpu_us * 1000.0;
+  }
+
   double cpuUs() const {
     return cpu_ns_ / (1000.0);
   }
