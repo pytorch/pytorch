@@ -158,6 +158,10 @@ class TestProfiler(TestCase):
                 y_pred = self.linear2(h_relu)
                 return y_pred
 
+        class CustomSGD(torch.optim.SGD):
+            def __init__(self, *args, **kwargs):
+                super(CustomSGD, self).__init__(*args, **kwargs)
+
         def train():
             for _, data in enumerate(dataloader):
                 x, y = data[0], data[1]
@@ -179,23 +183,42 @@ class TestProfiler(TestCase):
         except Exception:
             self.assertTrue(False, "Expected no exception without profiling.")
 
+        def judge(expected_event_count, prof):
+            actual_event_count = {}
+            for e in prof.function_events:
+                if "#" in e.name:
+                    key = e.name
+                    if key in expected_event_count.keys():
+                        actual_event_count[key] = actual_event_count.setdefault(key, 0) + 1
+            for key, count in expected_event_count.items():
+                self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
+
         with profile() as prof:
             train()
-
         expected_event_count = {
             # "+1" because the final iteration will enter __next__ but skip the loop body.
-            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": N + 1,
+            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": (N + 1),
             "Optimizer.step#SGD.step": N,
             "Optimizer.zero_grad#SGD.zero_grad": N
         }
-        actual_event_count = {}
-        for e in prof.function_events:
-            if "#" in e.name:
-                key = e.name
-                if key in expected_event_count.keys():
-                    actual_event_count[key] = actual_event_count.setdefault(key, 0) + 1
-        for key, count in expected_event_count.items():
-            self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
+        judge(expected_event_count, prof)
+
+        # Test on pickle/unpickle.
+        optimizer = pickle.loads(pickle.dumps(optimizer))
+        with profile() as prof:
+            train()
+        judge(expected_event_count, prof)
+
+        # Test on customized optimizer.
+        optimizer = CustomSGD(model.parameters(), lr=1e-4)
+        with profile() as prof:
+            train()
+        expected_event_count = {
+            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": (N + 1),
+            "Optimizer.step#CustomSGD.step": N,
+            "Optimizer.zero_grad#CustomSGD.zero_grad": N
+        }
+        judge(expected_event_count, prof)
 
 if __name__ == '__main__':
     run_tests()
