@@ -1971,7 +1971,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
   permutation_matrix.scatter_add_(
     -2,
     unpacked_pivots.unsqueeze(-2).to(at::kLong),
-    at::ones(permutation_matrix.sizes(), permutation_matrix.options())
+    at::ones({1}, permutation_matrix.options()).expand(permutation_matrix.sizes())
   );
 
   return std::tie(permutation_matrix, L, U);
