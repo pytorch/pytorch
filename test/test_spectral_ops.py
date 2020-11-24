@@ -5,6 +5,10 @@ from contextlib import contextmanager
 from itertools import product
 import itertools
 
+# saves the torch.fft function that's clobbered by importing the torch.fft module
+fft_fn = torch.fft
+import torch.fft
+
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_WITH_SLOW, TEST_NUMPY, TEST_LIBROSA, slowAwareTest)
 from torch.testing._internal.common_device_type import \
@@ -22,10 +26,6 @@ if TEST_NUMPY:
 
 if TEST_LIBROSA:
     import librosa
-
-# saves the torch.fft function that's clobbered by importing the torch.fft module
-fft_fn = torch.fft
-import torch.fft
 
 
 def _complex_stft(x, *args, **kwargs):
