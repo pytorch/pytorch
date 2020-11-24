@@ -3911,7 +3911,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (input))
 
     #@disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
-    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(11)
     @skipIfUnsupportedOpsetVersion([12])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
@@ -4171,6 +4171,90 @@ class TestONNXRuntime(unittest.TestCase):
         self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
                          'Please try opset version 11.', the_exception.args[0])
 
+    def test_if_fold(self):
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.dim() == 2:
+                    y = y + 4
+                    y = y + 2
+                else:
+                    return y
+                return y
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.numel() > 1:
+                    y = y + 4
+                    y = y + 2
+                else:
+                    return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.dim() != 3:
+                    y = y + 4
+                    y = y + 2
+                else:
+                    return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.dim() >= 1:
+                    y = y + 4
+                    y = y + 2
+                else:
+                    return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.dim() <= 1:
+                    y = y + 4
+                    y = y + 2
+                else:
+                    return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.dim() < 3 and y.dtype == torch.int:
+                    y = y + 4
+                    y = y + 2
+                else:
+                    return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.dim() == 3 and y.dtype == torch.int:
+                    y = y + 4
+                    y = y + 2
+                else:
+                    return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipIfONNXShapeInference(False)
     def test_uninitialized(self):
@@ -4323,21 +4407,21 @@ class TestONNXRuntime(unittest.TestCase):
     #@disableScriptTest()  # shape/type inference
     def test_crossentropyloss(self):
         for ignore_index in [-100, 1]:
-            x = torch.randn(3, 5)
-            y = torch.empty(3, dtype=torch.long).random_(5)
-            y[y == 1] = ignore_index
-
-            self._crossentropyloss(x, y, ignore_index)
-
-            # x = torch.randn(3, 5, 2)
-            # y = torch.empty(3, 2, dtype=torch.long).random_(5)
+            # x = torch.randn(3, 5)
+            # y = torch.empty(3, dtype=torch.long).random_(5)
             # y[y == 1] = ignore_index
+
             # self._crossentropyloss(x, y, ignore_index)
 
-            x = torch.randn(3, 5, 2, 7)
-            y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+            x = torch.randn(3, 5, 2)
+            y = torch.empty(3, 2, dtype=torch.long).random_(5)
             y[y == 1] = ignore_index
             self._crossentropyloss(x, y, ignore_index)
+
+            # x = torch.randn(3, 5, 2, 7)
+            # y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+            # y[y == 1] = ignore_index
+            # self._crossentropyloss(x, y, ignore_index)
 
     def _crossentropyloss(self, x, y, ignore_index):
         class CrossEntropyLossNone(torch.nn.Module):
@@ -4755,7 +4839,7 @@ class TestONNXRuntime(unittest.TestCase):
         z = torch.ones(2, 3, 1)
         self.run_test(Model(), (x, y, z))
 
-    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_where_condition(self):
         class Model1(torch.nn.Module):
             def forward(self, input):
