@@ -332,6 +332,8 @@ else:
     @contextmanager  # noqa: T484
     def TemporaryDirectoryName(suffix=None):
         with tempfile.TemporaryDirectory(suffix=suffix) as d:
+            print(type(d))
+            print(d)
             yield d.name
 
 IS_UTF8_ENCODING = locale.getlocale()[1] == 'UTF-8'
