@@ -41,7 +41,7 @@ static inline void fixSizeOneDimStride(int dim, const int *size, int *stride, bo
   int64_t z = 1;
   int index = 0;
   std::vector<int> permutation(dim);
-  
+
   if (nhwc) {
     permutation[index++] = 1;
   }
@@ -260,9 +260,9 @@ struct TORCH_CUDA_API RNNDescriptor
           mode,
           algo,
           datatype));
-    if (proj_size != 0 && proj_size != hidden_size) {
+    if (proj_size != 0) {
       AT_CUDNN_CHECK(cudnnSetRNNProjectionLayers(
-            handle, 
+            handle,
             /*rnnDesc=*/mut_desc(),
             /*recProjSize=*/proj_size,
             /*outProjSize=*/0));
@@ -272,7 +272,7 @@ struct TORCH_CUDA_API RNNDescriptor
       if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       }
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
       }

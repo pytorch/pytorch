@@ -69,7 +69,10 @@ struct CellParamsBase : torch::CustomClassHolder {
   virtual Tensor matmul_ih(const Tensor& input) const = 0;
   virtual Tensor matmul_hh(const Tensor& h) const = 0;
   // by default doing nothing. CellParams will override this
-  // to define correct behavior for LSTMs with projections
+  // to define correct behavior for LSTMs with projections.
+  // This function is not pure virtual, because it's useful to
+  // provide this default implementation, so that all cell params
+  // that don't support projections work correctly (e.g. QuantizedCellParams variations)
   virtual Tensor matmul_hr(const Tensor& h) const {
     return h;
   }

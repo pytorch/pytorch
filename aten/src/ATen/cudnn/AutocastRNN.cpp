@@ -46,7 +46,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
   // If bias is not enabled, there are 2 (ih and hh weights).
   // This organization holds for all rnn types (RNN, GRU, and LSTM). If LSTM with projections is
   // used, additional hr weight is added.
-  if (proj_size > 0 && proj_size != hidden_size) {
+  if (proj_size > 0) {
     TORCH_INTERNAL_ASSERT((weight_stride0 == 3) || (weight_stride0 == 5),
                           "weight_stride0 must be 3 (if no bias) or 5 (if bias) for LSTM with projections.  Received ",
                           weight_stride0);
@@ -75,7 +75,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
     // with the right locations and layouts expected by cudnn.
     // This is (and should be) autograd-exposed.
     bool include_bias = true;
-    if (weight_stride0 == 3 || weight_stride0 == 2) {
+    if (weight_stride0 == 2 || (weight_stride0 == 3 && proj_size > 0)) {
       include_bias = false;
     }
     std::tie(redispatch_weight_buf, redispatch_weight) =

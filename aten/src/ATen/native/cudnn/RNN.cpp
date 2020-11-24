@@ -360,7 +360,7 @@ namespace {
     size_t weight_size;
     AT_CUDNN_CHECK(cudnnGetRNNParamsSize(handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
     auto elem_size = dataSize(datatype);
-    AT_ASSERTM(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
+    TORCH_INTERNAL_ASSERT(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
     return weight_size / elem_size;
   }
 
@@ -389,7 +389,7 @@ namespace {
         std::vector<Tensor>& params
   ) {
     void* matrix_pointer = nullptr;
-    // assuming it's LSTM which has 8 layers
+    // assuming it's LSTM which has 8 "linear layers" (i.e. 4 weights and 4 biases)
     int64_t linear_id = 8;
     FilterDescriptor lin_layer_mat_desc;
     AT_CUDNN_CHECK(cudnnGetRNNLinLayerMatrixParams(
@@ -407,27 +407,23 @@ namespace {
     cudnnTensorFormat_t format;
     int nb_dims;
     constexpr int min_dim = 3;
-    // TODO: The use of CPU tensor here is a bit goofy in C++,
-    // some sort of alloca would be good enough except that it is
-    // kind of convenient to be able to prod() on it.
-    Tensor filter_dim_a = at::empty(min_dim, at::initialTensorOptions().dtype(kInt));
+    int filter_dim_a[min_dim];
     AT_CUDNN_CHECK(cudnnGetFilterNdDescriptor(
           lin_layer_mat_desc.desc(),
           min_dim,
           &data_type,
           &format,
           &nb_dims,
-          filter_dim_a.data_ptr<int>()
+          filter_dim_a
           ));
 
-    AT_ASSERTM(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
-    filter_dim_a = filter_dim_a.slice(0, 0, nb_dims);
+    TORCH_INTERNAL_ASSERT(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
     auto elem_size = dataSize(getCudnnDataType(weight_buf));
     auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
-    AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
+    TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
     size_t offset = offset_bytes / elem_size;
 
-    int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data_ptr<int>();
+    int mat_numel = prod_intlist(filter_dim_a, filter_dim_a + nb_dims);
     // Generate a new parameter tensor which is a view into the weight_buf.
     std::initializer_list<int64_t> size = {mat_numel, 1};
     Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
@@ -490,24 +486,20 @@ namespace {
           cudnnTensorFormat_t format;
           int nb_dims;
           constexpr int min_dim = 3;
-          // TODO: The use of CPU tensor here is a bit goofy in C++,
-          // some sort of alloca would be good enough except that it is
-          // kind of convenient to be able to prod() on it.
-          Tensor filter_dim_a = at::empty(min_dim, at::initialTensorOptions().dtype(kInt));
+          int filter_dim_a[min_dim];
           AT_CUDNN_CHECK(cudnnGetFilterNdDescriptor(
                 lin_layer_mat_desc.desc(),
                 min_dim,
                 &data_type,
                 &format,
                 &nb_dims,
-                filter_dim_a.data_ptr<int>()
+                filter_dim_a
                 ));
 
-          AT_ASSERTM(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
-          filter_dim_a = filter_dim_a.slice(0, 0, nb_dims);
+          TORCH_INTERNAL_ASSERT(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
           auto elem_size = dataSize(getCudnnDataType(weight_buf));
           auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
-          AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
+          TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
           size_t offset = offset_bytes / elem_size;
 
           // for all the RNN types provided by CUDNN, all the ih weights
@@ -515,7 +507,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-          int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data_ptr<int>();
+          int mat_numel = prod_intlist(filter_dim_a, filter_dim_a + nb_dims);
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             // We could also exclude bias params by restricting cudnn_methods to just { cudnnGetRNNLinLayerMatrixParams }
             // at the very top.  However, to do so would throw off the cur_offset account, which is currently a strict
@@ -531,12 +523,12 @@ namespace {
               layer_params_count++;
             }
           } else {
-            AT_ASSERTM(cur_offset == offset, "cur_offset = ", cur_offset, "; offset = ", offset);
+            TORCH_INTERNAL_ASSERT(cur_offset == offset, "cur_offset = ", cur_offset, "; offset = ", offset);
           }
           cur_offset = offset + mat_numel;
         }
       } // for cudnn_method
-      if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+      if (rnn.proj_size != 0) {
         add_projection_weights(handle, rnn_desc, x_desc, w_desc, weight_buf, layer, params);
         layer_params_count++;
       }
@@ -544,7 +536,7 @@ namespace {
       if (layer == 0) {
         global_layer_params_count = layer_params_count;
       } else {
-        AT_ASSERTM(global_layer_params_count == layer_params_count,
+        TORCH_INTERNAL_ASSERT(global_layer_params_count == layer_params_count,
                    "global_layer_params_count = ", global_layer_params_count,
                    "; layer_params_count = ", layer_params_count);
       }
@@ -564,7 +556,7 @@ namespace {
     int64_t num_dir_layers = rnn.num_directions() * rnn.num_layers;
     const auto cudnn_methods = { cudnnGetRNNLinLayerMatrixParams, cudnnGetRNNLinLayerBiasParams };
     std::vector<void*> data_ptrs;
-    if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+    if (rnn.proj_size != 0) {
       data_ptrs.reserve(num_dir_layers * (2 * 2 + 1));
     } else {
       data_ptrs.reserve(num_dir_layers * 2 * 2);
@@ -592,8 +584,8 @@ namespace {
           data_ptrs.push_back(matrix_pointer);
         }
       }
-      if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
-        // assuming it's LSTM which has 8 layers
+      if (rnn.proj_size != 0) {
+        // assuming it's LSTM which has 8 "linear layers" (i.e. 4 weights and 4 biases)
         int64_t linear_id = 8;
         FilterDescriptor lin_layer_mat_desc;
         void* matrix_pointer;
@@ -631,7 +623,7 @@ namespace {
 
   void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to,
                          bool copy, bool allow_type_change=false) {
-    AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
+    TORCH_INTERNAL_ASSERT(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
       auto layer_params_from = params_from[i];
       auto layer_params_to = params_to[i];
@@ -681,7 +673,7 @@ namespace {
   }
 
   std::vector<int64_t> _hidden_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
-    if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+    if (rnn.proj_size != 0) {
       return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.proj_size};
     } else {
       return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.hidden_size};
@@ -694,7 +686,7 @@ namespace {
 
   std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
     auto out_size = rnn.hidden_size;
-    if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+    if (rnn.proj_size != 0) {
       out_size = rnn.proj_size;
     }
     if (tensors.is_input_packed()) {
@@ -751,7 +743,7 @@ namespace {
 
   cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input) {
     // LSTM with projections only works with standard algorithm
-    if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+    if (rnn.proj_size != 0) {
       return CUDNN_RNN_ALGO_STANDARD;
     }
 
@@ -832,7 +824,7 @@ namespace cudnn_rnn {
       for (size_t i = 0; i < weight.size(0); i++) {
         // There is a special case for LSTM with projections and no bias,
         // where weight copy is done in 0->0, 1->1, 2->4 layout
-        if (weight[i].size() == 3) {
+        if (weight[i].size() == 3 && params[i].size() == 5) {
           weight[i][0].set_(params[i][0].view_as(weight[i][0]));
           weight[i][1].set_(params[i][1].view_as(weight[i][1]));
           weight[i][2].set_(params[i][4].view_as(weight[i][2]));
@@ -1085,7 +1077,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto dhy = grad_hy.contiguous().view(hidden_size);
   auto dcy = grad_cy.defined() ? grad_cy.contiguous().view(cell_size) : Tensor();
   auto dhx = at::empty(hidden_size, hx.options());
-  AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
+  TORCH_INTERNAL_ASSERT(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
   auto dcx = cx.defined() ? at::empty(cell_size, cx.options()) : Tensor();
 
   TORCH_CHECK(fn_train,
@@ -1428,7 +1420,7 @@ Tensor try_get_weight_buf(
 
   int64_t num_parameters = parameters.size();
   int64_t num_ptrs = expected_data_ptrs.size();
-  if (proj_size != 0 && proj_size != hidden_size) {
+  if (proj_size != 0) {
     AT_ASSERT(num_parameters % (has_biases ? 5 : 3) == 0);
     AT_ASSERT(num_ptrs % 5 == 0);
     if (has_biases) {
@@ -1469,11 +1461,13 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
+  int64_t proj_size = 0;
   // For LSTM models with projections hidden size could be different
-  if (cx.defined()) {
+  if (cx.defined() && cx.size(2) != hx.size(2)) {
     hidden_size = cx.size(2);
+    proj_size = hx.size(2);
   }
-  int64_t proj_size = hx.size(2);
+
   // TODO:  try_get_weight_buf returns a Tensor, but _cudnn_rnn below takes a c10::optional<Tensor>
   // in weight_buf's slot.  Do we want try_get_weight_buf to return a c10::optional<Tensor>
   // instead of a defined or undefined Tensor?
@@ -1486,7 +1480,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
   int64_t num_params = has_biases ? 4 : 2;
-  if (proj_size != hidden_size) {
+  if (proj_size != 0) {
     ++num_params;
   }
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
@@ -1507,17 +1501,18 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
+  int64_t proj_size = 0;
   // For LSTM models with projections hidden size could be different
-  if (cx.defined()) {
+  if (cx.defined() && cx.size(2) != hx.size(2)) {
     hidden_size = cx.size(2);
+    proj_size = hx.size(2);
   }
-  int64_t proj_size = hx.size(2);
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, proj_size, num_layers, bidirectional);
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
   int64_t num_params = has_biases ? 4 : 2;
-  if (proj_size != hidden_size) {
+  if (proj_size != 0) {
     ++num_params;
   }
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
