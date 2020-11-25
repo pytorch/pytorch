@@ -858,6 +858,7 @@ static bool checkIfFold(Node* node) {
 }
 
 // TODO: needs refactoring
+// TODO: only numel() > 0 is const
 static bool constantFoldingValue(Node* node) {
   auto cast_node = node->input()->node();
   auto prev_node = cast_node->input()->node();
@@ -921,6 +922,38 @@ static bool constantFoldingValue(Node* node) {
   }
   return false;
 }
+
+// before peephole pass
+// graph(%y.2 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
+//   %4 : Long(2, strides=[1], device=cpu) = onnx::Shape(%y.2)
+//   %5 : Long(device=cpu) = onnx::Size(%4)
+//   %12 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
+//   %6 : Bool(device=cpu) = onnx::Equal(%5, %12)
+//   %11 : bool = onnx::Cast[to=9](%6)
+//   %7 : Int(3, 4, strides=[4, 1], device=cpu) = onnx::If(%11)
+//     block0():
+//       %13 : Int(requires_grad=0, device=cpu) = onnx::Constant[value={4}]()
+//       %8 : Int(3, 4, strides=[4, 1], device=cpu) = onnx::Add(%y.2, %13)
+//       %14 : Int(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
+//       %9 : Int(3, 4, strides=[4, 1], device=cpu) = onnx::Add(%8, %14)
+//       -> (%9)
+//     block1():
+//       %y.1 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu) = onnx::Identity(%y.2)
+//       -> (%y.1)
+//   return (%7)
+
+// after peephole pass
+// graph(%y.2 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
+//   %4 : Long(2, strides=[1], device=cpu) = onnx::Shape(%y.2)
+//   %5 : Long(device=cpu) = onnx::Size(%4)
+//   %12 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
+//   %6 : Bool(device=cpu) = onnx::Equal(%5, %12)
+//   %11 : bool = onnx::Cast[to=9](%6)
+//   %13 : Int(requires_grad=0, device=cpu) = onnx::Constant[value={4}]()
+//   %8 : Int(3, 4, strides=[4, 1], device=cpu) = onnx::Add(%y.2, %13)
+//   %14 : Int(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
+//   %9 : Int(3, 4, strides=[4, 1], device=cpu) = onnx::Add(%8, %14)
+//   return (%9)
 
 static void foldIfNode(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
