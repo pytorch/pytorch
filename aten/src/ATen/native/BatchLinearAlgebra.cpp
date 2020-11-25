@@ -472,7 +472,8 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   auto infos = at::empty({batchCount(input_broadcasted)}, input_broadcasted.options().dtype(kInt));
   result = at::_linalg_solve_out_helper(result, input_working_copy, infos);
 
-  // Now check LAPACK error codes
+  // Now check LAPACK/MAGMA error codes
+  infos = infos.to(kCPU);
   std::vector<int64_t> infos_(infos.data_ptr<int>(), infos.data_ptr<int>() + batchCount(input_broadcasted));
   if (input_broadcasted.dim() > 2) {
     batchCheckErrors(infos_, "linalg_solve");
