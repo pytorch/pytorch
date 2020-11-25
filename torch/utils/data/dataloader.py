@@ -460,6 +460,7 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked = True
             except Exception:
                 pass
+
         if max_num_worker_suggest is None:
             # os.cpu_count() could return Optional[int]
             # get cpu count first and check None in order to satify mypy check
@@ -1208,18 +1209,31 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             index = self._next_index()
         except StopIteration:
             return
-        for _ in range(self._num_workers):  # find the next active worker, if any
-            worker_queue_idx = next(self._worker_queue_idx_cycle)
-            if self._workers_status[worker_queue_idx]:
-                break
-        else:
-            # not found (i.e., didn't break)
-            return
 
-        self._index_queues[worker_queue_idx].put((self._send_idx, index))
-        self._task_info[self._send_idx] = (worker_queue_idx,)
-        self._tasks_outstanding += 1
-        self._send_idx += 1
+        # for _ in range(self._num_workers):  # find the next active worker, if any
+        #     worker_queue_idx = next(self._worker_queue_idx_cycle)
+        #     if self._workers_status[worker_queue_idx]:
+        #         break
+        # else:
+        #     # not found (i.e., didn't break)
+        #     return
+
+        worker_queue_idx = next(self._worker_queue_idx_cycle)
+        worker_queue_size = self._index_queues[worker_queue_idx].qsize()
+        for i in range(self._num_workers):  # find the next active worker, if any
+            size = self._index_queues[i].qsize()
+            if size < worker_queue_size:
+                worker_queue_size = size
+                worker_queue_idx = i
+        # print("Queue size of selected queue: ", worker_queue_size)
+
+        if self._workers_status[worker_queue_idx]:
+            self._index_queues[worker_queue_idx].put((self._send_idx, index))
+            self._task_info[self._send_idx] = (worker_queue_idx,)
+            self._tasks_outstanding += 1
+            self._send_idx += 1
+        else:
+            return
 
     def _process_data(self, data):
         self._rcvd_idx += 1
