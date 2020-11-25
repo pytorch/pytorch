@@ -149,8 +149,8 @@ Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
 Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
-Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
-Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, asin_stub); }
+Tensor asin(const Tensor& self) { return unary_op_impl_float(self, asin_stub); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 // arcsin, alias of asin
