@@ -7,11 +7,14 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
 
+#include <thrust/distance.h>
 #include <thrust/device_ptr.h>
 #include <thrust/for_each.h>
 #include <thrust/functional.h>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
+#include <thrust/set_operations.h>
+#include <thrust/iterator/discard_iterator.h>
 
 namespace at { namespace native {
 
@@ -218,35 +221,59 @@ Tensor sparse_matrix_mask_helper_cpu(
 ) {
   auto t_v = t._values();
   Tensor r_values = at::zeros({r_nnz}, t_v.options());  
-
-  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
   auto t_i = t._indices();
-  auto t_indices = t_i.accessor<int64_t, 2>(); 
-  Tensor flatten_indices = at::zeros({t._nnz()}, mask_indices.options()); 
-  
-  at::parallel_for(0, t._nnz(), 1000, [&](int64_t start, int64_t end) {
+  auto t_indices_accessor = t_i.accessor<int64_t, 2>();
+  auto t_nnz = t._nnz();
+
+  std::vector<int64_t> t_flatten_indices(t_nnz);
+  at::parallel_for(0, t_nnz, 0, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
-      auto index = t_indices[0][i] * t.size(1) + t_indices[1][i];
-      flatten_indices[i] = index; 
+      auto index = t_indices_accessor[0][i] * t.size(1) + t_indices_accessor[1][i];
+      t_flatten_indices[i] = index;
     }
   });
-  
+
+  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
+  std::vector<int64_t> mask_flatten_indices(r_nnz);
+  for (auto i = 0; i < r_nnz; i++) {
+    auto x = mask_indices_accessor[0][i];
+    auto y = mask_indices_accessor[1][i];
+    int64_t index = x * t.size(1) + y;
+    mask_flatten_indices[i] = index; 
+  }
+  auto max_sz = std::max(r_nnz, t_nnz);
+
+  std::vector<int64_t> t_index_set(max_sz);
+
+  auto result_end = thrust::set_intersection_by_key(
+    t_flatten_indices.begin(),
+    t_flatten_indices.end(), 
+    mask_flatten_indices.begin(), 
+    mask_flatten_indices.end(),
+    thrust::make_counting_iterator(int64_t(0)),
+    thrust::make_discard_iterator(),
+    t_index_set.begin());
+
+  auto new_sz = thrust::distance(t_index_set.begin(), result_end.second);
+
+  std::vector<int64_t> mask_index_set(max_sz);
+  thrust::set_intersection_by_key(
+    mask_flatten_indices.begin(), 
+    mask_flatten_indices.end(),
+    t_flatten_indices.begin(),
+    t_flatten_indices.end(), 
+    thrust::make_counting_iterator(int64_t(0)),
+    thrust::make_discard_iterator(),
+    mask_index_set.begin());
+
   AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
-    auto i_ptr = flatten_indices.data_ptr<int64_t>();
     auto r_values_accessor = r_values.accessor<scalar_t, 1>();
     auto t_values = t_v.accessor<scalar_t, 1>(); 
-  
-    at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
+    at::parallel_for(0, new_sz, 0, [&](int64_t start, int64_t end) {
       for (auto i = start; i < end; i++) {
-        auto x = mask_indices_accessor[0][i];
-        auto y = mask_indices_accessor[1][i];
-        
-        int64_t index = x * t.size(1) + y;
-        auto iter = thrust::lower_bound(i_ptr, i_ptr + t._nnz(), index);
-        auto j = iter - i_ptr;
-        if (j < t._nnz() && index == i_ptr[j]) {
-          r_values_accessor[i] = t_values[j];
-        }
+        int64_t target = mask_index_set[i];
+        int64_t origin = t_index_set[i];     
+        r_values_accessor[target] = t_values[ origin ];
       }
     });
   });

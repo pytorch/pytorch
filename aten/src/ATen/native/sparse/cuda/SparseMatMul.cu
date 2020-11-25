@@ -28,6 +28,7 @@
 #include <thrust/functional.h>
 #include <thrust/binary_search.h>
 #include <thrust/execution_policy.h>
+#include <thrust/iterator/discard_iterator.h>
 
 
 #if defined(__CUDACC__) && (CUSPARSE_VERSION >= 11000)
@@ -769,54 +770,88 @@ void sparse_sparse_matmul_cuda_kernel(
 
 } // end anonymous namespace
 
-
 Tensor sparse_matrix_mask_helper_cuda(
   int64_t r_nnz,
   const SparseTensor& t,
   const LongTensor& mask_indices
 ) {
   auto t_v = t._values();
-  Tensor r_values = at::zeros({r_nnz}, t_v.options());
-  
-  auto mask_indices_accessor = mask_indices.packed_accessor<int64_t, 2>();
+  Tensor r_values = at::zeros({r_nnz}, t_v.options());  
   auto t_i = t._indices();
+  auto t_indices_accessor = t_i.packed_accessor<int64_t, 2>();
   auto t_nnz = t._nnz();
-  auto t_indices = t_i.packed_accessor<int64_t, 2>(); 
-  Tensor flatten_indices = at::zeros({t._nnz()}, mask_indices.options()); 
-  auto flatten_indices_accessor = flatten_indices.packed_accessor<int64_t, 1>();
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
+
+  Tensor t_flatten_indices = at::zeros({t_nnz}, mask_indices.options()); 
+  auto t_flatten_indices_accessor = t_flatten_indices.packed_accessor<int64_t, 1>();
   auto t_n_cols = t.size(1);
 
   thrust::for_each(
     policy,
     thrust::make_counting_iterator(int64_t(0)),
-    thrust::make_counting_iterator(int64_t(t._nnz())),
-    [t_indices, flatten_indices_accessor, t_n_cols] __device__ (int64_t i) mutable {
-      auto index = t_indices[0][i] * t_n_cols + t_indices[1][i];
-      flatten_indices_accessor[i] = index; 
+    thrust::make_counting_iterator(int64_t(t_nnz)),
+    [t_indices_accessor, t_flatten_indices_accessor, t_n_cols] __device__ (int64_t i) mutable {
+      auto index = t_indices_accessor[0][i] * t_n_cols + t_indices_accessor[1][i];
+      t_flatten_indices_accessor[i] = index; 
   });
 
+  Tensor mask_flatten_indices = at::zeros({r_nnz}, mask_indices.options()); 
+  auto mask_flatten_indices_accessor = mask_flatten_indices.packed_accessor<int64_t, 1>();
+  auto mask_indices_accessor = mask_indices.packed_accessor<int64_t, 2>();
+
+  thrust::for_each(
+    policy,
+    thrust::make_counting_iterator(int64_t(0)),
+    thrust::make_counting_iterator(int64_t(r_nnz)),
+    [mask_flatten_indices_accessor, mask_indices_accessor, t_n_cols] __device__ (int64_t i) mutable {
+      auto index = mask_indices_accessor[0][i] * t_n_cols + mask_indices_accessor[1][i];
+      mask_flatten_indices_accessor[i] = index; 
+  });
+  
+  auto max_sz = std::max(r_nnz, t_nnz);
+  Tensor t_index_set = at::zeros({max_sz}, mask_indices.options()); 
+
+  auto result_end = thrust::set_intersection_by_key(
+    policy,
+    t_flatten_indices.data_ptr<int64_t>(),
+    t_flatten_indices.data_ptr<int64_t>() + t_nnz, 
+    mask_flatten_indices.data_ptr<int64_t>(), 
+    mask_flatten_indices.data_ptr<int64_t>() + r_nnz,
+    thrust::make_counting_iterator(int64_t(0)),
+    thrust::make_discard_iterator(),
+    t_index_set.data_ptr<int64_t>());
+
+  auto new_sz = thrust::distance(t_index_set.data_ptr<int64_t>(), result_end.second);
+
+  Tensor mask_index_set = at::zeros({max_sz}, mask_indices.options()); 
+
+  thrust::set_intersection_by_key(
+      policy,
+      mask_flatten_indices.data_ptr<int64_t>(), 
+      mask_flatten_indices.data_ptr<int64_t>() + r_nnz,
+      t_flatten_indices.data_ptr<int64_t>(),
+      t_flatten_indices.data_ptr<int64_t>() + t_nnz, 
+      thrust::make_counting_iterator(int64_t(0)),
+      thrust::make_discard_iterator(),
+      mask_index_set.data_ptr<int64_t>()); 
+
   AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
-    auto i_ptr = flatten_indices.data_ptr<int64_t>();
     scalar_t* r_values_accessor = r_values.data_ptr<scalar_t>();
     scalar_t* t_values = t_v.data_ptr<scalar_t>(); 
-
+    int64_t* mask_index_set_ptr = mask_index_set.data_ptr<int64_t>();
+    int64_t* t_index_set_ptr = t_index_set.data_ptr<int64_t>();
+    
     thrust::for_each(
       policy,
       thrust::make_counting_iterator(int64_t(0)),
-      thrust::make_counting_iterator(int64_t(r_nnz)),
-      [mask_indices_accessor, r_values_accessor, t_values, t_n_cols, t_nnz, i_ptr] __device__ (int64_t i) mutable {
-        auto x = mask_indices_accessor[0][i];
-        auto y = mask_indices_accessor[1][i];
-        int64_t index = x * t_n_cols + y;
-        auto iter = thrust::lower_bound(thrust::device, i_ptr, i_ptr + t_nnz, index);
-        auto j = iter - i_ptr;
-        if (j < t_nnz && index == i_ptr[j]) {
-          r_values_accessor[i] = t_values[j];
-        }
+      thrust::make_counting_iterator(int64_t(new_sz)),
+      [r_values_accessor, t_values, t_index_set_ptr, mask_index_set_ptr] __device__ (int64_t i) mutable {
+        int64_t target = mask_index_set_ptr[i];
+        int64_t origin = t_index_set_ptr[i];     
+        r_values_accessor[target] = t_values[ origin ];
     });
   });
   return r_values;
