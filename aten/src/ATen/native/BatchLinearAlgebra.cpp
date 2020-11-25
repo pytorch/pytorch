@@ -451,17 +451,20 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
 
   // NumPy works for 1-dimensional 'other' or batch of 1-dimensional tensors, we need to unsqueeze it
   // because 2-dimensional tensors are expected in the implementation
-  // unsqueeze it only if input.shape[:-1] == other.shape
   Tensor other_ = other;
   bool is_rhs_broadcasted = false;
   if (input.dim()-1 == other.dim()) {
-    // if 'other' is a batch of 1-dimensional tensors, unsqueeze it
+    // if 'other' is a batch of 1-dimensional tensors, unsqueeze it only if input.shape[:-1] == other.shape
     auto dims_input = input.sizes().vec();
     dims_input.pop_back();
     is_rhs_broadcasted = other.sizes().equals(dims_input);
     if (is_rhs_broadcasted) {
       other_ = other.unsqueeze(-1);
     }
+  } else if (other.dim() == 1) {
+    // if 'other' is a 1-dimensional tensor, unsqueeze it
+    is_rhs_broadcasted = true;
+    other_ = other.unsqueeze(-1);
   }
 
   // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
