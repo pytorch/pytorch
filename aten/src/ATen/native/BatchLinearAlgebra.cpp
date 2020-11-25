@@ -476,7 +476,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   result.copy_(other_broadcasted);
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
   at::native::resize_output(infos, {batchCount(input_broadcasted)});
-  result = at::_linalg_solve_out_helper(result, input_working_copy, infos);
+  result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
 
   // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
   if (is_rhs_broadcasted) {
