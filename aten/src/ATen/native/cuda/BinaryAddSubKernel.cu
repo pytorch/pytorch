@@ -23,8 +23,10 @@ struct AddFunctor {
   private:
     scalar_t alpha;
 };
+// stringify here?
 
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
+  // stringify here?
   // create template here
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
     // NOTE: we don't need compile-time switching this does at all, so maybe use alternative?
@@ -88,115 +90,143 @@ static void getMajorMinor(
 
 namespace {
 
-  // TODO: update with IntDivider
-  // TODO: possibly size specialize with template
+// Host-side version of the Tensor Accessor struct
 struct TensorAccessor {
+  // NOTE: strides must be in bytes, not elements!
   TensorAccessor(
+      const ScalarType scalar_type,
+      const int64_t _element_size,
       const IntArrayRef shape,
       const IntArrayRef strides,
-      const int64_t _element_size)
-      : element_size_{_element_size}, ndims_(shape.size()) {
+      void* _data)
+      : element_size_(_element_size),
+        ndims_(shape.size()),
+        data_{static_cast<char*>(_data)} {
 
+    // TODO: improve this CUDA-compatible scalar type passing
+    if (scalar_type == kFloat) {
+      scalar_type_ = 0;
+    } else if (scalar_type == kDouble) {
+      scalar_type_ = 1;
+    }
+
+    // TODO: is there a better way to acquire and pass these to the device?
     std::copy(shape.cbegin(), shape.cend(), std::begin(sizes_));
     std::copy(strides.cbegin(), strides.cend(), std::begin(strides_));
   }
 
-  C10_HOST_DEVICE int64_t index_to_offset(int32_t idx) const {
-    int64_t offset = 0;
-
-    #pragma unroll
-    for (int32_t dim = 0; dim < 25; ++dim) {
-      if (dim == ndims_) {
-        break;
-      }
-
-      const auto quot = sizes_[dim] / idx;
-      const auto rem = sizes_[dim] % idx;
-
-      idx = quot;
-      offset += rem * strides_[dim];
-    }
-
-    return offset;
-  }
-
-  int64_t element_size_;
-  int32_t ndims_;
-  int32_t sizes_[25];
-  int64_t strides_[25];
+  short scalar_type_;
+  short element_size_;
+  short ndims_;
+  int sizes_[25];
+  // NOTE: strides is in bytes, not elements!
+  int strides_[25];
+  char* data_;
 };
 
+#define stringify(...) std::string(#__VA_ARGS__); __VA_ARGS__
+const auto jittable_foo_functor = stringify(
+  template<typename scalar_t>
+  struct FooFunctor {
+    FooFunctor(scalar_t a): alpha{a} {}
+    __device__ __forceinline__ scalar_t operator() (const scalar_t a, const scalar_t b) const {
+      return a + alpha * b;
+    }
+
+    scalar_t alpha;
+  };
+);
+#undef stringify
+
+// TODO: create a stringify-like macro so this looks like C++
+//   but produces the appropriate type with newlines
+//   NOTE: this probably requires creating macros for the template inserts, too
 static auto cuda_template = torch::jit::CodeTemplate(R"(
+  // Device-side of TensorAccessor
   struct TensorAccessor {
     TensorAccessor() = default;
 
-    // TODO: add a real function here
-    __host__ __device__ long index_to_offset(int idx) const {
-      return idx;
+    // TODO: write this function
+    // Returns the byte offset from the pointer data_ to access
+    //   the specified element
+    __device__ int index_to_offset(int idx) const {
+      return 0;
     }
 
-    long element_size_;
-    int ndims_;
+    short scalar_type_;
+    short element_size_;
+    short ndims_;
     int sizes_[25];
-    long strides_[25];
+    // NOTE: strides is in bytes, not elements!
+    int strides_[25];
+    char* data_;
   };
 
-  ${function}
+  ${functor}
 
+  // NOTE: assumes the op is binary (i.e. has three arguments out, a, and b)
+  // TODO: setup grid-stride loop
   extern "C" __global__
-  void foo_kernel(
-      long numel,
-      TensorAccessor* out_accessor,
-      TensorAccessor* a_accessor,
-      TensorAccessor* b_accessor,
-      float* out,
-      float* a,
-      float* b) {
+  void ${name}_kernel(
+      ${name}<${scalar_type}> functor,
+      const int numel,
+      TensorAccessor out,
+      TensorAccessor a,
+      TensorAccessor b) {
+
+    // NOTE: only the first thread operates on the first element for now
     if (blockIdx.x == 0 && threadIdx.x == 0) {
-      for (int i = 0; i < 4; ++i) {
-        int out_offset = out_accessor->index_to_offset(i);
-        int a_offset = a_accessor->index_to_offset(i);
-        int b_offset = b_accessor->index_to_offset(i);
-        // TODO: allow for custom names
-        out[out_offset] = foo(a[a_offset], b[b_offset]);
+      ${scalar_type} a_value;
+      int a_offset = a.index_to_offset(0);
+
+      ${scalar_type} b_value;
+      int b_offset = b.index_to_offset(0);
+
+      int out_offset = out.index_to_offset(0);
+
+      // TODO: refactor the loading, see c10::fetch_and_cast
+      if (a.scalar_type_ == 0) {
+        a_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(a.data_ + a_offset)));
+      } else if (a.scalar_type_ == 1) {
+        a_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(a.data_ + a_offset)));
       }
+
+      if (b.scalar_type_ == 0) {
+        b_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(b.data_ + b_offset)));
+      } else if (b.scalar_type_ == 1) {
+        b_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(b.data_ + b_offset)));
+      }
+
+      ${scalar_type} out_value = functor(a_value, b_value);
+
+      // TODO: refactor the storing, see c10::cast_and_store
+      if (out.scalar_type_ == 0) {
+        *(reinterpret_cast<float*>(out.data_ + out_offset)) = static_cast<float>(out_value);
+      } else if (out.scalar_type_ == 1) {
+        *(reinterpret_cast<double*>(out.data_ + out_offset)) = static_cast<double>(out_value);
+      }
+
+      printf("%f\n", out_value);
     }
   }
-
-  #define NUM_THREADS (C10_WARP_SIZE * 2)
-  #define THREAD_WORK_SIZE 4
-  #define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
-
-  extern "C" __global__
-  void vectorized_elementwise_kernel(int numel, ${args}) {
-    const int remaining = numel - BLOCK_WORK_SIZE * blockIdx.x;
-
-    if (remaining < BLOCK_WORK_SIZE) {
-
-    } else {
-      int idx = blockIdx.x;
-      using vec_t = aligned_vector<scalar_t, vec_size>;
-      vec_t *from_ = reinterpret_cast<vec_t *>(from);
-      int thread_idx = threadIdx.x;
-      #pragma unroll
-      for (int i = 0; i < loop_size; i++) {
-        int index = thread_idx + i * num_threads;
-        vec_t v = from_[index];
-        #pragma unroll
-        for (int j = 0; j < vec_size; j++) {
-          to(vec_size * i + j) = v.val[j];
-        }
-      }
-    }
-  }
-
 
 // instantiations here
 )");
 
+static int ceilDiv(const int a, const int b) {
+  return (a + b - 1) / b;
+}
+
 } // anonymous namespace
 
-Tensor foo_cuda(const Tensor& self, const Tensor& other) {
+#define NUM_THREADS (C10_WARP_SIZE * 2)
+#define THREAD_WORK_SIZE 4
+#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
+
+Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
+  TORCH_CHECK(self.scalar_type() == kFloat);
+  TORCH_CHECK(other.scalar_type() == kDouble);
+
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
 
@@ -208,57 +238,68 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other) {
   std::cout << "iter.tensor(2).scalar_type(): " << iter.tensor(2).scalar_type() << std::endl;
   std::cout << "common_dtype: " << iter.common_dtype() << std::endl;
 
-  // launch_vectorized_kernel path
-  int64_t numel = iter.numel();
-  int64_t grid = (numel + block_work_size - 1) / block_work_size;
-
-  const auto ntensors = iter.ntensors();
-  // at::detail::Array<char*, ntensors> data;
-  // for (auto i = decltype(ntensors){0}; i < ntensors; i++) {
-  //   data[i] = (char*)iter.data_ptr(i);
-  // }
-  // TODO: revise vectorize functions (see MemoryAccess.cuh) to work at runtime
-  //   without array allocation
-  // int32_t vec_size = memory::can_vectorize_up_to<func_t>(data);
-  // TODO: for now assume in case 4
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  // vectorized_elementwise_kernel switch here
+  std::cout << "jittable functor string" << std::endl;
+  std::cout << jittable_foo_functor << std::endl;
 
 
+  const auto output_dtype = iter.tensor(0).scalar_type();
+  const int32_t output_dtype_as_int = static_cast<int32_t>(output_dtype);
+  std::cout << "output_dtype_as_int: " << output_dtype_as_int << std::endl;
+
+  // Constructs kernel args
   std::vector<void*> args;
+
+  // Creates functor arg
+  // TODO: refactor with dispatch macro?
+  // TODO: support float or double dynamically
+  FooFunctor<double> my_functor{alpha_scalar.to<double>()};
+  args.push_back((void*)&my_functor);
+
+  // Adds numel arg
+  // NOTE: the intermediate capture is neccessary
   int64_t numel = iter.numel();
   args.push_back((void*)&numel);
 
-  std::cout << "iter.ntensors(): " << iter.ntensors() << std::endl;
-
-  #define stringify(...) std::string("__device__ __forceinline__ " #__VA_ARGS__)
-  const auto s = stringify(
-    float foo(float a, float b) {
-      return a + b;
-    }
-  );
-  #undef stringify
-
-  std::cout << "s: " << s << std::endl;
-
-  torch::jit::TemplateEnv env;
-  env.s("function", s);
-  std::string code = cuda_template.format(env);
-
-  std::cout << "code: " << code << std::endl;
-
+  // Creates per-tensor accessors
+  // TODO: this could be made more efficient by using the fact that the
+  //   function is binary so no loop is needed, no intermediate vector
+  //   holding the accessors would be needed is needed, and the accessors
+  //   could be pushed onto args directly without lifetime concerns
   std::vector<TensorAccessor> accessors;
   for (auto i = decltype(iter.ntensors()){0}; i < iter.ntensors(); ++i) {
-    accessors.emplace_back(iter.shape(), iter.strides(i), iter.element_size(i));
+    accessors.emplace_back(
+      iter.tensor(i).scalar_type(),
+      iter.element_size(i),
+      iter.shape(),
+      iter.strides(i),
+      iter.data_ptr(i));
   }
 
-  for (const auto& accessor : accessors) {
+   for (const auto& accessor : accessors) {
     args.push_back((void*)&accessor);
   }
 
-  // Acquires device and NVRTC properties (for compile arch and occupancy
-  // calculations)
+  // Constructs kernel code
+  torch::jit::TemplateEnv env;
+  env.s("name", "FooFunctor");
+  env.s("functor", jittable_foo_functor);
+
+  // Identifies scalar type
+  // TODO: there has to be an existing way of doing this (i.e. converting scalar type to string)
+  const auto& common_dtype = iter.common_dtype();
+  std::string common_dtype_string;
+  if (common_dtype == kFloat) {
+    common_dtype_string = "float";
+  } else if (common_dtype == kDouble) {
+    common_dtype_string = "double";
+  }
+  env.s("scalar_type", common_dtype_string);
+
+  std::string code = cuda_template.format(env);
+  std::cout << "code: " << code << std::endl;
+
+  // Compiles kernel
+  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
   getMajorMinor(prop, major, minor);
@@ -269,15 +310,15 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other) {
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
-  // constructs nvrtc arguments
+  // constructs nvrtc build arguments
   const std::string compute = "--gpu-architecture=compute_" +
     std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> build_args = {
     "--std=c++14", compute.c_str(), "-default-device"};
 
+  // compiles and validates result
   const auto compilation_result =
         nvrtc.nvrtcCompileProgram(program, build_args.size(), build_args.data());
-
   if (compilation_result != NVRTC_SUCCESS) {
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
@@ -298,31 +339,22 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other) {
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetPTX(program, ptx.data()));
 
   AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&module, ptx.data()));
-  const std::string name = "foo_kernel";
+  const std::string kernel_name = "FooFunctor_kernel";
   AT_CUDA_DRIVER_CHECK(
-    nvrtc.cuModuleGetFunction(&function, module, name.c_str()));
+    nvrtc.cuModuleGetFunction(&function, module, kernel_name.c_str()));
 
+  // Computes blocks and block size
+  // TODO: review this block computation vs cuda loops
   int maxBlocks;
   AT_CUDA_DRIVER_CHECK(nvrtc.cuOccupancyMaxActiveBlocksPerMultiprocessor(
     &maxBlocks, function, 128, 0));
   maxBlocks *= prop->multiProcessorCount;
 
-  // const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
-  const int nBlocks = 1;
-
   constexpr int32_t kBlockSize = 128;
+  const auto nBlocks = std::min(maxBlocks, ceilDiv(numel, kBlockSize));
 
-  void* out_ptr = iter.output().data_ptr();
-  void* self_ptr = self.data_ptr();
-  void* other_ptr = other.data_ptr();
-
-  // args.push_back(out_ptr);
-  args.push_back((void*)&out_ptr);
-  args.push_back((void*)&self_ptr);
-  args.push_back((void*)&other_ptr);
-
-  // Launches kernel on current stream (device was set by executor)
-
+  // Launches kernel on current stream
+  auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
     function,
     nBlocks,
@@ -359,6 +391,19 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other) {
   //     *out_float = *a_float + *b_float;
   //   }
   // })foo"};
+
+  // OLD AND EXPERIMENTAL CODE BELOW HERE
+
+  // // Constructs accessor arguments
+  // std::vector<std::string> accessor_strings;
+  // int accessor_name_counter = 65;
+  // for (const auto& accessor : accesors) {
+  //   torch::jit::TemplateEnv local;
+  //   local.s("tensor_name", static_cast<char>(accessor_name_counter++));
+  //   accessor_strings.emplace_back(torch::jit::format(", TensorAccessor ${tensor_name}", env);
+  // }
+
+  // env.v("tensor_accessors", accessor_strings);
 }
 
 }} // namespace at::native
