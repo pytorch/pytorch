@@ -2,6 +2,7 @@ import collections
 import gc
 import unittest
 
+import tempfile
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (
@@ -16,6 +17,14 @@ try:
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
+
+
+HAS_TORCHVISION = False
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    pass
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -48,6 +57,24 @@ class TestProfilerCUDA(TestCase):
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
 
+
+class DummyModule_1(nn.Module):
+    def __init__(self):
+        super(DummyModule_1, self).__init__()
+        self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
+
+    def forward(self, x):
+        return self.conv(x)
+
+class DummyModule_2(nn.Module):
+    def __init__(self):
+        super(DummyModule_2, self).__init__()
+        self.dummy = DummyModule_1()
+
+    def forward(self, x):
+        return self.dummy(x)
+
+
 class TestProfiler(TestCase):
     def test_source(self):
         """Checks that source code attribution works for eager, TS and autograd mode
@@ -66,15 +93,7 @@ class TestProfiler(TestCase):
             w = ts_method_2(x, y) + a
             return w.sum()
 
-        class DummyModule(nn.Module):
-            def __init__(self):
-                super(DummyModule, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
-
-            def forward(self, x):
-                return self.conv(x)
-
-        mod = DummyModule()
+        mod = DummyModule_1()
 
         with profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
@@ -163,22 +182,6 @@ class TestProfiler(TestCase):
         self.assertEqual(called_num[0], 2)
 
     def test_module_attrib_eager(self):
-        class DummyModule_1(nn.Module):
-            def __init__(self):
-                super(DummyModule_1, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
-
-            def forward(self, x):
-                return self.conv(x)
-
-        class DummyModule_2(nn.Module):
-            def __init__(self):
-                super(DummyModule_2, self).__init__()
-                self.dummy = DummyModule_1()
-
-            def forward(self, x):
-                return self.dummy(x)
-
         model = DummyModule_2()
         inp = torch.randn(2, 3, 2, 2)
         with profile(with_stack=True, use_kineto=kineto_available()) as p:
@@ -192,6 +195,26 @@ class TestProfiler(TestCase):
             if e.name == "aten::mkldnn_convolution":
                 self.assertTrue(any(["DummyModule_1" in entry for entry in e.stack]))
                 self.assertTrue(any(["DummyModule_2" in entry for entry in e.stack]))
+
+    @unittest.skipIf(not HAS_TORCHVISION, "Requires torchvision to run")
+    def test_export_stacks(self):
+        model = torchvision.models.resnet18()
+        inp = torch.rand(1,3,224,224)
+        with profile(with_stack=True, use_kineto=kineto_available()) as p:
+            model(inp)
+
+        with tempfile.NamedTemporaryFile(mode="w+") as f:
+            p.export_stacks(f.name)
+            lines = f.readlines()
+            assert len(lines) > 0, "Empty stacks file"
+            for line in lines:
+                is_int = False
+                try:
+                    int(line.split(" ")[-1])
+                    is_int = True
+                except ValueError:
+                    pass
+                assert is_int, "Invalid stacks file"
 
 
 if __name__ == '__main__':

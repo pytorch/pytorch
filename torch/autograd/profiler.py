@@ -261,6 +261,21 @@ class EventList(list):
             f.truncate()
             f.write("]")
 
+    def export_stacks(self, path: str, metric: str):
+        assert metric in ["self_cpu_time_total", "self_cuda_time_total"]
+        import os
+        translate_table = str.maketrans(" ;\t\n", "____")
+        with open(path, 'w') as f:
+            for evt in self:
+                if evt.stack and len(evt.stack) > 0:
+                    metric_value = getattr(evt, metric)
+                    stack_str = ""
+                    for entry in reversed(evt.stack):
+                        stack_str += entry.translate(translate_table)
+                        stack_str += ";"
+                    stack_str = stack_str[:-1] + " " + str(int(metric_value))
+                    f.write(stack_str + "\n")
+
     def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
         """Averages all function events over their keys.
 
@@ -503,6 +518,24 @@ class profile(object):
             assert self.function_events is not None
             return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
+
+    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
+        """
+        Save stack traces in a file in a format suitable for visualization.
+        Arguments:
+            path   - save stacks file to this location
+            metric - metric to use: "self_cpu_time_total" or "self_cuda_time_total"
+
+        Example of using FlameGraph tool:
+          git clone https://github.com/brendangregg/FlameGraph
+          cd FlameGraph
+          ./flamegraph.pl --title "profiler.stacks > perf_viz.svg
+        """
+        self._check_finish()
+        assert metric in ["self_cpu_time_total", "self_cuda_time_total"]
+        assert self.function_events is not None
+        assert self.with_stack, "export_stacks() requires with_stack=True"
+        return self.function_events.export_stacks(path, metric)
 
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
         self._check_finish()
