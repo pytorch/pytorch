@@ -57,11 +57,13 @@ from collections import OrderedDict
 import warnings
 import re
 
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, Tuple
 
 # Define helper types
 
 QConfigAny = Union[torch.quantization.QConfig, torch.quantization.QConfigDynamic]
+MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
+                    QConfigAny]
 
 # ------------------------
 # Helper Functions
@@ -449,6 +451,7 @@ class Quantizer:
             if activation_is_statically_quantized(qconfig):
                 if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) and model.training:
                     # we only insert fake quantize module in qat
+                    assert pattern is not None
                     activation_post_process_ctr = \
                         get_default_output_activation_post_process_map().get(pattern, None)
                     assert activation_post_process_ctr is not None, \
@@ -475,6 +478,7 @@ class Quantizer:
                         observed_node_names_set.add(node.name)
                 elif ((isinstance(quantize_handler, Add) or isinstance(quantize_handler, Mul)) and
                       quantize_handler.num_node_args == 1):
+                    assert matched_nodes is not None
                     input_node = matched_nodes[-1]  # first node in the sequence
 
                     def input_is_observed(arg):
@@ -766,6 +770,7 @@ class Quantizer:
                     result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
                 else:
+                    assert obj is not None
                     result = obj.convert(self, node, load_arg, debug=debug, convert_custom_config_dict=convert_custom_config_dict)
                     quantized = is_output_quantized(node)
 
@@ -869,7 +874,7 @@ class Quantizer:
             self, graph, modules, patterns,
             standalone_module_names=None,
             standalone_module_classes=None,
-            custom_module_classes=None):
+            custom_module_classes=None) -> Dict[str, MatchResult]:
         """
         Matches the nodes in the input graph to quantization patterns, and
         outputs the information needed to quantize them in future steps.
@@ -899,7 +904,7 @@ class Quantizer:
         if standalone_module_names is None:
             standalone_module_names = []
 
-        match_map: Dict[Any, Any] = {}
+        match_map: Dict[str, MatchResult] = {}
         all_matched = set()
 
         def record_match(pattern, node, matched):
