@@ -1346,7 +1346,7 @@ class TestLinalg(TestCase):
 
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=rtol, msg='VeV\' wrong')
+        self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
     @onlyCPU
