@@ -23,8 +23,8 @@
 
 namespace torch { namespace autograd { namespace profiler {
 
-std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs) {
-  std::vector<FileLineFunc> entries;
+std::vector<jit::FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs) {
+  std::vector<jit::FileLineFunc> entries;
   entries.reserve(cs.size());
   for (const auto& entry : cs) {
     auto& range = entry.range;
@@ -33,20 +33,24 @@ std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& c
       if (src && src->filename()) {
         auto line = src->starting_line_no() +
             src->lineno_for_offset(range.start());
-        entries.emplace_back(FileLineFunc{*(src->filename()), line, entry.filename});
+        entries.emplace_back(jit::FileLineFunc{*(src->filename()), line, entry.filename});
       }
     }
   }
   return entries;
 }
 
-std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
+std::vector<std::string> callstackStr(const std::vector<jit::FileLineFunc>& cs) {
   std::vector<std::string> cs_str;
   cs_str.reserve(cs.size());
+  std::stringstream loc;
   for (const auto& entry : cs) {
-    std::stringstream loc;
     loc << entry.filename << "(" << entry.line << "): " << entry.funcname;
+    if (!entry.classname.empty()) {
+      loc << " (" << entry.classname << ")";
+    }
     cs_str.push_back(loc.str());
+    loc.str("");
   }
   return cs_str;
 }
@@ -232,7 +236,7 @@ void ProfilerThreadLocalState::pushRange(
     if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
       auto cs = prepareCallstack(jit::currentCallstack());
       if (cs.empty()) {
-        cs = prepareCallstack(jit::tracer::pythonCallstack());
+        cs = jit::tracer::pythonCallstack();
       }
       evt.setStack(callstackStr(cs));
     }

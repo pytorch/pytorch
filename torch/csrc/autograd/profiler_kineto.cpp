@@ -165,7 +165,7 @@ void pushProfilingCallbacks() {
             fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
           auto cs = prepareCallstack(jit::currentCallstack());
           if (cs.empty()) {
-            cs = prepareCallstack(jit::tracer::pythonCallstack());
+            cs = jit::tracer::pythonCallstack();
           }
           ctx_ptr->stack = callstackStr(cs);
         }

@@ -162,6 +162,37 @@ class TestProfiler(TestCase):
 
         self.assertEqual(called_num[0], 2)
 
+    def test_module_attrib_eager(self):
+        class DummyModule_1(nn.Module):
+            def __init__(self):
+                super(DummyModule_1, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        class DummyModule_2(nn.Module):
+            def __init__(self):
+                super(DummyModule_2, self).__init__()
+                self.dummy = DummyModule_1()
+
+            def forward(self, x):
+                return self.dummy(x)
+
+        model = DummyModule_2()
+        inp = torch.randn(2, 3, 2, 2)
+        with profile(with_stack=True, use_kineto=kineto_available()) as p:
+            model(inp)
+
+        print(p.key_averages(
+            group_by_stack_n=10).table(
+            sort_by="self_cpu_time_total", row_limit=-1))
+
+        for e in p.function_events:
+            if e.name == "aten::mkldnn_convolution":
+                self.assertTrue(any(["DummyModule_1" in entry for entry in e.stack]))
+                self.assertTrue(any(["DummyModule_2" in entry for entry in e.stack]))
+
 
 if __name__ == '__main__':
     run_tests()

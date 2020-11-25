@@ -25,7 +25,13 @@
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
-namespace torch { namespace autograd {
+namespace torch {
+
+namespace jit {
+struct FileLineFunc;
+}
+
+namespace autograd {
 
 struct Node;
 
@@ -471,13 +477,8 @@ struct TORCH_API TLSProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-struct TORCH_API FileLineFunc {
-  std::string filename;
-  size_t line;
-  std::string funcname;
-};
-TORCH_API std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
-TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs);
+TORCH_API std::vector<jit::FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
+TORCH_API std::vector<std::string> callstackStr(const std::vector<jit::FileLineFunc>& cs);
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
 
 struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {

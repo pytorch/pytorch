@@ -24,6 +24,13 @@ struct Value;
 struct Graph;
 struct Module;
 
+struct TORCH_API FileLineFunc {
+  std::string filename;
+  size_t line;
+  std::string funcname;
+  std::string classname;
+};
+
 namespace tracer {
 
 using ::c10::ivalue::Shared;
@@ -194,8 +201,8 @@ struct WithNestedTracingFrame {
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 
-TORCH_API std::vector<StackEntry> pythonCallstack();
-TORCH_API void setPythonCallstack(std::vector<StackEntry> (*v)());
+TORCH_API std::vector<FileLineFunc> pythonCallstack();
+TORCH_API void setPythonCallstack(std::vector<FileLineFunc> (*v)());
 
 // Having finished adding a new 'node' to the graph IR 'setValueTrace'
 // associates this node with an output variable, so that further operations

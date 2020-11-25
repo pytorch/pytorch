@@ -21,20 +21,39 @@ namespace torch {
 namespace jit {
 namespace tracer {
 
+namespace {
+const std::string kPySelf = "self";
+}
+
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::vector<StackEntry> _pythonCallstack() {
+std::vector<FileLineFunc> _pythonCallstack() {
   pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
-  std::vector<StackEntry> entries;
+  std::vector<FileLineFunc> entries;
 
-  while (nullptr != frame) {
+  while (frame != nullptr) {
     size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-    auto source = std::make_shared<Source>(funcname, filename, line);
+    std::string classname = "";
+
+    if (PyFrame_FastToLocalsWithError(frame) >= 0) {
+      auto locals = frame->f_locals;
+      if (PyDict_Check(locals)) {
+        PyObject *key, *value;
+        ssize_t pos = 0;
+        while (PyDict_Next(locals, &pos, &key, &value)) {
+          auto key_str = THPUtils_unpackString(key);
+          if (key_str == kPySelf) {
+            classname = Py_TYPE(value)->tp_name;
+          }
+        }
+      }
+    }
+
     entries.emplace_back(
-        StackEntry{funcname, SourceRange(source, 0, funcname.size())});
+        FileLineFunc{filename, line, funcname, classname});
     frame = frame->f_back;
   }
   return entries;
@@ -46,19 +65,11 @@ SourceRange getPythonInterpreterSourceRange() {
   size_t source_line = 0;
   std::stringstream stack_trace;
   for (const auto& entry : cs) {
-    auto& range = entry.range;
-    if (range.source()) {
-      auto& src = range.source();
-      if (src && src->filename()) {
-        auto line =
-            src->starting_line_no() + src->lineno_for_offset(range.start());
-        stack_trace << *(src->filename()) << "(" << line
-                    << "): " << entry.filename << "\n";
-        if (!source_filename) {
-          source_filename = *(src->filename());
-          source_line = line;
-        }
-      }
+    stack_trace << entry.filename << "(" << entry.line
+        << "): " << entry.funcname << "\n";
+    if (!source_filename) {
+      source_filename = entry.filename;
+      source_line = entry.line;
     }
   }
 
