@@ -122,15 +122,20 @@ endif()
 
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "veclib")))
-  check_fortran_libraries(
-    BLAS_LIBRARIES
-    BLAS
-    sgemm
-    ""
-    "vecLib")
-  if (BLAS_LIBRARIES)
-    set(BLAS_INFO "veclib")
-  endif(BLAS_LIBRARIES)
+  FIND_PACKAGE(vecLib)
+  if(vecLib_FOUND)
+    SET(BLAS_INFO "veclib")
+  else()
+    check_fortran_libraries(
+      BLAS_LIBRARIES
+      BLAS
+      sgemm
+      ""
+      "vecLib")
+    if (BLAS_LIBRARIES)
+      set(BLAS_INFO "veclib")
+    endif(BLAS_LIBRARIES)
+  endif()
 endif()
 
 if((NOT BLAS_LIBRARIES)
@@ -236,15 +241,20 @@ endif()
 # BLAS in ATLAS library? (http://math-atlas.sourceforge.net/)
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "atlas")))
-  check_fortran_libraries(
-  BLAS_LIBRARIES
-  BLAS
-  sgemm
-  ""
-  "ptf77blas;atlas;gfortran")
-  if (BLAS_LIBRARIES)
-    set(BLAS_INFO "atlas")
-  endif(BLAS_LIBRARIES)
+  FIND_PACKAGE(Atlas)
+  if(Atlas_FOUND)
+    SET(BLAS_INFO "atlas")
+  else()
+    check_fortran_libraries(
+      BLAS_LIBRARIES
+      BLAS
+      sgemm
+      ""
+      "ptf77blas;atlas;gfortran")
+    if (BLAS_LIBRARIES)
+      set(BLAS_INFO "atlas")
+    endif(BLAS_LIBRARIES)
+  endif()
 endif()
 
 # Generic BLAS library?
