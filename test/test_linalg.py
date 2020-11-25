@@ -1686,6 +1686,47 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
+    def test_solve_batched_non_contiguous(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype).to(device).permute(1, 0, 2)
+        b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
+        self.assertFalse(A.is_contiguous())
+        self.assertFalse(b.is_contiguous())
+        actual = torch.linalg.solve(A, b)
+        expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy())
+        self.assertEqual(actual, expected)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_solve_errors(self, device, dtype):
+        # solve expects batches of square matrices as input
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
+            b = torch.randn(2, 3, 4, 1, dtype=dtype, device=device)
+            torch.linalg.solve(a, b)
+
+        # solve expects compatible shapes for A x = b
+        with self.assertRaisesRegex(RuntimeError, "Incompatible matrix sizes"):
+            a = torch.randn(2, 3, 3, 3, dtype=dtype, device=device)
+            b = torch.randn(2, 3, 2, 1, dtype=dtype, device=device)
+            torch.linalg.solve(a, b)
+
+        # if input is not solvable, RuntimeError is raised mentioning the first non-solvable batch
+        def run_test_singular_input(batch_dim, n):
+            a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            a[n, -1, -1] = 0
+            b = torch.randn(batch_dim, 3, 1, dtype=dtype, device=device)
+            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+                torch.linalg.solve(a, b)
+
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            run_test_singular_input(*params)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_old_solve(self, device, dtype):
         for (k, n) in zip([2, 3, 5], [3, 5, 7]):
             b, A = self.solve_test_helper((n,), (n, k), device, dtype)
