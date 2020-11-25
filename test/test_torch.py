@@ -6066,6 +6066,27 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(expected, result)
 
     @onlyOnCPUAndCUDA
+    def test_tile(self, device):
+        shapes = ((6, 4, 3),
+                  (1,),
+                  ())
+        reps = ((1, 10, 10, 99),
+                (25, 1, 1),
+                (3, 3, 3),
+                (1, 2, 0),
+                (2, 2),
+                (2,),
+                (1,),
+                ())
+        for shape in shapes:
+            tensor = torch.randn(shape, device=device)
+            for t in (tensor, tensor.T):
+                for dims in reps:
+                    expected = np.tile(t.cpu().numpy(), dims)
+                    result = torch.tile(t, dims).cpu().numpy()
+                    self.assertEqual(expected, result)
+
+    @onlyOnCPUAndCUDA
     @dtypesIfCPU(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
                                                include_bfloat16=False))
     @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
