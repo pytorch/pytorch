@@ -880,20 +880,22 @@ static bool constantFoldingValue(Node* node) {
   }
 
   std::vector<at::Tensor> inputs;
-  for (auto i = 0;  i < compare_node->inputs().size(); i++) {
+  for (auto i = 0; i < compare_node->inputs().size(); i++) {
     auto input_node = compare_node->inputs()[i]->node();
     if (input_node->kind() == onnx::Constant) {
       auto val = input_node->t(attr::value);
       inputs.push_back(val);
-    } else { // input_node is either onnx::Size or onnx::ReduceProd -verify if there are more cases.
+    } else { // input_node is either onnx::Size or onnx::ReduceProd -verify if
+             // there are more cases.
       auto shape_node = input_node->input()->node();
       auto v = shape_node->input()
                    ->type()
-                   ->cast<TensorType>() // what if it is ListType? By this stage it shouldn't be.
+                   ->cast<TensorType>() // what if it is ListType? By this stage
+                                        // it shouldn't be.
                    ->symbolic_sizes()
                    .rank();
       auto val = c10::scalar_to_tensor((int)*v);
-      inputs.push_back(val);  
+      inputs.push_back(val);
     }
   }
   if (compare_node->kind() == onnx::Equal) {
