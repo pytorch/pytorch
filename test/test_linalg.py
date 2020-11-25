@@ -1583,9 +1583,6 @@ class TestLinalg(TestCase):
             [[], [1], [4], [2, 3]],
             [0, 5, 64]
         ):
-            # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
-            if batches and batches[0] == 32 and n == 256:
-                continue
             matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
             run_test(matrices, batches, n)
 
