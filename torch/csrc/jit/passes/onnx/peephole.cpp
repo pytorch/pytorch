@@ -831,7 +831,7 @@ static void removeSequenceSplitConcat(Block* b) {
 static bool checkIfFold(Node* node) {
   if (node->kind() != onnx::If)
     return false;
-  
+
   auto cast_node = node->input()->node();
   auto prev_node = cast_node->input()->node();
   Node* compare_node;
@@ -841,7 +841,8 @@ static bool checkIfFold(Node* node) {
     compare_node = cast_node->input()->node();
   }
 
-  if (compare_node->kind() == onnx::Equal || compare_node->kind() == onnx::Greater ||
+  if (compare_node->kind() == onnx::Equal ||
+      compare_node->kind() == onnx::Greater ||
       compare_node->kind() == onnx::Less) {
     for (int i = 0; i < compare_node->inputs().size(); i++) {
       if (!(compare_node->inputs()[i]->node()->kind() == onnx::Constant ||
@@ -849,7 +850,7 @@ static bool checkIfFold(Node* node) {
             compare_node->inputs()[i]->node()->kind() == onnx::ReduceProd))
         return false;
     }
-    return true; 
+    return true;
   } else if (compare_node->kind() == onnx::Constant) {
     return true;
   }
@@ -863,9 +864,10 @@ static bool constantFoldingValue(Node* node) {
   if (prev_node->kind() == onnx::Constant) {
     auto val = prev_node->t(attr::value);
     return at::is_nonzero(val);
-  } 
-  
-  if (prev_node->kind() == onnx::Identity && prev_node->input()->node()->kind() == onnx::Constant) {
+  }
+
+  if (prev_node->kind() == onnx::Identity &&
+      prev_node->input()->node()->kind() == onnx::Constant) {
     auto val = prev_node->input()->node()->t(attr::value);
     return at::is_nonzero(val);
   }
@@ -877,39 +879,42 @@ static bool constantFoldingValue(Node* node) {
     compare_node = cast_node->input()->node();
   }
 
-  auto input1 = compare_node->inputs()[0]->node();
-  auto input2 = compare_node->inputs()[1]->node(); 
+  std::vector<at::Tensor> inputs;
+  for (auto i = 0;  i < compare_node->inputs().size(); i++) {
+    auto input_node = compare_node->inputs()[i]->node();
+    if (input_node->kind() == onnx::Constant) {
+      auto val = input_node->t(attr::value);
+      inputs.push_back(val);
+    } else { // input_node is either onnx::Size or onnx::ReduceProd -verify if there are more cases.
+      auto shape_node = input_node->input()->node();
+      auto v = shape_node->input()
+                   ->type()
+                   ->cast<TensorType>() // what if it is ListType? By this stage it shouldn't be.
+                   ->symbolic_sizes()
+                   .rank();
+      auto val = c10::scalar_to_tensor((int)*v);
+      inputs.push_back(val);  
+    }
+  }
   if (compare_node->kind() == onnx::Equal) {
-    if (input1->kind() == onnx::Constant && input2->kind() == onnx::Constant) {
-      auto val1 = input1->t(attr::value);
-      auto val2 = input2->t(attr::value);
-      auto res = at::equal(val1, val1);
-      return at::equal(val1, val2);
-    }
-    if (input1->kind() == onnx::Size || input1->kind() == onnx::ReduceProd) {
-      auto size_node = compare_node->inputs()[0]->node();
-      auto shape_node = size_node->inputs()[0]->node();
-      auto const_node2 = compare_node->inputs()[1]->node();
-      auto val2 = const_node2->t(attr::value);
-      auto v = shape_node->input()->type()->cast<TensorType>()->symbolic_sizes().rank();
-      auto res = at::eq(val2, (int)*v);
-      return at::is_nonzero(res);
-    }
-  } else if ((compare_node->kind() == onnx::Greater && prev_node->kind() != onnx::Not) || (prev_node->kind() == onnx::Not && compare_node->kind() == onnx::Less)) {
-    auto shape_node = input1->input()->node();
-    auto val = input2->t(attr::value);
-    auto v = shape_node->input()->type()->cast<TensorType>()->symbolic_sizes().rank();
-    auto res = at::less(val, (int)*v);
     if (prev_node->kind() == onnx::Not)
-      res = at::less_equal(val, (int)*v);
+      return !(at::equal(inputs[0], inputs[1]));
+    return at::equal(inputs[0], inputs[1]);
+  } else if (
+      (compare_node->kind() == onnx::Greater &&
+       prev_node->kind() != onnx::Not) ||
+      (prev_node->kind() == onnx::Not && compare_node->kind() == onnx::Less)) {
+    auto res = at::greater(inputs[0], inputs[1]);
+    if (prev_node->kind() == onnx::Not)
+      res = at::greater_equal(inputs[0], inputs[1]);
     return at::is_nonzero(res);
-  } else if (compare_node->kind() == onnx::Less || (prev_node->kind() == onnx::Not && compare_node->kind() == onnx::Greater)) {
-    auto shape_node = input1->input()->node();
-    auto val = input2->t(attr::value);
-    auto v = shape_node->input()->type()->cast<TensorType>()->symbolic_sizes().rank(); 
-    auto res = at::greater(val, (int)*v);
+  } else if (
+      compare_node->kind() == onnx::Less ||
+      (prev_node->kind() == onnx::Not &&
+       compare_node->kind() == onnx::Greater)) {
+    auto res = at::less(inputs[0], inputs[1]);
     if (prev_node->kind() == onnx::Not)
-      res = at::greater_equal(val, (int)*v);
+      res = at::less_equal(inputs[0], inputs[1]);
     return at::is_nonzero(res);
   }
   return false;
@@ -940,15 +945,16 @@ static void foldIfNode(Block* b) {
           valid_node->moveAfter(cur);
           cur = valid_node;
         }
-        for(auto i = 0; i < block->return_node()->inputs().size(); ++i) {
-          if_node->outputs()[i]->replaceAllUsesWith(block->return_node()->inputs()[i]);
+        for (auto i = 0; i < block->return_node()->inputs().size(); ++i) {
+          if_node->outputs()[i]->replaceAllUsesWith(
+              block->return_node()->inputs()[i]);
         }
         it->removeAllInputs();
         it.destroyCurrent();
       }
     }
   }
- }
+}
 
 // This optimization does ONNX-specific peephole optimizations.
 //
