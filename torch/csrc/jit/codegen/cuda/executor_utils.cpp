@@ -256,9 +256,26 @@ NvrtcFunction nvrtcCompile(
   // Major and minor is determined by device properties and
   // possibly "downcompiled" to a lower (compatible) compute architecture
   // based on the NVRTC version
-  const int major = prop->major;
-  const int minor = prop->minor;
+  int major = prop->major;
+  int minor = prop->minor;
   nvrtcProgram program;
+
+  if (nvrtc_major < 10 || (nvrtc_major == 10 && nvrtc_minor == 0)) { // clamp at sm_72 for CUDA < 10.1
+    if (major > 7 || (major == 7 && minor > 2)) {
+      major = 7;
+      minor = 2;
+    }
+  } else if (nvrtc_major < 11 || (nvrtc_major == 11 && nvrtc_minor == 0)) { // clamp at sm_75 for CUDA < 11.1
+    if (major > 7 || (major == 7 && minor > 5)) {
+      major = 7;
+      minor = 5;
+    }
+  } else if (nvrtc_major == 11 && nvrtc_minor == 1) {
+    if (major > 8 || (major == 8 && minor > 0)) {
+      major = 8;
+      minor = 0;
+    }
+  }
 
   {
     FUSER_PERF_SCOPE("nvrtcCreateProgram");
