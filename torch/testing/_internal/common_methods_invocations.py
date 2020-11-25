@@ -21,8 +21,10 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
 
+if TEST_SCIPY:
+    import scipy.special
 
 class SkipInfo(object):
     """Describes which test, or type of tests, should be skipped when testing
@@ -469,6 +471,25 @@ op_db = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
 ]
+
+if TEST_SCIPY:
+    op_db_scipy_reference = [
+        UnaryUfuncInfo('erf',
+                       ref=scipy.special.erf,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2}),),
+                       dtypes=floating_types(),
+                       dtypesIfCPU=floating_types_and(torch.bfloat16),
+                       dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
+        UnaryUfuncInfo('erfc',
+                       ref=scipy.special.erfc,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2}),),
+                       dtypes=floating_types(),
+                       dtypesIfCPU=floating_types_and(torch.bfloat16),
+                       dtypesIfCUDA=floating_types_and(torch.half)),
+    ]
+    op_db = op_db + op_db_scipy_reference
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
