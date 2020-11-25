@@ -9,12 +9,8 @@
 #include <vector>
 
 #ifdef _MSC_VER
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
+#include <c10/util/win32-headers.h>
 #include <iomanip>
-#include <Windows.h>
-#include <dbghelp.h>
 #pragma comment(lib, "Dbghelp.lib")
 #endif
 
