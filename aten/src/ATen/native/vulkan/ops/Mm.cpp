@@ -135,11 +135,11 @@ Tensor mm(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_mat1.has_image() && v_mat2.has_image()) {
+    if C10_LIKELY(v_mat1.has_image() && v_mat2.has_image()) {
       const struct {
         uvec3 size;
         int32_t K;
-      } block{
+      } block {
         v_output.extents(),
         safe_downcast<int32_t>(v_mat1_sizes[Layout::Parameter::width]),
       };
@@ -254,7 +254,8 @@ Tensor LinearOpContext::run(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_output.has_image() &&
+    if C10_LIKELY(
+        v_output.has_image() &&
         v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
@@ -262,7 +263,7 @@ Tensor LinearOpContext::run(
         uvec3 size;
         int32_t K;
         vec2 multiplier;
-      } block{
+      } block {
           v_output.extents(),
           safe_downcast<int32_t>(v_input.sizes()[Layout::Parameter::width]),
           {

@@ -36,7 +36,7 @@ Tensor adaptive_avg_pool2d(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_self.has_image()) {
+    if C10_LIKELY(v_self.has_image()) {
       const uvec3 v_output_size = v_output.extents();
       const uvec3 v_self_size = v_self.extents();
 
@@ -50,7 +50,7 @@ Tensor adaptive_avg_pool2d(
         uint32_t _;
         vec2 stride;
         vec2 kernel;
-      } block{
+      } block {
         v_output.extents(),
         0u,
         stride,
@@ -176,11 +176,11 @@ Tensor avg_pool2d(
   {
     using namespace utils;
 
-    if (v_self.has_image()) {
+    if C10_LIKELY(v_self.has_image()) {
       const struct {
         uvec3 extents;
         int32_t range;
-        uvec2 iextents;
+        ivec2 iextents;
         ivec2 stride;
         ivec2 padding;
         ivec2 kernel;
@@ -190,15 +190,21 @@ Tensor avg_pool2d(
             kernel[Layout::Parameter::width] *
             kernel[Layout::Parameter::height]),
         {
-          v_self.extents().data[0u],
-          v_self.extents().data[1u],
+          safe_downcast<int32_t>(self.size(Layout::Activation4D::width)),
+          safe_downcast<int32_t>(self.size(Layout::Activation4D::height)),
         },
-        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-        safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-        safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+        {
+          safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+          safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+        },
+        {
+          safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+          safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+        },
+        {
+          safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+          safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+        },
       };
 
       context->dispatch(

@@ -27,7 +27,7 @@ Tensor add_scalar(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       const struct {
         uvec3 extents;
         float other;
@@ -85,7 +85,7 @@ Tensor& add_scalar_(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_self.has_image()) {
+    if C10_LIKELY(v_self.has_image()) {
       const struct {
         uvec3 extents;
         float other;
@@ -143,7 +143,7 @@ Tensor add_tensor(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_self.has_image() && v_other.has_image()) {
+    if C10_LIKELY(v_self.has_image() && v_other.has_image()) {
       const struct {
         uvec3 extents;
         float alpha;
@@ -210,7 +210,7 @@ Tensor& add_tensor_(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
+    if C10_LIKELY(v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
       const struct {
         uvec3 extents;
         float alpha;

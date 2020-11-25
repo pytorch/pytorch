@@ -31,7 +31,7 @@ Tensor clamp(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       const struct {
         uvec3 extents;
         uint32_t _;
@@ -98,7 +98,7 @@ Tensor& clamp_(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_self.has_image()) {
+    if C10_LIKELY(v_self.has_image()) {
       const struct {
         uvec3 extents;
         uint32_t _;

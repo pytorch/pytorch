@@ -9,7 +9,7 @@ namespace {
 
 Tensor view(
     const Tensor& self_arg,
-    IntArrayRef shape) {
+    const IntArrayRef shape) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
