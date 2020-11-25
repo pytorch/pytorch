@@ -125,6 +125,22 @@ class NativeFunction:
     # in terms of the out kernel referenced by the string here.
     structured_delegate: Optional['OperatorName']
 
+    # Note [Abstract ATen methods]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # An abstract ATen method is one whose dispatch differs between
+    # types.  These are implemented in derived types (with a
+    # standard (throwing) definition in Type).  A concrete ATen
+    # method is one which has the same dispatch for all types;
+    # we just implement it in the base Type.  This is exposed
+    # in Declarations.yaml via a field named 'abstract'.
+    @property
+    def is_abstract(self) -> bool:
+        if self.structured_delegate:
+            # Structured functions MUST have a dispatch table
+            return True
+        else:
+            return self.dispatch.keys() != {'Math'}
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -436,6 +452,29 @@ class FunctionSchema:
                     '_foreach_div_.List',
                     '_foreach_exp_',
                     '_foreach_sqrt_',
+                    '_foreach_abs_',
+                    '_foreach_acos_',
+                    '_foreach_asin_',
+                    '_foreach_atan_',
+                    '_foreach_ceil_',
+                    '_foreach_cos_',
+                    '_foreach_cosh_',
+                    '_foreach_erf_',
+                    '_foreach_erfc_',
+                    '_foreach_expm1_',
+                    '_foreach_floor_',
+                    '_foreach_log_',
+                    '_foreach_log10_',
+                    '_foreach_log1p_',
+                    '_foreach_log2_',
+                    '_foreach_neg_',
+                    '_foreach_tan_',
+                    '_foreach_tanh_',
+                    '_foreach_sin_',
+                    '_foreach_sinh_',
+                    '_foreach_round_',
+                    '_foreach_lgamma_',
+                    '_foreach_frac_',
                     '_foreach_addcmul_.Scalar',
                     '_foreach_addcdiv_.Scalar',
                     '_foreach_addcmul_.ScalarList',
@@ -488,7 +527,6 @@ class FunctionSchema:
         else:
             return SchemaKind.functional
 
-    # WARNING: This method is not currently tested in any meaningful way
     def signature(self) -> 'FunctionSchema':
         """
         Certain schemas are 'related', in that they are simply
@@ -504,9 +542,6 @@ class FunctionSchema:
         - Out arguments are stripped
         - Mutability annotations are stripped  (this is sound
           because you cannot overload on mutability annotation)
-
-        This function is based off of get_signature in
-        tools.autograd.load_derivatives
         """
 
         # dataclasses.replace could be used here, but it is less
