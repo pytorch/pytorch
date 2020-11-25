@@ -3153,6 +3153,23 @@
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
+- func: masked_softmax.int(Tensor self, Tensor mask, int dim, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: masked_softmax.Dimname(Tensor self, Tensor mask, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  variants: function, method
+
+- func: _masked_softmax(Tensor self, Tensor mask, int dim, bool half_to_float) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    CPU: masked_softmax_cpu
+
+# - func: _masked_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self, Tensor mask) -> Tensor
+#   use_c10_dispatcher: full
+#   dispatch:
+#     CPU: masked_softmax_backward_cpu
+
 - func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
   use_c10_dispatcher: full
   variants: function, method

@@ -3155,6 +3155,139 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
+
+    def test_masked_softmax_functional_smoke(self):
+        inputs = torch.ones((2, 2), dtype=torch.float32)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
+        self.assertEqual(
+            torch.nn.functional.masked_softmax(inputs, mask, dim=0),
+            torch.tensor([[0.5, 0.], [0.5, 1.]], dtype=torch.float32),
+        )
+        self.assertEqual(
+            torch.nn.functional.masked_softmax(inputs, mask, dim=1),
+            torch.tensor([[1., 0.], [0.5, 0.5]], dtype=torch.float32),
+        )
+
+    def test_masked_softmax_cpp_smoke(self):
+        inputs = torch.ones((2, 2), dtype=torch.float32)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
+        self.assertEqualIgnoreType(
+            inputs.masked_softmax(mask, dim=0),
+            torch.tensor([[0.5, 0.], [0.5, 1.]]),
+        )
+        self.assertEqualIgnoreType(
+            inputs.masked_softmax(mask, dim=1),
+            torch.tensor([[1., 0.], [0.5, 0.5]]),
+        )
+
+    def test_masked_softmax_functional_dtype_conversion(self):
+        inputs = torch.ones((2, 2), dtype=torch.float32)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
+        outputs = torch.nn.functional.masked_softmax(
+            inputs, mask, dim=0, dtype=torch.float64
+        )
+        self.assertEqual(outputs.dtype, torch.float64)
+
+    def test_masked_softmax_cpp_dtype_conversion(self):
+        inputs = torch.ones((2, 2), dtype=torch.float32)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
+        outputs = inputs.masked_softmax(mask, dim=0, dtype=torch.float64)
+        self.assertEqual(outputs.dtype, torch.float64)
+
+    def test_masked_softmax_functional_mask_dtype(self):
+        inputs = torch.ones((2, 2), dtype=torch.float32)
+
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.uint8)
+        with self.assertWarnsRegex(UserWarning, "deprecated"):
+            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
+
+        mask = torch.rand((2, 2))
+        with self.assertRaises(TypeError):
+            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
+
+    def test_masked_softmax_cpp_mask_dtype(self):
+        inputs = torch.rand((2, 2), dtype=torch.float32)
+
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.uint8)
+        with self.assertWarnsRegex(UserWarning, "deprecated"):
+            inputs.masked_softmax(mask, dim=0)
+
+        mask = torch.rand((2, 2))
+        with self.assertRaises(RuntimeError):
+            inputs.masked_softmax(mask, dim=0)
+
+    def test_masked_softmax_functional_input_dtype(self):
+        inputs = torch.ones((2, 2), dtype=torch.float64)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
+
+        with self.assertRaises(TypeError):
+            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
+
+    def test_masked_softmax_cpp_input_dtype(self):
+        inputs = torch.rand((2, 2), dtype=torch.float64)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
+
+        with self.assertRaises(RuntimeError):
+            inputs.masked_softmax(mask, dim=0)
+
+    def test_masked_softmax_functional_mask_shape(self):
+        inputs = torch.rand((2, 2), dtype=torch.float32)
+        print(inputs.dtype)
+        mask = torch.triu(torch.ones((3, 3)), diagonal=1).to(torch.bool)
+        with self.assertRaises(RuntimeError):
+            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
+
+    def test_masked_softmax_cpp_mask_shape(self):
+        inputs = torch.rand((2, 2), dtype=torch.float32)
+        mask = torch.triu(torch.ones((3, 3)), diagonal=1).to(torch.bool)
+        with self.assertRaises(RuntimeError):
+            inputs.masked_softmax(mask, dim=-1)
+
+    def test_masked_softmax_functional_nan(self):
+        inputs = torch.rand((2, 2), dtype=torch.float32)
+        mask = torch.tensor([[1, 1], [0, 1]], dtype=torch.bool)
+        outputs = torch.nn.functional.masked_softmax(inputs, mask, dim=1)
+        # all entries in channel 0 along dim 1 are masked so the probability
+        # is not defined, and the function should return nan
+        self.assertTrue(all(math.isnan(item) for item in outputs[0]))
+
+    def test_masked_softmax_cpp_nan(self):
+        inputs = torch.rand((2, 2), dtype=torch.float32)
+        mask = torch.tensor([[1, 1], [0, 1]], dtype=torch.bool)
+        outputs = inputs.masked_softmax(mask, dim=1)
+        # all entries in channel 0 along dim 1 are masked so the probability
+        # is not defined, and the function should return nan
+        self.assertTrue(all(math.isnan(item) for item in outputs[0]))
+
+    def test_masked_softmax_functional(self):
+        AXIS = 0
+        inputs = torch.rand(3, 4, 5).to(torch.float32)
+        mask = torch.stack(
+            [torch.ones(4, 5), torch.zeros(4, 5), torch.zeros(4, 5)]
+        ).to(torch.bool)
+        outputs = torch.nn.functional.masked_softmax(inputs, mask, dim=AXIS)
+
+        # check output is 0 where masked
+        self.assertEqual(torch.sum(outputs[mask]), 0)
+
+        # check probabilities sum to 1 along chosen axis
+        self.assertTrue(torch.all(outputs.sum(dim=AXIS) == 1))
+
+    def test_masked_softmax_cpp(self):
+        AXIS = 0
+        inputs = torch.rand(3, 4, 5).to(torch.float32)
+        mask = torch.stack(
+            [torch.ones(4, 5), torch.zeros(4, 5), torch.zeros(4, 5)]
+        ).to(torch.bool)
+        outputs = inputs.masked_softmax(mask, dim=AXIS)
+
+        # check output is 0 where masked
+        self.assertEqual(torch.sum(outputs[mask]), 0)
+
+        # check probabilities sum to 1 along chosen axis
+        self.assertTrue(torch.all(outputs.sum(dim=AXIS) == 1))
+
+
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
     def test_multihead_attention(self):
         def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, key_padding_mask=None):

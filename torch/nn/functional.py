@@ -4037,6 +4037,27 @@ def _pad_circular(input, padding):
 
     return out
 
+def masked_softmax(input, mask, dim=None, dtype=None):
+    # Mask will be a bool tensor here. Type checking:
+    if mask.dtype != torch.bool:
+        if mask.dtype == torch.uint8:
+            warnings.warn(
+                "Byte tensor for mask in masked_softmax is deprecated. "
+                "Use bool tensor instead."
+            )
+            mask = mask.to(torch.bool)
+        else:
+            raise TypeError('mask must be of type torch.bool')
+
+    # Input assumed to be float32. Type checking:
+    if input.dtype != torch.float32:
+        raise TypeError('input must be of type torch.float32')
+
+    # To follow the logic of multi_head_attention_forward below,
+    # this assumes the mask will be True where we want to zero out the
+    # entries, and False where we want to preserve them.
+    input = input.masked_fill(mask, float('-inf'))
+    return torch.nn.functional.softmax(input, dim=dim, dtype=dtype)
 
 def multi_head_attention_forward(query: Tensor,
                                  key: Tensor,
@@ -4294,23 +4315,24 @@ def multi_head_attention_forward(query: Tensor,
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
+    combined_mask = torch.zeros(
+        bsz, num_heads, tgt_len, src_len, dtype=torch.bool
+    )  # nothing is masked yet
+
     if attn_mask is not None:
         if attn_mask.dtype == torch.bool:
-            attn_output_weights.masked_fill_(attn_mask, float('-inf'))
+            combined_mask |= attn_mask
         else:
             attn_output_weights += attn_mask
 
-
     if key_padding_mask is not None:
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
-        attn_output_weights = attn_output_weights.masked_fill(
-            key_padding_mask.unsqueeze(1).unsqueeze(2),
-            float('-inf'),
-        )
-        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+        combined_mask |= key_padding_mask.unsqueeze(1).unsqueeze(2)
 
-    attn_output_weights = softmax(
-        attn_output_weights, dim=-1)
+    attn_output_weights = attn_output_weights.masked_softmax(
+        combined_mask.view(bsz * num_heads, tgt_len, src_len),
+        dim=-1
+    )
+
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
 
     attn_output = torch.bmm(attn_output_weights, v)
