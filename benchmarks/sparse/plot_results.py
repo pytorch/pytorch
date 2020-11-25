@@ -32,6 +32,7 @@ def plot_results(filepath):
     rel_plot(df)
     plt.show()
 
+
 if __name__ == '__main__':
     path = Path()
     parser = argparse.ArgumentParser(description='Sparse Matmul Bench')

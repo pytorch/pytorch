@@ -32,15 +32,19 @@ def load_matrix(path):
         shape=(nrows, ncols)).tocoo()
     return torch.sparse_coo_tensor([coo.row, coo.col], coo.data, coo.shape)
 
+
 def scipy_coo_matmul(mat1, mat2):
     result = mat1.dot(mat2).tocoo()
     return torch.sparse_coo_tensor([result.row, result.col], result.data,
                                    result.shape)
 
+
 def to_coo_scipy(x):
     indices_1 = x._indices().numpy()
     values_1 = x._values().numpy()
-    return sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])), shape=x.shape)
+    return sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])),
+                             shape=x.shape)
+
 
 def torch_backward(a_dense, b_dense):
     a_dense.requires_grad = True
@@ -48,7 +52,8 @@ def torch_backward(a_dense, b_dense):
     r1 = a_dense.matmul(b_dense)
     f1 = torch.sum(r1)
     f1.backward()
-    
+
+
 def sparse_torch_backward(a, b):
     a.requires_grad = True
     b.requires_grad = True
@@ -57,7 +62,8 @@ def sparse_torch_backward(a, b):
     f2 = torch.sparse.sum(r2)
     f2.backward()
 
-def load_dataset(dataset_path, hidden_size, sparsity, n_limit = 20):
+
+def load_dataset(dataset_path, hidden_size, sparsity, n_limit=20):
     current_folder_path = f"{dataset_path}/{sparsity}"
     path = Path(current_folder_path)
     files = path.glob('**/*.smtx')
@@ -78,24 +84,23 @@ def load_dataset(dataset_path, hidden_size, sparsity, n_limit = 20):
     print()
     return zip(xs, ys)
 
+
 if __name__ == '__main__':
 
     path = Path()
     parser = argparse.ArgumentParser(description='Sparse Matmul Bench')
 
-    parser.add_argument('--path',
-                        type=str, 
-                        help='dataset path')
+    parser.add_argument('--path', type=str, help='dataset path')
     parser.add_argument('--dataset',
-                        type=str, 
+                        type=str,
                         help='dataset name',
                         default='random_pruning')
     parser.add_argument('--operation',
-                        type=str, 
+                        type=str,
                         help='matmul or backward',
                         default='matmul')
     parser.add_argument('--output',
-                        type=str, 
+                        type=str,
                         help='dataframe output path',
                         default='/tmp/matmul_bench.pkl')
     args = parser.parse_args()
@@ -113,18 +118,22 @@ if __name__ == '__main__':
         tasks = [
             ("matmul", "cpu", "torch", "torch.mm(dense_x, dense_y)"),
             ("matmul", "cpu", "torch.sparse", "torch.sparse.mm(tx, ty)"),
-            ("matmul", "cpu", "scipy", "scipy_coo_matmul(scipy_varx, scipy_vary)"),
-
-            ("matmul", "cuda", "torch", "torch.mm(dense_cuda_x, dense_cuda_y)"),
-            ("matmul", "cuda", "torch.sparse", "torch.sparse.mm(tx_cuda, ty_cuda)"),
+            ("matmul", "cpu", "scipy",
+             "scipy_coo_matmul(scipy_varx, scipy_vary)"),
+            ("matmul", "cuda", "torch",
+             "torch.mm(dense_cuda_x, dense_cuda_y)"),
+            ("matmul", "cuda", "torch.sparse",
+             "torch.sparse.mm(tx_cuda, ty_cuda)"),
         ]
     else:
         tasks = [
             ("backward", "cpu", "torch", "torch_backward(dense_x, dense_y)"),
-            ("backward", "cpu", "torch.sparse", "sparse_torch_backward(tx, ty)"),
-
-            ("backward", "cuda", "torch", "torch_backward(dense_cuda_x, dense_cuda_y)"),
-            ("backward", "cuda", "torch.sparse", "sparse_torch_backward(tx_cuda, ty_cuda)"),
+            ("backward", "cpu", "torch.sparse",
+             "sparse_torch_backward(tx, ty)"),
+            ("backward", "cuda", "torch",
+             "torch_backward(dense_cuda_x, dense_cuda_y)"),
+            ("backward", "cuda", "torch.sparse",
+             "sparse_torch_backward(tx_cuda, ty_cuda)"),
         ]
     serialized_results = []
     repeats = 2
@@ -153,7 +162,7 @@ if __name__ == '__main__':
             # num_threads=num_threads,
         ) for hidden_size in [512]
         for sparsity in [0.5, 0.7, 0.8, 0.9, 0.95, 0.98]
-        for label, device, sub_label, stmt in tasks 
+        for label, device, sub_label, stmt in tasks
         for num_threads in [1, 4, 8, 16]
         for x, y in load_dataset(dataset_path, hidden_size, sparsity)
     ]
@@ -181,7 +190,7 @@ if __name__ == '__main__':
     comparison.colorize()
     comparison.print()
 
-    table = [(m.task_spec.sub_label, m.task_spec.description, m.metadata["device"],
-            m.mean) for m in measurements]
+    table = [(m.task_spec.sub_label, m.task_spec.description,
+              m.metadata["device"], m.mean) for m in measurements]
     df = pd.DataFrame(table, columns=['method', 'sparsity', 'device', 'time'])
     df.to_pickle(df_output_path)
