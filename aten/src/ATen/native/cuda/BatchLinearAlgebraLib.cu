@@ -48,26 +48,14 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 
   if (use_loop_launch(batch_size, n)) {
     int* p_infos = infos.data_ptr<int>();
-    auto main_stream = at::cuda::getCurrentCUDAStream();
 
-    at::cuda::CUDAEvent main_event;
-    main_event.record(main_stream);
-
-    for (int64_t i = 0; i < batch_size; i++) {
-      auto stream = at::cuda::getStreamFromPool();
-      at::cuda::CUDAStreamGuard guard(stream);
-
-      main_event.block(stream);
-
+    CUDA_PARALLEL_STREAM_LAUNCH(i, batch_size, [&] {
       auto dataPtr = allocator.allocate(sizeof(int) * n);
       int* pivot = reinterpret_cast<int*>(dataPtr.get());
       _apply_single_inverse_helper<scalar_t>(
         &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot, p_infos + i * 2, n);
+    });
 
-      at::cuda::CUDAEvent finished;
-      finished.record(stream);
-      finished.block(main_stream);
-    }
   } else {
     // cublas batched kernels require input be "device array of device pointers"
     Tensor self_array = at::arange(
