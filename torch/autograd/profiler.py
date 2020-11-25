@@ -263,18 +263,18 @@ class EventList(list):
 
     def export_stacks(self, path: str, metric: str):
         assert metric in ["self_cpu_time_total", "self_cuda_time_total"]
-        import os
         translate_table = str.maketrans(" ;\t\n", "____")
         with open(path, 'w') as f:
             for evt in self:
                 if evt.stack and len(evt.stack) > 0:
                     metric_value = getattr(evt, metric)
-                    stack_str = ""
-                    for entry in reversed(evt.stack):
-                        stack_str += entry.translate(translate_table)
-                        stack_str += ";"
-                    stack_str = stack_str[:-1] + " " + str(int(metric_value))
-                    f.write(stack_str + "\n")
+                    if int(metric_value) > 0:
+                        stack_str = ""
+                        for entry in reversed(evt.stack):
+                            stack_str += entry.translate(translate_table)
+                            stack_str += ";"
+                        stack_str = stack_str[:-1] + " " + str(int(metric_value))
+                        f.write(stack_str + "\n")
 
     def key_averages(self, group_by_input_shapes=False, group_by_stack_n=0):
         """Averages all function events over their keys.
@@ -529,7 +529,7 @@ class profile(object):
         Example of using FlameGraph tool:
           git clone https://github.com/brendangregg/FlameGraph
           cd FlameGraph
-          ./flamegraph.pl --title "profiler.stacks > perf_viz.svg
+          ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
         """
         self._check_finish()
         assert metric in ["self_cpu_time_total", "self_cuda_time_total"]

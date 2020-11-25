@@ -199,7 +199,7 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not HAS_TORCHVISION, "Requires torchvision to run")
     def test_export_stacks(self):
         model = torchvision.models.resnet18()
-        inp = torch.rand(1,3,224,224)
+        inp = torch.rand(1, 3, 224, 224)
         with profile(with_stack=True, use_kineto=kineto_available()) as p:
             model(inp)
 
