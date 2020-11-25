@@ -21,17 +21,20 @@ void THCPGraph_init(PyObject *module) {
   shared_ptr_class_<::at::cuda::CudaGraph>(module, "_CudaGraphBase")
       .def(py::init<>()),
       .def("capture_begin",
-           &::at::cuda::CudaGraph::CaptureBegin,
+           &::at::cuda::CudaGraph::capture_end,
            py::call_guard<py::gil_scoped_release>(),
            R"(``capture_begin`` begins Cuda graph capture on the current stream.)")
       .def("capture_end",
-           &::at::cuda::CudaGraph::CaptureEnd,
+           &::at::cuda::CudaGraph::capture_end,
            py::call_guard<py::gil_scoped_release>(),
            R"(``capture_end`` ends Cuda graph capture on the current stream.
            After ``capture_end``, ``replay`` may be called on this instance.)")
       .def("replay",
-           &::at::cuda::CudaGraph::Replay,
+           &::at::cuda::CudaGraph::replay,
            py::call_guard<py::gil_scoped_release>(),
            R"(``replay`` replays the Cuda graph captured by this instance.)");
-
+      .def("drop_graph",
+           &::at::cuda::CudaGraph::drop_graph,
+           py::call_guard<py::gil_scoped_release>(),
+           R"(``drop_graph`` deletes the graph currently held by this instance.)");
 }
