@@ -210,11 +210,11 @@ class TestProfiler(TestCase):
             for line in lines:
                 is_int = False
                 try:
-                    int(line.split(" ")[-1])
+                    assert int(line.split(" ")[-1]) > 0, "Invalid stacks record"
                     is_int = True
                 except ValueError:
                     pass
-                assert is_int, "Invalid stacks file"
+                assert is_int, "Invalid stacks record"
 
 
 if __name__ == '__main__':
