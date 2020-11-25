@@ -1,14 +1,15 @@
 import math
 import torch
 from torch._six import inf
+from typing import Union, Optional
 
 
 class __PrinterOptions(object):
-    precision = 4
-    threshold = 1000
-    edgeitems = 3
-    linewidth = 80
-    sci_mode = None
+    precision: int = 4
+    threshold: Union[str, float] = 1000
+    edgeitems: int = 3
+    linewidth: int = 80
+    sci_mode: Optional[bool] = None
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -55,7 +56,7 @@ def set_printoptions(
             PRINT_OPTS.linewidth = 80
         elif profile == "full":
             PRINT_OPTS.precision = 4
-            PRINT_OPTS.threshold = int(inf)
+            PRINT_OPTS.threshold = inf
             PRINT_OPTS.edgeitems = 3
             PRINT_OPTS.linewidth = 80
 
