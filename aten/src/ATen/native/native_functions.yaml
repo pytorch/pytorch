@@ -4142,6 +4142,12 @@
 
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: var_backward(Tensor grad, Tensor self, bool unbiased=True) -> Tensor
+  use_c10_dispatcher: full
+
+- func: var_backward.dim(Tensor grad, Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function

@@ -745,26 +745,12 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
   }
 }
 
-Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
-  return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
-}
-
-Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  if (self.dim() == 0) {
-    return var_backward(grad, self, unbiased);
-  }
-  if (!keepdim && self.dim() > 1) {
-    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
-  }
-  return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
-}
-
 Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
-  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, unbiased);
+  return at::var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, unbiased);
 }
 
 Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, dim, unbiased, keepdim);
+  return at::var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, dim, unbiased, keepdim);
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
@@ -778,7 +764,7 @@ Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int numel) {
 Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {
-    grad = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : var_backward(grads[0], self, dim, unbiased, keepdim);
+    grad = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : at::var_backward(grads[0], self, dim, unbiased, keepdim);
   }
   if (grads[1].defined()) {
     Tensor mean_grad = mean_backward(grads[1], self.sizes(), dim, keepdim);
@@ -790,7 +776,7 @@ Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, co
 Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {
-    grad = is_std ? std_backward(r1, grads[0], self, unbiased) : var_backward(grads[0], self, unbiased);
+    grad = is_std ? std_backward(r1, grads[0], self, unbiased) : at::var_backward(grads[0], self, unbiased);
   }
   if (grads[1].defined()) {
     Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel());
