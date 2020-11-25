@@ -10,7 +10,6 @@ from torch import nn
 import torch.nn.functional as F
 
 from torch.distributed._pipeline.sync import Pipe
-from torch.testing._internal.distributed.pipeline.utils import setup_rpc
 
 
 def test_python_autograd_function(setup_rpc):

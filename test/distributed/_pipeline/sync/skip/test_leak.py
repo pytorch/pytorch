@@ -11,7 +11,6 @@ from torch import nn
 from torch.distributed._pipeline.sync import Pipe, is_checkpointing, is_recomputing
 from torch.distributed._pipeline.sync.skip import pop, skippable, stash
 from torch.distributed._pipeline.sync.skip.tracker import current_skip_tracker
-from torch.testing._internal.distributed.pipeline.utils import setup_rpc
 
 
 @skippable(stash=["skip"])

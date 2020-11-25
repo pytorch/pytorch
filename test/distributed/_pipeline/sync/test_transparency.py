@@ -8,7 +8,6 @@ import torch
 from torch import nn
 
 from torch.distributed._pipeline.sync import Pipe
-from torch.testing._internal.distributed.pipeline.utils import setup_rpc
 
 
 def test_simple_linears(setup_rpc):

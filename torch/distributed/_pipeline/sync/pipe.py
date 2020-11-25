@@ -316,7 +316,7 @@ class Pipe(Module):
             input (torch.Tensor or Tuple[torch.Tensor, ...]): input mini-batch
 
         Returns:
-            ``RRef`` to the output of the mini-batch
+            :class:`~torch.distributed.rpc.RRef` to the output of the mini-batch
 
         Raises:
             TypeError: input is not a tensor or tensors.
