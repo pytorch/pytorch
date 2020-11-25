@@ -436,7 +436,7 @@ Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& info
 
 // Solves a system of linear equations dot(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
-Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
+static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
   TORCH_CHECK(infos.scalar_type() == kInt,
     "infos dtype ", infos.scalar_type(), " does not match the expected dtype ", kInt);
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
