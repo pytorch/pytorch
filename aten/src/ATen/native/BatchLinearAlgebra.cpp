@@ -435,7 +435,10 @@ Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& info
 }
 
 // Solves a system of linear equations dot(input, x) = other in-place
-Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+// LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
+Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
+  TORCH_CHECK(infos.scalar_type() == kInt,
+    "infos dtype ", infos.scalar_type(), " does not match the expected dtype ", kInt);
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
   TORCH_CHECK(input.scalar_type() == other.scalar_type(),
@@ -469,21 +472,29 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
 
   result.copy_(other_broadcasted);
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
-  auto infos = at::empty({batchCount(input_broadcasted)}, input_broadcasted.options().dtype(kInt));
+  at::native::resize_output(infos, {batchCount(input_broadcasted)});
   result = at::_linalg_solve_out_helper(result, input_working_copy, infos);
-
-  // Now check LAPACK/MAGMA error codes
-  infos = infos.to(kCPU);
-  std::vector<int64_t> infos_(infos.data_ptr<int>(), infos.data_ptr<int>() + batchCount(input_broadcasted));
-  if (input_broadcasted.dim() > 2) {
-    batchCheckErrors(infos_, "linalg_solve");
-  } else {
-    singleCheckErrors(infos_[0], "linalg_solve");
-  }
 
   // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
   if (other.dim() == 1) {
     result.squeeze_(-1);
+  }
+
+  return result;
+}
+
+// Solves a system of linear equations dot(input, x) = other in-place
+Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  auto infos = at::empty({0}, input.options().dtype(kInt));
+  result = linalg_solve_out_info(result, infos, input, other);
+
+  // Now check LAPACK/MAGMA error codes
+  infos = infos.to(kCPU);
+  std::vector<int64_t> infos_(infos.data_ptr<int>(), infos.data_ptr<int>() + batchCount(result));
+  if (result.dim() > 2) {
+    batchCheckErrors(infos_, "linalg_solve");
+  } else {
+    singleCheckErrors(infos_[0], "linalg_solve");
   }
 
   return result;
