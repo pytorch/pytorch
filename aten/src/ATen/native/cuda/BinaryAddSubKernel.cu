@@ -142,24 +142,70 @@ const auto jittable_foo_functor = stringify(
 //   but produces the appropriate type with newlines
 //   NOTE: this probably requires creating macros for the template inserts, too
 static auto cuda_template = torch::jit::CodeTemplate(R"(
-  // Device-side of TensorAccessor
-  struct TensorAccessor {
-    TensorAccessor() = default;
+  typedef long long int int64_t;
 
-    // TODO: write this function
-    // Returns the byte offset from the pointer data_ to access
-    //   the specified element
-    __device__ int index_to_offset(int idx) const {
-      return 0;
+  template <typename T>
+  struct DivMod {
+    T div;
+    T mod;
+
+    __device__ DivMod(T _div, T _mod) {
+      div = _div;
+      mod = _mod;
+    }
+  };
+
+  //<unsigned int>
+  struct IntDivider {
+    IntDivider() = default;
+
+  __device__ inline unsigned int div(unsigned int n) const {
+    unsigned int t = __umulhi(n, m1);
+    return (t + n) >> shift;
+  }
+
+  __device__ inline unsigned int mod(unsigned int n) const {
+    return n - div(n) * divisor;
+  }
+
+  __device__ inline DivMod<unsigned int> divmod(unsigned int n) const {
+    unsigned int q = div(n);
+    return DivMod<unsigned int>(q, n - q * divisor);
+  }
+
+  unsigned int divisor;  // d above.
+  unsigned int m1;  // Magic number: m' above.
+  unsigned int shift;  // Shift amounts.
+};
+
+  struct OffsetCalculator {
+    OffsetCalculator() = default;
+    __device__ void index_to_offset(${index_type} offsets[${nInputs}], ${index_type} linear_idx) const {
+      #pragma unroll
+      for (int arg = 0; arg < ${nInputs}; ++arg) {
+        offsets[arg] = 0;
+      }
+
+      #pragma unroll
+      for (int dim = 0; dim < 25; ++dim) {
+        if (dim == dims) {
+          break;
+        }
+
+        auto divmod = sizes_[dim].divmod(linear_idx);
+        linear_idx = divmod.div;
+
+        #pragma unroll
+        for (int arg = 0; arg < ${nInputs}; ++arg) {
+          offsets[arg] += divmod.mod * strides_[dim][arg];
+        }
+      }
     }
 
-    short scalar_type_;
-    short element_size_;
-    short ndims_;
-    int sizes_[25];
-    // NOTE: strides is in bytes, not elements!
-    int strides_[25];
-    char* data_;
+    int dims;
+    IntDivider sizes_[25];
+    // NOTE: this approach will not support nInputs == 0
+    ${index_type} strides_[25][${nInputs}];
   };
 
   ${functor}
@@ -170,43 +216,44 @@ static auto cuda_template = torch::jit::CodeTemplate(R"(
   void ${name}_kernel(
       ${name}<${scalar_type}> functor,
       const int numel,
-      TensorAccessor out,
-      TensorAccessor a,
-      TensorAccessor b) {
+      char* data,
+      OffsetCalculator input_calculator,
+      OffsetCalculator output_calculator) {
+
 
     // NOTE: only the first thread operates on the first element for now
     if (blockIdx.x == 0 && threadIdx.x == 0) {
-      ${scalar_type} a_value;
-      int a_offset = a.index_to_offset(0);
+      // ${scalar_type} a_value;
+      // int a_offset = a.index_to_offset(0);
 
-      ${scalar_type} b_value;
-      int b_offset = b.index_to_offset(0);
+      // ${scalar_type} b_value;
+      // int b_offset = b.index_to_offset(0);
 
-      int out_offset = out.index_to_offset(0);
+      // int out_offset = out.index_to_offset(0);
 
-      // TODO: refactor the loading, see c10::fetch_and_cast
-      if (a.scalar_type_ == 0) {
-        a_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(a.data_ + a_offset)));
-      } else if (a.scalar_type_ == 1) {
-        a_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(a.data_ + a_offset)));
-      }
+      // // TODO: refactor the loading, see c10::fetch_and_cast
+      // if (a.scalar_type_ == 0) {
+      //   a_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(a.data_ + a_offset)));
+      // } else if (a.scalar_type_ == 1) {
+      //   a_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(a.data_ + a_offset)));
+      // }
 
-      if (b.scalar_type_ == 0) {
-        b_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(b.data_ + b_offset)));
-      } else if (b.scalar_type_ == 1) {
-        b_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(b.data_ + b_offset)));
-      }
+      // if (b.scalar_type_ == 0) {
+      //   b_value = static_cast<${scalar_type}>(*(reinterpret_cast<float*>(b.data_ + b_offset)));
+      // } else if (b.scalar_type_ == 1) {
+      //   b_value = static_cast<${scalar_type}>(*(reinterpret_cast<double*>(b.data_ + b_offset)));
+      // }
 
-      ${scalar_type} out_value = functor(a_value, b_value);
+      // ${scalar_type} out_value = functor(a_value, b_value);
 
-      // TODO: refactor the storing, see c10::cast_and_store
-      if (out.scalar_type_ == 0) {
-        *(reinterpret_cast<float*>(out.data_ + out_offset)) = static_cast<float>(out_value);
-      } else if (out.scalar_type_ == 1) {
-        *(reinterpret_cast<double*>(out.data_ + out_offset)) = static_cast<double>(out_value);
-      }
+      // // TODO: refactor the storing, see c10::cast_and_store
+      // if (out.scalar_type_ == 0) {
+      //   *(reinterpret_cast<float*>(out.data_ + out_offset)) = static_cast<float>(out_value);
+      // } else if (out.scalar_type_ == 1) {
+      //   *(reinterpret_cast<double*>(out.data_ + out_offset)) = static_cast<double>(out_value);
+      // }
 
-      printf("%f\n", out_value);
+      // printf("%f\n", out_value);
     }
   }
 
@@ -229,6 +276,8 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
 
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
+
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
   std::cout << "dtype 0: " << iter.dtype(0) << std::endl;
   std::cout << "dtype 1: " << iter.dtype(0) << std::endl;
@@ -260,29 +309,26 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   int64_t numel = iter.numel();
   args.push_back((void*)&numel);
 
-  // Creates per-tensor accessors
-  // TODO: this could be made more efficient by using the fact that the
-  //   function is binary so no loop is needed, no intermediate vector
-  //   holding the accessors would be needed is needed, and the accessors
-  //   could be pushed onto args directly without lifetime concerns
-  std::vector<TensorAccessor> accessors;
-  for (auto i = decltype(iter.ntensors()){0}; i < iter.ntensors(); ++i) {
-    accessors.emplace_back(
-      iter.tensor(i).scalar_type(),
-      iter.element_size(i),
-      iter.shape(),
-      iter.strides(i),
-      iter.data_ptr(i));
+  // Adds data ptrs
+  at::detail::Array<char*, 3> data;
+  for (auto i = decltype(iter.ntensors()){0}; i < iter.ntensors(); i++) {
+    data[i] = (char*)iter.data_ptr(i);
   }
+  args.push_back((void*)&data);
 
-   for (const auto& accessor : accessors) {
-    args.push_back((void*)&accessor);
-  }
+  // Addds offset calculators
+  // TODO: maybe combine into one offset calculator?
+  auto input_offset_calculator = make_input_offset_calculator<2>(iter);
+  auto output_offset_calculator = make_output_offset_calculator(iter);
+  args.push_back((void*)&input_offset_calculator);
+  args.push_back((void*)&output_offset_calculator);
 
   // Constructs kernel code
   torch::jit::TemplateEnv env;
   env.s("name", "FooFunctor");
   env.s("functor", jittable_foo_functor);
+  env.s("index_type", "unsigned int");
+  env.s("nInputs", "2");
 
   // Identifies scalar type
   // TODO: there has to be an existing way of doing this (i.e. converting scalar type to string)
