@@ -3382,6 +3382,13 @@ sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 See :func:`torch.sort`
 """)
 
+add_docstr_all('msort',
+               r"""
+sort(descending=False) -> (Tensor, LongTensor)
+
+See :func:`torch.msort`
+""")
+
 add_docstr_all('argsort',
                r"""
 argsort(dim=-1, descending=False) -> LongTensor
