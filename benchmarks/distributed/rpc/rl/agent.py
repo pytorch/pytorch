@@ -89,6 +89,7 @@ class AgentBase:
 
         if self.pending_states == self.batch_size:
             self.agent_latency_start = time.time()
+            # agent_latency_start = time.time()
 
         self.states[observer_id].copy_(state)
         future_action = self.future_actions.then(
@@ -108,8 +109,10 @@ class AgentBase:
                 future_actions.set_result(actions)
 
                 self.agent_latency_end = time.time()
+                # agent_latency_end = time.time()
 
                 batch_latency = self.agent_latency_end - self.agent_latency_start
+                # batch_latency = agent_latency_end - agent_latency_start
                 self.agent_latency.append(batch_latency)
                 self.agent_throughput.append(self.batch_size / batch_latency)
 
@@ -120,7 +123,8 @@ class AgentBase:
         self = agent_rref.local_value()
         observer_id -= 2
 
-        self.agent_latency_start = time.time()
+        # self.agent_latency_start = time.time()
+        agent_latency_start = time.time()
 
         state = state.float().unsqueeze(0)
         probs = self.policy(state)
@@ -129,9 +133,12 @@ class AgentBase:
 
         self.saved_log_probs[observer_id].append(m.log_prob(action))
 
-        self.agent_latency_end = time.time()
+        # self.agent_latency_end = time.time()
+        agent_latency_end = time.time()
 
-        non_batch_latency = self.agent_latency_end - self.agent_latency_start
+        # non_batch_latency = self.agent_latency_end - self.agent_latency_start
+        non_batch_latency = agent_latency_end - agent_latency_start
+
         self.agent_latency.append(non_batch_latency)
         self.agent_throughput.append(1 / non_batch_latency)
 
@@ -148,10 +155,13 @@ class AgentBase:
             probs = [torch.stack(self.saved_log_probs[i])
                      for i in range(len(rets))]
             probs = torch.stack(probs)
+
         policy_loss = -probs * rewards / len(rets)
+
         policy_loss.sum().backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
+
         # reset variables
         self.saved_log_probs = [] if self.batch else {
             k: [] for k in range(self.batch_size)}

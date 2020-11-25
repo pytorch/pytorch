@@ -5,6 +5,8 @@ import torch
 import torch.distributed.rpc as rpc
 import torch.multiprocessing as mp
 
+import time
+
 from coordinator import CoordinatorBase
 
 COORDINATOR_NAME = "coordinator"
@@ -63,13 +65,21 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 
 
 def main():
-    mp.spawn(
-        run_worker,
-        args=(args.world_size, args.master_addr, args.master_port,
-              args.batch, args.state_size, args.nlayers, args.out_features),
-        nprocs=args.world_size,
-        join=True
-    )
+    for world_size in range(12, 13):
+        delays = []
+        for batch in [True, False]:
+            print(world_size, batch, "==>\n")
+            tik = time.time()
+            mp.spawn(
+                run_worker,
+                args=(world_size, args.master_addr, args.master_port,
+                      batch, args.state_size, args.nlayers, args.out_features),
+                nprocs=world_size,
+                join=True
+            )
+            tok = time.time()
+            delays.append(tok - tik)
+        print(f"Time taken - {world_size}, {delays[0]}, {delays[1]}")
 
 
 if __name__ == '__main__':
