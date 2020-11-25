@@ -1,9 +1,17 @@
 import math
 import numpy as np
+import os
 from ._convert_np import make_np
 from ._utils import make_grid
 from tensorboard.compat import tf
 from tensorboard.plugins.projector.projector_config_pb2 import EmbeddingInfo
+
+
+def join(save_path, file_name):
+    full_path = os.path.join(save_path, file_name)
+    if full_path.find('://') >= 0:
+        full_path = full_path.replace(os.path.sep, '/')
+    return full_path
 
 
 def make_tsv(metadata, save_path, metadata_header=None):
@@ -16,8 +24,8 @@ def make_tsv(metadata, save_path, metadata_header=None):
                     for l in [metadata_header] + metadata]
 
     metadata_bytes = tf.compat.as_bytes('\n'.join(metadata) + '\n')
-    fs = tf.io.gfile.get_filesystem(save_path)
-    fs.write(fs.join(save_path, 'metadata.tsv'), metadata_bytes, binary_mode=True)
+    with tf.io.gfile.GFile(join(save_path, 'metadata.tsv'), 'wb') as f:
+        f.write(metadata_bytes)
 
 
 # https://github.com/tensorflow/tensorboard/issues/44 image label will be squared
@@ -40,31 +48,29 @@ def make_sprite(label_img, save_path):
         im.save(buf, format="PNG")
         im_bytes = buf.getvalue()
 
-    fs = tf.io.gfile.get_filesystem(save_path)
-    fs.write(fs.join(save_path, 'sprite.png'), im_bytes, binary_mode=True)
+    with tf.io.gfile.GFile(join(save_path, 'sprite.png'), 'wb') as f:
+        f.write(im_bytes)
 
 
-def get_embedding_info(metadata, label_img, filesys, subdir, global_step, tag):
+def get_embedding_info(metadata, label_img, subdir, global_step, tag):
     info = EmbeddingInfo()
     info.tensor_name = "{}:{}".format(tag, str(global_step).zfill(5))
-    info.tensor_path = filesys.join(subdir, 'tensors.tsv')
+    info.tensor_path = join(subdir, 'tensors.tsv')
     if metadata is not None:
-        info.metadata_path = filesys.join(subdir, 'metadata.tsv')
+        info.metadata_path = join(subdir, 'metadata.tsv')
     if label_img is not None:
-        info.sprite.image_path = filesys.join(subdir, 'sprite.png')
+        info.sprite.image_path = join(subdir, 'sprite.png')
         info.sprite.single_image_dim.extend([label_img.size(3), label_img.size(2)])
     return info
 
 
 def write_pbtxt(save_path, contents):
-    fs = tf.io.gfile.get_filesystem(save_path)
-    config_path = fs.join(save_path, 'projector_config.pbtxt')
-    fs.write(config_path, tf.compat.as_bytes(contents), binary_mode=True)
+    with tf.io.gfile.GFile(join(save_path, 'projector_config.pbtxt'), 'wb') as f:
+        f.write(tf.compat.as_bytes(contents))
 
 
 def make_mat(matlist, save_path):
-    fs = tf.io.gfile.get_filesystem(save_path)
-    with tf.io.gfile.GFile(fs.join(save_path, 'tensors.tsv'), 'wb') as f:
+    with tf.io.gfile.GFile(join(save_path, 'tensors.tsv'), 'wb') as f:
         for x in matlist:
             x = [str(i.item()) for i in x]
             f.write(tf.compat.as_bytes('\t'.join(x) + '\n'))

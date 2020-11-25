@@ -795,15 +795,14 @@ class SummaryWriter(object):
         subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
         save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
 
-        fs = tf.io.gfile.get_filesystem(save_path)
-        if fs.exists(save_path):
-            if fs.isdir(save_path):
+        if tf.io.gfile.exists(save_path):
+            if tf.io.gfile.isdir(save_path):
                 print(
                     'warning: Embedding dir exists, did you set global_step for add_embedding()?')
             else:
                 raise Exception("Path: `%s` exists, but is a file. Cannot proceed." % save_path)
         else:
-            fs.makedirs(save_path)
+            tf.io.gfile.makedirs(save_path)
 
         if metadata is not None:
             assert mat.shape[0] == len(
@@ -823,7 +822,7 @@ class SummaryWriter(object):
         if not hasattr(self, "_projector_config"):
             self._projector_config = ProjectorConfig()
         embedding_info = get_embedding_info(
-            metadata, label_img, fs, subdir, global_step, tag)
+            metadata, label_img, subdir, global_step, tag)
         self._projector_config.embeddings.extend([embedding_info])
 
         from google.protobuf import text_format  # type: ignore
