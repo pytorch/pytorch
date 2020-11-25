@@ -86,9 +86,15 @@ static void getMajorMinor(
     max_dev_version = CudaVersion(5, 0);
   } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
     max_dev_version = CudaVersion(6, 0);
-  } else if (nvrtc_version.first <= 9 || (nvrtc_version.first == 10 && nvrtc_version.second == 0)) { // 9 & 10.0 supports 3-7.2
+  } else if (
+      nvrtc_version.first <= 9 ||
+      (nvrtc_version.first == 10 &&
+       nvrtc_version.second == 0)) { // 9 & 10.0 supports 3-7.2
     max_dev_version = CudaVersion(7, 2);
-  } else if (nvrtc_version.first <= 10 || (nvrtc_version.first == 11 && nvrtc_version.second == 0)) { // 10.1-11.0 supports 3-7.5
+  } else if (
+      nvrtc_version.first <= 10 ||
+      (nvrtc_version.first == 11 &&
+       nvrtc_version.second == 0)) { // 10.1-11.0 supports 3-7.5
     max_dev_version = CudaVersion(7, 5);
   } else if (nvrtc_version.first == 11 && nvrtc_version.second == 1) {
     // 11.1 supports 3-8.0

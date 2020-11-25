@@ -260,12 +260,17 @@ NvrtcFunction nvrtcCompile(
   int minor = prop->minor;
   nvrtcProgram program;
 
-  if (nvrtc_major < 10 || (nvrtc_major == 10 && nvrtc_minor == 0)) { // clamp at sm_72 for CUDA < 10.1
+  if (nvrtc_major < 10 ||
+      (nvrtc_major == 10 &&
+       nvrtc_minor == 0)) { // clamp at sm_72 for CUDA < 10.1
     if (major > 7 || (major == 7 && minor > 2)) {
       major = 7;
       minor = 2;
     }
-  } else if (nvrtc_major < 11 || (nvrtc_major == 11 && nvrtc_minor == 0)) { // clamp at sm_75 for CUDA < 11.1
+  } else if (
+      nvrtc_major < 11 ||
+      (nvrtc_major == 11 &&
+       nvrtc_minor == 0)) { // clamp at sm_75 for CUDA < 11.1
     if (major > 7 || (major == 7 && minor > 5)) {
       major = 7;
       minor = 5;
