@@ -343,17 +343,43 @@ solve = _add_docstr(_linalg.linalg_solve, r"""
 linalg.solve(input, other, *, out=None) -> Tensor
 
 Computes a tensor ``x`` such that ``matmul(input, x) = other``.
-The resulting tensor ``x`` has the same shape as :attr:`other`.
+The resulting tensor ``x`` has the same shape as broadcasted :attr:`other`.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
 
+.. note:: If :attr:`input` is a non-invertible matrix or not a square matrix then a RuntimeError will be thrown.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
 Args:
-    input (Tensor): "left-hand-side" tensor.
-    other (Tensor): "right-hand-side" tensor.
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where ``*`` is one or more batch dimensions.
+    other (Tensor): "right-hand-side" tensor of shape :math:`(*, n)` or :math:`(*, n, k)`.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
+Examples::
+
+    >>> A = torch.eye(3)
+    >>> b = torch.randn(3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+
+Batched input::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(3, 1)
+    >>> x = torch.linalg.solve(A, b)
+    >>> torch.allclose(A @ x, b)
+    True
+    >>> b = torch.rand(3)
+    >>> x = torch.linalg.solve(A, b)
+    >>> x.shape
+    torch.Size([2, 3])
+    >>> Ax = A @ x.unsqueeze(-1)
+    >>> torch.allclose(Ax, b.unsqueeze(-1).expand_as(Ax))
+    True
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
