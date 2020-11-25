@@ -4,6 +4,7 @@
 #include <ATen/native/BinaryOps.h>
 
 // TODO: update to use lazynvrtc
+#include <ATen/cuda/detail/LazyNVRTC.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <sstream>
@@ -220,7 +221,6 @@ static auto cuda_template = torch::jit::CodeTemplate(R"(
       OffsetCalculator input_calculator,
       OffsetCalculator output_calculator) {
 
-
     // NOTE: only the first thread operates on the first element for now
     if (blockIdx.x == 0 && threadIdx.x == 0) {
       // ${scalar_type} a_value;
@@ -289,6 +289,13 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
 
   std::cout << "jittable functor string" << std::endl;
   std::cout << jittable_foo_functor << std::endl;
+
+  // EXAMPLE LOADING CODE TEMPLATE FROM FILE
+  // REPLACE THIS STRING WITH LOCAL PATH
+  const std::string local_path = "/private/home/mruberry/scratch.py";
+  const auto code_template_from_file = at::cuda::detail::load_code_template(local_path);
+  torch::jit::TemplateEnv file_env;
+  std::cout << "code_template_from_file: \n" << code_template_from_file.format(file_env) << std::endl;
 
 
   const auto output_dtype = iter.tensor(0).scalar_type();

@@ -166,6 +166,22 @@ NVRTC lazyNVRTC = {
   AT_FORALL_NVRTC(_REFERENCE_MEMBER)
 #undef _REFERENCE_MEMBER
 };
+
+// jiterator helpers start here (probably want a separate header eventually)
+
+#include <string>
+#include <fstream>
+#include <streambuf>
+
+torch::jit::CodeTemplate load_code_template(const std::string& path) {
+  std::ifstream ifs{path};
+  std::string s{
+    std::istreambuf_iterator<char>(ifs),
+    std::istreambuf_iterator<char>()};
+  return s;
+
+}
+
 } // namespace detail
 } // namespace cuda
 } // namespace at
