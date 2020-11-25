@@ -449,8 +449,20 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   TORCH_CHECK(other.dim() >= 1,
            "other should have at least 1 dimension, but has ", other.dim(), " dimensions instead");
 
-  // NumPy works for 1-dimensional 'other', we need to unsqueeze it, because 2-dimensional tensors are expected in the implementation
-  Tensor other_ = other.dim() == 1 ? other.unsqueeze(-1) : other;
+  // NumPy works for 1-dimensional 'other' or batch of 1-dimensional tensors, we need to unsqueeze it
+  // because 2-dimensional tensors are expected in the implementation
+  // unsqueeze it only if input.shape[:-1] == other.shape
+  Tensor other_ = other;
+  bool is_rhs_broadcasted = false;
+  if (input.dim()-1 == other.dim()) {
+    // if 'other' is a batch of 1-dimensional tensors, unsqueeze it
+    auto dims_input = input.sizes().vec();
+    dims_input.pop_back();
+    is_rhs_broadcasted = other.sizes().equals(dims_input);
+    if (is_rhs_broadcasted) {
+      other_ = other.unsqueeze(-1);
+    }
+  }
 
   // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
   // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
@@ -476,7 +488,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   result = at::_linalg_solve_out_helper(result, input_working_copy, infos);
 
   // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
-  if (other.dim() == 1) {
+  if (is_rhs_broadcasted) {
     result.squeeze_(-1);
   }
 

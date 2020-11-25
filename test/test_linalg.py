@@ -1648,12 +1648,40 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     def test_solve(self, device, dtype):
-        n = 5
-        k = 1
-        b, A = self.solve_test_helper((n,), (n, k), device, dtype)
-        x = torch.linalg.solve(A, b)
-        self.assertEqual(b, A.mm(x))
+        def run_test(n, batch, rhs):
+            A_dims = (n, *batch)
+            b_dims = (*batch, n, *rhs)
+            b, A = self.solve_test_helper(A_dims, b_dims, device, dtype)
+
+            # Correctness test
+            x = torch.linalg.solve(A, b)
+            if rhs == ():
+                Ax = torch.matmul(A, x.unsqueeze(-1))
+                Ax.squeeze_(-1)
+            else:
+                Ax = torch.matmul(A, x)
+            self.assertEqual(b.expand_as(Ax), Ax)
+
+            # Check against NumPy
+            expected = np.linalg.solve(A.cpu().numpy(), b.expand_as(x).cpu().numpy())
+            self.assertEqual(x, expected)
+
+            # Check out= variant
+            if rhs == ():
+                out = torch.empty_like(x.unsqueeze(-1))
+            else:
+                out = torch.empty_like(x)
+            ans = torch.linalg.solve(A, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(x, out)
+
+        batches = [(), (3, ), (2, 3)]
+        ns = [0, 5, 32]
+        nrhs = [(), (1, ), (5, )]
+        for n, batch, rhs in itertools.product(ns, batches, nrhs):
+            run_test(n, batch, rhs)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

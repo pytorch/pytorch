@@ -1116,6 +1116,13 @@ Tensor& _linalg_solve_out_helper_cuda(Tensor& result, Tensor& input, Tensor& inf
   // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
   // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
   // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
+
+  // if input is empty MAGMA might return non-zero error code, let's return early in this case
+  if (input.numel() == 0) {
+    infos.fill_(0);
+    return result;
+  }
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
     apply_solve<scalar_t>(result, input, infos);
   });
