@@ -49,11 +49,11 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   if (use_loop_launch(batch_size, n)) {
     int* p_infos = infos.data_ptr<int>();
 
+    auto dataPtr = allocator.allocate(sizeof(int) * n * batch_size);
+    int* pivot = reinterpret_cast<int*>(dataPtr.get());
     CUDA_PARALLEL_STREAM_LAUNCH(i, batch_size, [&] {
-      auto dataPtr = allocator.allocate(sizeof(int) * n);
-      int* pivot = reinterpret_cast<int*>(dataPtr.get());
       _apply_single_inverse_helper<scalar_t>(
-        &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot, p_infos + i * 2, n);
+        &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot + i * n, p_infos + i * 2, n);
     });
 
   } else {
