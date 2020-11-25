@@ -27,7 +27,7 @@ do {                                                        \
   _main_event.record(_main_stream);                         \
   for (int i = 0; i < _batch_size; i++) {                   \
     auto _stream = at::cuda::getStreamFromPool();           \
-    at::cuda::CUDAStreamGuard guard(_stream);               \
+    at::cuda::CUDAStreamGuard _guard(_stream);               \
     _main_event.block(_stream);                             \
     _stmt();                                                \
     at::cuda::CUDAEvent _finished;                          \
