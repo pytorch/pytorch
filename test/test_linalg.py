@@ -1580,7 +1580,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(matrix_inverse, expected_inv)
 
         for batches, n in itertools.product(
-            [[], [1], [4], [2, 3]],
+            [[], [1], [2], [4], [2, 3]],
             [0, 5, 64]
         ):
             matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
