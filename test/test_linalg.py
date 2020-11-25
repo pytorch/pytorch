@@ -1677,6 +1677,12 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, out)
             self.assertEqual(x, out)
 
+            # Check empty out
+            out = torch.empty(0, dtype=dtype, device=device)
+            ans = torch.linalg.solve(A, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(x, out)
+
         batches = [(), (3, ), (2, 3)]
         ns = [0, 5, 32]
         nrhs = [(), (1, ), (5, )]
@@ -1723,6 +1729,21 @@ class TestLinalg(TestCase):
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
+
+        # if out is non-empty then it should have correct sizes
+        with self.assertRaisesRegex(RuntimeError, r'does not match broadcasted other shape'):
+            out = torch.empty(1, dtype=dtype, device=device)
+            A = torch.eye(3, dtype=dtype, device=device)
+            b = torch.randn(3, 1, dtype=dtype, device=device)
+            torch.linalg.solve(A, b, out=out)
+
+        # if out is non-empty then it should also be Fortran contiguous
+        with self.assertRaisesRegex(RuntimeError, r'tensor must be in batched column major'):
+            out = torch.zeros(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
+            self.assertFalse(out.is_contiguous())
+            A = torch.eye(2, dtype=dtype, device=device).reshape((1, 2, 2)).repeat(2, 1, 1)
+            b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+            torch.linalg.solve(A, b, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
