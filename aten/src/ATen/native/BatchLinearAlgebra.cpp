@@ -354,6 +354,7 @@ Computes the solution to a system of linear equations
   A X = B,
 where A is an n-by-n matrix and X and B are n-by-nrhs matrices.
 Note that B is required to be a matrix, the usual, vector case, is obtained with nrhs = 1.
+Above description is for non-batched input, the batched input is also supported.
 This is an in-place routine, content of both A and b are overriden.
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see LAPACK's documentation for GESV routine.
@@ -426,8 +427,7 @@ Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& info
   // 'result' and 'input' should be in column major order (it should be checked before calling this function)
   // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
   // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
-  // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
-
+  // 'input' should contain data of original 'input' tensor (left-hand-side of the linear system of equations)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
     apply_solve<scalar_t>(result, input, infos);
   });
@@ -436,8 +436,6 @@ Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& info
 
 // Solves a system of linear equations dot(input, x) = other in-place
 Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
-  // TODO: leave only the necessary checks
-  squareCheckInputs(input);
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
   TORCH_CHECK(input.scalar_type() == other.scalar_type(),
@@ -445,43 +443,55 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
 
   TORCH_CHECK(input.dim() >= 2,
            "input should have at least 2 dimensions, but has ", input.dim(), " dimensions instead");
-  TORCH_CHECK(other.dim() >= 2,
-           "other should have at least 2 dimensions, but has ", other.dim(), " dimensions instead");
+  TORCH_CHECK(other.dim() >= 1,
+           "other should have at least 1 dimension, but has ", other.dim(), " dimensions instead");
 
+  // NumPy works for 1-dimensional 'other', we need to unsqueeze it, because 2-dimensional tensors are expected in the implementation
+  Tensor other_ = other.dim() == 1 ? other.unsqueeze(-1) : other;
+
+  // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
+  // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
   Tensor other_broadcasted, input_broadcasted;
-  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other, input, "linalg_solve");
-
-  // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-  TORCH_CHECK(result.numel() != 0 && result.sizes().equals(other_broadcasted.sizes()),
-    "result shape ", result.sizes(), " does not match broadcasted other shape ", other_broadcasted.sizes());
+  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
     at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
+  } else {
+    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
+    TORCH_CHECK(result.sizes().equals(other_broadcasted.sizes()),
+      "result shape ", result.sizes(), " does not match broadcasted other shape ", other_broadcasted.sizes());
   }
 
   // How to check efficiently that the individual matrices in the batch (last two dimensions) are in the column major order?
   TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
 
-
   result.copy_(other_broadcasted);
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
   auto infos = at::empty({batchCount(input_broadcasted)}, input_broadcasted.options().dtype(kInt));
   result = at::_linalg_solve_out_helper(result, input_working_copy, infos);
+
+  // Now check LAPACK error codes
+  std::vector<int64_t> infos_(infos.data_ptr<int>(), infos.data_ptr<int>() + batchCount(input_broadcasted));
+  if (input_broadcasted.dim() > 2) {
+    batchCheckErrors(infos_, "linalg_solve");
+  } else {
+    singleCheckErrors(infos_[0], "linalg_solve");
+  }
+
+  // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
+  if (other.dim() == 1) {
+    result.squeeze_(-1);
+  }
+
   return result;
 }
 
 // Solves a system of linear equations dot(input, x) = other
 Tensor linalg_solve(const Tensor& input, const Tensor& other) {
-  squareCheckInputs(input);
-  Tensor other_broadcasted, input_broadcasted;
-  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other, input, "linalg_solve");
-
-  auto result = cloneBatchedColumnMajor(other_broadcasted);
-  auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
-  auto infos = at::empty({batchCount(input_broadcasted)}, input_broadcasted.options().dtype(kInt));
-  result = at::_linalg_solve_out_helper(result, input_working_copy, infos);
+  Tensor result = at::empty({0}, input.options());
+  result = at::linalg_solve_out(result, input, other);
   return result;
 }
 

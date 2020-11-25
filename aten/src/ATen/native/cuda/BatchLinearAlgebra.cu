@@ -1116,7 +1116,6 @@ Tensor& _linalg_solve_out_helper_cuda(Tensor& result, Tensor& input, Tensor& inf
   // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
   // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
   // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
-
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
     apply_solve<scalar_t>(result, input, infos);
   });
