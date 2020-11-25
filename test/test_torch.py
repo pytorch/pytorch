@@ -3266,6 +3266,32 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_msort(self, device, dtype):
+        def test(shape):
+            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            expected_values = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+            expected_indices = torch.sort(tensor, dim=0).indices
+
+            result_values, result_indices = torch.msort(tensor)
+            self.assertEqual(result_values, expected_values)
+            self.assertEqual(result_indices, expected_indices)
+
+            out = [torch.empty_like(result_values), torch.empty_like(result_indices)]
+            torch.msort(tensor, out=out)
+            self.assertEqual(out[0], expected_values)
+            self.assertEqual(out[1], expected_indices)
+
+        shapes = (
+            [20, 1],
+            [1, 20],
+            [100, 100],
+            [10, 20, 30]
+        )
+        for shape in shapes:
+            test(shape)
+
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
