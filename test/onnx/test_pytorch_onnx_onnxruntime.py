@@ -4174,6 +4174,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
                          'Please try opset version 11.', the_exception.args[0])
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_if_fold(self):
         class IfFoldModel(torch.nn.Module):
             def forward(self, y):
@@ -4263,13 +4264,12 @@ class TestONNXRuntime(unittest.TestCase):
     def test_uninitialized(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, y):
-                if y.size() == torch.Size([3, 4]):
-                    y = y + 4
-                    y = y + 2
-                else:
-                    return y
+                if y.shape[1] < 5:
+                    if y.size(0) == 1:
+                        y = y + 4
+                    else:
+                        return y
                 return y
-
 
         x = torch.ones((3, 4), dtype=torch.int)
         self.run_test(UninitializedModel(), x)
@@ -4410,21 +4410,21 @@ class TestONNXRuntime(unittest.TestCase):
     #@disableScriptTest()  # shape/type inference
     def test_crossentropyloss(self):
         for ignore_index in [-100, 1]:
-            # x = torch.randn(3, 5)
-            # y = torch.empty(3, dtype=torch.long).random_(5)
-            # y[y == 1] = ignore_index
-
-            # self._crossentropyloss(x, y, ignore_index)
-
-            x = torch.randn(3, 5, 2)
-            y = torch.empty(3, 2, dtype=torch.long).random_(5)
+            x = torch.randn(3, 5)
+            y = torch.empty(3, dtype=torch.long).random_(5)
             y[y == 1] = ignore_index
+
             self._crossentropyloss(x, y, ignore_index)
 
-            # x = torch.randn(3, 5, 2, 7)
-            # y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+            # x = torch.randn(3, 5, 2)
+            # y = torch.empty(3, 2, dtype=torch.long).random_(5)
             # y[y == 1] = ignore_index
             # self._crossentropyloss(x, y, ignore_index)
+
+            x = torch.randn(3, 5, 2, 7)
+            y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
+            y[y == 1] = ignore_index
+            self._crossentropyloss(x, y, ignore_index)
 
     def _crossentropyloss(self, x, y, ignore_index):
         class CrossEntropyLossNone(torch.nn.Module):
