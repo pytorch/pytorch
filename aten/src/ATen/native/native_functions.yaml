@@ -2346,7 +2346,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: log1p
+    CPU, CUDA: log1p
+    SparseCPU, SparseCUDA: log1p_sparse
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -3917,6 +3918,10 @@
   dispatch:
     CPU: threshold_backward
     CUDA: threshold_backward_cuda
+
+- func: tile(Tensor self, int[] dims) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   use_c10_dispatcher: full
