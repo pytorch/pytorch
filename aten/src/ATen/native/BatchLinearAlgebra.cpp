@@ -434,7 +434,7 @@ Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& info
   return result;
 }
 
-// Solves a system of linear equations dot(input, x) = other in-place
+// Solves a system of linear equations matmul(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
 static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
   TORCH_CHECK(infos.scalar_type() == kInt,
@@ -495,7 +495,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   return result;
 }
 
-// Solves a system of linear equations dot(input, x) = other in-place
+// Solves a system of linear equations matmul(input, x) = other in-place
 Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   auto infos = at::empty({0}, input.options().dtype(kInt));
   result = linalg_solve_out_info(result, infos, input, other);
@@ -512,7 +512,7 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   return result;
 }
 
-// Solves a system of linear equations dot(input, x) = other
+// Solves a system of linear equations matmul(input, x) = other
 Tensor linalg_solve(const Tensor& input, const Tensor& other) {
   Tensor result = at::empty({0}, input.options());
   result = at::linalg_solve_out(result, input, other);

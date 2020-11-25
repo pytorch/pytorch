@@ -342,7 +342,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 solve = _add_docstr(_linalg.linalg_solve, r"""
 linalg.solve(input, other, *, out=None) -> Tensor
 
-Computes a tensor ``x`` such that ``dot(input, x) = other``.
+Computes a tensor ``x`` such that ``matmul(input, x) = other``.
 The resulting tensor ``x`` has the same shape as :attr:`other`.
 
 Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
