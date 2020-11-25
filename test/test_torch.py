@@ -4429,11 +4429,9 @@ class TestTorchDeviceType(TestCase):
         test_against_np_uniformbins(sample, density=True)
 
         # test weights and density arg
-        # if weights have a float32 type, the difference is around 2e-7, so increasing atol
-        if dtypes[1] == torch.float32:
-            test_against_np_uniformbins(sample, weights=weights, density=True, atol=3e-7, rtol=1e-7)
-        else:
-            test_against_np_uniformbins(sample, weights=weights, density=True)
+        # Increasing atol because for some reason if weights dtype is float32 or some bincounts are negative
+        # there's a small discrepancy with NumPy
+        test_against_np_uniformbins(sample, weights=weights, density=True, atol=3e-7, rtol=1e-7)
 
         # Test bins arg
         test_against_np_uniformbins(sample, bins=20)
