@@ -182,6 +182,8 @@ public:
     //   }
 
     //   [Step 4]
+    //   x = std::fabs(x);
+    //   y = std::fabs(y);
     //   auto a = max(x, y);
     //   auto b = min(x, y);
     //   return std::abs(a) * std::sqrt(1 + std::pow(b / a, 2));
@@ -204,8 +206,8 @@ public:
     const auto values_abs = _mm256_andnot_ps(mask, values);
 
     // [Step 4]
-    auto a = _mm256_max_ps(values, _mm256_permute_ps(values, 0xB1));
-    auto b = _mm256_min_ps(values, _mm256_permute_ps(values, 0xB1));
+    auto a = _mm256_max_ps(values_abs, _mm256_permute_ps(values_abs, 0xB1));
+    auto b = _mm256_min_ps(values_abs, _mm256_permute_ps(values_abs, 0xB1));
 
     auto abs_a = _mm256_andnot_ps(mask, a);
 

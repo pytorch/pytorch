@@ -139,8 +139,8 @@ public:
     const auto values_abs = _mm256_andnot_pd(mask, values);
 
     // [Step 4]
-    auto a = _mm256_max_pd(values, _mm256_permute_pd(values, 0x05));
-    auto b = _mm256_min_pd(values, _mm256_permute_pd(values, 0x05));
+    auto a = _mm256_max_pd(values_abs, _mm256_permute_pd(values_abs, 0x05));
+    auto b = _mm256_min_pd(values_abs, _mm256_permute_pd(values_abs, 0x05));
 
     auto abs_a = _mm256_andnot_pd(mask, a);
 
