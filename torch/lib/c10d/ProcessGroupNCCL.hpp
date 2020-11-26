@@ -223,19 +223,9 @@ class ProcessGroupNCCL : public ProcessGroup {
           "FutureNCCL only supports single-process single-device mode.");
     }
 
-    // This constructor is used by then callback, it skips setting the value at
-    // the beginning. Later, the value will be set using markCompleted with the
-    // return value of callback.
-    explicit FutureNCCL(
-        c10::DeviceIndex deviceIndex,
-        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
+    explicit FutureNCCL(c10::DeviceIndex deviceIndex)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
-          deviceIndex_(deviceIndex),
-          cudaEvents_(std::move(cudaEvents)) {
-      TORCH_INTERNAL_ASSERT(
-          cudaEvents_->size() == 1,
-          "FutureNCCL only supports single-process single-device mode.");
-    }
+          deviceIndex_(deviceIndex) {}
 
     // Gets the current stream of the device and synchronizes recorded streams
     // with that. It will return after synchronizing the correct GPU streams to
@@ -259,6 +249,15 @@ class ProcessGroupNCCL : public ProcessGroup {
           "FutureNCCL's value was internally set to NCCL collective's "
           "outputs or the return value of the callback.");
       value_ = std::move(value);
+
+      if (cudaEvents_ == nullptr) {
+        // Create a new cudaEvents object of size 1 that will record the current
+        // stream after callback and will be passed to the new FutureNCCL.
+        cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
+        // In case of chained then callback calls, cudaEvents
+        // records callback's stream.
+        (*cudaEvents_)[0].record(at::cuda::getDefaultCUDAStream(deviceIndex_));
+      }
     }
 
     // Just returns FutureNCCL's value after wait returns.
@@ -301,13 +300,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     c10::intrusive_ptr<Future> then(
         std::function<at::IValue(void)> callback,
         at::TypePtr /* unused */) override {
-      // Create a new cudaEvents object of size 1 that will record the current
-      // stream after callback and will be passed to the new FutureNCCL.
-      auto thenFutCudaEvents =
-          std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
-      // Create a FutureNCCL without setting a value.
-      auto fut = c10::make_intrusive<FutureNCCL>(
-          deviceIndex_, thenFutCudaEvents);
+      auto fut = c10::make_intrusive<FutureNCCL>(deviceIndex_);
 
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
@@ -316,10 +309,6 @@ class ProcessGroupNCCL : public ProcessGroup {
           [&](std::function<at::IValue(void)> cb) {
             try {
               fut->markCompleted(at::IValue(cb()));
-              // In case of chained then callback calls, thenFutCudaEvents
-              // records callback's stream.
-              (*thenFutCudaEvents)[0].record(
-                  at::cuda::getDefaultCUDAStream(deviceIndex_));
             } catch (const std::exception& e) {
               fut->setError(std::current_exception());
             }
