@@ -99,6 +99,8 @@ Indexing, Slicing, Joining, Mutating Ops
     split
     squeeze
     stack
+    swapaxes
+    swapdims
     t
     take
     tensor_split
