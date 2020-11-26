@@ -29,6 +29,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/math_kernel_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_overlapping_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/mobile_memory_cleanup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp

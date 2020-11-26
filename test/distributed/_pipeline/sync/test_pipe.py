@@ -512,7 +512,7 @@ def test_verify_module_params_on_same_device():
 
     with pytest.raises(
         ValueError,
-        match='should have all parameters on a single device, please use .to\(\)'
+        match=r'should have all parameters on a single device, please use .to\(\)'
             ' to place the module on a single device'):
         Pipe(model)
 

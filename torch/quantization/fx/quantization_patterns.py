@@ -13,23 +13,29 @@ from ..quantization_mappings import (
     get_static_quant_module_class,
     get_quantized_operator,
 )
+from ..utils import (
+    get_swapped_custom_module_class,
+    activation_is_statically_quantized,
+    weight_is_statically_quantized,
+    weight_dtype,
+    get_qconfig_dtypes,
+)
+
 from .pattern_utils import (
     register_quant_pattern,
+    mark_input_output_not_observed,
 )
+
 from .utils import (
     _parent_name,
     quantize_node,
     get_per_tensor_qparams,
-    get_swapped_custom_module_class,
-    activation_is_statically_quantized,
-    weight_is_quantized,
-    weight_dtype,
     get_linear_prepack_op_for_dtype,
-    get_qconfig_dtypes,
 )
 
 from abc import ABC, abstractmethod
 import operator
+import warnings
 
 # -------------------------
 # Pattern Registrations
@@ -212,14 +218,7 @@ class ConvRelu(QuantizeHandler):
                 convert_custom_config_dict = {}
             additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
             # 1. attach activation post process to module
-            if type(self.conv) in [
-                    torch.nn.intrinsic.ConvReLU1d,
-                    torch.nn.intrinsic.ConvReLU2d,
-                    torch.nn.intrinsic.ConvReLU3d
-            ]:
-                self.conv[1].activation_post_process = quantizer.activation_post_process_map[node.name]
-            else:
-                self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
+            self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
             qconv_cls = get_static_quant_module_class(
                 type(self.conv), additional_static_quant_mapping)
@@ -299,8 +298,13 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
-            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Linear "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':
@@ -315,11 +319,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 output_activation_post_process = None
 
             if output_activation_post_process:
-                if type(self.linear) == torch.nn.intrinsic.LinearReLU:
-                    float_linear_module = self.linear[1]
-                else:
-                    float_linear_module = self.linear
-                float_linear_module.activation_post_process = output_activation_post_process
+                self.linear.activation_post_process = output_activation_post_process
 
             # 2. select corresponding quantized linear class for the float linear class
             if type(self.linear) in [torch.nn.Linear, torch.nn.qat.Linear]:
@@ -343,7 +343,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 quantized_input_idxs = []
                 if activation_statically_quantized:
                     quantized_input_idxs.append(0)
-                if weight_is_quantized(qconfig):
+                if weight_is_statically_quantized(qconfig):
                     quantized_input_idxs.append(1)
                 args = load_arg(quantized=quantized_input_idxs)(self.linear_node.args)
                 args = load_arg(quantized=False)(self.linear_node.args)
@@ -364,7 +364,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             else:  # non-debug option
                 # linear args
                 # (x, weight, bias, ...)
-                weight_quantized = weight_is_quantized(qconfig)
+                weight_quantized = weight_is_statically_quantized(qconfig)
                 linear_weight = load_arg(quantized=weight_quantized)(self.linear_node.args[1])
 
                 # get other arguments
@@ -396,7 +396,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
                 else:
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
-                    qlinear_args = (linear_input, packed_weight)
+                    qlinear_args = (linear_input, packed_weight)  # type: ignore
                     return quantizer.quantized_graph.create_node(
                         'call_function', torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
 
@@ -416,13 +416,7 @@ class BatchNorm(QuantizeHandler):
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
-        activation_post_process = quantizer.activation_post_process_map[node.name]
-        if type(self.bn) in \
-            [torch.nn.intrinsic.BNReLU2d,
-             torch.nn.intrinsic.BNReLU3d]:
-            self.bn[1].activation_post_process = activation_post_process
-        else:
-            self.bn.activation_post_process = activation_post_process
+        self.bn.activation_post_process = quantizer.activation_post_process_map[node.name]
         qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
@@ -435,27 +429,33 @@ class BatchNorm(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
+@mark_input_output_not_observed()
 class Embedding(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # Supported combinations are:
-        # quant_type  | activation (compute_type) | weight
-        # weight_only |  float32 (torch.uint8)    | quint8
-        # weight_only |  float32 (torch.uint8)    | quint4x2
+        # quant_type  | activation | weight | activation_compute_type
+        # weight_only |  float32   | quint8 | None
+        # weight_only |  float32   | quint4x2 | None
         # tuple (activation_dtype, weight_dtype, compute_dtype)
         supported_dtypes = [
-            (torch.float32, torch.quint8, torch.quint8),
-            (torch.float32, torch.quint4x2, torch.quint8),
+            (torch.float32, torch.quint8, None),
+            (torch.float32, torch.quint4x2, None),
         ]
         assert node.op == 'call_module'
         emb_node = node
         emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
-            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Embedding/EmbeddingBag, "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
@@ -669,7 +669,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
-        convert = torch.quantization.quantize_fx._convert_standalone_module_fx
+        convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore
         observed_standalone_module = quantizer.modules[node.target]
         quantized_standalone_module = convert(observed_standalone_module, debug=debug)
         parent_name, name = _parent_name(node.target)

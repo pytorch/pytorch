@@ -292,8 +292,8 @@ Tensor& log10_out(Tensor& result, const Tensor& self) { return unary_op_impl_flo
 Tensor log10(const Tensor& self) { return unary_op_impl_float(self, log10_stub); }
 Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
 
-Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log1p_stub); }
-Tensor log1p(const Tensor& self) { return unary_op_impl(self, at::log1p_out); }
+Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, log1p_stub); }
+Tensor log1p(const Tensor& self) { return unary_op_impl_float(self, log1p_stub); }
 Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
 
 Tensor& log2_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, log2_stub); }
@@ -378,8 +378,8 @@ Tensor& arctanh_out(Tensor& result, const Tensor& self) { return at::atanh_out(r
 Tensor arctanh(const Tensor& self) { return self.atanh(); }
 Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
-Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
-Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
+Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sqrt_stub); }
+Tensor sqrt(const Tensor& self) { return unary_op_impl_float(self, sqrt_stub); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
