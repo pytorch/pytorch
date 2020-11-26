@@ -263,7 +263,7 @@ if dist.is_available():
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
-    if not TEST_WITH_ROCM and dist.is_gloo_available():
+    if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'
