@@ -1063,14 +1063,14 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_svd_helper(self, some, compute_uv);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor U_tmp, S_tmp, V_tmp;
   std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
   U.resize_as_(U_tmp).copy_(U_tmp);
@@ -1093,7 +1093,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
 
     bool some = !full_matrices;
     Tensor U, S, V;
