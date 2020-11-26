@@ -364,6 +364,11 @@ class BuildExtension(build_ext, object):
                         extension.extra_compile_args[ext] = []
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
+            # See note [Pybind11 ABI constants]
+            for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+                val = getattr(torch._C, f"_PYBIND11_{name}")
+                if val is not None and not IS_WINDOWS:
+                    self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -387,11 +392,20 @@ class BuildExtension(build_ext, object):
                 cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
+            cflags = (COMMON_NVCC_FLAGS +
+                      ['--compiler-options', "'-fPIC'"] +
+                      cflags + _get_cuda_arch_flags(cflags))
+
+            # NVCC does not allow multiple -ccbin/--compiler-bindir to be passed, so we avoid
+            # overriding the option if the user explicitly passed it.
             _ccbin = os.getenv("CC")
-            return (COMMON_NVCC_FLAGS +
-                    ['--compiler-options', "'-fPIC'"] +
-                    cflags + _get_cuda_arch_flags(cflags) +
-                    (['-ccbin', _ccbin] if _ccbin is not None else []))
+            if (
+                _ccbin is not None 
+                and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
+            ):
+                cflags.extend(['-ccbin', _ccbin])
+
+            return cflags
 
         def convert_to_absolute_paths_inplace(paths):
             # Helper function. See Note [Absolute include_dirs]
@@ -548,7 +562,7 @@ class BuildExtension(build_ext, object):
                         else:
                             cflags = []
 
-                        cflags = win_cuda_flags(cflags)
+                        cflags = win_cuda_flags(cflags) + ['--use-local-env']
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
@@ -618,7 +632,7 @@ class BuildExtension(build_ext, object):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = []
+                cuda_cflags = ['--use-local-env']
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
@@ -1415,9 +1429,17 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
-    # If not given, determine what's needed for the GPU that can be found
+    # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
         capability = torch.cuda.get_device_capability()
+        supported_sm = [int(arch.split('_')[1])
+                        for arch in torch.cuda.get_arch_list() if 'sm_' in arch]
+        max_supported_sm = max((sm // 10, sm % 10) for sm in supported_sm)
+        # Capability of the device may be higher than what's supported by the user's
+        # NVCC, causing compilation error. User's NVCC is expected to match the one
+        # used to build pytorch, so we use the maximum supported capability of pytorch
+        # to clamp the capability.
+        capability = min(max_supported_sm, capability)
         arch_list = [f'{capability[0]}.{capability[1]}']
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
@@ -1511,33 +1533,26 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     try:
         sys.stdout.flush()
         sys.stderr.flush()
-        if sys.version_info >= (3, 5):
-            # Warning: don't pass stdout=None to subprocess.run to get output.
-            # subprocess.run assumes that sys.__stdout__ has not been modified and
-            # attempts to write to it by default.  However, when we call _run_ninja_build
-            # from ahead-of-time cpp extensions, the following happens:
-            # 1) If the stdout encoding is not utf-8, setuptools detachs __stdout__.
-            #    https://github.com/pypa/setuptools/blob/7e97def47723303fafabe48b22168bbc11bb4821/setuptools/dist.py#L1110
-            #    (it probably shouldn't do this)
-            # 2) subprocess.run (on POSIX, with no stdout override) relies on
-            #    __stdout__ not being detached:
-            #    https://github.com/python/cpython/blob/c352e6c7446c894b13643f538db312092b351789/Lib/subprocess.py#L1214
-            # To work around this, we pass in the fileno directly and hope that
-            # it is valid.
-            stdout_fileno = 1
-            subprocess.run(
-                command,
-                stdout=stdout_fileno if verbose else subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                cwd=build_directory,
-                check=True,
-                env=env)
-        else:
-            subprocess.check_output(
-                command,
-                stderr=subprocess.STDOUT,
-                cwd=build_directory,
-                env=env)
+        # Warning: don't pass stdout=None to subprocess.run to get output.
+        # subprocess.run assumes that sys.__stdout__ has not been modified and
+        # attempts to write to it by default.  However, when we call _run_ninja_build
+        # from ahead-of-time cpp extensions, the following happens:
+        # 1) If the stdout encoding is not utf-8, setuptools detachs __stdout__.
+        #    https://github.com/pypa/setuptools/blob/7e97def47723303fafabe48b22168bbc11bb4821/setuptools/dist.py#L1110
+        #    (it probably shouldn't do this)
+        # 2) subprocess.run (on POSIX, with no stdout override) relies on
+        #    __stdout__ not being detached:
+        #    https://github.com/python/cpython/blob/c352e6c7446c894b13643f538db312092b351789/Lib/subprocess.py#L1214
+        # To work around this, we pass in the fileno directly and hope that
+        # it is valid.
+        stdout_fileno = 1
+        subprocess.run(
+            command,
+            stdout=stdout_fileno if verbose else subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=build_directory,
+            check=True,
+            env=env)
     except subprocess.CalledProcessError as e:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
@@ -1590,6 +1605,24 @@ def _write_ninja_file_to_build_library(path,
 
     common_cflags = [f'-DTORCH_EXTENSION_NAME={name}']
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
+
+    # Note [Pybind11 ABI constants]
+    #
+    # Pybind11 before 2.4 used to build an ABI strings using the following pattern:
+    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_BUILD_TYPE}__"
+    # Since 2.4 compier type, stdlib and build abi parameters are also encoded like this:
+    # f"__pybind11_internals_v{PYBIND11_INTERNALS_VERSION}{PYBIND11_INTERNALS_KIND}{PYBIND11_COMPILER_TYPE}{PYBIND11_STDLIB}{PYBIND11_BUILD_ABI}{PYBIND11_BUILD_TYPE}__"
+    #
+    # This was done in order to further narrow down the chances of compiler ABI incompatibility
+    # that can cause a hard to debug segfaults.
+    # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
+    # captured during PyTorch native library compilation in torch/csrc/Module.cpp
+
+    for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+        pval = getattr(torch._C, f"_PYBIND11_{pname}")
+        if pval is not None and not IS_WINDOWS:
+            common_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
+
     common_cflags += [f'-I{include}' for include in user_includes]
     common_cflags += [f'-isystem {include}' for include in system_includes]
 

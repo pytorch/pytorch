@@ -1,6 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
 #include <memory>
@@ -11,13 +12,19 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/Transforms/Scalar.h>
 
+#if LLVM_VERSION_MAJOR >= 11
+#include <llvm/Support/TypeSize.h>
+#endif
+
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
+#include <torch/csrc/jit/tensorexpr/half_support.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -73,6 +80,22 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
   }
 }
 
+#if LLVM_VERSION_MAJOR <= 9
+int ElementCount(int lanes) {
+  return lanes;
+}
+#else
+llvm::ElementCount ElementCount(int lanes) {
+#if LLVM_VERSION_MAJOR <= 11
+  return llvm::ElementCount(static_cast<unsigned>(lanes), false);
+#elif LLVM_VERSION_MAJOR == 12
+  return llvm::ElementCount::getFixed(lanes);
+#else
+#error Only LLVM versions 8 through 12 are supported.
+#endif
+}
+#endif
+
 } // namespace
 
 class LLVMCodeGenImpl : public IRVisitor {
@@ -103,6 +126,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::Type* dtypeToLLVMPtr(Dtype dtype);
   void emitWrapper(const std::vector<llvm::Type*>& params);
   void emitKernel(Stmt* stmt, const std::vector<llvm::Type*>& params);
+  llvm::Value* toVec(llvm::Value* v, int lanes);
 
  public:
   LLVMCodeGenImpl(
@@ -172,7 +196,7 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #if 0
   // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
   // once LLVM 10 is available.
-  return llvm::cantFail(llvm::orc::JITTargetMachineBuilder::detectHost());
+  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
 #else
   llvm::orc::JITTargetMachineBuilder JTMB(
       (llvm::Triple(llvm::sys::getProcessTriple())));
@@ -188,7 +212,7 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
   }
 
   JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
-  JTMB.setCPU(llvm::sys::getHostCPUName());
+  JTMB.setCPU(llvm::sys::getHostCPUName().str());
   JTMB.addFeatures(SubtargetFeatures.getFeatures());
   JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
 
@@ -205,8 +229,9 @@ LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
     at::Device device,
+    const std::string& kernel_func_name,
     Dtype dtype)
-    : CodeGen(stmt, args, device),
+    : CodeGen(stmt, args, device, kernel_func_name),
       impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
 
 static void* argToPtr(
@@ -280,12 +305,17 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::InitializeNativeTargetAsmPrinter();
 
   auto JTMB = makeTargetMachineBuilder();
-  TM_ = llvm::cantFail(JTMB.createTargetMachine());
+  TM_ = assertSuccess(JTMB.createTargetMachine());
 
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
-  module_->setDataLayout(cantFail(JTMB.getDefaultDataLayoutForTarget()));
+  module_->setDataLayout(assertSuccess(JTMB.getDefaultDataLayoutForTarget()));
   module_->setTargetTriple(JTMB.getTargetTriple().str());
+
+  // We support float16 ops by casting expr inputs to float32
+  // and then casting the result back to float16
+  HalfRewriter hsFix;
+  stmt = stmt->accept_mutator(&hsFix);
 
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
@@ -314,9 +344,9 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitWrapper(params);
   emitKernel(stmt, params);
 
-  cantFail(jit_->addModule(std::move(module_), std::move(context_)));
+  assertSuccess(jit_->addModule(std::move(module_), std::move(context_)));
   auto sym = jit_->findSymbol("wrapper");
-  kernelAddress_ = cantFail(sym.getAddress());
+  kernelAddress_ = assertSuccess(sym.getAddress());
   argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
@@ -378,12 +408,12 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     if (v->op_type() == kTanh) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_tanh(v->param(0));
+        return fast_tanh(v->param(0)->accept_mutator(this));
       }
     } else if (v->op_type() == kSigmoid) {
       ScalarType stype = v->dtype().scalar_type();
       if (stype == ScalarType::Float) {
-        return fast_sigmoid(v->param(0));
+        return fast_sigmoid(v->param(0)->accept_mutator(this));
       }
     }
     // TODO: fast exp
@@ -401,25 +431,25 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     int lanes = dtype.lanes();
     // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
     // times. Clamp the input expression to [-9, 9]
-    ExprHandle plus_9 = to_vec(9.0f, lanes);
-    ExprHandle minus_9 = to_vec(-9.0f, lanes);
+    ExprHandle plus_9 = float_to_vec(9.0f, lanes);
+    ExprHandle minus_9 = float_to_vec(-9.0f, lanes);
     ExprHandle v1 = Min::make(v, plus_9, false);
     v1 = Max::make(v1, minus_9, false);
 
     // The coefficients for the numerator
-    ExprHandle alpha_1 = to_vec(4.89352455891786e-03f, lanes);
-    ExprHandle alpha_3 = to_vec(6.37261928875436e-04f, lanes);
-    ExprHandle alpha_5 = to_vec(1.48572235717979e-05f, lanes);
-    ExprHandle alpha_7 = to_vec(5.12229709037114e-08f, lanes);
-    ExprHandle alpha_9 = to_vec(-8.60467152213735e-11f, lanes);
-    ExprHandle alpha_11 = to_vec(2.00018790482477e-13f, lanes);
-    ExprHandle alpha_13 = to_vec(-2.76076847742355e-16f, lanes);
+    ExprHandle alpha_1 = float_to_vec(4.89352455891786e-03f, lanes);
+    ExprHandle alpha_3 = float_to_vec(6.37261928875436e-04f, lanes);
+    ExprHandle alpha_5 = float_to_vec(1.48572235717979e-05f, lanes);
+    ExprHandle alpha_7 = float_to_vec(5.12229709037114e-08f, lanes);
+    ExprHandle alpha_9 = float_to_vec(-8.60467152213735e-11f, lanes);
+    ExprHandle alpha_11 = float_to_vec(2.00018790482477e-13f, lanes);
+    ExprHandle alpha_13 = float_to_vec(-2.76076847742355e-16f, lanes);
 
     // The coeffecients for the denominator
-    ExprHandle beta_0 = to_vec(4.89352518554385e-03f, lanes);
-    ExprHandle beta_2 = to_vec(2.26843463243900e-03f, lanes);
-    ExprHandle beta_4 = to_vec(1.18534705686654e-04f, lanes);
-    ExprHandle beta_6 = to_vec(1.19825839466702e-06f, lanes);
+    ExprHandle beta_0 = float_to_vec(4.89352518554385e-03f, lanes);
+    ExprHandle beta_2 = float_to_vec(2.26843463243900e-03f, lanes);
+    ExprHandle beta_4 = float_to_vec(1.18534705686654e-04f, lanes);
+    ExprHandle beta_6 = float_to_vec(1.19825839466702e-06f, lanes);
 
     // numerator
     ExprHandle v2 = v1 * v1;
@@ -444,20 +474,16 @@ class LLVMIntrinsicsExpander : public GenericIntrinsicsExpander {
     // sigmoid(x) = (tanh(x / 2) + 1) / 2
     ExprHandle x{v_ptr};
     int lanes = x.dtype().lanes();
-    ExprHandle one_v = to_vec(1.f, lanes);
-    ExprHandle half_v = to_vec(0.5f, lanes);
+    ExprHandle one_v = float_to_vec(1.f, lanes);
+    ExprHandle half_v = float_to_vec(0.5f, lanes);
     ExprHandle x2 = x * half_v;
     ExprHandle y{fast_tanh(x2.node())};
     ExprHandle z = (y + one_v) * half_v;
     return z.node();
   }
 
-  ExprHandle to_vec(float v, int lanes) {
-    if (lanes == 1) {
-      return v;
-    } else {
-      return Broadcast::make(v, lanes);
-    }
+  ExprHandle float_to_vec(float v, int lanes) {
+    return expr_to_vec(FloatImm::make(v), lanes);
   }
 };
 
@@ -696,8 +722,7 @@ void LLVMCodeGenImpl::visit(const Min* v) {
   auto lhs = this->value_;
   v->rhs()->accept(this);
   auto rhs = this->value_;
-
-  if (v->dtype() == kInt) {
+  if (v->dtype().is_integral()) {
     auto icmp = irb_.CreateICmpSLT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
@@ -795,7 +820,7 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
 
   llvm::Type* dstType = dtypeToLLVM(v->dtype());
   if (v->dtype().lanes() > 1) {
-    dstType = llvm::VectorType::get(dstType, v->dtype().lanes());
+    dstType = llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
   }
   llvm::Type* srcType = dtypeToLLVM(v->src_value()->dtype());
 
@@ -804,7 +829,8 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
     return;
   }
 
-  bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte;
+  bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
+      v->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {
@@ -819,18 +845,28 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
     } else {
       throw unimplemented_lowering(v);
     }
-  } else if (srcType->isIntOrIntVectorTy()) {
-    if (dstType->isFPOrFPVectorTy()) {
-      if (destUnsigned) {
-        value_ = irb_.CreateUIToFP(value_, dstType);
-      } else {
-        value_ = irb_.CreateSIToFP(value_, dstType);
-      }
-    } else if (dstType->isIntOrIntVectorTy()) {
-      value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
+    return;
+  }
+  if (!srcType->isIntOrIntVectorTy()) {
+    throw unimplemented_lowering(v);
+  }
+  if (dstType->isFPOrFPVectorTy()) {
+    if (destUnsigned) {
+      value_ = irb_.CreateUIToFP(value_, dstType);
     } else {
-      throw unimplemented_lowering(v);
+      value_ = irb_.CreateSIToFP(value_, dstType);
     }
+  } else if (dstType->isIntOrIntVectorTy()) {
+    // Ensure bool true value is exactly one, since we convert to int
+    // from bool by zero extending the int8
+    if (v->dtype().scalar_type() == ScalarType::Bool) {
+      llvm::Value* zero =
+          toVec(llvm::ConstantInt::get(srcType, 0), v->dtype().lanes());
+      value_ = irb_.CreateICmpNE(value_, zero);
+    }
+    value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
+  } else {
+    throw unimplemented_lowering(v);
   }
 }
 
@@ -866,10 +902,11 @@ void LLVMCodeGenImpl::visit(const Ramp* v) {
   }
 
   llvm::Type* vecType = nullptr;
+  auto element_count = ElementCount(lanes);
   switch (v->dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name)                            \
-  case ScalarType::Name:                               \
-    vecType = llvm::VectorType::get(Name##Ty_, lanes); \
+#define TYPE_CASE(_1, Name)                                    \
+  case ScalarType::Name:                                       \
+    vecType = llvm::VectorType::get(Name##Ty_, element_count); \
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -939,10 +976,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
 
   llvm::Type* loadType = nullptr;
 
+  auto element_count = ElementCount(v->dtype().lanes());
   switch (v->dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name)                                          \
-  case ScalarType::Name:                                             \
-    loadType = llvm::VectorType::get(Name##Ty_, v->dtype().lanes()); \
+#define TYPE_CASE(_1, Name)                                     \
+  case ScalarType::Name:                                        \
+    loadType = llvm::VectorType::get(Name##Ty_, element_count); \
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -1225,14 +1263,14 @@ static void applyMathFunctionAttributes(llvm::Function* f) {
   // TODO: Adding this attr should be correct, but as of LLVM 9.0.1 adding it
   // causes some math functions to incorrectly be turned into tail calls.
   // f->addFnAttr(llvm::Attribute::Speculatable);
-#if LLVM_VERSION_MAJOR == 9
+#if LLVM_VERSION_MAJOR >= 9
   f->addFnAttr(llvm::Attribute::NoFree);
   f->addFnAttr(llvm::Attribute::WillReturn);
 #endif
 }
 
 namespace {
-#if LLVM_VERSION_MAJOR == 9
+#if LLVM_VERSION_MAJOR >= 9
 
 using FunctionCallee = llvm::FunctionCallee;
 
@@ -1258,10 +1296,18 @@ struct FunctionCallee {
 };
 
 #else
-#error Only LLVM versions 8 or 9 are supported.
+#error Only LLVM versions 8 through 12 are supported.
 #endif
 
 } // namespace
+
+llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
+  if (lanes > 1) {
+    return irb_.CreateVectorSplat(lanes, v);
+  } else {
+    return v;
+  }
+}
 
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
@@ -1273,57 +1319,57 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       case kRsqrt: {
         v->params().front()->accept(this);
         value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
-        llvm::Value* constant = llvm::ConstantFP::get(FloatTy_, 1.0);
-        if (v->dtype().lanes() > 1) {
-          constant = irb_.CreateVectorSplat(v->dtype().lanes(), constant);
-        }
+        llvm::Value* constant =
+            toVec(llvm::ConstantFP::get(FloatTy_, 1.0), v->dtype().lanes());
         value_ = irb_.CreateFDiv(constant, value_);
         return;
       } break;
 
 #if defined(__AVX__) && !defined(_MSC_VER)
-#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 8) {                                           \
-      fname = "Sleef_" + std::string(name) + "8";                            \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
-      call_simd_sleef = true;                                                \
-    } else if (v->dtype().lanes() == 4) {                                    \
-      fname = "Sleef_" + std::string(name) + "4";                            \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type}, false), {});           \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                            \
+  case enum: {                                                            \
+    FunctionCallee callee;                                                \
+    std::string fname;                                                    \
+    auto element_count = ElementCount(v->dtype().lanes());                \
+    if (v->dtype().lanes() == 8) {                                        \
+      fname = "Sleef_" + std::string(name) + "8";                         \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);   \
+      callee = module_->getOrInsertFunction(                              \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {}); \
+      call_simd_sleef = true;                                             \
+    } else if (v->dtype().lanes() == 4) {                                 \
+      fname = "Sleef_" + std::string(name) + "4";                         \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);   \
+      callee = module_->getOrInsertFunction(                              \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {}); \
+      call_simd_sleef = true;                                             \
+    } else {                                                              \
+      callee = module_->getOrInsertFunction(                              \
+          name, llvm::FunctionType::get(type, {type}, false), {});        \
+    }                                                                     \
+    call_ty = callee.getFunctionType();                                   \
+    call_fn = callee.getCallee();                                         \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));     \
   } break;
 #else
-#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 4) {                                           \
-      fname = "Sleef_" + std::string(name) + "4";                            \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type}, false), {});           \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                            \
+  case enum: {                                                            \
+    FunctionCallee callee;                                                \
+    std::string fname;                                                    \
+    auto element_count = ElementCount(v->dtype().lanes());                \
+    if (v->dtype().lanes() == 4) {                                        \
+      fname = "Sleef_" + std::string(name) + "4";                         \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);   \
+      callee = module_->getOrInsertFunction(                              \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {}); \
+      call_simd_sleef = true;                                             \
+    } else {                                                              \
+      callee = module_->getOrInsertFunction(                              \
+          name, llvm::FunctionType::get(type, {type}, false), {});        \
+    }                                                                     \
+    call_ty = callee.getFunctionType();                                   \
+    call_fn = callee.getCallee();                                         \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));     \
   } break;
 #endif
         SIMD_UNARY_MATH_CASE(kLog10, "log10f", FloatTy_)
@@ -1353,54 +1399,56 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #undef SIMD_UNARY_MATH_CASE
 
 #if defined(__AVX__) && !defined(_MSC_VER)
-#define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 8) {                                           \
-      fname = "Sleef_" + std::string(name) + "8";                            \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname,                                                             \
-          llvm::FunctionType::get(vecType, {vecType, vecType}, false),       \
-          {});                                                               \
-      call_simd_sleef = true;                                                \
-    } else if (v->dtype().lanes() == 4) {                                    \
-      fname = "Sleef_" + std::string(name) + "4";                            \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname,                                                             \
-          llvm::FunctionType::get(vecType, {vecType, vecType}, false),       \
-          {});                                                               \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type, type}, false), {});     \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                          \
+  case enum: {                                                           \
+    FunctionCallee callee;                                               \
+    std::string fname;                                                   \
+    auto element_count = ElementCount(v->dtype().lanes());               \
+    if (v->dtype().lanes() == 8) {                                       \
+      fname = "Sleef_" + std::string(name) + "8";                        \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);  \
+      callee = module_->getOrInsertFunction(                             \
+          fname,                                                         \
+          llvm::FunctionType::get(vecType, {vecType, vecType}, false),   \
+          {});                                                           \
+      call_simd_sleef = true;                                            \
+    } else if (v->dtype().lanes() == 4) {                                \
+      fname = "Sleef_" + std::string(name) + "4";                        \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);  \
+      callee = module_->getOrInsertFunction(                             \
+          fname,                                                         \
+          llvm::FunctionType::get(vecType, {vecType, vecType}, false),   \
+          {});                                                           \
+      call_simd_sleef = true;                                            \
+    } else {                                                             \
+      callee = module_->getOrInsertFunction(                             \
+          name, llvm::FunctionType::get(type, {type, type}, false), {}); \
+    }                                                                    \
+    call_ty = callee.getFunctionType();                                  \
+    call_fn = callee.getCallee();                                        \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));    \
   } break;
 #else
-#define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 4) {                                           \
-      fname = "Sleef_" + std::string(name) + "4";                            \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname,                                                             \
-          llvm::FunctionType::get(vecType, {vecType, vecType}, false),       \
-          {});                                                               \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type, type}, false), {});     \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                          \
+  case enum: {                                                           \
+    FunctionCallee callee;                                               \
+    std::string fname;                                                   \
+    auto element_count = ElementCount(v->dtype().lanes());               \
+    if (v->dtype().lanes() == 4) {                                       \
+      fname = "Sleef_" + std::string(name) + "4";                        \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);  \
+      callee = module_->getOrInsertFunction(                             \
+          fname,                                                         \
+          llvm::FunctionType::get(vecType, {vecType, vecType}, false),   \
+          {});                                                           \
+      call_simd_sleef = true;                                            \
+    } else {                                                             \
+      callee = module_->getOrInsertFunction(                             \
+          name, llvm::FunctionType::get(type, {type, type}, false), {}); \
+    }                                                                    \
+    call_ty = callee.getFunctionType();                                  \
+    call_fn = callee.getCallee();                                        \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));    \
   } break;
 #endif
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
@@ -1426,48 +1474,50 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   } else if (v->dtype().scalar_type() == ScalarType::Double) {
     switch (v->op_type()) {
 #if defined(__AVX__) && !defined(_MSC_VER)
-#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 4) {                                           \
-      fname = "Sleef_" + std::string(name) + "d4";                           \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
-      call_simd_sleef = true;                                                \
-    } else if (v->dtype().lanes() == 2) {                                    \
-      fname = "Sleef_" + std::string(name) + "d2";                           \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type}, false), {});           \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                            \
+  case enum: {                                                            \
+    FunctionCallee callee;                                                \
+    std::string fname;                                                    \
+    auto element_count = ElementCount(v->dtype().lanes());                \
+    if (v->dtype().lanes() == 4) {                                        \
+      fname = "Sleef_" + std::string(name) + "d4";                        \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);   \
+      callee = module_->getOrInsertFunction(                              \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {}); \
+      call_simd_sleef = true;                                             \
+    } else if (v->dtype().lanes() == 2) {                                 \
+      fname = "Sleef_" + std::string(name) + "d2";                        \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);   \
+      callee = module_->getOrInsertFunction(                              \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {}); \
+      call_simd_sleef = true;                                             \
+    } else {                                                              \
+      callee = module_->getOrInsertFunction(                              \
+          name, llvm::FunctionType::get(type, {type}, false), {});        \
+    }                                                                     \
+    call_ty = callee.getFunctionType();                                   \
+    call_fn = callee.getCallee();                                         \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));     \
   } break;
 #else
-#define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 2) {                                           \
-      fname = "Sleef_" + std::string(name) + "d2";                           \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname, llvm::FunctionType::get(vecType, {vecType}, false), {});    \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type}, false), {});           \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                            \
+  case enum: {                                                            \
+    FunctionCallee callee;                                                \
+    std::string fname;                                                    \
+    if (v->dtype().lanes() == 2) {                                        \
+      fname = "Sleef_" + std::string(name) + "d2";                        \
+      llvm::Type* vecType =                                               \
+          llvm::VectorType::get(type, ElementCount(v->dtype().lanes()));  \
+      callee = module_->getOrInsertFunction(                              \
+          fname, llvm::FunctionType::get(vecType, {vecType}, false), {}); \
+      call_simd_sleef = true;                                             \
+    } else {                                                              \
+      callee = module_->getOrInsertFunction(                              \
+          name, llvm::FunctionType::get(type, {type}, false), {});        \
+    }                                                                     \
+    call_ty = callee.getFunctionType();                                   \
+    call_fn = callee.getCallee();                                         \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));     \
   } break;
 #endif
       SIMD_UNARY_MATH_CASE(kLog10, "log10", DoubleTy_)
@@ -1508,54 +1558,56 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       } break;
 
 #if defined(__AVX__) && !defined(_MSC_VER)
-#define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 4) {                                           \
-      fname = "Sleef_" + std::string(name) + "d4";                           \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname,                                                             \
-          llvm::FunctionType::get(vecType, {vecType, vecType}, false),       \
-          {});                                                               \
-      call_simd_sleef = true;                                                \
-    } else if (v->dtype().lanes() == 2) {                                    \
-      fname = "Sleef_" + std::string(name) + "d2";                           \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname,                                                             \
-          llvm::FunctionType::get(vecType, {vecType, vecType}, false),       \
-          {});                                                               \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type, type}, false), {});     \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                          \
+  case enum: {                                                           \
+    FunctionCallee callee;                                               \
+    std::string fname;                                                   \
+    auto element_count = ElementCount(v->dtype().lanes());               \
+    if (v->dtype().lanes() == 4) {                                       \
+      fname = "Sleef_" + std::string(name) + "d4";                       \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);  \
+      callee = module_->getOrInsertFunction(                             \
+          fname,                                                         \
+          llvm::FunctionType::get(vecType, {vecType, vecType}, false),   \
+          {});                                                           \
+      call_simd_sleef = true;                                            \
+    } else if (v->dtype().lanes() == 2) {                                \
+      fname = "Sleef_" + std::string(name) + "d2";                       \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);  \
+      callee = module_->getOrInsertFunction(                             \
+          fname,                                                         \
+          llvm::FunctionType::get(vecType, {vecType, vecType}, false),   \
+          {});                                                           \
+      call_simd_sleef = true;                                            \
+    } else {                                                             \
+      callee = module_->getOrInsertFunction(                             \
+          name, llvm::FunctionType::get(type, {type, type}, false), {}); \
+    }                                                                    \
+    call_ty = callee.getFunctionType();                                  \
+    call_fn = callee.getCallee();                                        \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));    \
   } break;
 #else
-#define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
-  case enum: {                                                               \
-    FunctionCallee callee;                                                   \
-    std::string fname;                                                       \
-    if (v->dtype().lanes() == 2) {                                           \
-      fname = "Sleef_" + std::string(name) + "d2";                           \
-      llvm::Type* vecType = llvm::VectorType::get(type, v->dtype().lanes()); \
-      callee = module_->getOrInsertFunction(                                 \
-          fname,                                                             \
-          llvm::FunctionType::get(vecType, {vecType, vecType}, false),       \
-          {});                                                               \
-      call_simd_sleef = true;                                                \
-    } else {                                                                 \
-      callee = module_->getOrInsertFunction(                                 \
-          name, llvm::FunctionType::get(type, {type, type}, false), {});     \
-    }                                                                        \
-    call_ty = callee.getFunctionType();                                      \
-    call_fn = callee.getCallee();                                            \
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));        \
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                          \
+  case enum: {                                                           \
+    FunctionCallee callee;                                               \
+    std::string fname;                                                   \
+    auto element_count = ElementCount(v->dtype().lanes());               \
+    if (v->dtype().lanes() == 2) {                                       \
+      fname = "Sleef_" + std::string(name) + "d2";                       \
+      llvm::Type* vecType = llvm::VectorType::get(type, element_count);  \
+      callee = module_->getOrInsertFunction(                             \
+          fname,                                                         \
+          llvm::FunctionType::get(vecType, {vecType, vecType}, false),   \
+          {});                                                           \
+      call_simd_sleef = true;                                            \
+    } else {                                                             \
+      callee = module_->getOrInsertFunction(                             \
+          name, llvm::FunctionType::get(type, {type, type}, false), {}); \
+    }                                                                    \
+    call_ty = callee.getFunctionType();                                  \
+    call_fn = callee.getCallee();                                        \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));    \
   } break;
 #endif
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2", DoubleTy_)
@@ -1578,6 +1630,26 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         throw unimplemented_lowering(v);
       } break;
     }
+  } else if (v->dtype().is_integral() && v->op_type() == kFabs) {
+    // abs is only intrinsic defined for integer inputs in pytorch eager
+    v->params().front()->accept(this);
+    if (is_unsigned_integral(v->dtype().scalar_type())) {
+      return;
+    }
+    // TODO: use llvm.abs intrinsic for LLVM 12
+    auto zero = llvm::ConstantInt::get(value_->getType(), 0);
+    auto neg_value = irb_.CreateSub(zero, value_);
+    auto icmp = irb_.CreateICmpSGT(value_, zero);
+    value_ = irb_.CreateSelect(icmp, value_, neg_value);
+    return;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        v,
+        "Unimplemented lowering:",
+        v->op_type(),
+        " for input of dtype",
+        v->dtype().scalar_dtype());
   }
 
   std::vector<llvm::Value*> params;
@@ -1658,7 +1730,45 @@ void LLVMCodeGenImpl::visit(const Let* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Cond* v) {
-  throw unimplemented_lowering(v);
+  // Even if true_stmt and false_stmt are nullptr,
+  // in case condition is a function call with side effect,
+  // we still evaluate it.
+  v->condition()->accept(this);
+
+  if (!v->true_stmt() && !v->false_stmt()) {
+    return;
+  }
+  assert(v->true_stmt());
+
+  llvm::Value* condition = value_;
+  llvm::Value* c = irb_.CreateICmpNE(
+      condition, llvm::ConstantInt::get(condition->getType(), 0));
+  llvm::BasicBlock* then_block =
+      llvm::BasicBlock::Create(getContext(), "then", fn_);
+  llvm::BasicBlock* else_block = nullptr;
+  if (v->false_stmt()) {
+    else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);
+  }
+  llvm::BasicBlock* end_block =
+      llvm::BasicBlock::Create(getContext(), "end", fn_);
+
+  if (else_block) {
+    irb_.CreateCondBr(c, then_block, else_block);
+  } else {
+    irb_.CreateCondBr(c, then_block, end_block);
+  }
+
+  irb_.SetInsertPoint(then_block);
+  v->true_stmt()->accept(this);
+  irb_.CreateBr(end_block);
+
+  if (else_block) {
+    irb_.SetInsertPoint(else_block);
+    v->false_stmt()->accept(this);
+    irb_.CreateBr(end_block);
+  }
+
+  irb_.SetInsertPoint(end_block);
 }
 
 void LLVMCodeGenImpl::optimize(llvm::Module& M) {

@@ -1,37 +1,36 @@
 #version 450 core
 #define PRECISION $precision
+
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform constBlock {
-  int W;
-  int H;
-  int OW;
-  int OH;
-}
-uConstBlock;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, rgba32f) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  int W = uConstBlock.W;
-  int H = uConstBlock.H;
-  int OW = uConstBlock.OW;
-  int OH = uConstBlock.OH;
-  vec4 r = vec4(1.0) / float(W) / float(H);
-  vec4 acc = vec4(0);
-  int xi, yi;
-  for (xi = 0; xi < W; ++xi) {
-    for (yi = 0; yi < H; ++yi) {
-      acc += texelFetch(uInput, ivec3(xi, yi, pos.z), 0);
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
+
+  /* Dynamically Uniform */
+  const ivec3 size = imageSize(uOutput);
+  const ivec3 isize = textureSize(uInput, 0);
+  const float range = isize.x * isize.y;
+
+  if (all(lessThan(pos, size))) {
+    vec4 sum = vec4(0);
+
+    for (int y = 0; y < isize.y; ++y) {
+      for (int x = 0; x < isize.x; ++x) {
+        sum += texelFetch(uInput, ivec3(x, y, pos.z), 0);
+      }
     }
-  }
-  vec4 outValue = r * acc;
-  for (int vi = 0; vi < 4; ++vi) {
-    int oy = (4 * pos.z + vi) / OW;
-    int ox = (4 * pos.z + vi) % OW;
-    imageStore(uOutput, ivec3(ox, oy, 0), vec4(outValue[vi], 0, 0, 0));
+
+    imageStore(
+        uOutput,
+        pos,
+        sum / range);
   }
 }

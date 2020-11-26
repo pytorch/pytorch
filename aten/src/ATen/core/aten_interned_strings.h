@@ -80,6 +80,7 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _ldexp) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -133,8 +134,6 @@ _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
 _(aten, _tanh_forward) \
-_(aten, _th_baddbmm) \
-_(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_mode) \
@@ -239,6 +238,7 @@ _(aten, combinations) \
 _(aten, _conj) \
 _(aten, conj) \
 _(aten, complex) \
+_(aten, copysign) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
@@ -371,6 +371,10 @@ _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
 _(aten, i0_) \
+_(aten, igamma) \
+_(aten, igamma_) \
+_(aten, igammac) \
+_(aten, igammac_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -666,7 +670,6 @@ _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
 _(aten, tensor_split) \
-_(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
 _(aten, th_pow) \
@@ -676,6 +679,7 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
+_(aten, tile) \
 _(aten, slow_conv3d) \
 _(aten, slow_conv3d_backward) \
 _(aten, slow_conv3d_forward) \
@@ -697,7 +701,6 @@ _(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
-_(aten, transpose) \
 _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
@@ -736,7 +739,6 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
-_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
@@ -781,6 +783,7 @@ _(attr, ceil_mode) \
 _(attr, checked_signal_sizes) \
 _(attr, chunks) \
 _(attr, columns) \
+_(attr, column_stack) \
 _(attr, complex_input) \
 _(attr, complex_output) \
 _(attr, condition) \

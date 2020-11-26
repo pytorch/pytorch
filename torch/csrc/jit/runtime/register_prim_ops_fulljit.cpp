@@ -233,14 +233,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::eq.device(Device a, Device b) -> bool",
-         [](Stack* stack) {
-           auto a = pop(stack).toDevice();
-           auto b = pop(stack).toDevice();
-           push(stack, a == b);
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::requires_grad(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -568,6 +560,18 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
+     // This operator is generated inside the compiler for indexing into
+     // ModuleDict without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           push(stack, module_dict.toModule().attr(ind.toStringRef()));
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::dict() -> Dict(str, Tensor)",
          [](Stack* stack) {
@@ -638,19 +642,6 @@ RegisterOperators logging_operators(
 void hashValue(Stack* stack) {
   auto value = pop(stack);
   push(stack, value.hash());
-}
-
-// As described in https://docs.python.org/3/library/functions.html#round
-// When a number is exactly halfway between two integers, python builtin round
-// function will round to even number. We use round(x/2)*2 to handle the
-// special halfway case. For positive 'x', round(x/2)*2 =
-// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
-// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
-// result will always be a even number. Due to symmetricity, it also applies to
-// negative cases.
-double round_to_even(double a) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
 }
 
 RegisterOperators reg2({
@@ -877,7 +868,6 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_SCALAR_SCALAR_BINARY_OP(

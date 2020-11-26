@@ -103,8 +103,8 @@ static_assert(
     "We make an assumption that int is always int32 for numpy "
     "type mapping.");
 
-int CaffeToNumpyType(const TypeMeta& dtype);
-const TypeMeta& NumpyTypeToCaffe(int numpy_type);
+int CaffeToNumpyType(const TypeMeta dtype);
+const TypeMeta NumpyTypeToCaffe(int numpy_type);
 
 class TensorFetcher : public BlobFetcherBase {
  public:
@@ -114,7 +114,7 @@ class TensorFetcher : public BlobFetcherBase {
 
   // Checks whether the data with type `dtype` needs to be copied in the context
   // of `tensor`
-  bool NeedsCopy(const Tensor* tensor, const TypeMeta& dtype) const {
+  bool NeedsCopy(const Tensor* tensor, const TypeMeta dtype) const {
 #ifdef USE_NUMPY
     return tensor->GetDeviceType() != CPU ||
         CaffeToNumpyType(dtype) == NPY_OBJECT;
@@ -200,9 +200,9 @@ class TensorFeeder : public BlobFeederBase {
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
     const auto npy_type = PyArray_TYPE(array);
-    const TypeMeta& dtype = NumpyTypeToCaffe(npy_type);
+    const TypeMeta dtype = NumpyTypeToCaffe(npy_type);
     CAFFE_ENFORCE(
-        dtype.id() != TypeIdentifier::uninitialized(),
+        dtype != ScalarType::Undefined,
         "This numpy data type is not supported: ",
         PyArray_TYPE(array),
         ".");

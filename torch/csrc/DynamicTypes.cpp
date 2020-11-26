@@ -59,7 +59,7 @@ at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scala
 
 PyTypeObject* getPyTypeObject(
     const at::Storage& storage,
-    const caffe2::TypeMeta& dtype) {
+    const caffe2::TypeMeta dtype) {
   at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
   auto attype = &at::getDeprecatedTypeProperties(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),
@@ -106,7 +106,7 @@ THPLayout* getTHPLayout(at::Layout layout) {
 
 PyObject* createPyObject(
     const at::Storage& storage,
-    const caffe2::TypeMeta& data_type) {
+    const caffe2::TypeMeta data_type) {
   auto type = getPyTypeObject(storage, data_type);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();
