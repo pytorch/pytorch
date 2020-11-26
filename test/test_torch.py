@@ -6231,13 +6231,13 @@ class TestTorchDeviceType(TestCase):
 
         for op in (torch.float_power, torch.Tensor.float_power, torch.Tensor.float_power_):
 
-            # Exception case test in test_float_power_exceptions
-            if op is torch.Tensor.float_power_ and base_dtype != out_dtype:
-                continue
-
             # Case of Tensor x Tensor
-            result = op(base.clone(), exp)
-            self.assertEqual(expected, result)
+            if op is torch.Tensor.float_power_ and base_dtype != out_dtype:
+                with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                    op(base.clone(), exp)
+            else:
+                result = op(base.clone(), exp)
+                self.assertEqual(expected, result)
 
             if op is torch.float_power:
                 out = torch.empty_like(base).to(device=device, dtype=out_dtype)
@@ -6249,12 +6249,12 @@ class TestTorchDeviceType(TestCase):
                 out_dtype_scalar_exp = torch.complex128 if base_dtype.is_complex or type(i) == complex else torch.float64
                 expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
 
-                # Exception case test in test_float_power_exceptions
                 if op is torch.Tensor.float_power_ and base_dtype != out_dtype_scalar_exp:
-                    continue
-
-                result = op(base.clone(), i)
-                self.assertEqual(expected_scalar_exp, result)
+                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                        op(base.clone(), i)
+                else:
+                    result = op(base.clone(), i)
+                    self.assertEqual(expected_scalar_exp, result)
 
                 if op is torch.float_power:
                     out = torch.empty_like(base).to(device=device, dtype=out_dtype_scalar_exp)

@@ -116,11 +116,11 @@ Tensor& float_power_(Tensor& base, const Tensor& exp) {
   TORCH_CHECK(base.scalar_type() == dtype,
               "self tensor type ", base.scalar_type(), "is not the desired type ", dtype);
 
-  return at::pow_(base, exp.to(dtype));
+  return base.pow_(exp.to(dtype));
 }
 
 Tensor& float_power_(Tensor& base, Scalar exp) {
-  return at::float_power_(base, c10::scalar_to_tensor(exp, base.device()));
+  return base.float_power_(c10::scalar_to_tensor(exp, base.device()));
 }
 
 } // namespace native

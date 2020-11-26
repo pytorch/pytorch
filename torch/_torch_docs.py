@@ -6346,13 +6346,6 @@ Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double pr
 If neither input is complex returns a ``torch.float64`` tensor, 
 and if one or more inputs is complex returns a ``torch.complex128`` tensor.
 
-:attr:`exponent` can be either a single number, or a `Tensor`
-with the same number of elements as :attr:`input`.
-
-.. math::
-    \text{out}_i = x_i ^ {\text{exponent}_i}
-""" + r"""
-
 .. note:: 
     This function always computes in double precision, unlike :func:`torch.pow`, 
     which implements more typical :ref:`type promotion <type-promotion-doc>`.
@@ -6361,8 +6354,8 @@ with the same number of elements as :attr:`input`.
     like when an integer base is raised to a negative integer exponent.
 
 Args:
-    {input}
-    exponent (Tensor or Number): the exponent value
+    input (Tensor or Number): the base value(s)
+    exponent (Tensor or Number): the exponent value(s)
 
 Keyword args:
     {out}

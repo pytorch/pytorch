@@ -5558,13 +5558,13 @@
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   use_c10_dispatcher: full
-  variants: function, method
+  variants: method
   dispatch:
     CPU, CUDA: pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   use_c10_dispatcher: full
-  variants: function, method
+  variants: method
   dispatch:
     CPU, CUDA: pow_
 
@@ -6902,13 +6902,13 @@
 
 - func: float_power_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   use_c10_dispatcher: full
-  variants: function, method
+  variants: method
   dispatch:
     Math: float_power_
 
 - func: float_power_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   use_c10_dispatcher: full
-  variants: function, method
+  variants: method
   dispatch:
     Math: float_power_
 
