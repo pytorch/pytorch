@@ -283,27 +283,21 @@ class DeviceTypeTestBase(TestCase):
             for op in test.op_list:
                 # Acquires dtypes, using the op data if unspecified
                 dtypes = cls._get_dtypes(test)
-                if dtypes is not None:
-                    want_supported = not test.unsupported_dtypes_only
-                    dtypes = [t for t in dtypes
-                              if op.supports_dtype(t, cls.device_type) == want_supported]
-                else:
-                    if cls.device_type == 'cpu' and op.dtypesIfCPU is not None:
-                        dtypes = op.dtypesIfCPU
-                    elif (cls.device_type == 'cuda' and not TEST_WITH_ROCM
-                          and op.dtypesIfCUDA is not None):
-                        dtypes = op.dtypesIfCUDA
-                    elif (cls.device_type == 'cuda' and TEST_WITH_ROCM
-                          and op.dtypesIfROCM is not None):
-                        dtypes = op.dtypesIfROCM
+                if dtypes is None:
+                    if test.unsupported_dtypes_only:
+                        dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(cls.device_type))
+                    elif test.all_dtypes:
+                        dtypes = op.supported_dtypes(cls.device_type)
                     else:
-                        dtypes = op.dtypes
+                        dtypes = op.tested_dtypes(cls.device_type)
 
-                    # Inverts dtypes if the function wants unsupported dtypes
-                    if test.unsupported_dtypes_only is True:
-                        dtypes = [d for d in get_all_dtypes() if d not in dtypes]
+                    if test.dtype_filter is not None:
+                        dtypes = dtypes.intersection(test.dtype_filter)
 
-                dtypes = dtypes if dtypes is not None else (None,)
+                else:
+                    assert test.dtype_filter is None, "ops(dtype_filter=[...]) and the dtypes decorator are incompatible"
+                    assert not test.all_dtypes, "ops(all_dtypes=True) and dtypes decorator are incompatible"
+
                 for dtype in dtypes:
                     instantiate_test_helper(cls,
                                             name,
@@ -495,13 +489,19 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # test_numerics(self, device, dtype, op):
 #   <test_code>
 class ops(object):
-    def __init__(self, op_list, *, unsupported_dtypes_only=False):
+    def __init__(self, op_list, *, unsupported_dtypes_only=False, all_dtypes=False, dtype_filter=None):
         self.op_list = op_list
+        assert not (unsupported_dtypes_only and all_dtypes), \
+            "Cannot have both all_dtypes and unsupported_dtypes_only"
         self.unsupported_dtypes_only = unsupported_dtypes_only
+        self.all_dtypes = all_dtypes
+        self.dtype_filter = set(dtype_filter) if dtype_filter is not None else None
 
     def __call__(self, fn):
         fn.op_list = self.op_list
         fn.unsupported_dtypes_only = self.unsupported_dtypes_only
+        fn.all_dtypes = self.all_dtypes
+        fn.dtype_filter = self.dtype_filter
         return fn
 
 # Decorator that skips a test if the given condition is true.

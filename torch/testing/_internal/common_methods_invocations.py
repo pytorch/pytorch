@@ -62,6 +62,7 @@ class OpInfo(object):
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 tested_dtypes=None,  # dtypes to test with by default
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
@@ -73,10 +74,11 @@ class OpInfo(object):
 
         self.name = name
 
-        self.dtypes = dtypes
-        self.dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
-        self.dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
-        self.dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
+        self.dtypes = set(dtypes)
+        self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
+        self.dtypesIfCUDA = set(dtypesIfCUDA) if dtypesIfCUDA is not None else self.dtypes
+        self.dtypesIfROCM = set(dtypesIfROCM) if dtypesIfROCM is not None else self.dtypes
+        self._tested_dtypes = set(tested_dtypes) if tested_dtypes is not None else None
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if op is None:
@@ -131,15 +133,22 @@ class OpInfo(object):
 
         return False
 
-    def supports_dtype(self, dtype, device_type):
+    def supported_dtypes(self, device_type):
         if device_type == 'cpu':
-            return dtype in self.dtypesIfCPU
+            return self.dtypesIfCPU
         if device_type == 'cuda':
-            if TEST_WITH_ROCM:
-                return dtype in self.dtypesIfROCM
-            return dtype in self.dtypesIfCUDA
+            return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
+        else:
+            return self.dtypes
 
-        return dtype in self.dtypes
+
+    def supports_dtype(self, dtype, device_type):
+        return dtype in self.supported_dtypes(device_type)
+
+    def tested_dtypes(self, device_type):
+        supported = self.supported_dtypes(device_type)
+        return (supported if self._tested_dtypes is None
+                else supported.intersection(self._tested_dtypes))
 
 
 L = 20
