@@ -52,7 +52,7 @@ def pin_memory(data):
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, container_abcs.Sequence):
-        return [pin_memory(sample) for sample in data]
+        return type(data)(iter(pin_memory(sample) for sample in data))
     elif hasattr(data, "pin_memory"):
         return data.pin_memory()
     else:
