@@ -141,11 +141,26 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 svd = _add_docstr(_linalg.linalg_svd, r"""
-linalg.svd(input, full_matrices=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
+linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-This function returns a namedtuple ``(U, S, Vh)`` which is the singular value
-decomposition of a input real matrix or batches of real matrices :attr:`input` such that
-:math:`input = U \times diag(S) \times V^H` (where :math:`V^H` is ``Vh``).
+
+Compute the singular value decomposition of either a matrix or batch of
+matrices :attr:`input`." The singular value decomposition is represented as a
+namedtuple ``(U, S, Vh)``, such that :math:`input = U \times diag(S) \times
+Vh`. If the inputs are batches, then returns batched outputs for all of ``U``,
+``S`` and ``Vh``.
+
+If :attr:`full_matrices` is ``False``, the method returns the reduced singular
+value decomposition i.e., if the last two dimensions of :attr:`input` are
+``m`` and ``n``, then the returned `U` and `V` matrices will contain only
+:math:`min(n, m)` orthonormal columns.
+
+If :attr:`compute_uv` is ``False``, the returned `U` and `Vh` will be empy
+tensors with no elements and the same device as :attr:`input`. The
+:attr:`full_matrices` argument has no effect when :attr:`compute_uv` is False.
+
+The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+always be real-valued, even if :attr:`input` is complex.
 
 .. warning:: **Differences with** :meth:`~torch.svd`:
 
@@ -156,28 +171,15 @@ decomposition of a input real matrix or batches of real matrices :attr:`input` s
 
              * it returns ``Vh``, whereas :meth:`~torch.svd` returns
                ``V``. The result is that when using :meth:`~torch.svd` you
-               need to manually transpose and conjugate ``V`` in order to
-               reconstruct the original matrix.
+               need to manually transpose ``V`` in order to reconstruct the
+               original matrix.
 
-             * If :attr:`compute_uv=False`, it returns empty tensors (i.e.,
-               with 0 elements) for ``U`` and ``V``, whereas
-               :meth:`~torch.svd` returns zero-filled tensors.
+             * If :attr:`compute_uv=False`, it returns empty tensors for ``U``
+               and ``Vh``, whereas :meth:`~torch.svd` returns zero-filled
+               tensors.
 
-             **Differences with** ``numpy.linalg.svd``:
-
-             * if :attr:`compute_uv=False` it returns ``(empty_tensor, S, empty_tensor)``,
-               whereas numpy returns ``S``.
-
-
-The dtype of ``U`` and ``V`` is the same as the ``input`` matrix. The dtype of
-``S`` is always real numbers, even if ``input`` is complex.
-
-If :attr:`full_matrices` is ``False``, the method returns the reduced singular value decomposition
-i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the returned
-`U` and `V` matrices will contain only :math:`min(n, m)` orthonormal columns.
-
-If :attr:`compute_uv` is ``False``, the returned `U` and `V` will be None.:attr:`full_matrices` will
-be ignored here.
+.. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
+          three tensors, even when :attr:`compute_uv=False`.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -186,30 +188,28 @@ be ignored here.
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
           `gesdd` as well.
 
-.. note:: Irrespective of the original strides, the returned matrix `U`
-          will be transposed, i.e. with strides :code:`U.contiguous().transpose(-2, -1).stride()`
+.. note:: The returned matrix `U` will be transposed, i.e. with strides
+          :code:`U.contiguous().transpose(-2, -1).stride()`.
 
-.. note:: Extra care needs to be taken when backward through `U` and `V`
-          outputs. Such operation is really only stable when :attr:`input` is
-          full rank with all distinct singular values. Otherwise, ``NaN`` can
-          appear as the gradients are not properly defined. Also, notice that
-          double backward will usually do an additional backward through `U` and
-          `V` even if the original backward is only on `S`.
+.. note:: Gradients computed using `U` and `Vh` may be unstable if
+          :attr:`input` is not full rank or has non-unique singular values.
 
 .. note:: When :attr:`full_matrices` = ``False``, the gradients on :code:`U[..., :, min(m, n):]`
           and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
 
-.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
-          from the forward pass is required for the backward operation.
+.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
+
+
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                     batch dimensions consisting of :math:`m \times n` matrices.
-    full_matrices (bool, optional): controls the shape of returned `U` and `V`
-    compute_uv (bool, optional): option whether to compute `U` and `V` or not
-    out (tuple, optional): the output tuple of tensors. If compute_uv=False, tThe 1st and 3rd
-                           argument must be tensors, but they are ignored. E.g. you can
+    full_matrices (bool, optional): controls whether to compute the full or reduced decomposition, and
+                                    consequently the shape of returned ``U`` and ``V``. Defaults to True.
+    compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
+    out (tuple, optional): the output tuple of tensors. If compute_uv=False, the 1st and 3rd
+                           arguments must be tensors, but they are ignored. E.g. you can
                            pass `(torch.Tensor(), out_S, torch.Tensor())`
 
 Example::
