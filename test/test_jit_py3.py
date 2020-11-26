@@ -797,6 +797,22 @@ class TestScriptPy3(JitTestCase):
         # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
         #     set(torch.jit.export_opnames(scripted_M_mod))))
 
+    def test_broadcasting_list(self):
+        """
+        Test BroadcastingList and torch.nn._size_N_t alias
+        """
+        from torch._jit_internal import BroadcastingList2
+        from torch.nn.common_types import _size_2_t
+
+        def sum_i(x: _size_2_t) -> int:
+            return x[0] + x[1]
+
+        def sum_f(x: BroadcastingList2[float]) -> float:
+            return x[0] + x[1]
+
+        self.assertTrue(torch.jit.script(sum_i)(4) == 8)
+        self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
+
 
 if __name__ == '__main__':
     run_tests()

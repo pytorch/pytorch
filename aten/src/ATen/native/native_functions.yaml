@@ -2346,7 +2346,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: log1p
+    CPU, CUDA: log1p
+    SparseCPU, SparseCUDA: log1p_sparse
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
