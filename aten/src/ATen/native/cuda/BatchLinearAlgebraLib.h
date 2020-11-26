@@ -12,7 +12,7 @@
 #define USE_CUSOLVER
 #endif
 
-// comment out this line for the emergency break if there is something wrong with parallel launch
+// comment out this line as the emergency brake if there is something wrong with parallel launch
 // e.g. if you have a script failure with linear algebra and set environment variable CUDA_LAUNCH_BLOCKING=1
 // solves the problem, then you can try removing the cuda parallel stream launch
 #define _USE_PARALLEL_LAUNCH
@@ -20,14 +20,14 @@
 
 #ifdef _USE_PARALLEL_LAUNCH
 
-#define CUDA_PARALLEL_STREAM_LAUNCH(i, _batch_size, _stmt)  \
+#define CUDA_PARALLEL_STREAM_LAUNCH(_i, _batch_size, _stmt) \
 do {                                                        \
   auto _main_stream = at::cuda::getCurrentCUDAStream();     \
   at::cuda::CUDAEvent _main_event;                          \
   _main_event.record(_main_stream);                         \
-  for (int i = 0; i < _batch_size; i++) {                   \
+  for (int _i = 0; _i < _batch_size; _i++) {                \
     auto _stream = at::cuda::getStreamFromPool();           \
-    at::cuda::CUDAStreamGuard _guard(_stream);               \
+    at::cuda::CUDAStreamGuard _guard(_stream);              \
     _main_event.block(_stream);                             \
     _stmt();                                                \
     at::cuda::CUDAEvent _finished;                          \
@@ -38,9 +38,9 @@ do {                                                        \
 
 #else // _USE_PARALLEL_LAUNCH is not defined
 
-#define CUDA_PARALLEL_STREAM_LAUNCH(i, _batch_size, _stmt)  \
+#define CUDA_PARALLEL_STREAM_LAUNCH(_i, _batch_size, _stmt) \
 do {                                                        \
-  for (int i = 0; i < _batch_size; i++) {                   \
+  for (int _i = 0; _i < _batch_size; _i++) {                \
     _stmt();                                                \
   }                                                         \
 } while (0)
