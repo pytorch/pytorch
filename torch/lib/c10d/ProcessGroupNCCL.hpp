@@ -291,7 +291,15 @@ class ProcessGroupNCCL : public ProcessGroup {
     // this callback. This new FutureNCCL's cudaEvents will record the
     // callback's stream and will have the result value of the callback.
     void addCallback(std::function<void(void)> callback) override {
+      // Do not free the underlying data storage of value_ before its
+      // usage on futureNCCLCallbackStream_ finish.
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            data_ptr, *futureNCCLCallbackStream_);
+      }
+
       (*cudaEvents_)[0].block(*futureNCCLCallbackStream_);
+      // Use the dedicated callback stream to run callback.
       c10::OptionalStreamGuard streamGuard{
           c10::Stream(*futureNCCLCallbackStream_)};
       callback();
@@ -312,14 +320,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       auto fut = c10::make_intrusive<FutureNCCL>(
           deviceIndex_, thenFutCudaEvents, futureNCCLCallbackStream_);
 
-      // Do not free the underlying data storage of value_ before its
-      // usage on futureNCCLCallbackStream_ finish.
-      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            data_ptr, *futureNCCLCallbackStream_);
-      }
-
-      // Use the dedicated callback stream to run callback.
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
       // specify types.
