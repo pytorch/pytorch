@@ -3286,7 +3286,7 @@ class TestTorchDeviceType(TestCase):
         shapes = (
             [20, 1],
             [1, 20],
-            [100, 100],
+            [30, 30],
             [10, 20, 30]
         )
         for shape in shapes:

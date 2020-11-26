@@ -7558,7 +7558,7 @@ Example::
 
 add_docstr(torch.msort,
            r"""
-sort(input, descending=False, *, out=None) -> (Tensor, LongTensor)
+msort(input, descending=False, *, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along the first dimension
 in ascending order by value.
