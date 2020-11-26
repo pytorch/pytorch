@@ -117,7 +117,6 @@ class TestFFT(TestCase):
             torch.fft(t, 1)
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     @ops([op for op in spectral_funcs if not op.ndimensional])
     def test_reference_1d(self, device, dtype, op):
         norm_modes = ((None, "forward", "backward", "ortho")
@@ -214,7 +213,6 @@ class TestFFT(TestCase):
 
     # Note: NumPy will throw a ValueError for an empty input
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     @ops(spectral_funcs)
     def test_empty_fft(self, device, dtype, op):
         t = torch.empty(0, device=device, dtype=dtype)
@@ -275,8 +273,8 @@ class TestFFT(TestCase):
             self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.half, torch.bfloat16)
-    @ops(spectral_funcs, unsupported_dtypes_only=True)
+    @ops(spectral_funcs, unsupported_dtypes_only=True,
+         dtype_filter=[torch.half, torch.bfloat16])
     def test_fft_half_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
         x = torch.randn(64, device=device).to(dtype)
@@ -297,8 +295,7 @@ class TestFFT(TestCase):
 
     @slowAwareTest
     @onlyOnCPUAndCUDA
-    @dtypes(torch.double, torch.complex128)  # gradcheck requires double
-    @ops(spectral_funcs)
+    @ops(spectral_funcs, dtype_filter=[torch.double, torch.complex128]) # gradcheck requires double
     def test_backward_1d(self, device, dtype, op):
         test_args = list(product(
             # input
@@ -322,7 +319,6 @@ class TestFFT(TestCase):
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     @ops([op for op in spectral_funcs if op.ndimensional])
     def test_reference_nd(self, device, dtype, op):
         norm_modes = ((None, "forward", "backward", "ortho")
@@ -402,8 +398,8 @@ class TestFFT(TestCase):
 
     @slowAwareTest
     @onlyOnCPUAndCUDA
-    @dtypes(torch.double, torch.complex128)  # gradcheck requires double
-    @ops([op for op in spectral_funcs if op.ndimensional])
+    @ops([op for op in spectral_funcs if op.ndimensional],
+         dtype_filter=[torch.double, torch.complex128])  # gradcheck requires double
     def test_backward_nd(self, device, dtype, op):
         # input_ndim, s, dim
         transform_desc = [
@@ -428,8 +424,8 @@ class TestFFT(TestCase):
                 self._fft_grad_check_helper(op.get_op(), input, (s, dim, norm))
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.float, torch.cfloat)
-    @ops([op for op in spectral_funcs if op.ndimensional])
+    @ops([op for op in spectral_funcs if op.ndimensional],
+         dtype_filter=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
 
