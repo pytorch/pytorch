@@ -3932,33 +3932,33 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         def test_comparison_ops_check_for_scalar_overflow(self):
             with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
-                torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)
-                (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)
-                torch.tensor([1 << 5], dtype=torch.uint8) <= (1 << 20)
-                (1 << 20) <= torch.tensor([1 << 5], dtype=torch.uint8)
-                torch.tensor([1 << 5], dtype=torch.uint8) > (1 << 20)
-                (1 << 20) > torch.tensor([1 << 5], dtype=torch.uint8)
-                torch.tensor([1 << 5], dtype=torch.uint8) >= (1 << 20)
-                (1 << 20) >= torch.tensor([1 << 5], dtype=torch.uint8)
-                torch.tensor([1 << 5], dtype=torch.uint8) == (1 << 20)
-                (1 << 20) == torch.tensor([1 << 5], dtype=torch.uint8)
-                torch.tensor([1 << 5], dtype=torch.uint8) != (1 << 20)
-                (1 << 20) != torch.tensor([1 << 5], dtype=torch.uint8)
+                torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)   # noqa: B015
+                (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) <= (1 << 20)  # noqa: B015
+                (1 << 20) <= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) > (1 << 20)   # noqa: B015
+                (1 << 20) > torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) >= (1 << 20)  # noqa: B015
+                (1 << 20) >= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) == (1 << 20)  # noqa: B015
+                (1 << 20) == torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) != (1 << 20)  # noqa: B015
+                (1 << 20) != torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
 
         def test_comparison_ops_check_for_zerodim_tensor_overflow(self):
             with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
-                torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)
-                torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)
-                torch.tensor([1 << 5], dtype=torch.uint8) <= torch.tensor(1 << 20, dtype=torch.int32)
-                torch.tensor(1 << 40, dtype=torch.int64) <= torch.tensor([1 << 30], dtype=torch.int32)
-                torch.tensor([1 << 5], dtype=torch.uint8) > torch.tensor(1 << 20, dtype=torch.int32)
-                torch.tensor(1 << 40, dtype=torch.int64) > torch.tensor([1 << 30], dtype=torch.int32)
-                torch.tensor([1 << 5], dtype=torch.uint8) >= torch.tensor(1 << 20, dtype=torch.int32)
-                torch.tensor(1 << 40, dtype=torch.int64) >= torch.tensor([1 << 30], dtype=torch.int32)
-                torch.tensor([1 << 5], dtype=torch.uint8) == torch.tensor(1 << 20, dtype=torch.int32)
-                torch.tensor(1 << 40, dtype=torch.int64) == torch.tensor([1 << 30], dtype=torch.int32)
-                torch.tensor([1 << 5], dtype=torch.uint8) != torch.tensor(1 << 20, dtype=torch.int32)
-                torch.tensor(1 << 40, dtype=torch.int64) != torch.tensor([1 << 30], dtype=torch.int32)
+                torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)    # noqa: B015
+                torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)   # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) <= torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
+                torch.tensor(1 << 40, dtype=torch.int64) <= torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) > torch.tensor(1 << 20, dtype=torch.int32)    # noqa: B015
+                torch.tensor(1 << 40, dtype=torch.int64) > torch.tensor([1 << 30], dtype=torch.int32)   # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) >= torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
+                torch.tensor(1 << 40, dtype=torch.int64) >= torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) == torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
+                torch.tensor(1 << 40, dtype=torch.int64) == torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
+                torch.tensor([1 << 5], dtype=torch.uint8) != torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
+                torch.tensor(1 << 40, dtype=torch.int64) != torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
 
         def test_bitwise_ops(self):
             x = torch.randn(5, 5).gt(0)
@@ -9409,7 +9409,7 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
-    @slowTest
+    @onlyCUDA
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -20922,9 +20922,7 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('erf', ref_backend='scipy'),
-                  _TorchMathTestMeta('erfc', ref_backend='scipy'),
-                  _TorchMathTestMeta('exp'),
+torch_op_tests = [_TorchMathTestMeta('exp'),
                   _TorchMathTestMeta('expm1'),
                   _TorchMathTestMeta('floor'),
                   _TorchMathTestMeta('ceil'),
