@@ -13,6 +13,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAFuture.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
@@ -207,103 +208,19 @@ class ProcessGroupNCCL : public ProcessGroup {
   // enables synchronizing the appropriate streams and avoids stalling PyTorch's
   // default stream while running the callback. In case of multiple then
   // callbacks, each will be executed on its own fresh stream.
-  struct FutureNCCL : at::ivalue::Future {
+  struct FutureNCCL : at::cuda::CUDAFuture {
    public:
-    explicit FutureNCCL(
+    FutureNCCL(
         at::IValue value,
         std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
-        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
-          cudaEvents_(std::move(cudaEvents)) {
+        : at::cuda::CUDAFuture(c10::ListType::create(c10::TensorType::get())){
+      cudaEvents_ = std::move(cudaEvents);
       markCompleted(std::move(value));
     }
 
-    using at::ivalue::Future::Future;
-
-    void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-      dataPtrExtractor_ = std::move(data_ptr_extractor);
-    }
-
    protected:
-    c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override {
-      return c10::make_intrusive<FutureNCCL>(std::move(type));
-    }
-
     void postMarkCompletedHook(const at::IValue& value) override {
-      if (cudaEvents_ == nullptr) {
-        std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-        for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
-          if (data_ptr.device().is_cuda()) {
-            isCudaDeviceUsed[data_ptr.device().index()] = true;
-          }
-        }
-
-        cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
-        for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-          if (isCudaDeviceUsed[idx]) {
-            at::cuda::CUDAEvent cudaEvent;
-            cudaEvent.record(at::cuda::getDefaultCUDAStream(idx));
-            (*cudaEvents_).push_back(std::move(cudaEvent));
-          }
-        }
-      }
-    }
-
-    std::function<void(void)> wrapCallback(std::function<void(void)> callback) override {
-      return [this, callback{std::move(callback)}]() {
-        // Get a stream for all devices, even those that are not used by the
-        // value, because the user's callback could use those other devices.
-        std::vector<at::cuda::CUDAStream> streams;
-        for (c10::DeviceIndex idx = 0; idx < c10::cuda::device_count(); idx++) {
-          // FIXME Should we find a way to allow to change the priority of
-          // streams?
-          streams.push_back(
-              at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
-        }
-
-        // Do not free the underlying data storage of value_ before its
-        // usage on the stream finishes.
-        for (const at::DataPtr& data_ptr : extractDataPtrs(constValue())) {
-          if (data_ptr.device().is_cuda()) {
-            c10::cuda::CUDACachingAllocator::recordStream(
-                data_ptr, streams[data_ptr.device().index()]);
-          }
-        }
-
-        for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-          cudaEvent.block(streams[cudaEvent.device_index()]);
-        }
-
-        // Use the dedicated callback stream to run callback.
-        at::cuda::CUDAMultiStreamGuard streamGuard(streams);
-
-        callback();
-      };
-    }
-
-    void postWaitHook() override {
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-        cudaEvent.block(
-            at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
-      }
-    }
-
-   private:
-    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
-    DataPtrExtractor dataPtrExtractor_;
-
-    std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
-        const at::IValue& value) {
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
-      if (dataPtrExtractor_ != nullptr) {
-        // If a Python communication hook is used, dataPtrExtractor_ will be
-        // set in torch/csrc/jit/python/pybind_utils.h, which allows Python
-        // dependency to be imported.
-        data_ptrs = dataPtrExtractor_(value);
-      } else {
-        // If a C++ communication hook is used, use the default extractor.
-        data_ptrs = at::ivalue::Future::defaultDataPtrExtractor(value);
-      }
-      return data_ptrs;
+      // Do nothing because the constructor already stored the events.
     }
   };
 
