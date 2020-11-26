@@ -156,9 +156,95 @@ public:
     return _mm256_sqrt_ps(abs_2_());                // abs     abs
   }
   Vec256<c10::complex<float>> abs() const {
-    const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
-                                                                   0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));
-    return _mm256_and_ps(abs_(), real_mask);        // abs     0
+    // Non-vectorized Code:
+    // template <typename T>
+    // T abs(std::complex<T> value) {
+    //   auto x = value.real();
+    //   auto y = value.imag();
+
+    //   [Step 1]
+    //   if (std::isinf(x) or std::isinf(y)) {
+    //     return INFINITY;
+    //   }
+
+    //   [Step 2]
+    //   if (std::isnan(x) or std::isnan(y)) {
+    //     return NAN;
+    //   }
+
+    //   [Step 3.1]
+    //   if (x == 0) {
+    //     return std::fabs(y);
+    //   }
+    //   [Step 3.2]
+    //   if (y == 0) {
+    //     return std::fabs(x);
+    //   }
+
+    //   [Step 4]
+    //   auto a = max(x, y);
+    //   auto b = min(x, y);
+    //   return std::abs(a) * std::sqrt(1 + std::pow(b / a, 2));
+    // }
+    const auto pos_inf = _mm256_set1_ps(INFINITY);
+    const auto neg_inf = _mm256_set1_ps(-INFINITY);
+    const auto nan_vec = _mm256_set1_ps(NAN);
+    const auto one_vec = _mm256_set1_ps(1);
+    const auto zero_vec = _mm256_setzero_ps();
+    const auto real_mask = __m256{-NAN, 0, -NAN, 0, -NAN, 0, -NAN, 0};
+    const auto imag_mask = __m256{0, -NAN, 0, -NAN, 0, -NAN, 0, -NAN};
+
+    const auto zero_mask = _mm256_cmp_ps(values, zero_vec, _CMP_EQ_OQ);
+    const auto pos_inf_mask = _mm256_cmp_ps(values, pos_inf, _CMP_EQ_OQ);
+    const auto neg_inf_mask = _mm256_cmp_ps(values, neg_inf, _CMP_EQ_OQ);
+    const auto is_inf_mask = _mm256_or_ps(pos_inf_mask, neg_inf_mask);
+    const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
+    const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
+    const auto mask = _mm256_set1_ps(-0.f);
+    const auto values_abs = _mm256_andnot_ps(mask, values);
+
+    // [Step 4]
+    auto a = _mm256_max_ps(values, _mm256_permute_ps(values, 0xB1));
+    auto b = _mm256_min_ps(values, _mm256_permute_ps(values, 0xB1));
+
+    auto abs_a = _mm256_andnot_ps(mask, a);
+
+    auto b_div_a = _mm256_div_ps(b, a);
+    auto two_vec = _mm256_add_ps(one_vec, one_vec);
+    auto b_div_a_sqr = _mm256_mul_ps(b_div_a, b_div_a);
+    auto one_plus_b_div_a_sqr = _mm256_add_ps(one_vec, b_div_a_sqr);
+    auto computed_abs =
+        _mm256_mul_ps(abs_a, _mm256_sqrt_ps(one_plus_b_div_a_sqr));
+
+    // [Step 3.1]
+    auto real_is_zero = _mm256_and_ps(zero_mask, real_mask);
+    computed_abs = _mm256_blendv_ps(
+        computed_abs, _mm256_permute_ps(values_abs, 0xB1), real_is_zero);
+
+    // [Step 3.2]
+    auto imag_is_zero = _mm256_and_ps(zero_mask, imag_mask);
+    computed_abs = _mm256_blendv_ps(
+        computed_abs, values_abs, _mm256_permute_ps(imag_is_zero, 0xB1));
+
+    // [Step 2]
+    auto real_is_nan = _mm256_and_ps(nan_mask, real_mask);
+    computed_abs = _mm256_blendv_ps(computed_abs, nan_vec, real_is_nan);
+
+    auto imag_is_nan = _mm256_and_ps(nan_mask, imag_mask);
+    computed_abs = _mm256_blendv_ps(
+        computed_abs, nan_vec, _mm256_permute_ps(imag_is_nan, 0xB1));
+
+    // [Step 1]
+    auto real_is_inf = _mm256_and_ps(is_inf_mask, real_mask);
+    computed_abs = _mm256_blendv_ps(computed_abs, pos_inf, real_is_inf);
+
+    auto imag_is_inf = _mm256_and_ps(is_inf_mask, imag_mask);
+    computed_abs = _mm256_blendv_ps(
+        computed_abs, pos_inf, _mm256_permute_ps(imag_is_inf, 0xB1));
+
+    // abs is real, so set the imaginary values to zero
+    computed_abs = _mm256_blendv_ps(zero_vec, computed_abs, real_mask);
+    return computed_abs;
   }
   __m256 angle_() const {
     //angle = atan2(b/a)
