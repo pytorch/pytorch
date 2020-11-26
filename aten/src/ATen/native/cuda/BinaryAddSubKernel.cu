@@ -9,6 +9,12 @@
 #include <torch/csrc/jit/resource_guard.h>
 #include <sstream>
 #include <torch/csrc/jit/frontend/code_template.h>
+#include <algorithm>
+#include <cctype>
+#include <unordered_map>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Optional.h>
+#include <mutex>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -51,12 +57,38 @@ static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 
+namespace {
+
+// TODO jiterator cache design does not handle multiple gpus currently
+using JiteratorKey = ScalarType;
+using JiteratorCache = std::unordered_map<JiteratorKey, CUfunction>;
+
+// global jiterator mutex
+// TODO: currently caches are per function but the mutex is global,
+//   so maybe mutexes should be per function, too, or the caches should
+//   be consolidated
+std::mutex jiterator_mutex;
+
+JiteratorKey construct_jiterator_key(const ScalarType scalar_type) {
+  return scalar_type;
+}
+
+// NOTE: get does not acquire the lock
+c10::optional<CUfunction> get_jitted_function(const JiteratorCache& cache, JiteratorKey key) {
+  auto it = cache.find(key);
+  if (it == cache.end()) {
+    return c10::nullopt;
+  }
+  return it->second;
+}
+
 // TODO: update this
 static void getMajorMinor(
     const cudaDeviceProp* const prop,
     int& major,
     int& minor) {
   int nvrtc_major, nvrtc_minor;
+
   AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
@@ -89,41 +121,129 @@ static void getMajorMinor(
   }
 }
 
-namespace {
+void store_jitted_function(
+    JiteratorCache& cache,
+    const JiteratorKey key,
+    CUfunction function) {
+  cache.emplace(key, function);
+}
 
-// Host-side version of the Tensor Accessor struct
-struct TensorAccessor {
-  // NOTE: strides must be in bytes, not elements!
-  TensorAccessor(
-      const ScalarType scalar_type,
-      const int64_t _element_size,
-      const IntArrayRef shape,
-      const IntArrayRef strides,
-      void* _data)
-      : element_size_(_element_size),
-        ndims_(shape.size()),
-        data_{static_cast<char*>(_data)} {
+CUfunction jit_binary_pwise_function(
+    JiteratorCache& cache,
+    JiteratorKey key,
+    const std::string& code,
+    const std::string& kernel_name) {
 
-    // TODO: improve this CUDA-compatible scalar type passing
-    if (scalar_type == kFloat) {
-      scalar_type_ = 0;
-    } else if (scalar_type == kDouble) {
-      scalar_type_ = 1;
-    }
+  // TODO: this lock is could be acquired around the cache updates
+  std::lock_guard<std::mutex> guard{jiterator_mutex};
 
-    // TODO: is there a better way to acquire and pass these to the device?
-    std::copy(shape.cbegin(), shape.cend(), std::begin(sizes_));
-    std::copy(strides.cbegin(), strides.cend(), std::begin(strides_));
+  // Compiles the kernel ---
+
+  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  int major, minor;
+  getMajorMinor(prop, major, minor);
+
+  // Creates the NVRTC program
+  nvrtcProgram program;
+  const auto& nvrtc = at::globalContext().getNVRTC();
+  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
+      &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+
+  // constructs nvrtc build arguments
+  const std::string compute = "--gpu-architecture=compute_" +
+    std::to_string(major) + std::to_string(minor);
+  const std::vector<const char*> build_args = {
+    "--std=c++14", compute.c_str(), "-default-device"};
+
+  // compiles and validates result
+  const auto compilation_result =
+        nvrtc.nvrtcCompileProgram(program, build_args.size(), build_args.data());
+  if (compilation_result != NVRTC_SUCCESS) {
+    size_t logsize;
+    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
+    std::vector<char> log(logsize);
+    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
+    std::stringstream cu;
+    cu << log.data();
+    throw std::runtime_error(cu.str());
   }
 
-  short scalar_type_;
-  short element_size_;
-  short ndims_;
-  int sizes_[25];
-  // NOTE: strides is in bytes, not elements!
-  int strides_[25];
-  char* data_;
-};
+  CUmodule module;
+  CUfunction function;
+  std::vector<char> ptx;
+  size_t ptx_size;
+  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetPTXSize(program, &ptx_size));
+  ptx.resize(ptx_size);
+  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetPTX(program, ptx.data()));
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&module, ptx.data()));
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleGetFunction(&function, module, kernel_name.c_str()));
+
+
+  // Updates (or not) the cache and returns the function ---
+  c10::optional<CUfunction> maybe_function = get_jitted_function(cache, key);
+  if (maybe_function) {
+    // Destroys the just compiled but unneccessary program
+    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
+    return *maybe_function;
+  }
+
+  store_jitted_function(cache, key, function);
+  return function;
+}
+
+// TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
+void launch_jitted_binary_pwise_function(
+    CUfunction function,
+    std::vector<void*>& args) {
+
+  const auto& nvrtc = at::globalContext().getNVRTC();
+
+  // TODO: seems like this and block calculation should be cached per device
+  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  int major, minor;
+  getMajorMinor(prop, major, minor);
+
+  // Computes blocks and block size
+  // TODO: review this block computation vs cuda loops
+  int maxBlocks;
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuOccupancyMaxActiveBlocksPerMultiprocessor(
+    &maxBlocks, function, 128, 0));
+  maxBlocks *= prop->multiProcessorCount;
+
+  constexpr int32_t kBlockSize = 128;
+  // TODO: nBlocks set to 1 for debugging
+  // const auto nBlocks = std::min(maxBlocks, ceilDiv(numel, kBlockSize));
+  const auto nBlocks = 1;
+
+  // Launches kernel on current stream
+  auto stream = at::cuda::getCurrentCUDAStream();
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
+    function,
+    nBlocks,
+    1,
+    1,
+    kBlockSize,
+    1,
+    1,
+    0,
+    stream,
+    args.data(),
+    nullptr));
+}
+
+// Creates a string from the scalar type and lowercases it to produce the c-type
+// TODO: this works for float and double, but a more general solution is needed
+std::string scalartype_to_type_string(const ScalarType scalar_type) {
+  std::string s{c10::toString(scalar_type)};
+  std::transform(
+    s.cbegin(),
+    s.cend(),
+    s.begin(),
+    [](unsigned char c){ return std::tolower(c); });
+  return s;
+}
 
 #define stringify(...) std::string(#__VA_ARGS__); __VA_ARGS__
 const auto jittable_foo_functor = stringify(
@@ -270,10 +390,9 @@ static int ceilDiv(const int a, const int b) {
 #define THREAD_WORK_SIZE 4
 #define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
 
-Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
-  TORCH_CHECK(self.scalar_type() == kFloat);
-  TORCH_CHECK(other.scalar_type() == kDouble);
+JiteratorCache foo_cache;
 
+Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
 
@@ -287,20 +406,8 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   std::cout << "iter.tensor(2).scalar_type(): " << iter.tensor(2).scalar_type() << std::endl;
   std::cout << "common_dtype: " << iter.common_dtype() << std::endl;
 
-  std::cout << "jittable functor string" << std::endl;
-  std::cout << jittable_foo_functor << std::endl;
-
-  // EXAMPLE LOADING CODE TEMPLATE FROM FILE
-  // REPLACE THIS STRING WITH LOCAL PATH
-  const std::string local_path = "/private/home/mruberry/scratch.py";
-  const auto code_template_from_file = at::cuda::detail::load_code_template(local_path);
-  torch::jit::TemplateEnv file_env;
-  std::cout << "code_template_from_file: \n" << code_template_from_file.format(file_env) << std::endl;
-
-
-  const auto output_dtype = iter.tensor(0).scalar_type();
-  const int32_t output_dtype_as_int = static_cast<int32_t>(output_dtype);
-  std::cout << "output_dtype_as_int: " << output_dtype_as_int << std::endl;
+  // std::cout << "jittable functor string" << std::endl;
+  // std::cout << jittable_foo_functor << std::endl;
 
   // Constructs kernel args
   std::vector<void*> args;
@@ -349,114 +456,24 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   env.s("scalar_type", common_dtype_string);
 
   std::string code = cuda_template.format(env);
-  std::cout << "code: " << code << std::endl;
+  // std::cout << "code: \n" << code << std::endl;
 
-  // Compiles kernel
-  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  int major, minor;
-  getMajorMinor(prop, major, minor);
-
-  // Creates the NVRTC program
-  nvrtcProgram program;
-  const auto& nvrtc = at::globalContext().getNVRTC();
-  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
-      &program, code.c_str(), nullptr, 0, nullptr, nullptr));
-
-  // constructs nvrtc build arguments
-  const std::string compute = "--gpu-architecture=compute_" +
-    std::to_string(major) + std::to_string(minor);
-  const std::vector<const char*> build_args = {
-    "--std=c++14", compute.c_str(), "-default-device"};
-
-  // compiles and validates result
-  const auto compilation_result =
-        nvrtc.nvrtcCompileProgram(program, build_args.size(), build_args.data());
-  if (compilation_result != NVRTC_SUCCESS) {
-    size_t logsize;
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
-    std::vector<char> log(logsize);
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
-    std::stringstream cu;
-    cu << log.data();
-    throw std::runtime_error(cu.str());
+  JiteratorKey key = construct_jiterator_key(iter.common_dtype());
+  c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
+  CUfunction function;
+  if (maybe_function) {
+    std::cout << "found function" << std::endl;
+    function = *maybe_function;
+  } else {
+    std::cout << "jitting function" << std::endl;
+    // TODO: make kernel name generic
+    const std::string kernel_name{"FooFunctor_kernel"};
+    function = jit_binary_pwise_function(foo_cache, key, code, kernel_name);
   }
 
-  CUmodule module;
-  CUfunction function;
-  ::torch::jit::ResourceGuard holdProgram([&] { nvrtc.nvrtcDestroyProgram(&program); });
-  std::vector<char> ptx;
-  size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetPTXSize(program, &ptx_size));
-  ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetPTX(program, ptx.data()));
-
-  AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&module, ptx.data()));
-  const std::string kernel_name = "FooFunctor_kernel";
-  AT_CUDA_DRIVER_CHECK(
-    nvrtc.cuModuleGetFunction(&function, module, kernel_name.c_str()));
-
-  // Computes blocks and block size
-  // TODO: review this block computation vs cuda loops
-  int maxBlocks;
-  AT_CUDA_DRIVER_CHECK(nvrtc.cuOccupancyMaxActiveBlocksPerMultiprocessor(
-    &maxBlocks, function, 128, 0));
-  maxBlocks *= prop->multiProcessorCount;
-
-  constexpr int32_t kBlockSize = 128;
-  const auto nBlocks = std::min(maxBlocks, ceilDiv(numel, kBlockSize));
-
-  // Launches kernel on current stream
-  auto stream = at::cuda::getCurrentCUDAStream();
-  AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
-    function,
-    nBlocks,
-    1,
-    1,
-    kBlockSize,
-    1,
-    1,
-    0,
-    stream,
-    args.data(),
-    nullptr));
+  launch_jitted_binary_pwise_function(function, args);
 
   return iter.output();
-
-  // NOTE: may need/want to initialize CUDA context here (refactor into nvrtc call)
-
-  // void* out, void* a, void* b
-  // TODO: provide code (a std::string)
-  // const std::string name{"foo_kernel"};
-  // const std::string code{R"foo(
-  // extern "C" __global__
-  // void foo_kernel(void* out, void* a, void* b) {
-  //   // if (blockIdx.x == 0 && threadIdx.x == 0) {
-  //   //   printf("%f\n", a);
-  //   //   printf("%i\n", b);
-  //   //   printf("%f\n", ((float*)ptr)[0]);
-  //   // }
-  //   float* out_float = static_cast<float*>(out);
-  //   float* a_float = static_cast<float*>(a);
-  //   float* b_float = static_cast<float*>(b);
-
-  //   if (blockIdx.x == 0 && threadIdx.x == 0) {
-  //     *out_float = *a_float + *b_float;
-  //   }
-  // })foo"};
-
-  // OLD AND EXPERIMENTAL CODE BELOW HERE
-
-  // // Constructs accessor arguments
-  // std::vector<std::string> accessor_strings;
-  // int accessor_name_counter = 65;
-  // for (const auto& accessor : accesors) {
-  //   torch::jit::TemplateEnv local;
-  //   local.s("tensor_name", static_cast<char>(accessor_name_counter++));
-  //   accessor_strings.emplace_back(torch::jit::format(", TensorAccessor ${tensor_name}", env);
-  // }
-
-  // env.v("tensor_accessors", accessor_strings);
 }
 
 }} // namespace at::native
