@@ -858,7 +858,6 @@ static bool checkIfFold(Node* node) {
 }
 
 // TODO: needs refactoring
-// TODO: only numel() > 0 is const
 static bool constantFoldingValue(Node* node) {
   auto cast_node = node->input()->node();
   auto prev_node = cast_node->input()->node();
@@ -889,13 +888,25 @@ static bool constantFoldingValue(Node* node) {
     } else { // input_node is either onnx::Size or onnx::ReduceProd -verify if
              // there are more cases.
       auto shape_node = input_node->input()->node();
-      auto v = shape_node->input()
-                   ->type()
-                   ->cast<TensorType>() // what if it is ListType? By this stage
-                                        // it shouldn't be.
-                   ->symbolic_sizes()
-                   .rank();
-      auto val = c10::scalar_to_tensor((int)*v);
+      auto shape =
+          shape_node->input()->type()->cast<TensorType>()->symbolic_sizes();
+
+      at::Tensor val;
+      if (input_node->kind() == onnx::Size) {
+        auto rank = shape.rank();
+        val = c10::scalar_to_tensor(
+            (int64_t)*rank); // figure out to what it should be cast to (int,
+                             // in64_t, etc...)
+      } else if (input_node->kind() == onnx::ReduceProd) {
+        auto sizes = shape.sizes();
+        int64_t prod;
+        for (int64_t i = 0; i < (int64_t)*shape.rank(); i++) {
+          auto dim = sizes.value()[i].static_size();
+          prod *= dim;
+        }
+        val = c10::scalar_to_tensor(prod);
+      }
+      // Probably some check is needed here
       inputs.push_back(val);
     }
   }
@@ -938,7 +949,8 @@ static bool constantFoldingValue(Node* node) {
 //       %9 : Int(3, 4, strides=[4, 1], device=cpu) = onnx::Add(%8, %14)
 //       -> (%9)
 //     block1():
-//       %y.1 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu) = onnx::Identity(%y.2)
+//       %y.1 : Int(3, 4, strides=[4, 1], requires_grad=0, device=cpu) =
+//       onnx::Identity(%y.2)
 //       -> (%y.1)
 //   return (%7)
 
