@@ -430,20 +430,18 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   // Expose the default implementation so that external ones can defer to it.
   static std::vector<std::reference_wrapper<const at::DataPtr>>
   defaultDataPtrExtractor(const at::IValue& value) {
-    // FIXME Should we support more types than just tensors and tensor lists?
-    TORCH_INTERNAL_ASSERT(
-        value.isTensorList() || value.isTensor(),
-        "the future value must be either a tensor list or a tensor.");
-    at::Tensor tensor;
-    if (value.isTensorList()) {
-      const auto tensors = value.toTensorVector();
-      TORCH_INTERNAL_ASSERT(tensors.size() == 1, "expected exactly 1 tensor");
-      tensor = tensors[0];
-    } else {
-      tensor = value.toTensor();
-    }
+    at::IValue::HashAliasedIValues sub_values;
+    // Prefer getSubValues() over visit() as the latter is a silent no-op for
+    // some unsupported types, whereas the former at least fails loudly.
+    value.getSubValues(sub_values);
 
-    return {tensor.storage().data_ptr()};
+    std::vector<std::reference_wrapper<const at::DataPtr>> res;
+    for (const at::IValue& sub_value : sub_values) {
+      if (sub_value.isTensor()) {
+        res.emplace_back(sub_value.toTensor().storage().data_ptr());
+      }
+    }
+    return res;
   };
 
   // Tries to retrieve the error message from std::exception_ptr.
