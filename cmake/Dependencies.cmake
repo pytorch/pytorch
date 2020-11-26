@@ -273,6 +273,13 @@ else()
   set(DISABLE_NNPACK_AND_FAMILY ON)
 endif()
 
+if(USE_QNNPACK AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  message(WARNING
+    "QNNPACK does not compile for Apple Silicon. "
+    "Turn this warning off by explicit USE_QNNPACK=OFF.")
+  caffe2_update_option(USE_QNNPACK OFF)
+endif()
+
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
   CACHE PATH "Confu-style dependencies source directory")
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
