@@ -37,7 +37,7 @@ class TestOpInfo(TestCase):
     #   does NOT throw a runtime error
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
-    @ops(op_db)
+    @ops(op_db, all_dtypes=True)
     def test_supported_dtypes(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         if len(samples) == 0:
