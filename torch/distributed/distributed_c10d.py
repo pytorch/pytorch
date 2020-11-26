@@ -1427,7 +1427,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     ]
     # Allgather tensor sizes
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())
+    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
@@ -1518,7 +1518,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     # gather, since each rank needs to broadcast a tensor of the same (maximal)
     # size.
     all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())
+    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     # Avoid populating output tensors if the result won't be gathered on this rank.
