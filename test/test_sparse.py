@@ -1813,63 +1813,83 @@ class TestSparse(TestCase):
         self.assertRaises(RuntimeError, lambda: with_dense.narrow_copy(10, 0, 3))  # dim > sparseDim + denseDim
 
     def _test_log1p_tensor(self, sparse_tensor):
+        def is_integral(dtype):
+            return dtype in torch.testing.get_all_int_dtypes()
+
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.log1p()
-
+        is_integral_dtype = is_integral(sparse_tensor.dtype)
         self.assertEqual(expected_output, sparse_tensor.log1p().to_dense())
-        self.assertEqual(expected_output, sparse_tensor.coalesce().log1p_().to_dense())
+        if is_integral_dtype:
+            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got:"):
+                sparse_tensor.coalesce().log1p_()
+        else:
+            self.assertEqual(expected_output, sparse_tensor.coalesce().log1p_().to_dense())
 
-        if self.is_uncoalesced:
+        if self.is_uncoalesced and not is_integral_dtype:
             # test in-place op on uncoalesced input
             with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
                 sparse_tensor.log1p_()
+        elif self.is_uncoalesced and is_integral_dtype:
+            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got"):
+                sparse_tensor.log1p_()
 
-        sparse_tensor.requires_grad_()
-        self.assertTrue(sparse_tensor.requires_grad)
+        if not is_integral_dtype:
+            sparse_tensor.requires_grad_()
+            self.assertTrue(sparse_tensor.requires_grad)
 
-        # test autograd
-        x = sparse_tensor.clone()
-        y = sparse_tensor.log1p()
-        with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
-            y.backward(x)
+            # test autograd
+            x = sparse_tensor.clone()
+            y = sparse_tensor.log1p()
+            with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
+                y.backward(x)
+        else:
+            with self.assertRaisesRegex(RuntimeError, "only Tensors of floating point dtype can require gradients"):
+                sparse_tensor.requires_grad_()
 
     def test_log1p(self):
-        if not self.is_uncoalesced:
-            input_coalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[0], [1], [2]]).transpose(1, 0),
-                values=torch.tensor([3.0, 4.0, 5.0]),
-                size=[3, ],
-                device=self.device
-            ).coalesce()
-            self._test_log1p_tensor(input_coalesced)
+        for dtype in torch.testing.get_all_dtypes(include_bool=False, include_half=False,
+                                                  include_bfloat16=False, include_complex=False):
+            if not self.is_uncoalesced:
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[0], [1], [2]]).transpose(1, 0),
+                    values=torch.tensor([3.0, 4.0, 5.0]),
+                    size=[3, ],
+                    device=self.device,
+                    dtype=dtype
+                ).coalesce()
+                self._test_log1p_tensor(input_coalesced)
 
-            # hybrid sparse input
-            input_coalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[1, 3], [2, 4]]),
-                values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
-                size=[4, 5, 2],
-                device=self.device
-            ).coalesce()
-            self._test_log1p_tensor(input_coalesced)
+                # hybrid sparse input
+                input_coalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[1, 3], [2, 4]]),
+                    values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
+                    size=[4, 5, 2],
+                    device=self.device,
+                    dtype=dtype
+                ).coalesce()
+                self._test_log1p_tensor(input_coalesced)
 
-        if self.is_uncoalesced:
-            # test uncoalesced input
-            input_uncoalesced = torch.sparse_coo_tensor(
-                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                values=torch.tensor([2.0, 3.0, 4.0, 1.0, 1.0, 1.0]),
-                size=[3, ],
-                device=self.device
-            )
-            self._test_log1p_tensor(input_uncoalesced)
+            if self.is_uncoalesced:
+                # test uncoalesced input
+                input_uncoalesced = torch.sparse_coo_tensor(
+                    indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                    values=torch.tensor([2.0, 3.0, 4.0, 1.0, 1.0, 1.0]),
+                    size=[3, ],
+                    device=self.device,
+                    dtype=dtype
+                )
+                self._test_log1p_tensor(input_uncoalesced)
 
-            # test on empty sparse tensor
-            input_uncoalesced = torch.sparse_coo_tensor(
-                indices=torch.zeros([2, 0]),
-                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
-                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
-                device=self.device
-            )
-            self._test_log1p_tensor(input_uncoalesced)
+                # test on empty sparse tensor
+                input_uncoalesced = torch.sparse_coo_tensor(
+                    indices=torch.zeros([2, 0]),
+                    values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                    size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                    device=self.device,
+                    dtype=dtype
+                )
+                self._test_log1p_tensor(input_uncoalesced)
 
     def _test_neg_negative(self, sparse_tensor):
         dense_tensor = sparse_tensor.to_dense()
