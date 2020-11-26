@@ -10,6 +10,7 @@ from .adagrad import Adagrad
 from .adam import Adam
 from .adamw import AdamW
 from .sparse_adam import SparseAdam
+from .sparse_adamw import SparseAdamW
 from .adamax import Adamax
 from .asgd import ASGD
 from .sgd import SGD
@@ -25,6 +26,7 @@ del adagrad
 del adam
 del adamw
 del sparse_adam
+del sparse_adamw
 del adamax
 del asgd
 del sgd

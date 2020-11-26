@@ -117,6 +117,8 @@ Algorithms
     :members:
 .. autoclass:: SparseAdam
     :members:
+.. autoclass:: SparseAdamW
+    :members:
 .. autoclass:: Adamax
     :members:
 .. autoclass:: ASGD
