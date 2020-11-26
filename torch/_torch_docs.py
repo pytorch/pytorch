@@ -7669,17 +7669,8 @@ The original tensor can be reconstructed by::
 
     U @ diag(S) @ V.T
 
-
-.. note:: It is worth noting that that the code above works unmodified even
-          for complex numbers, i.e. the returned matrix ``V`` is already
-          conjugated.  This behavior is probably unexpected from the
-          mathematical point of view, but it is not possible to change it
-          without breaking existing code.  New code is encouraged to use
-          ``torch.linalg.svd`` instead, which returns :math:`V^H` instead.
-
-
-The dtype of ``U`` and ``V`` is the same as the ``input`` matrix. The dtype of
-``S`` is always real numbers, even if ``input`` is complex.
+The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+always be real-valued, even if :attr:`input` is complex.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced
 singular value decomposition i.e., if the last two dimensions of
