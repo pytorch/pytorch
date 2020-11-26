@@ -86,6 +86,7 @@ def script_lnlstm(input_size, hidden_size, num_layers, bias=True,
 LSTMState = namedtuple('LSTMState', ['hx', 'cx'])
 
 
+@jit.ignore
 def reverse(lst):
     # type: (List[Tensor]) -> List[Tensor]
     return lst[::-1]
