@@ -351,13 +351,9 @@ if TYPE_CHECKING:
         return _meshgrid(*tensors)
 else:
     def meshgrid(*tensors):
-        return _meshgrid(*tensors)
-
-
-def _meshgrid(*tensors):
-    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
-expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
+        r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+    vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
+    expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
 
     Args:
@@ -382,7 +378,11 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
         tensor([[4, 5, 6],
                 [4, 5, 6],
                 [4, 5, 6]])
-    """
+        """
+        return _meshgrid(*tensors)
+
+
+def _meshgrid(*tensors):
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
             return handle_torch_function(meshgrid, tensors, *tensors)
