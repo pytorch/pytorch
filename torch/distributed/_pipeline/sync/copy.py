@@ -8,7 +8,7 @@
 and computation on the same GPU.
 """
 from collections import deque
-from typing import Deque, List, Optional, Tuple
+from typing import Deque, List, Optional, Tuple, Sequence
 
 import torch
 from torch import Tensor
@@ -18,7 +18,7 @@ from .stream import AbstractStream, current_stream, get_device, record_stream, u
 __all__: List[str] = []
 
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 
 
 # Common interface between :class:`Copy` and :class:`Wait`.

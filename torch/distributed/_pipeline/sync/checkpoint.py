@@ -27,7 +27,16 @@ copied entirely.
 from collections import deque
 from contextlib import contextmanager
 import threading
-from typing import TYPE_CHECKING, Deque, Generator, List, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Deque,
+    Generator,
+    List,
+    Optional,
+    Union,
+    Sequence,
+    Tuple
+)
 
 import torch
 from torch import Tensor
@@ -40,7 +49,7 @@ from .phony import get_phony
 __all__ = ["is_checkpointing", "is_recomputing"]
 
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 
 # Types for shared memory between Checkpoint and Recompute.

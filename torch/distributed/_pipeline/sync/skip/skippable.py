@@ -17,6 +17,7 @@ from typing import (
     List,
     Optional,
     Set,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -33,7 +34,7 @@ from .tracker import current_skip_tracker
 __all__ = ["skippable", "stash", "pop", "verify_skippables"]
 
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 
 StashPop = Union["stash", "pop"]

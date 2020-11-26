@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """Manipulation of micro-batches."""
 import typing
-from typing import Callable, Iterable, Iterator, List, Tuple, Union, cast
+from typing import Callable, Iterable, Iterator, List, Union, cast, Sequence
 
 import torch
 from torch import Tensor
@@ -15,7 +15,7 @@ import torch.cuda.comm
 __all__: List[str] = []
 
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 Function = Callable[[TensorOrTensors], TensorOrTensors]
 
@@ -139,7 +139,7 @@ def check(input: TensorOrTensors) -> None:
         TypeError: input is not a tensor or tensors.
 
     """
-    if isinstance(input, tuple):
+    if isinstance(input, Sequence) and not isinstance(input, str):
         for x in input:
             check(x)
         return

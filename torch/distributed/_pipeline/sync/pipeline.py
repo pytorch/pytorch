@@ -7,7 +7,7 @@
 """The pipeline parallelism of Pipe."""
 from queue import Queue
 from types import TracebackType
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, Type, Union, cast
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, Type, Union, cast, Sequence
 
 import torch
 from torch import Tensor, nn
@@ -25,7 +25,7 @@ from .worker import Task, create_workers, join_workers
 __all__: List[str] = []
 
 
-Tensors = Tuple[Tensor, ...]
+Tensors = Sequence[Tensor]
 TensorOrTensors = Union[Tensor, Tensors]
 
 ExcInfo = Tuple[Type[BaseException], BaseException, TracebackType]

@@ -282,6 +282,17 @@ def test_input_pair(setup_rpc):
     assert a.grad is not None
     assert b.grad is not None
 
+    # Test with list.
+    a.grad = None
+    b.grad = None
+    a_out, b_out = model([a, b]).local_value()
+    loss = (a_out + b_out).mean()
+    loss.backward()
+
+    assert a.grad is not None
+    assert b.grad is not None
+
+
 
 def test_input_singleton(setup_rpc):
     class One(nn.Module):
