@@ -291,7 +291,7 @@ class SpectralFuncInfo(OpInfo):
 
 
 # Operator database (sorted alphabetically)
-op_db = [
+op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
@@ -630,7 +630,7 @@ op_db = [
 ]
 
 if TEST_SCIPY:
-    op_db_scipy_reference = [
+    op_db_scipy_reference: List[OpInfo] = [
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,

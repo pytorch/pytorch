@@ -295,7 +295,7 @@ class TestFFT(TestCase):
 
     @slowAwareTest
     @onlyOnCPUAndCUDA
-    @ops(spectral_funcs, dtype_filter=[torch.double, torch.complex128]) # gradcheck requires double
+    @ops(spectral_funcs, dtype_filter=[torch.double, torch.complex128])  # gradcheck requires double
     def test_backward_1d(self, device, dtype, op):
         test_args = list(product(
             # input
@@ -360,7 +360,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoMkl
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
-    def test_round_trip_nd(self, device, dtype):
+    def test_fftn_round_trip(self, device, dtype):
         norm_modes = (None, "forward", "backward", "ortho")
 
         # input_ndim, dim
