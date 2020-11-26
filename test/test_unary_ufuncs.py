@@ -517,13 +517,18 @@ class TestUnaryUfuncs(TestCase):
 
             complex(1e20, -500),
             complex(500, -1e20),
-
-            complex(1e200, 0),
-            complex(0, -1e200),
-
-            complex(1e200, -500),
-            complex(500, -1e200),
         ]
+
+        # UBSan Error:
+        # runtime error: 1e+200 is outside the range of representable values of type 'float'
+        if dtype == torch.cdouble:
+            values += [
+                complex(1e200, 0),
+                complex(0, -1e200),
+
+                complex(1e200, -500),
+                complex(500, -1e200),
+            ]
 
         for value in values:
             t = torch.tensor(value, dtype=dtype, device=device)
