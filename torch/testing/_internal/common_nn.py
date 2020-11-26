@@ -2029,22 +2029,22 @@ new_module_tests = [
     ),
     dict(
         fullname='AvgPool2d_divisor',
-        constructor=lambda: nn.AvgPool2d((2, 2), divisor_override=True),
-        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2}).divisor_override(True)',
+        constructor=lambda: nn.AvgPool2d((2, 2), divisor_override=1),  # type: ignore[arg-type]
+        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2}).divisor_override(1)',
         input_size=(2, 3, 6, 6),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool2d_divisor_stride',
-        constructor=lambda: nn.AvgPool2d((2, 2), (2, 2), divisor_override=True),
-        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}).divisor_override(True)',
+        constructor=lambda: nn.AvgPool2d((2, 2), (2, 2), divisor_override=1),  # type: ignore[arg-type]
+        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}).divisor_override(1)',
         input_size=(2, 3, 6, 6),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool2d_divisor_stride_pad',
-        constructor=lambda: nn.AvgPool2d((2, 2), (2, 2), (1, 1), divisor_override=True),
-        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}).padding({1, 1}).divisor_override(True)',
+        constructor=lambda: nn.AvgPool2d((2, 2), (2, 2), (1, 1), divisor_override=1),  # type: ignore[arg-type]
+        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}).padding({1, 1}).divisor_override(1)',
         input_size=(2, 3, 6, 6),
         check_with_long_tensor=True,
     ),
