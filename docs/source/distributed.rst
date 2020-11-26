@@ -374,7 +374,7 @@ It shows the explicit need to synchronize when using collective outputs on diffe
         output.add_(100)
     if rank == 0:
         # if the explicit call to wait_stream was omitted, the output below will be
-        # non-deterministically 1 or 101, depending on whether the allreduce overwrote
+        # non-deterministically 1 or 101, depending on whether the all_reduce overwrote
         # the value after the add completed.
         print(output)
 
