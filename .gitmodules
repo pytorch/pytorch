@@ -132,4 +132,5 @@
     url = https://github.com/pytorch/tensorpipe.git
 [submodule "third_party/kineto"]
 	path = third_party/kineto
-	url = https://github.com/pytorch/kineto
+	url = https://github.com/ilia-cher/kineto
+	branch = cmake_version
