@@ -278,6 +278,10 @@ def test_nested_input(setup_rpc):
     with pytest.raises(TypeError):
         model((a, (a, b))).local_value()
 
+    # TypeError: expected Tensor, but got list
+    with pytest.raises(TypeError):
+        model((a, [a, b])).local_value()
+
 
 def test_input_pair(setup_rpc):
     class Two(nn.Module):
