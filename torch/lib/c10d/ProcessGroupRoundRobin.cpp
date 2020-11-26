@@ -5,7 +5,7 @@ namespace c10d {
 ProcessGroupRoundRobin::ProcessGroupRoundRobin(
     int rank,
     int size,
-    std::vector<std::shared_ptr<ProcessGroup>> processGroups)
+    std::vector<c10::intrusive_ptr<ProcessGroup>> processGroups)
     : ProcessGroup(rank, size), processGroups_(std::move(processGroups)) {
   TORCH_CHECK(processGroups_.size() >= 1);
   for (const auto& processGroup : processGroups_) {
@@ -111,7 +111,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupRoundRobin::barrier(
   throw std::runtime_error("ProcessGroupRoundRobin does not support barrier");
 };
 
-const std::shared_ptr<ProcessGroup>& ProcessGroupRoundRobin::next() {
+const c10::intrusive_ptr<ProcessGroup>& ProcessGroupRoundRobin::next() {
   auto& processGroup = *iterator_;
   iterator_++;
   if (iterator_ == processGroups_.end()) {

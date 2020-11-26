@@ -107,12 +107,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::recvAnysource(
   throw std::runtime_error("ProcessGroupTest does not support recvAnysource");
 }
 
-std::shared_ptr<ProcessGroup> ProcessGroupTest::createProcessGroupTest(
+c10::intrusive_ptr<ProcessGroup> ProcessGroupTest::createProcessGroupTest(
     const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,
     const std::chrono::duration<float>& timeout) {
-  return std::make_shared<ProcessGroupTest>(rank, size);
+  return c10::make_intrusive<ProcessGroupTest>(rank, size);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
