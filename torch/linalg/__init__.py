@@ -208,8 +208,8 @@ Args:
     full_matrices (bool, optional): controls whether to compute the full or reduced decomposition, and
                                     consequently the shape of returned ``U`` and ``V``. Defaults to True.
     compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
-    out (tuple, optional): the output tuple of tensors. If compute_uv=False, the 1st and 3rd
-                           arguments must be tensors, but they are ignored. E.g. you can
+    out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
+                           the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
                            pass `(torch.Tensor(), out_S, torch.Tensor())`
 
 Example::
