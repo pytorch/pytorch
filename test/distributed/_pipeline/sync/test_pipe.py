@@ -347,7 +347,7 @@ def test_non_tensor(setup_rpc):
         model("hello")
 
 
-def test_non_tensor_tuple(setup_rpc):
+def test_non_tensor_sequence(setup_rpc):
     class NonTensorTuple(nn.Module):
         def forward(self, x):
             return (x, "hello")
@@ -363,6 +363,10 @@ def test_non_tensor_tuple(setup_rpc):
     # TypeError: expected Tensor to scatter, but got str
     with pytest.raises(TypeError):
         model((x, "hello"))
+
+    # TypeError: expected Tensor to scatter, but got str
+    with pytest.raises(TypeError):
+        model([x, "hello"])
 
 
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
