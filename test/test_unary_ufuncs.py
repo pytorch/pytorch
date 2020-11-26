@@ -516,7 +516,10 @@ class TestUnaryUfuncs(TestCase):
             complex(0, -1e37),
 
             complex(1e20, -500),
-            complex(-500, 1e20),
+            complex(500, -1e20),
+
+            complex(1e200, 0),
+            complex(0, -1e200),
 
             complex(1e200, -500),
             complex(500, -1e200),
@@ -528,6 +531,7 @@ class TestUnaryUfuncs(TestCase):
 
             # for vectorized version.
             t = torch.tensor([value] * 100, dtype=dtype, device=device)
+            print(t)
             self.compare_with_numpy(torch.abs, np.abs, t)
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
