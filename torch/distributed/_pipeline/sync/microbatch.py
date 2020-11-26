@@ -139,9 +139,10 @@ def check(input: TensorOrTensors) -> None:
         TypeError: input is not a tensor or tensors.
 
     """
-    if isinstance(input, Sequence) and not isinstance(input, str):
+    if isinstance(input, Sequence):
         for x in input:
-            check(x)
+            if not isinstance(x, Tensor):
+                raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
         return
 
     if not isinstance(input, Tensor):
