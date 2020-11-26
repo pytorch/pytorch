@@ -899,7 +899,7 @@ static bool constantFoldingValue(Node* node) {
                              // in64_t, etc...)
       } else if (input_node->kind() == onnx::ReduceProd) {
         auto sizes = shape.sizes();
-        int64_t prod;
+        int64_t prod = 1;
         for (int64_t i = 0; i < (int64_t)*shape.rank(); i++) {
           auto dim = sizes.value()[i].static_size();
           prod *= dim;

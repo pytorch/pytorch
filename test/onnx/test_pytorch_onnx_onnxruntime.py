@@ -4182,7 +4182,7 @@ class TestONNXRuntime(unittest.TestCase):
                     y = y + 4
                     y = y + 2
                 else:
-                    return y
+                    y = y - 1
                 return y
         x = torch.ones((3, 4), dtype=torch.int)
         self.run_test(IfFoldModel(), x)
@@ -4191,9 +4191,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, y):
                 if y.numel() > 1:
                     y = y + 4
-                    y = y + 2
                 else:
-                    return y
+                    y = y + 2
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -4215,9 +4214,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, y):
                 if y.dim() >= 1:
                     y = y + 4
-                    y = y + 2
                 else:
-                    return y
+                    y = y - 1
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -4227,9 +4225,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, y):
                 if y.dim() <= 1:
                     y = y + 4
-                    y = y + 2
                 else:
-                    return y
+                    y = y + 2
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
@@ -4253,11 +4250,47 @@ class TestONNXRuntime(unittest.TestCase):
                     y = y + 4
                     y = y + 2
                 else:
+                    y = y + 1
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, y):
+                if y.numel() != 0 and y.dim() == 2:
+                    y = y + 4
+                    y = y + 2
+                else:
                     return y
                 return y
 
         x = torch.ones((3, 4), dtype=torch.int)
         self.run_test(IfFoldModel(), x)
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, x, y):
+                if x.numel() == y.numel():
+                    y = x + y
+                else:
+                    y = y - x
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        y = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), (x, y))
+
+        class IfFoldModel(torch.nn.Module):
+            def forward(self, x, y):
+                if x.numel() != y.numel():
+                    y = x + y
+                else:
+                    y = y - x
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        y = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(IfFoldModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipIfONNXShapeInference(False)
