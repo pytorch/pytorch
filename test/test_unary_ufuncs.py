@@ -490,6 +490,46 @@ class TestUnaryUfuncs(TestCase):
         x = torch.tensor(-1.0000e+20 - 4988429.2000j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
 
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_abs_complex_edge_values(self, device, dtype):
+        values = [
+            complex(float('inf'), float('inf')),
+            complex(float('inf'), -float('inf')),
+            complex(-float('inf'), float('inf')),
+            complex(-float('inf'), -float('inf')),
+            complex(float('inf'), 0),
+            complex(-float('inf'), 0),
+            complex(float('inf'), 3.14),
+            complex(-float('inf'), 3.14),
+
+            complex(0, float('inf')),
+            complex(0, -float('inf')),
+            complex(3.14, float('inf')),
+            complex(3.14, -float('inf')),
+
+            complex(float('nan'), 0),
+            complex(0, float('nan')),
+            complex(float('nan'), 3.14),
+            complex(3.14, float('nan')),
+
+            complex(1e37, 0),
+            complex(0, -1e37),
+
+            complex(1e20, -500),
+            complex(-500, 1e20),
+
+            complex(1e200, -500),
+            complex(500, -1e200),
+        ]
+
+        for value in values:
+            t = torch.tensor(value, dtype=dtype, device=device)
+            self.compare_with_numpy(torch.abs, np.abs, t)
+
+            # for vectorized version.
+            t = torch.tensor([value] * 100, dtype=dtype, device=device)
+            self.compare_with_numpy(torch.abs, np.abs, t)
+
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 
 if __name__ == '__main__':
