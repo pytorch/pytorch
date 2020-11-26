@@ -1008,16 +1008,7 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  std::vector<c10::DeviceIndex> deviceIndices;
-  for (const c10::Device& device : devices_) {
-    TORCH_INTERNAL_ASSERT(device.is_cuda());
-    deviceIndices.push_back(device.index());
-  }
-
-  return c10::make_intrusive<FutureNCCL>(
-      at::IValue(*outputs_),
-      std::move(deviceIndices),
-      cudaEvents_);
+  return c10::make_intrusive<FutureNCCL>(at::IValue(*outputs_), cudaEvents_);
 }
 
 void ProcessGroupNCCL::workEnqueue(

@@ -211,16 +211,10 @@ class ProcessGroupNCCL : public ProcessGroup {
    public:
     explicit FutureNCCL(
         at::IValue value,
-        std::vector<c10::DeviceIndex> deviceIndices,
         std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           value_(std::move(value)),
-          deviceIndices_(std::move(deviceIndices)),
           cudaEvents_(std::move(cudaEvents)) {
-      TORCH_INTERNAL_ASSERT(
-        cudaEvents->size() == deviceIndices.size(),
-        "The device indices and the events must be paired up. Got ",
-        deviceIndices.size(), " devices and ", cudaEvents->size(), " events.");
     }
 
     FutureNCCL()
@@ -235,9 +229,9 @@ class ProcessGroupNCCL : public ProcessGroup {
         throw *error_;
       }
 
-      for (int i = 0; i < deviceIndices_.size(); i++) {
-        (*cudaEvents_)[i].block(
-            at::cuda::getCurrentCUDAStream(deviceIndices_[i]));
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        cudaEvent.block(
+            at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
       }
     }
 
@@ -265,7 +259,6 @@ class ProcessGroupNCCL : public ProcessGroup {
           if (isCudaDeviceUsed[idx]) {
             at::cuda::CUDAEvent cudaEvent;
             cudaEvent.record(at::cuda::getDefaultCUDAStream(idx));
-            deviceIndices_.push_back(idx);
             (*cudaEvents_).push_back(std::move(cudaEvent));
           }
         }
@@ -309,8 +302,8 @@ class ProcessGroupNCCL : public ProcessGroup {
         }
       }
 
-      for (int i = 0; i < deviceIndices_.size(); i++) {
-        (*cudaEvents_)[i].block(streams[deviceIndices_[i]]);
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        cudaEvent.block(streams[cudaEvent.device_index()]);
       }
 
       // Use the dedicated callback stream to run callback.
@@ -362,7 +355,6 @@ class ProcessGroupNCCL : public ProcessGroup {
 
    private:
     at::IValue value_;
-    std::vector<c10::DeviceIndex> deviceIndices_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     DataPtrExtractor dataPtrExtractor_;
     c10::optional<FutureError> error_;
