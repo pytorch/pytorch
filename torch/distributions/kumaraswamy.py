@@ -40,8 +40,7 @@ class Kumaraswamy(TransformedDistribution):
         finfo = torch.finfo(self.concentration0.dtype)
         base_dist = Uniform(torch.full_like(self.concentration0, 0),
                             torch.full_like(self.concentration0, 1))
-        transforms = [AffineTransform(loc=1., scale=-1.),
-                      PowerTransform(exponent=self.concentration0.reciprocal()),
+        transforms = [PowerTransform(exponent=self.concentration0.reciprocal()),
                       AffineTransform(loc=1., scale=-1.),
                       PowerTransform(exponent=self.concentration1.reciprocal())]
         super(Kumaraswamy, self).__init__(base_dist, transforms, validate_args=validate_args)
