@@ -5,6 +5,7 @@ from .optimizer import Optimizer
 
 class SparseAdamW(Optimizer):
     r"""Implements lazy version of AdamW algorithm suitable for sparse tensors.
+
     In this variant, only moments that show up in the gradient get updated, and
     only those portions of the gradient get applied to the parameters.
     The original Adam algorithm was proposed in `Adam: A Method for Stochastic Optimization`_.
@@ -58,12 +59,10 @@ class SparseAdamW(Optimizer):
                         weight_decay=weight_decay)
         super(SparseAdamW, self).__init__(params, defaults)
 
-    def __setstate__(self, state):
-        super(SparseAdamW, self).__setstate__(state)
-
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
+
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
