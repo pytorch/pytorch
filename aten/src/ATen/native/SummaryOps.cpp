@@ -300,9 +300,16 @@ std::tuple<Tensor, Tensor> histogram(
   hist = hist.slice(0, 1, -1);
 
   if (density) { // Compute the density
-    hist = hist.to(ScalarType::Double);
-    hist /= hist.sum() *
-        (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1)).to(kDouble);
+    if (!weights.defined() || isIntegralType(weights.scalar_type())) {
+      hist = hist.to(c10::get_default_dtype());
+      hist /= hist.sum() *
+          (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1))
+              .to(c10::get_default_dtype());
+    } else {
+      hist /= hist.sum() *
+          (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1))
+              .to(weights.scalar_type());
+    }
   } else {
     // This is a hack for integral types of weights, as bincount casts them to double when computing the histogram
     // and disabling that would be a bc-breaking change

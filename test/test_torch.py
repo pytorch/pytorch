@@ -4316,7 +4316,8 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
                                                   include_bool=False, include_complex=False),
                      torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
-                                                  include_bool=False, include_complex=False)))
+                                                  include_bool=False, include_complex=False),
+                     (torch.float32, torch.float64)))
     def test_histogram_vs_numpy_custom_bins(self, device, dtypes):
         # test against numpy.histogram()
         def test_against_np_custombins(tensor, bins, weights=None, density=False, rtol=None, atol=None):
@@ -4328,13 +4329,22 @@ class TestTorchDeviceType(TestCase):
                 npweights = None
             actual = torch.histogram(tensor, bins=bins, weights=weights, density=density)
             expected = np.histogram(nparr, bins=npbins, weights=npweights, density=density)
-            self.assertEqual(actual[0], torch.from_numpy(expected[0]), rtol=rtol, atol=atol)
+            if density:
+                if weights is None or not weights.is_floating_point():
+                    self.assertEqual(actual[0], torch.from_numpy(expected[0]).to(torch.get_default_dtype()), rtol=rtol, atol=atol)
+                else:
+                    self.assertEqual(actual[0], torch.from_numpy(expected[0]).to(weights.dtype), rtol=rtol, atol=atol)
+            else:
+                self.assertEqual(actual[0], torch.from_numpy(expected[0]), rtol=rtol, atol=atol)
             self.assertEqual(actual[1], torch.from_numpy(expected[1]))
 
-        # This test fails for 8bit weights on XLA
+        # This test fails for 8bit weights on XLA - probably becdause of how integer overflow is handled there
         if self.device_type == 'xla':
             if dtypes[1] in (torch.int8, torch.uint8):
                 return
+
+        default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(dtypes[2])
 
         if dtypes[0].is_floating_point:
             sample = torch.randn(5000, device=device, dtype=dtypes[0])
@@ -4382,6 +4392,8 @@ class TestTorchDeviceType(TestCase):
         elif dtypes[1] not in (torch.int8, torch.uint8):
             test_against_np_custombins(sample_noncontig, bins_noncontig, weights_noncontig, density=True)
 
+        torch.set_default_dtype(default_dtype)
+
     @dtypes(*product(torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
                                                   include_bool=False, include_complex=False),
                      torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False,
@@ -4420,13 +4432,17 @@ class TestTorchDeviceType(TestCase):
             weights = torch.randint(127, (5000, ), device=device, dtype=dtypes[1])
 
         # Test only inputting sample
-        test_against_np_uniformbins(sample)
+        # No need to test for different weights dtypes
+        if(dtypes[0] == torch.int64):
+            test_against_np_uniformbins(sample)
 
         # test weights arg
         test_against_np_uniformbins(sample, weights=weights)
 
         # test density arg
-        test_against_np_uniformbins(sample, density=True)
+        # No need to test for different weights dtypes
+        if(dtypes[0] == torch.int64):
+            test_against_np_uniformbins(sample, density=True)
 
         # test weights and density arg
         # Increasing atol because for some reason if weights dtype is float32 or some bincounts are negative
