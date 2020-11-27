@@ -256,7 +256,7 @@ class ProcessGroupNCCL : public ProcessGroup {
         cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
         // In case of chained then callback calls, cudaEvents
         // records callback's stream.
-        (*cudaEvents_)[0].record(at::cuda::getDefaultCUDAStream(deviceIndex_));
+        (*cudaEvents_)[0].record(at::cuda::getCurrentCUDAStream(deviceIndex_));
       }
     }
 

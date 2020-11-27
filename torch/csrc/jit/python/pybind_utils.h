@@ -119,23 +119,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // vector, but Future does not acquire GIL on destruction.
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
 
-    // This callback is only used by subclasses of Future that deal with CUDA,
-    // in order to register the pointers on the right streams with the caching
-    // allocator.
-    // By default, assume that the input value is or can be casted into a tensor
-    // vector that has exactly one tensor.
-    auto data_ptr_extractor = [](const at::IValue& value) {
-      if (value.isPyObject()) {
-        pybind11::gil_scoped_acquire gil;
-        py::object obj = torch::jit::toPyObject(value);
-        // FIXME Should we support more types than just tensor lists?
-        auto new_value = torch::jit::toIValue(
-            obj, c10::ListType::create(c10::TensorType::get()));
-        return at::ivalue::Future::defaultDataPtrExtractor(new_value);
-      }
-      return at::ivalue::Future::defaultDataPtrExtractor(value);
-    };
-    fut->setDataPtrExtractor(std::move(data_ptr_extractor));
+    fut->setDataPtrExtractor(&PythonFutureWrapper::dataPtrExtractor);
 
     return std::make_shared<jit::PythonFutureWrapper>(fut->then(
         // Capture a copy of the ivalue::Future instead of the `this` pointer
@@ -232,6 +216,24 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   std::shared_ptr<PythonFutureWrapper> getPtr() {
     return shared_from_this();
   }
+
+  // This callback is only used by subclasses of Future that deal with CUDA,
+  // in order to register the pointers on the right streams with the caching
+  // allocator.
+  // By default, assume that the input value is or can be casted into a tensor
+  // vector that has exactly one tensor.
+  static std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrExtractor(
+      const at::IValue& value) {
+    if (value.isPyObject()) {
+      pybind11::gil_scoped_acquire gil;
+      py::object obj = torch::jit::toPyObject(value);
+      // FIXME Should we support more types than just tensor lists?
+      auto new_value = torch::jit::toIValue(
+          obj, c10::ListType::create(c10::TensorType::get()));
+      return at::ivalue::Future::defaultDataPtrExtractor(new_value);
+    }
+    return at::ivalue::Future::defaultDataPtrExtractor(value);
+  };
 };
 
 // error reporting: when reporting user-caused errors, these functions should
