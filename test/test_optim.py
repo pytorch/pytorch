@@ -465,9 +465,9 @@ class TestOptim(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdamW(None, lr=1e-2, betas=(1.0, 0.0))
-        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+        with self.assertRaisesRegex(ValueError, "SparseAdamW requires dense parameter tensors"):
             optim.SparseAdamW([torch.zeros(3, layout=torch.sparse_coo)])
-        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+        with self.assertRaisesRegex(ValueError, "SparseAdamW requires dense parameter tensors"):
             optim.SparseAdamW([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optimizer(None, lr=1e-2, weight_decay=-1)
