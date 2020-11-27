@@ -480,9 +480,9 @@ if TEST_SCIPY:
                        ref=scipy.special.expit,
                        decorators=(precisionOverride({torch.float16: 1e-2,
                                                       torch.bfloat16: 1e-2}),),
-                       # 'expit' not supported for the input types
+                       # 'scipy.special.expit' not supported for the input types
                        skips=(SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                       device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),),
+                                       dtypes=[torch.cfloat, torch.cdouble]),),
                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
