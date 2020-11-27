@@ -319,7 +319,7 @@ class ProcessGroupNCCL : public ProcessGroup {
               // In case of chained then callback calls, thenFutCudaEvents
               // records callback's stream.
               (*thenFutCudaEvents)[0].record(
-                  at::cuda::getDefaultCUDAStream(deviceIndex_));
+                  at::cuda::getCurrentCUDAStream(deviceIndex_));
             } catch (const std::exception& e) {
               fut->setError(std::current_exception());
             }
