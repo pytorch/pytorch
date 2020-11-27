@@ -2,8 +2,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
 
-#include <iostream>
-
 #pragma once
 
 namespace at { namespace native {
