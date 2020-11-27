@@ -6779,11 +6779,11 @@
 - func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
 
-- func: msort.values(Tensor self, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     Math: msort_out
 
-- func: msort(Tensor self, bool descending=False) -> (Tensor values, Tensor indices)
+- func: msort(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:

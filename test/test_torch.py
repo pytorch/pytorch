@@ -3266,25 +3266,22 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
-    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_msort(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
-            expected_values = torch.from_numpy(np.msort(tensor.cpu().numpy()))
-            expected_indices = torch.sort(tensor, dim=0).indices
+            expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
+            result = torch.msort(tensor)
+            self.assertEqual(result, expected)
 
-            result_values, result_indices = torch.msort(tensor)
-            self.assertEqual(result_values, expected_values)
-            self.assertEqual(result_indices, expected_indices)
-
-            out = [torch.empty_like(result_values), torch.empty_like(result_indices)]
+            out = torch.empty_like(result)
             torch.msort(tensor, out=out)
-            self.assertEqual(out[0], expected_values)
-            self.assertEqual(out[1], expected_indices)
+            self.assertEqual(out, expected)
 
         shapes = (
-            [20, 1],
+            [0],
+            [20, ],
             [1, 20],
             [30, 30],
             [10, 20, 30]

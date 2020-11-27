@@ -7558,41 +7558,31 @@ Example::
 
 add_docstr(torch.msort,
            r"""
-msort(input, descending=False, *, out=None) -> (Tensor, LongTensor)
+msort(input, *, out=None) -> Tensor
 
-Sorts the elements of the :attr:`input` tensor along the first dimension
+Sorts the elements of the :attr:`input` tensor along its first dimension
 in ascending order by value.
 
-If :attr:`descending` is ``True`` then the elements are sorted in descending
-order by value.
-
-A namedtuple of (values, indices) is returned, where the `values` are the
-sorted values and `indices` are the indices of the elements in the original
-`input` tensor.
-
-.. note:: `torch.msort(a)` is equivalent to `torch.sort(a, dim=0)`.
+.. note:: `torch.msort(a)` is equivalent to `torch.sort(t, dim=0)[0]`.
           See also :func:`torch.sort`.
 
 Args:
     {input}
-    descending (bool, optional): controls the sorting order (ascending or descending)
 
 Keyword args:
-    out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
-        be optionally given to be used as output buffers
+    {out}
 
 Example::
 
-    >>> x = torch.randn(3, 4)
-    >>> sorted, indices = torch.msort(x)
-    >>> sorted
-    tensor([[-0.5071, -0.2162,  0.6719, -0.5793],
-            [ 0.0608,  0.0061,  0.9497,  0.3343],
-            [ 0.6058,  0.9553,  1.0960,  2.3332]])
-    >>> indices
-    tensor([[ 2,  0,  0,  1],
-            [ 0,  1,  1,  2],
-            [ 1,  2,  2,  0]])
+    >>> t = torch.randn(3, 4)
+    >>> t
+    tensor([[-0.1321,  0.4370, -1.2631, -1.1289],
+            [-2.0527, -1.1250,  0.2275,  0.3077],
+            [-0.0881, -0.1259, -0.5495,  1.0284]])
+    >>> torch.msort(t)
+    tensor([[-2.0527, -1.1250, -1.2631, -1.1289],
+            [-0.1321, -0.1259, -0.5495,  0.3077],
+            [-0.0881,  0.4370,  0.2275,  1.0284]])
 """.format(**common_args))
 
 add_docstr(torch.sparse_coo_tensor,
