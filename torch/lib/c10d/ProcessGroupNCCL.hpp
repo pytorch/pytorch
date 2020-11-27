@@ -257,7 +257,7 @@ class ProcessGroupNCCL : public ProcessGroup {
         for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
           if (isCudaDeviceUsed[idx]) {
             at::cuda::CUDAEvent cudaEvent;
-            cudaEvent.record(at::cuda::getDefaultCUDAStream(idx));
+            cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
             (*cudaEvents_).push_back(std::move(cudaEvent));
           }
         }
@@ -317,6 +317,13 @@ class ProcessGroupNCCL : public ProcessGroup {
         std::function<at::IValue(void)> callback,
         at::TypePtr type) override {
       auto fut = c10::make_intrusive<FutureNCCL>(std::move(type));
+      // The new future needs the DataPtr extractor when it gets marked complete
+      // but this might happen immediately inline or in parallel by another
+      // thread. In both these cases this would/might happen before the user has
+      // time to set their own DataPtr extractor, which might lead to failures
+      // if the default extractor can't handle some of the user's types.
+      // Therefore we propagate our extractor.
+      fut->setDataPtrExtractor(dataPtrExtractor_);
 
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
@@ -349,7 +356,11 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-      dataPtrExtractor_ = std::move(data_ptr_extractor);
+      // To avoid races with other threads that may be using the extractor, we
+      // won't modify it after it's first set.
+      if (dataPtrExtractor_ == nullptr) {
+        dataPtrExtractor_ = std::move(data_ptr_extractor);
+      }
     }
 
    private:
