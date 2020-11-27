@@ -735,12 +735,13 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool complex_fft = input.is_complex();
   const auto onesided = onesidedOpt.value_or(!complex_fft);
 
+  const fft_norm_mode norm = normalized ? fft_norm_mode::by_root_n : fft_norm_mode::none;
   Tensor out;
   if (complex_fft) {
     TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
-    out = at::native::fft(at::view_as_real(input), 1, normalized);
+    out = at::_fft_c2c(input, input.dim() - 1, static_cast<int64_t>(norm), /*forward=*/true);
   } else {
-    out = at::native::rfft(input, 1, normalized, onesided);
+    out = at::_fft_r2c(input, input.dim() - 1, static_cast<int64_t>(norm), onesided);
   }
   out.transpose_(1, 2);
 
@@ -749,10 +750,24 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   }
 
   if (return_complex) {
-    return at::view_as_complex(out);
-  } else {
     return out;
+  } else {
+    return at::view_as_real(out);
   }
+}
+
+// Like view_as_complex but may clone if the input can't be directly viewed as complex
+static Tensor as_complex(const Tensor& self) {
+  const bool can_view_as_complex = [&]{
+    auto strides = self.strides();
+    for (int64_t i = 0; i + 1 < strides.size(); ++i) {
+      if (strides[i] % 2 != 0) {
+        return false;
+      }
+    }
+    return strides.back() == 1 && self.storage_offset() % 2 == 0;
+  }();
+  return at::view_as_complex(can_view_as_complex ? self : self.clone(MemoryFormat::Contiguous));
 }
 
 /* Inverse Short-time Fourier Transform
@@ -851,16 +866,19 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     input = input.unsqueeze(0);
   }
 
-  input = input.transpose(1, 2);  // size: (channel, n_frames, fft_size, 2)
+  input = as_complex(input.transpose(1, 2));  // size: (channel, n_frames, fft_size, 2)
 
+  const fft_norm_mode norm = normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n;
   if (return_complex) {
     TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
-    input = at::native::ifft(input, 1, normalized);  // size: (channel, n_frames, n_fft)
-    input = at::view_as_complex(input);
+    input = at::_fft_c2c(input, input.dim() - 1, static_cast<int64_t>(norm), /*forward=*/false);  // size: (channel, n_frames, n_fft)
   } else {
     TORCH_CHECK(!window.defined() || !window.is_complex(),
                 "Complex windows are incompatible with return_complex=False");
-    input = at::native::irfft(input, 1, normalized, onesided, {n_fft,});  // size: (channel, n_frames, n_fft)
+    if (!onesided) {
+      input = input.slice(-1, 0, n_fft / 2 + 1);
+    }
+    input = at::_fft_c2r(input, input.dim() - 1, static_cast<int64_t>(norm), n_fft);  // size: (channel, n_frames, n_fft)
   }
   TORCH_INTERNAL_ASSERT(input.size(2) == n_fft);
 
