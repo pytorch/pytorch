@@ -13,6 +13,7 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 from torch.distributed._pipeline.sync import Pipe
+import unittest
 
 class PipeWithDDPTest(RpcAgentTestFixture):
     @property
@@ -23,17 +24,49 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @requires_nccl()
     @dist_init
     @skip_if_rocm
-    def test_basic_nccl(self):
-        self._run_basic_test("nccl")
+    def test_basic_nccl_ckpt_never(self):
+        self._run_basic_test("nccl", "never")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    @dist_init
+    @skip_if_rocm
+    @unittest.skip("DDP doesn't work with checkpointing")
+    def test_basic_nccl_ckpt_always(self):
+        self._run_basic_test("nccl", "always")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    @dist_init
+    @skip_if_rocm
+    @unittest.skip("DDP doesn't work with checkpointing")
+    def test_basic_nccl_ckpt_except_last(self):
+        self._run_basic_test("nccl", "except_last")
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
     @skip_if_rocm
-    def test_basic_gloo(self):
-        self._run_basic_test("gloo")
+    def test_basic_gloo_ckpt_never(self):
+        self._run_basic_test("gloo", "never")
 
-    def _run_basic_test(self, backend):
+    @skip_if_lt_x_gpu(4)
+    @requires_gloo()
+    @dist_init
+    @skip_if_rocm
+    @unittest.skip("DDP doesn't work with checkpointing")
+    def test_basic_gloo_ckpt_always(self):
+        self._run_basic_test("gloo", "always")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_gloo()
+    @dist_init
+    @skip_if_rocm
+    @unittest.skip("DDP doesn't work with checkpointing")
+    def test_basic_gloo_ckpt_except_last(self):
+        self._run_basic_test("gloo", "except_last")
+
+    def _run_basic_test(self, backend, checkpoint):
         dist.init_process_group(
             backend="nccl",
             init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
@@ -51,8 +84,7 @@ class PipeWithDDPTest(RpcAgentTestFixture):
                 fc1,
                 fc2
             )
-            # TODO: Doesn't work with other checkpointing modes.
-            model = Pipe(model, chunks=2, checkpoint="never")
+            model = Pipe(model, chunks=2, checkpoint=checkpoint)
             model = DistributedDataParallel(model, process_group=pg)
             out = model(torch.rand(16, 16).cuda(self.rank)).local_value()
             out.sum().backward()
