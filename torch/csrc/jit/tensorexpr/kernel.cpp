@@ -1127,8 +1127,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::asin: {
-      return computeOneOperand(
-          "aten_asin", v, [](const ExprHandle& a) { return asin(a); });
+      return computeOneOperand("aten_asin", v, [](const ExprHandle& a) {
+        return asin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::cosh: {
