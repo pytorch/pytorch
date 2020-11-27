@@ -5,6 +5,7 @@ import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
+import functools
 
 
 class _RequiredParameter(object):
@@ -34,6 +35,8 @@ class Optimizer(object):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
+        self.hook_for_profile()
+
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
                             "an iterable of Tensors or dicts, but got " +
@@ -55,11 +58,12 @@ class Optimizer(object):
         return {
             'defaults': self.defaults,
             'state': self.state,
-            'param_groups': self.param_groups,
+            'param_groups': self.param_groups
         }
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        self.hook_for_profile()
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
@@ -71,6 +75,24 @@ class Optimizer(object):
                     format_string += '    {0}: {1}\n'.format(key, group[key])
         format_string += ')'
         return format_string
+
+    def hook_for_profile(self):
+        self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
+
+        def profile_hook_step(func):
+            
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                obj, *_ = args
+                profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
+                with torch.autograd.profiler.record_function(profile_name):
+                    return func(*args, **kwargs)
+            return wrapper
+
+        hooked = getattr(self.__class__.step, "hooked", None)
+        if not hooked:
+            self.__class__.step = profile_hook_step(self.__class__.step)
+            self.__class__.step.hooked = True
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
@@ -179,17 +201,18 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
+        with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        if set_to_none:
+                            p.grad = None
                         else:
-                            p.grad.requires_grad_(False)
-                        p.grad.zero_()
+                            if p.grad.grad_fn is not None:
+                                p.grad.detach_()
+                            else:
+                                p.grad.requires_grad_(False)
+                            p.grad.zero_()
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
