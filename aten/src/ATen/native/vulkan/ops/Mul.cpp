@@ -19,14 +19,14 @@ Tensor mul_scalar(
 
   vTensor v_output{
     context,
-    self.sizes(),
-    self.options(),
+    v_self.sizes(),
+    v_self.options(),
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if (v_output.has_image() && v_self.has_image()) {
       const struct {
         uvec3 extents;
         float other;
@@ -83,7 +83,7 @@ Tensor& mul_scalar_(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if C10_LIKELY(v_self.has_image()) {
+    if (v_self.has_image()) {
       const struct {
         uvec3 extents;
         float other;

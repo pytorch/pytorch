@@ -271,7 +271,7 @@
 //     const IntArrayRef dilation,
 //     const float output_min,
 //     const float output_max) {
-//   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+//   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
 //     const struct {
 //       int32_t kernel_x, kernel_y;
 //       int32_t stride_x, stride_y;
@@ -344,7 +344,7 @@
 //     const IntArrayRef padding,
 //     const float output_min,
 //     const float output_max) {
-//   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+//   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
 
 //     vTensor v_weight_reshaped{
 //         context,
@@ -442,7 +442,7 @@
 //     const IntArrayRef dilation,
 //     const float output_min,
 //     const float output_max) {
-//   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+//   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
 //     const struct {
 //       int32_t kernel_x, kernel_y, kernel_ic, kernel_oc;
 //       int32_t stride_x, stride_y;

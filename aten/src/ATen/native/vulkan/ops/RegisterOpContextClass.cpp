@@ -1,4 +1,4 @@
-// #ifdef USE_VULKAN
+// #ifdef USE_VULKAN_API
 
 // #include <torch/library.h>
 // #include <torch/custom_class.h>
@@ -77,4 +77,4 @@
 // } // namespace native
 // } // namespace at
 
-// #endif /* USE_VULKAN */
+// #endif /* USE_VULKAN_API */

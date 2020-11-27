@@ -506,7 +506,7 @@ TEST(VulkanAPITest, empty) {
 }
 
 TEST(VulkanAPITest, mean) {
-  const auto in_cpu = at::rand({10, 3, 21, 21}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({17, 3, 79, 53}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::mean(in_cpu, {-1, -2}, true);
 
   const auto in_vulkan = in_cpu.vulkan();
@@ -522,7 +522,7 @@ TEST(VulkanAPITest, mean) {
 }
 
 TEST(VulkanAPITest, mean2d) {
-  const auto in_cpu = at::rand({5, 3, 9, 9}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({11, 7, 173, 37}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::mean(in_cpu, {-1, -2}, false);
 
   const auto in_vulkan = in_cpu.vulkan();

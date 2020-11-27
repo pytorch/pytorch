@@ -13,9 +13,9 @@ using namespace api::utils;
 Tensor adaptive_avg_pool2d(
     const at::Tensor& self_arg,
     const IntArrayRef output_size) {
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       self_arg.dim() == 4,
-      "vulkan_adaptive_avg_pool2d expects 4-dimensional input!");
+      "Vulkan adaptive_avg_pool2d expects 4-dimensional input!");
 
   api::Context* const context = api::context();
 
@@ -30,13 +30,13 @@ Tensor adaptive_avg_pool2d(
       output_size[Layout::Activation4D::batch],
       output_size[Layout::Activation4D::channels],
     },
-    self.options(),
+    v_self.options(),
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if C10_LIKELY(v_self.has_image()) {
+    if (v_self.has_image()) {
       const uvec3 v_output_size = v_output.extents();
       const uvec3 v_self_size = v_self.extents();
 
@@ -168,7 +168,7 @@ Tensor avg_pool2d(
       output_height,
       output_width,
     },
-    self.options(),
+    v_self.options(),
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
@@ -176,7 +176,7 @@ Tensor avg_pool2d(
   {
     using namespace utils;
 
-    if C10_LIKELY(v_self.has_image()) {
+    if (v_self.has_image()) {
       const struct {
         uvec3 extents;
         int32_t range;

@@ -19,18 +19,17 @@ Tensor upsample_nearest2d(
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
-
-  const auto input_sizes = input.sizes();
+  const auto v_input_sizes = v_input.sizes();
 
   TORCH_CHECK(
-      (4 == input_sizes.size()) && (2 == output_sizes.size()),
+      (4 == v_input_sizes.size()) && (2 == output_sizes.size()),
       "Invalid input!");
 
   vTensor v_output{
     context,
     {
-      input_sizes[Layout::Activation4D::batch],
-      input_sizes[Layout::Activation4D::channels],
+      v_input_sizes[Layout::Activation4D::batch],
+      v_input_sizes[Layout::Activation4D::channels],
       output_sizes[Layout::Parameter::height],
       output_sizes[Layout::Parameter::width],
     },
@@ -40,7 +39,7 @@ Tensor upsample_nearest2d(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if C10_LIKELY(v_input.has_image()) {
+    if (v_input.has_image()) {
       const struct {
         uvec3 extents;
         uint32_t _;
@@ -56,11 +55,11 @@ Tensor upsample_nearest2d(
         {
             compute_scales_value<float>(
                 scales_w,
-                input_sizes[Layout::Activation4D::width],
+                v_input_sizes[Layout::Activation4D::width],
                 output_sizes[Layout::Parameter::width]),
             compute_scales_value<float>(
                 scales_h,
-                input_sizes[Layout::Activation4D::height],
+                v_input_sizes[Layout::Activation4D::height],
                 output_sizes[Layout::Parameter::height]),
         },
       };

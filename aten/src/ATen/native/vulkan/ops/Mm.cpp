@@ -27,12 +27,12 @@ vTensor pack_biases(
   }
 
   vTensor v_bias{
-      api::context(),
-      &pool,
-      {
-        weight_arg.size(Layout::Parameter::width),
-      },
-      weight_arg.options(),
+    api::context(),
+    &pool,
+    {
+      weight_arg.size(Layout::Parameter::width),
+    },
+    weight_arg.options(),
   };
 
   using Future = vTensor::Future<void, vTensor::Access::Write>;
@@ -135,7 +135,7 @@ Tensor mm(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if C10_LIKELY(v_mat1.has_image() && v_mat2.has_image()) {
+    if (v_mat1.has_image() && v_mat2.has_image()) {
       const struct {
         uvec3 size;
         int32_t K;
@@ -254,8 +254,7 @@ Tensor LinearOpContext::run(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if C10_LIKELY(
-        v_output.has_image() &&
+    if (v_output.has_image() &&
         v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {

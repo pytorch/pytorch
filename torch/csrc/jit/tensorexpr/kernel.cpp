@@ -962,8 +962,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log1p: {
-      return computeOneOperand(
-          "aten_log1p", v, [](const ExprHandle& a) { return log1p(a); });
+      return computeOneOperand("aten_log1p", v, [](const ExprHandle& a) {
+        return log1p(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log2: {
