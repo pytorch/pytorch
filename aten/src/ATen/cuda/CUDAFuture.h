@@ -25,12 +25,24 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   using at::ivalue::Future::Future;
 
   void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-    dataPtrExtractor_ = std::move(data_ptr_extractor);
+    // To avoid races with other threads that may be using the extractor, we
+    // won't modify it after it's first set.
+    if (dataPtrExtractor_ == nullptr) {
+      dataPtrExtractor_ = std::move(data_ptr_extractor);
+    }
   }
 
  protected:
   c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override {
-    return c10::make_intrusive<CUDAFuture>(std::move(type));
+    auto fut = c10::make_intrusive<CUDAFuture>(std::move(type));
+    // The new future needs the DataPtr extractor when it gets marked complete
+    // but this might happen immediately inline or in parallel by another
+    // thread. In both these cases this would/might happen before the user has
+    // time to set their own DataPtr extractor, which might lead to failures
+    // if the default extractor can't handle some of the user's types.
+    // Therefore we propagate our extractor.
+    fut->setDataPtrExtractor(dataPtrExtractor_);
+    return fut;
   }
 
   void postMarkCompletedHook(const at::IValue& value) override {
@@ -45,7 +57,7 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
     for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
       if (isCudaDeviceUsed[idx]) {
         at::cuda::CUDAEvent cudaEvent;
-        cudaEvent.record(at::cuda::getDefaultCUDAStream(idx));
+        cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
         (*cudaEvents_).push_back(std::move(cudaEvent));
       }
     }
