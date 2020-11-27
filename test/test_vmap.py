@@ -1354,6 +1354,27 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
+    def test_fill_and_zero_inplace(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+        ops = (
+            lambda t: t.fill_(0.1),
+            lambda t: t.fill_(torch.tensor(0.2)),
+            lambda t: t.zero_(),
+        )
+
+        for op in ops:
+            # Single vmap, various in_dims / out_dims
+            test(op, [TensorFactory.randn([B0, 3])])
+            test(op, [TensorFactory.randn([2, 5, B0, 3])], in_dims=2)
+            test(op, [TensorFactory.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [TensorFactory.randn([B0, B1])])
+            test(vmap(op), [TensorFactory.randn([B1, 2, 5, B0, 3])], in_dims=2)
+            test(vmap(op, in_dims=2), [TensorFactory.randn([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
     def _test_complex_views(self, op, dtypes):
         test = self._vmap_view_test
 
