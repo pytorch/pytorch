@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
 
@@ -863,8 +864,10 @@ std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& se
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor Q_tmp, R_tmp;
   std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
-  Q.resize_as_(Q_tmp).copy_(Q_tmp);
-  R.resize_as_(R_tmp).copy_(R_tmp);
+  at::native::resize_output(Q, Q_tmp.sizes());
+  Q.copy_(Q_tmp);
+  at::native::resize_output(R, R_tmp.sizes());
+  R.copy_(R_tmp);
   return std::tuple<Tensor&, Tensor&>(Q, R);
 }
 

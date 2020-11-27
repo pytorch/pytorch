@@ -1420,7 +1420,8 @@ class TestLinalg(TestCase):
             t = torch.randn((7, 5), device=device, dtype=dtype)
             np_t = t.cpu().numpy()
             q, r = torch.linalg.qr(t, mode=mode)
-            out = (torch.empty_like(t), torch.empty_like(t))
+            out = (torch.empty((0), dtype=dtype, device=device),
+                   torch.empty((0), dtype=dtype, device=device))
             q2, r2 = torch.linalg.qr(t, mode=mode, out=out)
             assert q2 is out[0]
             assert r2 is out[1]
