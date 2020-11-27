@@ -42,6 +42,12 @@ namespace {
     return csr;
   }
 
+  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
+    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
+    }
+    return at::empty_like(input);
+  }
 }
 
 // --------------------------------------------------------------------
@@ -102,6 +108,10 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      "log1p: result type cannot be Integral, got:",
+      r.scalar_type());
 
   if (is_same_tensor(r, t)) {
     // don't have in-place log1p for uncoalesced input because coalesce() is not in-place
@@ -112,6 +122,11 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   }
   r._values().log1p_();
   return r;
+}
+
+SparseTensor log1p_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op(t);
+  return log1p_out_sparse(result, t);
 }
 
 SparseTensor& log1p_sparse_(SparseTensor& t) {
