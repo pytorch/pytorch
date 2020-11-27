@@ -1383,6 +1383,32 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_batched(self, device, dtype):
+        """
+        test torch.linalg.qr vs numpy.linalg.qr. We need some special logic
+        because numpy does not support batched qr
+        """
+        def np_qr_batched(a, mode):
+            """poor's man batched version of np.linalg.qr"""
+            all_q = []
+            all_r = []
+            for matrix in a:
+                q, r = np.linalg.qr(matrix, mode=mode)
+                all_q.append(q)
+                all_r.append(r)
+            return np.array(all_q), np.array(all_r)
+
+        t = torch.randn((3, 7, 5), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+        for mode in ['reduced', 'complete']:
+            exp_q, exp_r = np_qr_batched(np_t, mode=mode)
+            q, r = torch.linalg.qr(t, mode=mode)
+            self.assertEqual(q, exp_q)
+            self.assertEqual(r, exp_r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_qr_out(self, device, dtype):
         """
         test torch.linalg.qr(out=...) vs torch.lingalg.qr
