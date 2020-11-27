@@ -194,7 +194,7 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: Gradients computed using `U` and `Vh` may be unstable if
           :attr:`input` is not full rank or has non-unique singular values.
 
-.. note:: When :attr:`full_matrices` = ``False``, the gradients on :code:`U[..., :, min(m, n):]`
+.. note:: When :attr:`full_matrices` = ``True``, the gradients on :code:`U[..., :, min(m, n):]`
           and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
 
