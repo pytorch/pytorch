@@ -179,7 +179,7 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        profile_name = "{}#{}.{}".format("Optimizer.zero_grad#{}.zero_grad"", self.__class__.__name__)
+        profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
         with torch.autograd.profiler.record_function(profile_name):
             for group in self.param_groups:
                 for p in group['params']:
