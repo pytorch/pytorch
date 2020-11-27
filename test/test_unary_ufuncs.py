@@ -54,6 +54,23 @@ _large_float_vals = (-501, 501,
                      -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
 
+hard_complex_base_values = [float('inf'), -float('inf'), float('nan'),
+                            0, 3.14, 500, -500, -1e20, 1e20, 1e37, -1e37]
+
+hard_complex_double_base_values = [1e200, -1e200]
+
+
+def get_hard_complex_values(dtype):
+    if dtype == torch.cfloat:
+        values = hard_complex_base_values
+        return tuple(complex(x, y)
+                     for x, y in product(values, values))
+    elif dtype == torch.cdouble:
+        values = hard_complex_base_values + hard_complex_double_base_values
+        return tuple(complex(x, y)
+                     for x, y in product(values, values))
+
+    raise TypeError("Invalid complex dtype passed")
 
 # Returns an iterable of contiguous tensors with the same storage on the requested
 #   device and with the requested dtype.
@@ -492,43 +509,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypes(torch.cfloat, torch.cdouble)
     def test_abs_complex_edge_values(self, device, dtype):
-        values = [
-            complex(float('inf'), float('inf')),
-            complex(float('inf'), -float('inf')),
-            complex(-float('inf'), float('inf')),
-            complex(-float('inf'), -float('inf')),
-            complex(float('inf'), 0),
-            complex(-float('inf'), 0),
-            complex(float('inf'), 3.14),
-            complex(-float('inf'), 3.14),
-
-            complex(0, float('inf')),
-            complex(0, -float('inf')),
-            complex(3.14, float('inf')),
-            complex(3.14, -float('inf')),
-
-            complex(float('nan'), 0),
-            complex(0, float('nan')),
-            complex(float('nan'), 3.14),
-            complex(3.14, float('nan')),
-
-            complex(1e37, 0),
-            complex(0, -1e37),
-
-            complex(1e20, -500),
-            complex(500, -1e20),
-        ]
-
-        # UBSan Error:
-        # runtime error: 1e+200 is outside the range of representable values of type 'float'
-        if dtype == torch.cdouble:
-            values += [
-                complex(1e200, 0),
-                complex(0, -1e200),
-
-                complex(1e200, -500),
-                complex(500, -1e200),
-            ]
+        values = get_hard_complex_values(dtype)
 
         for value in values:
             t = torch.tensor(value, dtype=dtype, device=device)
@@ -536,7 +517,6 @@ class TestUnaryUfuncs(TestCase):
 
             # for vectorized version.
             t = torch.tensor([value] * 100, dtype=dtype, device=device)
-            print(t)
             self.compare_with_numpy(torch.abs, np.abs, t)
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
