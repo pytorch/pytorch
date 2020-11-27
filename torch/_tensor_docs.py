@@ -2031,6 +2031,20 @@ kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 See :func:`torch.kthvalue`
 """)
 
+add_docstr_all('ldexp',
+               r"""
+ldexp(other) -> Tensor
+
+See :func:`torch.ldexp`
+""")
+
+add_docstr_all('ldexp_',
+               r"""
+ldexp_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.ldexp`
+""")
+
 add_docstr_all('lcm',
                r"""
 lcm(other) -> Tensor
@@ -3599,6 +3613,13 @@ add_docstr_all('t_',
 t_() -> Tensor
 
 In-place version of :meth:`~Tensor.t`
+""")
+
+add_docstr_all('tile',
+               r"""
+tile(*reps) -> Tensor
+
+See :func:`torch.tile`
 """)
 
 add_docstr_all('to',

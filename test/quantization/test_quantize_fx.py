@@ -350,7 +350,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        options = itertools.product([2], [True, False], self.static_quant_types)
+        options = itertools.product([1, 2], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu

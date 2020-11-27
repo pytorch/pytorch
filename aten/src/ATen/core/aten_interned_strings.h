@@ -80,6 +80,7 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _ldexp) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -678,6 +679,7 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
+_(aten, tile) \
 _(aten, slow_conv3d) \
 _(aten, slow_conv3d_backward) \
 _(aten, slow_conv3d_forward) \
