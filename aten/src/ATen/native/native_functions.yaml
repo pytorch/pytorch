@@ -9579,7 +9579,7 @@
   use_c10_dispatcher: full
   python_module: nn
 
-- func: foo(Tensor self, Tensor other) -> Tensor
+- func: foo(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   dispatch:

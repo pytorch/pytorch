@@ -128,6 +128,10 @@ void store_jitted_function(
   cache.emplace(key, function);
 }
 
+constexpr int num_threads = 64;
+constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
+constexpr int block_work_size = thread_work_size * num_threads;
+
 CUfunction jit_binary_pwise_function(
     JiteratorCache& cache,
     JiteratorKey key,
@@ -195,7 +199,9 @@ CUfunction jit_binary_pwise_function(
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_binary_pwise_function(
     CUfunction function,
-    std::vector<void*>& args) {
+    std::vector<void*>& args,
+    const int nBlocks,
+    const int kBlockSize) {
 
   const auto& nvrtc = at::globalContext().getNVRTC();
 
@@ -205,17 +211,6 @@ void launch_jitted_binary_pwise_function(
   int major, minor;
   getMajorMinor(prop, major, minor);
 
-  // Computes blocks and block size
-  // TODO: review this block computation vs cuda loops
-  int maxBlocks;
-  AT_CUDA_DRIVER_CHECK(nvrtc.cuOccupancyMaxActiveBlocksPerMultiprocessor(
-    &maxBlocks, function, 128, 0));
-  maxBlocks *= prop->multiProcessorCount;
-
-  constexpr int32_t kBlockSize = 128;
-  // TODO: nBlocks set to 1 for debugging
-  // const auto nBlocks = std::min(maxBlocks, ceilDiv(numel, kBlockSize));
-  const auto nBlocks = 1;
 
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -386,9 +381,7 @@ static int ceilDiv(const int a, const int b) {
 
 } // anonymous namespace
 
-#define NUM_THREADS (C10_WARP_SIZE * 2)
-#define THREAD_WORK_SIZE 4
-#define BLOCK_WORK_SIZE (THREAD_WORK_SIZE * num_threads)
+
 
 JiteratorCache foo_cache;
 
@@ -454,6 +447,7 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
     common_dtype_string = "double";
   }
   env.s("scalar_type", common_dtype_string);
+  cuda_template = at::cuda::detail::load_code_template("/private/home/ngimel/pytorch/aten/src/ATen/native/cuda/code_template.cuh");
 
   std::string code = cuda_template.format(env);
   // std::cout << "code: \n" << code << std::endl;
@@ -471,7 +465,9 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
     function = jit_binary_pwise_function(foo_cache, key, code, kernel_name);
   }
 
-  launch_jitted_binary_pwise_function(function, args);
+  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+
+  launch_jitted_binary_pwise_function(function, args, grid, num_threads);
 
   return iter.output();
 }
