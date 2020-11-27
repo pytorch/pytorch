@@ -10,14 +10,13 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS)
 from torch.autograd.profiler import profile
 from torch.autograd import kineto_available
-import pickle
-import multiprocessing
 
 try:
     import psutil
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
+import pickle
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -49,17 +48,6 @@ class TestProfilerCUDA(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
-
-def process_main(obj_bytes, ret):
-    optimizer = pickle.loads(obj_bytes)
-    with profile() as prof:
-        optimizer.step()
-    count = 0
-    for e in prof.function_events:
-        if e.name == "Optimizer.step#SGD.step":
-            count += 1
-    ret.value = count
-    return
 
 class TestProfiler(TestCase):
     def test_source(self):
@@ -170,6 +158,10 @@ class TestProfiler(TestCase):
                 y_pred = self.linear2(h_relu)
                 return y_pred
 
+        class CustomSGD(torch.optim.SGD):
+            def __init__(self, *args, **kwargs):
+                super(CustomSGD, self).__init__(*args, **kwargs)
+
         def train():
             for _, data in enumerate(dataloader):
                 x, y = data[0], data[1]
@@ -186,38 +178,52 @@ class TestProfiler(TestCase):
         ds = RepeatedDataset(N, D_in, D_out)
         dataloader = torch.utils.data.DataLoader(ds, batch_size=1)
 
-        # Test for checking re-hook.
-        optimizer_useless = torch.optim.SGD(model.parameters(), lr=1e-4)
-        dataloader_useless = torch.utils.data.DataLoader(ds, batch_size=1)
-
         try:
             train()
         except Exception:
             self.assertTrue(False, "Expected no exception without profiling.")
 
+        # Create multiple instances, expect each func is hooked only one time.
+        # Nested wrappers(repeated patching) will make following test fail.
+        optimizer_duplicate = torch.optim.SGD(model.parameters(), lr=1e-4)
+        dataloader_duplicate = torch.utils.data.DataLoader(ds, batch_size=1)
+
+        def judge(expected_event_count, prof):
+            actual_event_count = {}
+            for e in prof.function_events:
+                if "#" in e.name:
+                    key = e.name
+                    if key in expected_event_count.keys():
+                        actual_event_count[key] = actual_event_count.setdefault(key, 0) + 1
+            for key, count in expected_event_count.items():
+                self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
+
         with profile() as prof:
             train()
-
         expected_event_count = {
             # "+1" because the final iteration will enter __next__ but skip the loop body.
-            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": N + 1,
+            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": (N + 1),
             "Optimizer.step#SGD.step": N,
             "Optimizer.zero_grad#SGD.zero_grad": N
         }
-        actual_event_count = {}
-        for e in prof.function_events:
-            if "#" in e.name:
-                key = e.name
-                if key in expected_event_count.keys():
-                    actual_event_count[key] = actual_event_count.setdefault(key, 0) + 1
-        for key, count in expected_event_count.items():
-            self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
+        judge(expected_event_count, prof)
 
-        ret = multiprocessing.Value("i", 0)
-        p = multiprocessing.Process(target=process_main, args=(pickle.dumps(optimizer), ret))
-        p.start()
-        p.join()
-        self.assertTrue(ret.value == 1)
+        # Test on pickle/unpickle. Expect to work in multi-processing.
+        optimizer = pickle.loads(pickle.dumps(optimizer))
+        with profile() as prof:
+            train()
+        judge(expected_event_count, prof)
+
+        # Test on customized optimizer.
+        optimizer = CustomSGD(model.parameters(), lr=1e-4)
+        with profile() as prof:
+            train()
+        expected_event_count = {
+            "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": (N + 1),
+            "Optimizer.step#CustomSGD.step": N,
+            "Optimizer.zero_grad#CustomSGD.zero_grad": N
+        }
+        judge(expected_event_count, prof)
 
 if __name__ == '__main__':
     run_tests()
