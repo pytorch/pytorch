@@ -6,6 +6,7 @@
 #endif
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Unicode.h>
 
 /* stuff for mapped files */
 #ifdef _WIN32
