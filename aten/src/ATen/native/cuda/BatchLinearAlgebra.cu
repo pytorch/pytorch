@@ -1465,9 +1465,8 @@ std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string
     int64_t n = self.size(-1);
     r_working_copy = at::empty({n_columns_q, n}, self.options());
     if (compute_q) {
-        // Fix the number of columns of q appropriately
-        q_sizes[self.dim() - 1] = n_columns_q;
-        q_working_copy = at::empty(q_sizes, self.options());
+        int64_t n_rows_q = q_sizes[self.dim() - 2];
+        q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
     } else {
       q_working_copy = at::empty({0}, self.options());
     }

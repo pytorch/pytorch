@@ -1351,86 +1351,60 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_qr_reduced(self, device, dtype):
-        t = torch.randn((7, 5), device=device, dtype=dtype)
-        np_t = t.cpu().numpy()
-
-        exp_q, exp_r = np.linalg.qr(np_t)
-        q, r = torch.linalg.qr(t)
-        self.assertEqual(q, exp_q)
-        self.assertEqual(r, exp_r)
-
-        exp_q, exp_r = np.linalg.qr(np_t, mode='reduced')
-        q, r = torch.linalg.qr(t, mode='reduced')
-        self.assertEqual(q, exp_q)
-        self.assertEqual(r, exp_r)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_qr_complete(self, device, dtype):
-        t = torch.randn((7, 5), device=device, dtype=dtype)
-        np_t = t.cpu().numpy()
-
-        exp_q, exp_r = np.linalg.qr(np_t, mode='complete')
-        q, r = torch.linalg.qr(t, mode='complete')
-        self.assertEqual(q, exp_q)
-        self.assertEqual(r, exp_r)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_qr_r(self, device, dtype):
-        t = torch.randn((7, 5), device=device, dtype=dtype)
-        np_t = t.cpu().numpy()
-        # note: numpy returns only r, while we return a tuple q, r where q is
-        # an empty tensor
-        exp_r = np.linalg.qr(np_t, mode='r')
-        q, r = torch.linalg.qr(t, mode='r')
-        # check that q is empty
-        assert q.shape == (0,)
-        assert q.dtype == t.dtype
-        assert q.device == t.device
-        # check r
-        self.assertEqual(r, exp_r)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float)
-    def test_qr_empty(self, device, dtype):
-        def check(shape):
-            t = torch.empty((5, 0), dtype=dtype, device=device)
+    def test_qr(self, device, dtype):
+        """
+        test torch.linalg.qr vs numpy.linalg.qr
+        """
+        sizes_to_test = [
+            (7, 5),
+            (5, 7),
+            (5, 0),    # empty
+            (0, 5),    # empty
+        ]
+        for size in sizes_to_test:
+            t = torch.randn(size, device=device, dtype=dtype)
             np_t = t.cpu().numpy()
-            exp_q, exp_r = np.linalg.qr(np_t)
-            q, r = torch.linalg.qr(t, mode='reduced')
-            self.assertEqual(q, exp_q)
-            self.assertEqual(r, exp_r)
+            for mode in ['reduced', 'complete']:
+                exp_q, exp_r = np.linalg.qr(np_t, mode=mode)
+                q, r = torch.linalg.qr(t, mode=mode)
+                self.assertEqual(q, exp_q)
+                self.assertEqual(r, exp_r)
+            #
+            # for mode='r' we need a special logic because numpy returns only r
+            exp_r = np.linalg.qr(np_t, mode='r')
             q, r = torch.linalg.qr(t, mode='r')
+            # check that q is empty
             assert q.shape == (0,)
+            assert q.dtype == t.dtype
+            assert q.device == t.device
+            # check r
             self.assertEqual(r, exp_r)
-
-        check((5, 0))
-        check((0, 5))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_qr_out(self, device, dtype):
-        def check(mode):
-            t = torch.randn((7, 5), device=device, dtype=dtype)
+        """
+        test torch.linalg.qr(out=...) vs torch.lingalg.qr
+        """
+        sizes_to_test = [
+            (7, 5),
+            (5, 7),
+            (5, 0),    # empty
+            (0, 5),    # empty
+        ]
+        for size in sizes_to_test:
+            t = torch.randn(size, device=device, dtype=dtype)
             np_t = t.cpu().numpy()
-            q, r = torch.linalg.qr(t, mode=mode)
-            out = (torch.empty((0), dtype=dtype, device=device),
-                   torch.empty((0), dtype=dtype, device=device))
-            q2, r2 = torch.linalg.qr(t, mode=mode, out=out)
-            assert q2 is out[0]
-            assert r2 is out[1]
-            self.assertEqual(q2, q)
-            self.assertEqual(r2, r)
-
-        check('reduced')
-        check('complete')
-        check('r')
+            for mode in ['reduced', 'complete', 'r']:
+                q, r = torch.linalg.qr(t, mode=mode)
+                out = (torch.empty((0), dtype=dtype, device=device),
+                       torch.empty((0), dtype=dtype, device=device))
+                q2, r2 = torch.linalg.qr(t, mode=mode, out=out)
+                assert q2 is out[0]
+                assert r2 is out[1]
+                self.assertEqual(q2, q)
+                self.assertEqual(r2, r)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
