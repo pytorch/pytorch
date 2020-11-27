@@ -29,6 +29,7 @@ TESTS = [
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
     'distributed/test_c10d',
+    'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn',
     'test_cuda',
     'test_jit_cuda_fuser',
@@ -215,6 +216,7 @@ SLOW_TESTS = [
     'test_multiprocessing',
     'test_tensorboard',
     'distributed/test_c10d',
+    'distributed/test_jit_c10d',
     'distributed/test_c10d_spawn',
     'test_quantization',
     'test_determination',
@@ -261,7 +263,7 @@ if dist.is_available():
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
-    if not TEST_WITH_ROCM and dist.is_gloo_available():
+    if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'
@@ -307,7 +309,7 @@ def get_executable_command(options, allow_pytest):
 def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
-        unittest_args.append('--verbose')
+        unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
     if test_module in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
     if extra_unittest_args:
@@ -427,11 +429,14 @@ def test_distributed(test_module, test_directory, options):
                 if backend == 'mpi':
                     # test mpiexec for --noprefix option
                     with open(os.devnull, 'w') as devnull:
+                        allowrunasroot_opt = '--allow-run-as-root' if subprocess.call(
+                            'mpiexec --allow-run-as-root -n 1 bash -c ""', shell=True,
+                            stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
                         noprefix_opt = '--noprefix' if subprocess.call(
-                            'mpiexec -n 1 --noprefix bash -c ""', shell=True,
+                            f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""', shell=True,
                             stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
-                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt]
+                    mpiexec = ['mpiexec', '-n', '3', noprefix_opt, allowrunasroot_opt]
 
                     return_code = run_test(test_module, test_directory, options,
                                            launcher_cmd=mpiexec)
@@ -472,7 +477,8 @@ def parse_args():
     parser.add_argument(
         '-v',
         '--verbose',
-        action='store_true',
+        action='count',
+        default=0,
         help='print verbose information and test-by-test results')
     parser.add_argument(
         '--jit',

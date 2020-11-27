@@ -1,5 +1,4 @@
 import argparse
-import statistics
 import sys
 import timeit
 import torch
@@ -34,10 +33,12 @@ if __name__ == '__main__':
     parser.add_argument('--with_cuda', action='store_true')
     parser.add_argument('--with_stack', action='store_true')
     parser.add_argument('--use_script', action='store_true')
+    parser.add_argument('--use_kineto', action='store_true')
     parser.add_argument('--profiling_tensor_size', default=1, type=int)
     parser.add_argument('--workload', default='loop', type=str)
     parser.add_argument('--internal_iter', default=256, type=int)
-    parser.add_argument('--timer_min_run_time', default=100, type=int)
+    parser.add_argument('--timer_min_run_time', default=10, type=int)
+    parser.add_argument('--cuda_only', action='store_true')
 
     args = parser.parse_args()
 
@@ -50,11 +51,12 @@ if __name__ == '__main__':
     INTERNAL_ITER = args.internal_iter
 
     for profiling_enabled in [False, True]:
-        print("Profiling {}, tensor size {}x{}, use cuda: {}, with stacks: {}, use script: {}".format(
+        print("Profiling {}, tensor size {}x{}, use cuda: {}, use kineto: {}, with stacks: {}, use script: {}".format(
             "enabled" if profiling_enabled else "disabled",
             args.profiling_tensor_size,
             args.profiling_tensor_size,
             args.with_cuda,
+            args.use_kineto,
             args.with_stack,
             args.use_script))
 
@@ -81,7 +83,9 @@ if __name__ == '__main__':
                 x = None
                 with torch.autograd.profiler.profile(
                         use_cuda=args.with_cuda,
-                        with_stack=args.with_stack) as prof:
+                        with_stack=args.with_stack,
+                        use_kineto=args.use_kineto,
+                        use_cpu=not args.cuda_only) as prof:
                     x = workload(input_x)
                 return x
         else:
