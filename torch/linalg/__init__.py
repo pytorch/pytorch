@@ -210,25 +210,25 @@ complete QR factorization. See below for a list of valid modes.
 
              * ``mode='raw'`` is not implemented
 
-             * when ``mode='r'`` numpy returns a single array `R`, whereas
-               pytorch returns a tuple `(Q, R)`, where `Q` is an empty
-               tensor.
+             * unlike ``numpy.linalg.qr``, this function always returns a
+               tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
+               empty tensor.
 
-
-.. warning::
+.. note::
           Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
 
           If you plan to backpropagate through QR, note that the current backward implementation
           is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
           columns of :attr:`input` are linearly independent.
-          This behavior will propably change once QR supports pivoting.
+          This behavior may change in the future.
 
 .. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
           are large
 
-.. note:: While it should always give you a valid decomposition, it may not
-          give you the same one across platforms - it will depend on your
-          LAPACK implementation.
+.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+          and may produce different decompositions on different device types
+          and different platforms, depending on the precise version of the
+          underlying library.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
