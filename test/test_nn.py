@@ -10362,6 +10362,11 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(x, torch.zeros_like(x))
 
+        for p in mod.parameters():
+            if p.requires_grad:
+                self.assertEqual(p.grad, torch.zeros_like(p.grad))
+        self.assertEqual(x.grad, torch.zeros_like(x))
+
         with self.assertRaisesRegex(RuntimeError, 'Expected'):
             x = torch.randn(0, requires_grad=True)
             y = torch.ones(10).type(torch.long)
