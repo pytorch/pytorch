@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import torch
 import torch.distributed as dist
 
@@ -29,11 +30,12 @@ def _orthogonalize(matrix, epsilon=1e-8):
 
 
 class PowerSGDState(object):
-    __slots__ = ["process_group", "matrix_approximation_rank"]
+    __slots__ = ["process_group", "matrix_approximation_rank", "rng"]
 
-    def __init__(self, process_group, matrix_approximation_rank=1):
+    def __init__(self, process_group, matrix_approximation_rank=1, random_seed=0):
         self.process_group = process_group
         self.matrix_approximation_rank = matrix_approximation_rank
+        self.rng = np.random.RandomState(random_seed)
 
 
 def powerSGD_hook(
@@ -92,25 +94,20 @@ def powerSGD_hook(
     input_tensor[total_length:padded_total_length].fill_(0)
     matrix = input_tensor.view(square_side_length, square_side_length)
 
-    def create_low_rank_tensor(fill_random_values):
+    def create_low_rank_tensor(fill_random_values, rng):
         "Returns a low-rank 2D tensor of square_side_length * matrix_approximation_rank."
         if fill_random_values:
-            with torch.random.fork_rng(devices=[device]):
-                # The seed makes sure that the initial random values are the same across all the DDP replicas.
-                # Such seed should differ at every step.
-                # Currently use the length of input tensor as the seed, which should be mostly different.
-                # TODO(wayi@): Should read the random seed from the state of this hook provided by the constructor.
-                torch.manual_seed(total_length)
-                return torch.randn(
-                    square_side_length, state.matrix_approximation_rank, device=device
-                )
+            torch.manual_seed(rng.randint(1_000_000_000))
+            return torch.randn(
+                square_side_length, state.matrix_approximation_rank, device=device
+            )
         else:
             return torch.empty(
                 square_side_length, state.matrix_approximation_rank, device=device
             )
 
-    p = create_low_rank_tensor(fill_random_values=False)
-    q = create_low_rank_tensor(fill_random_values=True)
+    p = create_low_rank_tensor(fill_random_values=False, rng=state.rng)
+    q = create_low_rank_tensor(fill_random_values=True, rng=state.rng)
     _orthogonalize(q, 0)
 
     torch.matmul(matrix, q, out=p)
