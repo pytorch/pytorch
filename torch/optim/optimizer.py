@@ -80,7 +80,7 @@ class Optimizer(object):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
 
         def profile_hook_step(func):
-            
+
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 obj, *_ = args
