@@ -515,7 +515,7 @@ class _BaseDataLoaderIter(object):
 
     def __next__(self) -> Any:
         profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
-        with torch.autograd.profiler.record_function(self._profile_name):
+        with torch.autograd.profiler.record_function(profile_name):
             if self._sampler_iter is None:
                 self._reset()
             data = self._next_data()
