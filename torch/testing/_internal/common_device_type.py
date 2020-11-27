@@ -3,8 +3,9 @@ import gc
 import inspect
 import runpy
 import threading
+from enum import Enum
 from functools import wraps
-from typing import List, Any, ClassVar
+from typing import List, Any, ClassVar, Optional, Sequence
 import unittest
 import os
 import torch
@@ -284,19 +285,20 @@ class DeviceTypeTestBase(TestCase):
                 # Acquires dtypes, using the op data if unspecified
                 dtypes = cls._get_dtypes(test)
                 if dtypes is None:
-                    if test.unsupported_dtypes_only:
+                    if test.opinfo_dtypes == OpDTypes.unsupported:
                         dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(cls.device_type))
-                    elif test.all_dtypes:
+                    elif test.opinfo_dtypes == OpDTypes.supported:
                         dtypes = op.supported_dtypes(cls.device_type)
-                    else:
+                    elif test.opinfo_dtypes == OpDTypes.basic:
                         dtypes = op.tested_dtypes(cls.device_type)
+                    else:
+                        raise RuntimeError(f"Unknown OpDType: {test.opinfo_dtypes}")
 
-                    if test.dtype_filter is not None:
-                        dtypes = dtypes.intersection(test.dtype_filter)
-
+                    if test.allowed_dtypes is not None:
+                        dtypes = dtypes.intersection(test.allowed_dtypes)
                 else:
-                    assert test.dtype_filter is None, "ops(dtype_filter=[...]) and the dtypes decorator are incompatible"
-                    assert not test.all_dtypes, "ops(all_dtypes=True) and dtypes decorator are incompatible"
+                    assert test.allowed_dtypes is None, "ops(allowed_dtypes=[...]) and the dtypes decorator are incompatible"
+                    assert test.opinfo_dtypes == OpDTypes.basic, "ops(dtypes=...) and the dtypes decorator are incompatible"
 
                 for dtype in dtypes:
                     instantiate_test_helper(cls,
@@ -481,6 +483,13 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         scope[class_name] = device_type_test_class
 
 
+# Category of dtypes to run an OpInfo-based test for
+class OpDTypes(Enum):
+    basic = 0  # Test the basic set of dtypes (default)
+    supported = 1  # Test all supported dtypes
+    unsupported = 2  # Test only unsupported dtypes
+
+
 # Decorator that defines the ops a test should be run with
 # The test signature must be:
 #   <test_name>(self, device, dtype, op)
@@ -489,19 +498,16 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # test_numerics(self, device, dtype, op):
 #   <test_code>
 class ops(object):
-    def __init__(self, op_list, *, unsupported_dtypes_only=False, all_dtypes=False, dtype_filter=None):
+    def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
+                 allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
         self.op_list = op_list
-        assert not (unsupported_dtypes_only and all_dtypes), \
-            "Cannot have both all_dtypes and unsupported_dtypes_only"
-        self.unsupported_dtypes_only = unsupported_dtypes_only
-        self.all_dtypes = all_dtypes
-        self.dtype_filter = set(dtype_filter) if dtype_filter is not None else None
+        self.opinfo_dtypes = dtypes
+        self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
     def __call__(self, fn):
         fn.op_list = self.op_list
-        fn.unsupported_dtypes_only = self.unsupported_dtypes_only
-        fn.all_dtypes = self.all_dtypes
-        fn.dtype_filter = self.dtype_filter
+        fn.allowed_dtypes = self.allowed_dtypes
+        fn.opinfo_dtypes = self.opinfo_dtypes
         return fn
 
 # Decorator that skips a test if the given condition is true.

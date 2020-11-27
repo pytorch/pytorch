@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_WITH_SLOW, TEST_NUMPY, TEST_LIBROSA, slowAwareTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
-     skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA)
+     skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes)
 from torch.testing._internal.common_methods_invocations import spectral_funcs
 from torch.autograd.gradcheck import gradgradcheck
 
@@ -273,8 +273,8 @@ class TestFFT(TestCase):
             self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
     @onlyOnCPUAndCUDA
-    @ops(spectral_funcs, unsupported_dtypes_only=True,
-         dtype_filter=[torch.half, torch.bfloat16])
+    @ops(spectral_funcs, dtypes=OpDTypes.unsupported,
+         allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
         x = torch.randn(64, device=device).to(dtype)
@@ -295,7 +295,7 @@ class TestFFT(TestCase):
 
     @slowAwareTest
     @onlyOnCPUAndCUDA
-    @ops(spectral_funcs, dtype_filter=[torch.double, torch.complex128])  # gradcheck requires double
+    @ops(spectral_funcs, allowed_dtypes=[torch.double, torch.complex128])  # gradcheck requires double
     def test_backward_1d(self, device, dtype, op):
         test_args = list(product(
             # input
@@ -399,7 +399,7 @@ class TestFFT(TestCase):
     @slowAwareTest
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if op.ndimensional],
-         dtype_filter=[torch.double, torch.complex128])  # gradcheck requires double
+         allowed_dtypes=[torch.double, torch.complex128])  # gradcheck requires double
     def test_backward_nd(self, device, dtype, op):
         # input_ndim, s, dim
         transform_desc = [
@@ -425,7 +425,7 @@ class TestFFT(TestCase):
 
     @onlyOnCPUAndCUDA
     @ops([op for op in spectral_funcs if op.ndimensional],
-         dtype_filter=[torch.float, torch.cfloat])
+         allowed_dtypes=[torch.float, torch.cfloat])
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
 
