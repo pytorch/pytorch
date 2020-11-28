@@ -247,19 +247,48 @@ void launch_jitted_pwise_function(
     nullptr));
 }
 
-// Creates a string from the scalar type and lowercases it to produce the c-type
-// TODO: this works for float and double, but a more general solution is needed
-std::string scalartype_to_type_string(const ScalarType scalar_type) {
-  std::string s{c10::toString(scalar_type)};
-  std::transform(
-    s.cbegin(),
-    s.cend(),
-    s.begin(),
-    [](unsigned char c){ return std::tolower(c); });
-  return s;
+//launch has to happen in this function because of lifetime of
+//objects going into args vector
+template <typename func_t>
+void prepare_args_and_launch_impl(CUfunction function, TensorIterator iter, func_t f){
+// Constructs kernel args
+  std::vector<void*> args;
+  args.push_back((void*)&f);
+  // Adds numel arg
+  // NOTE: the intermediate capture is neccessary
+  const int64_t numel = iter.numel();
+  args.push_back((void*)&numel);
+
+  // Adds data ptrs
+  at::detail::Array<char*, 3> data;
+  for (auto i = decltype(iter.ntensors()){0}; i < iter.ntensors(); i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
+  args.push_back((void*)&data);
+
+  // Addds offset calculators
+  // TODO: maybe combine into one offset calculator?
+  auto input_offset_calculator = make_input_offset_calculator<2>(iter);
+  auto output_offset_calculator = make_output_offset_calculator(iter);
+  args.push_back((void*)&input_offset_calculator);
+  args.push_back((void*)&output_offset_calculator);
+  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+  launch_jitted_pwise_function(function, args, grid, num_threads);
 }
 
-
+template <typename func_t>
+void prepare_args_and_launch(CUfunction function, TensorIterator iter, func_t f){
+  if (iter.numel() == 0) {
+    return;
+  }
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      prepare_args_and_launch(function, sub_iter, f);
+    }
+    return;
+  }
+  prepare_args_and_launch_impl(function, iter, f);
+}
 
 // TODO: create a stringify-like macro so this looks like C++
 //   but produces the appropriate type with newlines
@@ -382,10 +411,6 @@ static auto cuda_template = torch::jit::CodeTemplate(R"(
 // instantiations here
 )");
 
-static int ceilDiv(const int a, const int b) {
-  return (a + b - 1) / b;
-}
-
 } // anonymous namespace
 
 
@@ -409,33 +434,11 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   // std::cout << "jittable functor string" << std::endl;
   // std::cout << jittable_foo_functor << std::endl;
 
-  // Constructs kernel args
-  std::vector<void*> args;
-
   // Creates functor arg
   // TODO: refactor with dispatch macro?
   // TODO: support float or double dynamically
   FooFunctor<float> my_functor{alpha_scalar.to<float>()};
-  args.push_back((void*)&my_functor);
 
-  // Adds numel arg
-  // NOTE: the intermediate capture is neccessary
-  const int64_t numel = iter.numel();
-  args.push_back((void*)&numel);
-
-  // Adds data ptrs
-  at::detail::Array<char*, 3> data;
-  for (auto i = decltype(iter.ntensors()){0}; i < iter.ntensors(); i++) {
-    data[i] = (char*)iter.data_ptr(i);
-  }
-  args.push_back((void*)&data);
-
-  // Addds offset calculators
-  // TODO: maybe combine into one offset calculator?
-  auto input_offset_calculator = make_input_offset_calculator<2>(iter);
-  auto output_offset_calculator = make_output_offset_calculator(iter);
-  args.push_back((void*)&input_offset_calculator);
-  args.push_back((void*)&output_offset_calculator);
 
   JiteratorKey key = construct_jiterator_key(iter.common_dtype());
   c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
@@ -446,15 +449,14 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   } else {
     std::cout << "jitting function" << std::endl;
     // TODO: make kernel name generic
+    // Note: even though code is generated on an iter that can potentially
+    // be split, the properties of the iter that are used for codegen
+    // won't change if it is split
     auto code = generate_code(cuda_template, iter);
     const std::string kernel_name{"FooFunctor_kernel"};
     function = jit_pwise_function(foo_cache, key, code, kernel_name);
   }
-
-  int64_t grid = (numel + block_work_size - 1) / block_work_size;
-
-  launch_jitted_pwise_function(function, args, grid, num_threads);
-
+  prepare_args_and_launch(function, iter, my_functor);
   return iter.output();
 }
 
