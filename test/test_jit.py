@@ -44,6 +44,7 @@ from torch._six import PY37, StringIO
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.testing import FileCheck
+import torch.autograd.profiler
 import torch.cuda
 import torch.jit
 import torch.jit._logging
@@ -2552,10 +2553,10 @@ graph(%Ra, %Rb):
         for e in prof.function_events:
             if e.name == "aten::mul":
                 self.assertTrue(e.thread not in mul_events)
-                mul_events[e.thread] = e.cpu_interval.elapsed_us()
+                mul_events[e.thread] = e.time_range.elapsed_us()
             elif e.name == "other_fn":
                 self.assertTrue(e.thread not in other_fn_events)
-                other_fn_events[e.thread] = e.cpu_interval.elapsed_us()
+                other_fn_events[e.thread] = e.time_range.elapsed_us()
 
         self.assertTrue(len(mul_events) == 2)
         self.assertTrue(len(other_fn_events) == 2)
@@ -8268,7 +8269,7 @@ dedent """
 
     def _test_dtype_op_shape(self, ops, args, input_dims=1):
         if input_dims < 1:
-            raise 'input dims must be at least 1'
+            raise RuntimeError("input dims must be at least 1")
         dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
         str_args = ', '.join([str(arg) for arg in args]) + (', ' if len(args) else '')
         tensor_data = ('[' * input_dims) + '1, 2, 3' + (input_dims * ']')

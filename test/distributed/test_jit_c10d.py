@@ -155,7 +155,6 @@ class C10dProcessGroupSerialization(TestCase):
                     return input + 1
                 else:
                     return input + 2
-
-        self.assertEqual(1, 2)
+        assert False
 
         self.checkModule(TestModule, torch.rank((2, 3)))
