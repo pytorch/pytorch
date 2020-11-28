@@ -79,7 +79,8 @@ class OpInfo(object):
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
-                 tested_dtypes=None,  # dtypes to test with by default
+                 default_test_dtypes=None,  # dtypes to test with by default. Gets intersected
+                                            # with the dtypes support on the tested device
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
@@ -95,7 +96,7 @@ class OpInfo(object):
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
         self.dtypesIfCUDA = set(dtypesIfCUDA) if dtypesIfCUDA is not None else self.dtypes
         self.dtypesIfROCM = set(dtypesIfROCM) if dtypesIfROCM is not None else self.dtypes
-        self._tested_dtypes = set(tested_dtypes) if tested_dtypes is not None else None
+        self._default_test_dtypes = set(default_test_dtypes) if default_test_dtypes is not None else None
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         self.op = op if op else _getattr_qual(torch, self.name)
@@ -160,10 +161,15 @@ class OpInfo(object):
     def supports_dtype(self, dtype, device_type):
         return dtype in self.supported_dtypes(device_type)
 
-    def tested_dtypes(self, device_type):
+    def default_test_dtypes(self, device_type):
+        """Returns the default dtypes used to test this operator on the device.
+
+        Equal to the operator's default_test_dtypes filtered to remove dtypes
+        not supported by the device.
+        """
         supported = self.supported_dtypes(device_type)
-        return (supported if self._tested_dtypes is None
-                else supported.intersection(self._tested_dtypes))
+        return (supported if self._default_test_dtypes is None
+                else supported.intersection(self._default_test_dtypes))
 
 
 L = 20
@@ -300,6 +306,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                   default_test_dtypes=[torch.long, torch.half, torch.bfloat16, torch.float32, torch.cfloat],
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
@@ -401,14 +408,14 @@ op_db: List[OpInfo] = [
                      ref=np.fft.fft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.fftn',
                      ref=np.fft.fftn,
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,
                      decorators=[precisionOverride(
@@ -417,21 +424,21 @@ op_db: List[OpInfo] = [
                      ref=np.fft.hfft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfft',
                      ref=np.fft.rfft,
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfftn',
                      ref=np.fft.rfftn,
                      ndimensional=True,
                      dtypes=all_types_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,
                      decorators=[precisionOverride({torch.float: 1e-4})],),
@@ -439,35 +446,35 @@ op_db: List[OpInfo] = [
                      ref=np.fft.ifft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ifftn',
                      ref=np.fft.ifftn,
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ihfft',
                      ref=np.fft.ihfft,
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
-                     tested_dtypes=floating_types(),
+                     default_test_dtypes=floating_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfft',
                      ref=np.fft.irfft,
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfftn',
                      ref=np.fft.irfftn,
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     tested_dtypes=floating_and_complex_types(),
+                     default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=False,
                      test_inplace_grad=False,),
     UnaryUfuncInfo('log',

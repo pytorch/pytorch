@@ -290,7 +290,7 @@ class DeviceTypeTestBase(TestCase):
                     elif test.opinfo_dtypes == OpDTypes.supported:
                         dtypes = op.supported_dtypes(cls.device_type)
                     elif test.opinfo_dtypes == OpDTypes.basic:
-                        dtypes = op.tested_dtypes(cls.device_type)
+                        dtypes = op.default_test_dtypes(cls.device_type)
                     else:
                         raise RuntimeError(f"Unknown OpDType: {test.opinfo_dtypes}")
 
@@ -484,6 +484,15 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
 
 # Category of dtypes to run an OpInfo-based test for
+# Example use: @ops(dtype=OpDTypes.supported)
+#
+# There are 3 categories: supported, unsupported and basic.
+# - basic: The dtypes the operator wants to be tested on by default. This will be
+#          a subset of the types supported by the operator.
+# - supported: Every dtype supported by the operator. Use for exhaustive
+#              testing of all dtypes.
+# - unsupported: Run tests on dtypes not supported by the operator. e.g. for
+#                testing the operator raises an error and doesn't crash.
 class OpDTypes(Enum):
     basic = 0  # Test the basic set of dtypes (default)
     supported = 1  # Test all supported dtypes
