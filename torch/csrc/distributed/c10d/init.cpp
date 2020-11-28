@@ -1605,7 +1605,7 @@ static const auto ProcessGroupNCCLTorchBind =
 #endif
 
 static const auto DistributedC10dFrontendTorchBind =
-    torch::class_<::c10d::DistributedC10d>("c10d", "frontend")
+    torch::class_<::c10d::DistributedC10d>("dist_c10d", "frontend")
         .def(torch::init([]() { return ::c10d::DistributedC10d::get(); }))
         .def(
             "new_process_group_helper",
