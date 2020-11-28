@@ -197,8 +197,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // or NCCL's barrier().
   //
   // If created by WorkNCCL's getFuture API, FutureNCCL has a reference to
-  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device index of
-  // outputs' device. Its value is NCCL collective's outputs.
+  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device indices of
+  // outputs' devices. Its value is NCCL collective's outputs.
   //
   // If created by FutureNCCL's then callback, its value becomes the value of
   // callback() and its cudaEvents will record the NCCL stream that runs that
