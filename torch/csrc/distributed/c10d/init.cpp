@@ -1605,8 +1605,37 @@ static const auto ProcessGroupNCCLTorchBind =
 #endif
 
 static const auto DistributedC10dFrontendTorchBind =
-    torch::class_<::c10d::DistributedC10d>("c10d", "frontend")
+    torch::class_<::c10d::DistributedC10d>("dist_c10d", "frontend")
         .def(torch::init([]() { return ::c10d::DistributedC10d::get(); }))
+        .def("_rank_not_in_group", &::c10d::DistributedC10d::rankNotInGroup)
+        .def("_get_group_rank", &::c10d::DistributedC10d::getGroupRank)
+        .def("_get_global_rank", &::c10d::DistributedC10d::getGlobalRank)
+        .def("_get_group_size", &::c10d::DistributedC10d::getGroupSize)
+        .def("_set_pg_group_ranks", &::c10d::DistributedC10d::setPgGroupRanks)
+        .def("_set_pg_map", &::c10d::DistributedC10d::setPgMap)
+        .def("get_backend", &::c10d::DistributedC10d::getBackend)
+        .def("get_rank", &::c10d::DistributedC10d::getRank)
+        .def("get_world_size", &::c10d::DistributedC10d::getWorldSize)
+        .def("isend", &::c10d::DistributedC10d::isend)
+        .def("irecv", &::c10d::DistributedC10d::irecv)
+        .def("send", &::c10d::DistributedC10d::send)
+        .def("recv", &::c10d::DistributedC10d::recv)
+        .def("broadcast_multigpu", &::c10d::DistributedC10d::broadcastMultiGPU)
+        .def("broadcast", &::c10d::DistributedC10d::broadcast)
+        .def("all_reduce_multigpu", &::c10d::DistributedC10d::allReduceMultiGPU)
+        .def("all_reduce", &::c10d::DistributedC10d::allReduce)
+        .def("all_reduce_coalesced", &::c10d::DistributedC10d::allReduceCoalesced)
+        .def("reduce_multigpu", &::c10d::DistributedC10d::reduceMultiGPU)
+        .def("reduce", &::c10d::DistributedC10d::reduce)
+        .def("all_gather_multigpu", &::c10d::DistributedC10d::allGatherMultiGPU)
+        .def("all_gather", &::c10d::DistributedC10d::allGather)
+        .def("gather", &::c10d::DistributedC10d::gather)
+        .def("scatter", &::c10d::DistributedC10d::scatter)
+        .def("reduce_scatter_multigpu", &::c10d::DistributedC10d::reduceScatterMultiGPU)
+        .def("reduce_scatter", &::c10d::DistributedC10d::reduceScatter)
+        .def("all_to_all_single", &::c10d::DistributedC10d::allToAllSingle)
+        .def("all_to_all", &::c10d::DistributedC10d::allToAll)
+        .def("barrier", &::c10d::DistributedC10d::barrier)
         .def(
             "new_process_group_helper",
             &::c10d::DistributedC10d::newProcessGroupHelper)
@@ -1615,7 +1644,10 @@ static const auto DistributedC10dFrontendTorchBind =
             &::c10d::DistributedC10d::getProcessGroupByName)
         .def(
             "get_name_of_process_group",
-            &::c10d::DistributedC10d::getNameOfProcessGroup);
+            &::c10d::DistributedC10d::getNameOfProcessGroup)
+        .def(
+            "_broadcast_coalesced",
+            &::c10d::DistributedC10d::broadcastCoalesced);
 
 } // namespace
 

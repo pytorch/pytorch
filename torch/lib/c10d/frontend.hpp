@@ -49,15 +49,6 @@ class DistributedC10d : public torch::CustomClassHolder {
 
   DistributedC10d() = default;
 
-  void initProcessGroup(
-      const std::string& backend,
-      const std::string& init_method,
-      const std::chrono::milliseconds& timeout,
-      int64_t world_size,
-      int64_t rank,
-      c10::intrusive_ptr<Store> store,
-      const std::string& group_name);
-
   void destroyProcessGroup(c10::intrusive_ptr<ProcessGroup> group);
   int64_t getRank(const c10::intrusive_ptr<ProcessGroup>& group) const;
   int64_t getWorldSize(const c10::intrusive_ptr<ProcessGroup>& group) const;
@@ -66,28 +57,28 @@ class DistributedC10d : public torch::CustomClassHolder {
       at::Tensor tensor,
       int64_t dst,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      c10::optional<int64_t>& tag);
+      const c10::optional<int64_t>& tag);
 
   c10::intrusive_ptr<ProcessGroup::Work> irecv(
       at::Tensor tensor,
       int64_t src,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      c10::optional<int64_t>& tag);
+      const c10::optional<int64_t>& tag);
 
   void send(
       at::Tensor tensor,
       int64_t dst,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      c10::optional<int64_t>& tag);
+      const c10::optional<int64_t>& tag);
 
   int64_t recv(
       at::Tensor tensor,
       const c10::optional<int64_t>& src,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      c10::optional<int64_t>& tag);
+      const c10::optional<int64_t>& tag);
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcastMultiGPU(
-      std::vector<at::Tensor>& tensor_list,
+      std::vector<at::Tensor> tensor_list,
       int64_t src,
       const c10::intrusive_ptr<ProcessGroup>& group,
       bool async_op = false,
@@ -99,29 +90,35 @@ class DistributedC10d : public torch::CustomClassHolder {
       const c10::intrusive_ptr<ProcessGroup>& group,
       bool async_op = false);
 
+  void broadcastCoalesced(
+      c10::intrusive_ptr<ProcessGroup> group,
+      std::vector<at::Tensor> tensors,
+      int64_t buffer_size,
+      int64_t rank);
+
   c10::intrusive_ptr<ProcessGroup::Work> allReduceMultiGPU(
-      std::vector<at::Tensor>& tensor_list,
+      std::vector<at::Tensor> tensor_list,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      ReduceOp op = ReduceOp::SUM,
+      int64_t op = int64_t(ReduceOp::SUM),
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> allReduce(
       at::Tensor tensor,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      ReduceOp op = ReduceOp::SUM,
+      int64_t op = int64_t(ReduceOp::SUM),
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> allReduceCoalesced(
-      std::vector<at::Tensor>& tensors,
+      std::vector<at::Tensor> tensors,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      ReduceOp op = ReduceOp::SUM,
+      int64_t op = int64_t(ReduceOp::SUM),
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> reduceMultiGPU(
-      std::vector<at::Tensor>& tensor_list,
+      std::vector<at::Tensor> tensor_list,
       int64_t dst,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      ReduceOp op = ReduceOp::SUM,
+      int64_t op = int64_t(ReduceOp::SUM),
       bool async_op = false,
       int64_t dst_tensor = 0);
 
@@ -129,24 +126,24 @@ class DistributedC10d : public torch::CustomClassHolder {
       at::Tensor tensor,
       int64_t dst,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      ReduceOp op = ReduceOp::SUM,
+      int64_t op = int64_t(ReduceOp::SUM),
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> allGatherMultiGPU(
-      std::vector<std::vector<at::Tensor>>& output_tensor_lists,
-      std::vector<at::Tensor>& input_tensor_list,
+      std::vector<std::vector<at::Tensor>> output_tensor_lists,
+      std::vector<at::Tensor> input_tensor_list,
       const c10::intrusive_ptr<ProcessGroup>& group,
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> allGather(
-      std::vector<at::Tensor>& tensor_list,
+      std::vector<at::Tensor> tensor_list,
       at::Tensor tensor,
       const c10::intrusive_ptr<ProcessGroup>& group,
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> allGatherCoalesced(
-      std::vector<std::vector<at::Tensor>>& output_tensor_lists,
-      std::vector<at::Tensor>& input_tensor_list,
+      std::vector<std::vector<at::Tensor>> output_tensor_lists,
+      std::vector<at::Tensor> input_tensor_list,
       const c10::intrusive_ptr<ProcessGroup>& group,
       bool async_op = false);
 
@@ -159,36 +156,37 @@ class DistributedC10d : public torch::CustomClassHolder {
 
   c10::intrusive_ptr<ProcessGroup::Work> scatter(
       at::Tensor tensor,
-      std::vector<at::Tensor>& scatter_list,
+      std::vector<at::Tensor> scatter_list,
       const c10::intrusive_ptr<ProcessGroup>& group,
       int64_t src = 0,
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> reduceScatterMultiGPU(
-      std::vector<at::Tensor>& output_tensor_list,
-      std::vector<std::vector<at::Tensor>>& input_tensor_lists,
+      std::vector<at::Tensor> output_tensor_list,
+      std::vector<std::vector<at::Tensor>> input_tensor_lists,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      ReduceOp op = ReduceOp::SUM,
+      int64_t op = int64_t(ReduceOp::SUM),
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> reduceScatter(
       at::Tensor output,
-      std::vector<at::Tensor>& input_tensor_list,
+      std::vector<at::Tensor> input_tensor_list,
       const c10::intrusive_ptr<ProcessGroup>& group,
-      ReduceOp op = ReduceOp::SUM,
+      int64_t op = int64_t(ReduceOp::SUM),
       bool async_op = false);
 
+  // TODO: Should we use optional values for output/input_split_sizes to match Python signature?
   c10::intrusive_ptr<ProcessGroup::Work> allToAllSingle(
       at::Tensor output,
       at::Tensor input,
-      std::vector<int64_t>& output_split_sizes,
-      std::vector<int64_t>& input_split_sizes,
+      std::vector<int64_t> output_split_sizes,
+      std::vector<int64_t> input_split_sizes,
       const c10::intrusive_ptr<ProcessGroup>& group,
       bool async_op = false);
 
   c10::intrusive_ptr<ProcessGroup::Work> allToAll(
-      std::vector<at::Tensor>& output_tensor_list,
-      std::vector<at::Tensor>& input_tensor_list,
+      std::vector<at::Tensor> output_tensor_list,
+      std::vector<at::Tensor> input_tensor_list,
       const c10::intrusive_ptr<ProcessGroup>& group,
       bool async_op = false);
 
@@ -218,18 +216,30 @@ class DistributedC10d : public torch::CustomClassHolder {
   std::string getNameOfProcessGroup(
       const c10::intrusive_ptr<ProcessGroup>& pg) const;
 
- private:
-
   bool rankNotInGroup(const c10::intrusive_ptr<ProcessGroup>& group) const;
-  int64_t getGroupRank(
+
+    int64_t getGroupRank(
       const c10::intrusive_ptr<ProcessGroup>& group,
       const int64_t rank) const;
+
   int64_t getGlobalRank(
       const c10::intrusive_ptr<ProcessGroup>& group,
       const int64_t group_rank) const;
-  void checkDefaultPg() const;
   int64_t getGroupSize(const c10::intrusive_ptr<ProcessGroup>& group) const;
+
+  void setPgGroupRanks(
+      const c10::intrusive_ptr<ProcessGroup>& group, c10::Dict<int64_t, int64_t> ranks);
+
+  void setPgMap(
+      const c10::intrusive_ptr<ProcessGroup>& group,
+      std::string backend,
+      c10::intrusive_ptr<Store> store);
+
   std::string getBackend(const c10::intrusive_ptr<ProcessGroup>& group);
+
+ private:
+  
+  void checkDefaultPg() const;
 
   std::string backend_;
   // TODO: Ask Alex what kind of equality we need. It determine whether we
@@ -246,7 +256,7 @@ class DistributedC10d : public torch::CustomClassHolder {
   // Process group's global rank to local rank mapping
   std::unordered_map<
       c10::intrusive_ptr<ProcessGroup>,
-      std::unordered_map<int64_t, int64_t>>
+      c10::Dict<int64_t, int64_t>>
       pg_group_ranks_;
 
   c10::intrusive_ptr<ProcessGroup> default_pg_;
