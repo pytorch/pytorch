@@ -6205,6 +6205,102 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
+    @dtypes(*list(product(torch.testing.get_all_dtypes(include_bool=False),
+                          torch.testing.get_all_dtypes(include_bool=False))))
+    def test_float_power(self, device, dtypes):
+        def to_np(value):
+            if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
+                return value.to(torch.float).cpu().numpy()
+            return value.cpu().numpy() if isinstance(value, torch.Tensor) else value
+
+        base_dtype = dtypes[0]
+        exp_dtype = dtypes[1]
+        out_dtype = torch.complex128 if base_dtype.is_complex or exp_dtype.is_complex else torch.float64
+
+        base = make_tensor((30,), device, base_dtype, low=1, high=100)
+        # Complex and real results do not agree between PyTorch and NumPy when computing negative and zero power of 0
+        # Related: https://github.com/pytorch/pytorch/issues/48000
+        # base[0] = base[3] = base[7] = 0
+        exp = make_tensor((30,), device, exp_dtype, low=-2, high=2)
+        exp[0] = exp[4] = exp[6] = 0
+
+        expected = torch.from_numpy(np.float_power(to_np(base), to_np(exp)))
+
+        exponents = [-2.8, -2, -1, -0.5, 0.5, 1, 2]
+        complex_exponents = exponents + [-2.5j, -1.0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
+
+        for op in (torch.float_power, torch.Tensor.float_power, torch.Tensor.float_power_):
+
+            # Case of Tensor x Tensor
+            if op is torch.Tensor.float_power_ and base_dtype != out_dtype:
+                with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                    op(base.clone(), exp)
+            else:
+                result = op(base.clone(), exp)
+                self.assertEqual(expected, result)
+
+            if op is torch.float_power:
+                out = torch.empty_like(base).to(device=device, dtype=out_dtype)
+                op(base, exp, out=out)
+                self.assertEqual(expected, out)
+
+            # Case of Tensor x Scalar
+            for i in complex_exponents if exp_dtype.is_complex else exponents:
+                out_dtype_scalar_exp = torch.complex128 if base_dtype.is_complex or type(i) == complex else torch.float64
+                expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
+
+                if op is torch.Tensor.float_power_ and base_dtype != out_dtype_scalar_exp:
+                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                        op(base.clone(), i)
+                else:
+                    result = op(base.clone(), i)
+                    self.assertEqual(expected_scalar_exp, result)
+
+                if op is torch.float_power:
+                    out = torch.empty_like(base).to(device=device, dtype=out_dtype_scalar_exp)
+                    op(base, i, out=out)
+                    self.assertEqual(expected_scalar_exp, out)
+
+        # Case of Scalar x Tensor
+        for i in complex_exponents if base_dtype.is_complex else exponents:
+            out_dtype_scalar_base = torch.complex128 if exp_dtype.is_complex or type(i) == complex else torch.float64
+            expected_scalar_base = torch.from_numpy(np.float_power(i, to_np(exp)))
+
+            result = torch.float_power(i, exp)
+            self.assertEqual(expected_scalar_base, result)
+
+            out = torch.empty_like(exp).to(device=device, dtype=out_dtype_scalar_base)
+            torch.float_power(i, exp, out=out)
+            self.assertEqual(expected_scalar_base, out)
+
+    def test_float_power_exceptions(self, device):
+        def _promo_helper(x, y):
+            for i in (x, y):
+                if type(i) == complex:
+                    return torch.complex128
+                elif type(i) == torch.Tensor and i.is_complex():
+                    return torch.complex128
+            return torch.double
+
+        test_cases = ((torch.tensor([-2, -1, 0, 1, 2], device=device), -.25),
+                      (torch.tensor([-1.0j, 0j, 1.0j, 1.0 + 1.0j, -1.0 - 1.5j], device=device), 2.))
+        for base, exp in test_cases:
+            for out_dtype in (torch.long, torch.float, torch.double, torch.cdouble):
+                out = torch.empty(1, device=device, dtype=out_dtype)
+                required_dtype = _promo_helper(base, exp)
+
+                if out.dtype == required_dtype:
+                    torch.float_power(base, exp, out=out)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "is not the desired output type"):
+                        torch.float_power(base, exp, out=out)
+
+                if base.dtype == required_dtype:
+                    torch.Tensor.float_power_(base.clone(), exp)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                        torch.Tensor.float_power_(base.clone(), exp)
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
@@ -16168,70 +16264,6 @@ class TestTorchDeviceType(TestCase):
                 'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
             self._test_memory_format_transformations(
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
-
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_eig(self, device, dtype):
-        a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
-                          (-6.49, 3.80, 0.00, 0.00, 0.00),
-                          (-0.47, -6.39, 4.17, 0.00, 0.00),
-                          (-7.20, 1.50, -1.51, 5.70, 0.00),
-                          (-0.65, -6.34, 2.67, 1.80, -7.10))).t().contiguous().to(dtype=dtype, device=device)
-        e = torch.eig(a)[0]
-        ee, vv = torch.eig(a, True)
-        te = torch.tensor((), dtype=dtype, device=device)
-        tv = torch.tensor((), dtype=dtype, device=device)
-        eee, vvv = torch.eig(a, True, out=(te, tv))
-        self.assertEqual(e, ee, atol=1e-12, rtol=0)
-        self.assertEqual(ee, eee, atol=1e-12, rtol=0)
-        self.assertEqual(ee, te, atol=1e-12, rtol=0)
-        self.assertEqual(vv, vvv, atol=1e-12, rtol=0)
-        self.assertEqual(vv, tv, atol=1e-12, rtol=0)
-
-        # test reuse
-        X = torch.randn(4, 4, dtype=dtype, device=device)
-        X = torch.mm(X.t(), X)
-        e = torch.zeros(4, 2, dtype=dtype, device=device)
-        v = torch.zeros(4, 4, dtype=dtype, device=device)
-        torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
-
-        torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
-
-        # test non-contiguous
-        X = torch.randn(4, 4, dtype=dtype, device=device)
-        X = torch.mm(X.t(), X)
-        e = torch.zeros(4, 2, 2, dtype=dtype, device=device)[:, 1]
-        v = torch.zeros(4, 2, 4, dtype=dtype, device=device)[:, 1]
-        self.assertFalse(v.is_contiguous(), 'V is contiguous')
-        self.assertFalse(e.is_contiguous(), 'E is contiguous')
-        torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
-
-        # test invalid input
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should be 2 dimensional',
-            lambda: torch.eig(torch.ones((2))))
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should be square',
-            lambda: torch.eig(torch.ones((2, 3))))
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should not contain infs or NaNs',
-            lambda: torch.eig(np.inf * torch.ones((2, 2))))
-        self.assertRaisesRegex(
-            RuntimeError,
-            'A should not contain infs or NaNs',
-            lambda: torch.eig(np.nan * torch.ones((2, 2))))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
