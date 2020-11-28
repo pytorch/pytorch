@@ -7,7 +7,9 @@ import random
 from functools import reduce
 
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
+    onlyOnCPUAndCUDA)
 
 
 class TestIndexing(TestCase):
@@ -121,6 +123,7 @@ class TestIndexing(TestCase):
 
         self.assertRaises(TypeError, delitem)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.double)
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
