@@ -197,8 +197,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // or NCCL's barrier().
   //
   // If created by WorkNCCL's getFuture API, FutureNCCL has a reference to
-  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device index of
-  // outputs' device. Its value is NCCL collective's outputs.
+  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device indices of
+  // outputs' devices. Its value is NCCL collective's outputs.
   //
   // If created by FutureNCCL's then callback, its value becomes the value of
   // callback() and its cudaEvents will record the NCCL stream that runs that
@@ -218,9 +218,10 @@ class ProcessGroupNCCL : public ProcessGroup {
           deviceIndices_(std::move(deviceIndices)),
           cudaEvents_(std::move(cudaEvents)) {
       TORCH_INTERNAL_ASSERT(
-        cudaEvents->size() == deviceIndices.size(),
+        cudaEvents_->size() == deviceIndices_.size(),
         "The device indices and the events must be paired up. Got ",
-        deviceIndices.size(), " devices and ", cudaEvents->size(), " events.");
+        deviceIndices_.size(), " devices and ", cudaEvents_->size(),
+        " events.");
     }
 
     FutureNCCL()
