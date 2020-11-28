@@ -4896,10 +4896,41 @@ class TestTorchDeviceType(TestCase):
     def test_index_add_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
-        ind = torch.tensor([0, 2, 3], device=device)
+        ind = torch.tensor([2, 1, 0], device=device)
         value = torch.rand((3,), device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.index_add_(0, ind, value)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.index_add_(0, ind, y[:3])
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_add_(0, ind, ind.clone())
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_add_(0, ind.clone(), ind)
+
+    def test_index_copy_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        y = torch.rand((6,), device=device)
+        ind = torch.tensor([2, 1, 0], device=device)
+        value = torch.rand((3,), device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.index_copy_(0, ind, value)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.index_copy_(0, ind, y[:3])
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_copy_(0, ind, ind.clone())
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_copy_(0, ind.clone(), ind)
+
+    def test_index_fill_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        y = torch.rand((6,), device=device)
+        ind = torch.tensor([2, 1, 0], device=device)
+        value = torch.rand((3,), device=device)
+
+        with self.assertWarnsRegex(UserWarning, "index_fill_ on expanded tensors"):
+            x.index_fill_(0, ind, 1.0)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_fill_(0, ind, 0)
 
     def test_shift_mem_overlap(self, device):
         x = torch.rand(3, device=device)
@@ -4924,12 +4955,20 @@ class TestTorchDeviceType(TestCase):
     def test_index_put_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         y = torch.rand((6,), device=device)
-        ind = torch.tensor([0, 2, 3], device=device)
+        ind = torch.tensor([2, 1, 0], device=device)
         value = torch.rand((3,), device=device)
         with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
             x.index_put_((ind,), value)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             y.index_put_((ind,), y[0])
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_put_((ind,), ind)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.index_put_((ind,), y[:3])
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_put_((ind,), ind.clone())
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.index_put_((ind.clone(),), ind)
 
     def test_masked_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4941,12 +4980,19 @@ class TestTorchDeviceType(TestCase):
         with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
             x.masked_fill_(mask, fill_val)
 
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            mask[1:].masked_fill_(mask[:-1], False)
+
     def test_masked_select_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((3,))
         y = torch.rand((6,), device=device)
         mask = torch.tensor([True, False, True, True, False, False], device=device)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.masked_select(y, mask, out=x)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.masked_select(y, mask, out=y)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.masked_select(mask.clone(), mask, out=mask)
 
     def test_masked_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
@@ -4966,17 +5012,37 @@ class TestTorchDeviceType(TestCase):
     def test_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         src = torch.rand((3,), device=device)
-        ind = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
+        ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
 
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.scatter_(0, ind, src)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            src.scatter_(0, ind, src)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            ind.scatter_(0, ind, ind.clone())
 
     def test_gather_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((3,))
         src = torch.rand((6,), device=device)
-        ind = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
+        ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.gather(src, 0, ind, out=x)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.gather(src, 0, ind, out=src)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.gather(ind.clone(), 0, ind, out=ind)
+
+    def test_take_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((3,))
+        src = torch.rand((6,), device=device)
+        ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.take(src, ind, out=x)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.take(src, ind, out=src)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.take(ind.clone(), ind[1:], out=ind[:-1])
+
 
     @onlyCUDA
     def test_multinomial_device_constrain(self, device):

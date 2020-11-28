@@ -9,6 +9,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <THC/THCTensorInfo.cuh>
 
 namespace at { namespace native {
@@ -228,6 +229,10 @@ void take_out_cuda_template(Tensor& output, const Tensor& input, const Tensor& i
   TORCH_CHECK(index.dim() < MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
 
   TORCH_CHECK(!(input.numel() == 0 && index.numel() != 0), "tried to take from an empty tensor");
+
+  at::assert_no_internal_overlap(output);
+  at::assert_no_partial_overlap(output, index);
+  at::assert_no_overlap(output, input);
 
   output.resize_(index.sizes());
 

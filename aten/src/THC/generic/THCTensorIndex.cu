@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/MemoryOverlap.h>
 
 // Check tensor dimensions for index operations, and return the slice size.
 // src can be nullptr in case of indexFill: in that case it is ignored.
@@ -279,6 +280,13 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
+  at::assert_no_overlap(dst, indices);
+  if (at::has_internal_overlap(dst) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
 
   // The `src` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
