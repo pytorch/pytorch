@@ -277,14 +277,19 @@ static inline float trigamma(float x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline double calc_digamma(double x) {
+  // [CPP Standard Reference] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is ±0, ±∞ is returned
     return std::copysign(INFINITY, -x);
   }
 
   int x_is_integer = x == floor(x);
   if (x < 0) {
     if (x_is_integer) {
+      // As per C++ standard for gamma related functions and SciPy,
+      // If the argument is a negative integer, NaN is returned
       return NAN;
     }
     return calc_digamma(1 - x) - M_PI / tan(M_PI * x);
@@ -324,14 +329,19 @@ static inline double calc_digamma(double x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline float calc_digamma(float x) {
+  // See [CPP Standard Reference]
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is ±0, ±∞ is returned
     return std::copysign(INFINITY, -x);
   }
 
   int x_is_integer = x == floorf(x);
   if (x < 0) {
     if (x_is_integer) {
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is a negative integer, NaN is returned
       return NAN;
     }
     // Avoid rounding errors for `tan`'s input.
