@@ -80,6 +80,7 @@ _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
+_(aten, _ldexp) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -372,6 +373,8 @@ _(aten, i0) \
 _(aten, i0_) \
 _(aten, igamma) \
 _(aten, igamma_) \
+_(aten, igammac) \
+_(aten, igammac_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -676,6 +679,7 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
+_(aten, tile) \
 _(aten, slow_conv3d) \
 _(aten, slow_conv3d_backward) \
 _(aten, slow_conv3d_forward) \
@@ -697,7 +701,6 @@ _(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
-_(aten, transpose) \
 _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
