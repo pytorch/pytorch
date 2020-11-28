@@ -11168,89 +11168,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
             torch.signbit(t, out=out)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                          include_bool=True, include_complex=False))
-    def test_logical_any(self, device, dtype):
-        x = torch.zeros([2, 3, 400], dtype=dtype, device=device)
-
-        out_dtype = torch.bool
-
-        self.assertEqual(
-            torch.tensor(0, dtype=out_dtype, device=device),
-            x.any())
-
-        self.assertEqual(
-            torch.zeros([1, 3, 400], dtype=out_dtype, device=device),
-            x.any(0, keepdim=True))
-
-        self.assertEqual(
-            torch.zeros([2, 1, 400], dtype=out_dtype, device=device),
-            x.any(1, keepdim=True))
-
-        self.assertEqual(
-            torch.zeros([2, 3, 1], dtype=out_dtype, device=device),
-            x.any(2, keepdim=True))
-
-        # set the last element to 0
-        x[-1][-1][-1] = 1
-
-        self.assertEqual(
-            torch.tensor(1, dtype=out_dtype, device=device),
-            x.any())
-
-        y = torch.zeros([1, 3, 400], dtype=out_dtype, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(0, keepdim=True))
-
-        y = torch.zeros([2, 1, 400], dtype=out_dtype, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(1, keepdim=True))
-
-        y = torch.zeros([2, 3, 1], dtype=out_dtype, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(2, keepdim=True))
-
-    @dtypes(*torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                          include_bool=True, include_complex=False))
-    def test_logical_all(self, device, dtype):
-        x = torch.ones([2, 3, 400], dtype=dtype, device=device)
-
-        out_dtype = torch.bool
-        self.assertEqual(
-            torch.tensor(1, dtype=out_dtype, device=device),
-            x.all())
-
-        self.assertEqual(
-            torch.ones([1, 3, 400], dtype=out_dtype, device=device),
-            x.all(0, keepdim=True))
-
-        self.assertEqual(
-            torch.ones([2, 1, 400], dtype=out_dtype, device=device),
-            x.all(1, keepdim=True))
-
-        self.assertEqual(
-            torch.ones([2, 3, 1], dtype=out_dtype, device=device),
-            x.all(2, keepdim=True))
-
-        # set the last element to 0
-        x[-1][-1][-1] = 0
-
-        self.assertEqual(
-            torch.tensor(0, dtype=out_dtype, device=device),
-            x.all())
-
-        y = torch.ones([1, 3, 400], dtype=out_dtype, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(0, keepdim=True))
-
-        y = torch.ones([2, 1, 400], dtype=out_dtype, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(1, keepdim=True))
-
-        y = torch.ones([2, 3, 1], dtype=out_dtype, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(2, keepdim=True))
-
     def test_pairwise_distance_empty(self, device):
         shape = (2, 0)
         x = torch.randn(shape, device=device)
@@ -19243,10 +19160,10 @@ else:
                 torch.any(x, dim, out=out)
                 self.assertEqual(expected, out)
             else:
-                with self.assertRaisesRegex(RuntimeError, "all only supports bool tensor"):
+                with self.assertRaisesRegex(RuntimeError, "all: provided dtype must match dtype of result."):
                     torch.all(x, dim, out=out)
 
-                with self.assertRaisesRegex(RuntimeError, "any only supports bool tensor"):
+                with self.assertRaisesRegex(RuntimeError, "any: provided dtype must match dtype of result."):
                     torch.any(x, dim, out=out)
 
         def _test_all_any_with_dim_keepdim(x, dim, keepdim):
