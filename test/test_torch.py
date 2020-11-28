@@ -6205,6 +6205,102 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
+    @dtypes(*list(product(torch.testing.get_all_dtypes(include_bool=False),
+                          torch.testing.get_all_dtypes(include_bool=False))))
+    def test_float_power(self, device, dtypes):
+        def to_np(value):
+            if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
+                return value.to(torch.float).cpu().numpy()
+            return value.cpu().numpy() if isinstance(value, torch.Tensor) else value
+
+        base_dtype = dtypes[0]
+        exp_dtype = dtypes[1]
+        out_dtype = torch.complex128 if base_dtype.is_complex or exp_dtype.is_complex else torch.float64
+
+        base = make_tensor((30,), device, base_dtype, low=1, high=100)
+        # Complex and real results do not agree between PyTorch and NumPy when computing negative and zero power of 0
+        # Related: https://github.com/pytorch/pytorch/issues/48000
+        # base[0] = base[3] = base[7] = 0
+        exp = make_tensor((30,), device, exp_dtype, low=-2, high=2)
+        exp[0] = exp[4] = exp[6] = 0
+
+        expected = torch.from_numpy(np.float_power(to_np(base), to_np(exp)))
+
+        exponents = [-2.8, -2, -1, -0.5, 0.5, 1, 2]
+        complex_exponents = exponents + [-2.5j, -1.0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
+
+        for op in (torch.float_power, torch.Tensor.float_power, torch.Tensor.float_power_):
+
+            # Case of Tensor x Tensor
+            if op is torch.Tensor.float_power_ and base_dtype != out_dtype:
+                with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                    op(base.clone(), exp)
+            else:
+                result = op(base.clone(), exp)
+                self.assertEqual(expected, result)
+
+            if op is torch.float_power:
+                out = torch.empty_like(base).to(device=device, dtype=out_dtype)
+                op(base, exp, out=out)
+                self.assertEqual(expected, out)
+
+            # Case of Tensor x Scalar
+            for i in complex_exponents if exp_dtype.is_complex else exponents:
+                out_dtype_scalar_exp = torch.complex128 if base_dtype.is_complex or type(i) == complex else torch.float64
+                expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
+
+                if op is torch.Tensor.float_power_ and base_dtype != out_dtype_scalar_exp:
+                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                        op(base.clone(), i)
+                else:
+                    result = op(base.clone(), i)
+                    self.assertEqual(expected_scalar_exp, result)
+
+                if op is torch.float_power:
+                    out = torch.empty_like(base).to(device=device, dtype=out_dtype_scalar_exp)
+                    op(base, i, out=out)
+                    self.assertEqual(expected_scalar_exp, out)
+
+        # Case of Scalar x Tensor
+        for i in complex_exponents if base_dtype.is_complex else exponents:
+            out_dtype_scalar_base = torch.complex128 if exp_dtype.is_complex or type(i) == complex else torch.float64
+            expected_scalar_base = torch.from_numpy(np.float_power(i, to_np(exp)))
+
+            result = torch.float_power(i, exp)
+            self.assertEqual(expected_scalar_base, result)
+
+            out = torch.empty_like(exp).to(device=device, dtype=out_dtype_scalar_base)
+            torch.float_power(i, exp, out=out)
+            self.assertEqual(expected_scalar_base, out)
+
+    def test_float_power_exceptions(self, device):
+        def _promo_helper(x, y):
+            for i in (x, y):
+                if type(i) == complex:
+                    return torch.complex128
+                elif type(i) == torch.Tensor and i.is_complex():
+                    return torch.complex128
+            return torch.double
+
+        test_cases = ((torch.tensor([-2, -1, 0, 1, 2], device=device), -.25),
+                      (torch.tensor([-1.0j, 0j, 1.0j, 1.0 + 1.0j, -1.0 - 1.5j], device=device), 2.))
+        for base, exp in test_cases:
+            for out_dtype in (torch.long, torch.float, torch.double, torch.cdouble):
+                out = torch.empty(1, device=device, dtype=out_dtype)
+                required_dtype = _promo_helper(base, exp)
+
+                if out.dtype == required_dtype:
+                    torch.float_power(base, exp, out=out)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "is not the desired output type"):
+                        torch.float_power(base, exp, out=out)
+
+                if base.dtype == required_dtype:
+                    torch.Tensor.float_power_(base.clone(), exp)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                        torch.Tensor.float_power_(base.clone(), exp)
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
