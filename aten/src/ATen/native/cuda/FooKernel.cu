@@ -92,7 +92,63 @@ constexpr int num_threads = 64;
 constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
 constexpr int block_work_size = thread_work_size * num_threads;
 
-CUfunction jit_binary_pwise_function(
+#define stringify(...) std::string(#__VA_ARGS__); __VA_ARGS__
+const auto jittable_foo_functor = stringify(
+  template<typename scalar_t>
+  struct FooFunctor {
+    FooFunctor(scalar_t a): alpha{a} {}
+    __device__ __forceinline__ scalar_t operator() (const scalar_t a, const scalar_t b) const {
+      return a + alpha * b;
+    }
+
+    scalar_t alpha;
+  };
+);
+#undef stringify
+
+std::string generate_code(
+    torch::jit::CodeTemplate cuda_template,
+    const TensorIterator& iter) {
+  // Constructs kernel code
+  const int nInputs = iter.ninputs();
+  torch::jit::TemplateEnv env;
+  env.s("name", "FooFunctor");
+  env.s("functor", jittable_foo_functor);
+  env.s("index_type", "unsigned int");
+  env.s("nInputs", std::to_string(nInputs));
+  // Identifies scalar type
+  // TODO: there has to be an existing way of doing this (i.e. converting scalar type to string)
+  const auto& common_dtype = iter.common_dtype();
+  std::string common_dtype_string;
+  if (common_dtype == kFloat) {
+    common_dtype_string = "float";
+  } else if (common_dtype == kDouble) {
+    common_dtype_string = "double";
+  }
+    env.s("scalar_type", common_dtype_string);
+  std::stringstream declare_load_arrays;
+  for (int i=0; i < nInputs; i++){
+//TODO these arrays are potentially of the different types, use function traits to determine the types
+    declare_load_arrays << common_dtype_string << " arg" << std::to_string(i) << "[" << std::to_string(thread_work_size) << "];\n";
+  }
+  env.s("declare_load_arrays", declare_load_arrays.str());
+  std::stringstream  load_inputs;
+  for (int i=0; i < nInputs; i++){
+    load_inputs << "arg" << std::to_string(i) << "[j] = *(reinterpret_cast<" << common_dtype_string << "*>(data[" <<
+    std::to_string(i + iter.noutputs()) << "]) + input_offsets[" << std::to_string(i) << "]);\n";
+  }
+  env.s("load_inputs", load_inputs.str());
+  std::stringstream functor_args;
+  for (int i=0; i < nInputs - 1; i++){
+    functor_args << "arg" << std::to_string(i) << "[j], ";
+  }
+  functor_args << "arg" << std::to_string(nInputs-1) << "[j]";
+  env.s("args", functor_args.str());
+  cuda_template = at::cuda::detail::load_code_template("/private/home/ngimel/pytorch/aten/src/ATen/native/cuda/code_template.cuh");
+  return  cuda_template.format(env);
+}
+
+CUfunction jit_pwise_function(
     JiteratorCache& cache,
     JiteratorKey key,
     const std::string& code,
@@ -157,7 +213,7 @@ CUfunction jit_binary_pwise_function(
 }
 
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
-void launch_jitted_binary_pwise_function(
+void launch_jitted_pwise_function(
     CUfunction function,
     std::vector<void*>& args,
     const int nBlocks,
@@ -200,19 +256,7 @@ std::string scalartype_to_type_string(const ScalarType scalar_type) {
   return s;
 }
 
-#define stringify(...) std::string(#__VA_ARGS__); __VA_ARGS__
-const auto jittable_foo_functor = stringify(
-  template<typename scalar_t>
-  struct FooFunctor {
-    FooFunctor(scalar_t a): alpha{a} {}
-    __device__ __forceinline__ scalar_t operator() (const scalar_t a, const scalar_t b) const {
-      return a + alpha * b;
-    }
 
-    scalar_t alpha;
-  };
-);
-#undef stringify
 
 // TODO: create a stringify-like macro so this looks like C++
 //   but produces the appropriate type with newlines
@@ -352,8 +396,8 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
   std::cout << "dtype 0: " << iter.dtype(0) << std::endl;
-  std::cout << "dtype 1: " << iter.dtype(0) << std::endl;
-  std::cout << "dtype 2: " << iter.dtype(0) << std::endl;
+  std::cout << "dtype 1: " << iter.dtype(1) << std::endl;
+  std::cout << "dtype 2: " << iter.dtype(2) << std::endl;
   std::cout << "iter.tensor(0).scalar_type(): " << iter.tensor(0).scalar_type() << std::endl;
   std::cout << "iter.tensor(1).scalar_type(): " << iter.tensor(1).scalar_type() << std::endl;
   std::cout << "iter.tensor(2).scalar_type(): " << iter.tensor(2).scalar_type() << std::endl;
@@ -390,47 +434,6 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   args.push_back((void*)&input_offset_calculator);
   args.push_back((void*)&output_offset_calculator);
 
-  // Constructs kernel code
-  const int nInputs = iter.ninputs();
-  torch::jit::TemplateEnv env;
-  env.s("name", "FooFunctor");
-  env.s("functor", jittable_foo_functor);
-  env.s("index_type", "unsigned int");
-  env.s("nInputs", std::to_string(nInputs));
-  // Identifies scalar type
-  // TODO: there has to be an existing way of doing this (i.e. converting scalar type to string)
-  const auto& common_dtype = iter.common_dtype();
-  std::string common_dtype_string;
-  if (common_dtype == kFloat) {
-    common_dtype_string = "float";
-  } else if (common_dtype == kDouble) {
-    common_dtype_string = "double";
-  }
-  env.s("scalar_type", common_dtype_string);
-  std::stringstream declare_load_arrays;
-  for (int i=0; i < nInputs; i++){
-//TODO these arrays are potentially of the different types, use function traits to determine the types
-    declare_load_arrays << common_dtype_string << " arg" << std::to_string(i) << "[" << std::to_string(thread_work_size) << "];\n";
-  }
-  env.s("declare_load_arrays", declare_load_arrays.str());
-  std::stringstream  load_inputs;
-  for (int i=0; i < nInputs; i++){
-    load_inputs << "arg" << std::to_string(i) << "[j] = *(reinterpret_cast<" << common_dtype_string << "*>(data[" <<
-    std::to_string(i + iter.noutputs()) << "]) + input_offsets[" << std::to_string(i) << "]);\n";
-  }
-  env.s("load_inputs", load_inputs.str());
-  std::stringstream functor_args;
-  for (int i=0; i < nInputs - 1; i++){
-    functor_args << "arg" << std::to_string(i) << "[j], ";
-  }
-  functor_args << "arg" << std::to_string(nInputs-1) << "[j]";
-  env.s("args", functor_args.str());
-
-  cuda_template = at::cuda::detail::load_code_template("/private/home/ngimel/pytorch/aten/src/ATen/native/cuda/code_template.cuh");
-
-  std::string code = cuda_template.format(env);
-//  std::cout << "code: \n" << code << std::endl;
-
   JiteratorKey key = construct_jiterator_key(iter.common_dtype());
   c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
   CUfunction function;
@@ -440,13 +443,14 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   } else {
     std::cout << "jitting function" << std::endl;
     // TODO: make kernel name generic
+    auto code = generate_code(cuda_template, iter);
     const std::string kernel_name{"FooFunctor_kernel"};
-    function = jit_binary_pwise_function(foo_cache, key, code, kernel_name);
+    function = jit_pwise_function(foo_cache, key, code, kernel_name);
   }
 
   int64_t grid = (numel + block_work_size - 1) / block_work_size;
 
-  launch_jitted_binary_pwise_function(function, args, grid, num_threads);
+  launch_jitted_pwise_function(function, args, grid, num_threads);
 
   return iter.output();
 }
