@@ -215,8 +215,8 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   // FB employees can see
   //   https://fb.workplace.com/groups/llvm.gcc/permalink/4053565044692080/
   // for more details
-  static_assert(sizeof(DeviceType) == 2, "DeviceType is not 16-bit");
-  auto p = device_guard_impl_registry[static_cast<size_t>(type) & 0xFFFF].load();
+  static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
+  auto p = device_guard_impl_registry[static_cast<size_t>(type) & 0xFF].load();
 
   // This seems to be the first place where you make use of a device
   // when you pass devices to factory functions.  Give a nicer error

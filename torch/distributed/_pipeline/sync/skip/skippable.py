@@ -39,7 +39,8 @@ TensorOrTensors = Union[Tensor, Tensors]
 StashPop = Union["stash", "pop"]
 StashPopGenerator = Generator[StashPop, Optional[Tensor], TensorOrTensors]
 if TYPE_CHECKING:
-    SkippableModule = nn.Module[Union[StashPopGenerator, TensorOrTensors]]
+    # Typechecking: nn.Module is not a Generic
+    SkippableModule = nn.Module[Union[StashPopGenerator, TensorOrTensors]]  # type: ignore[type-arg]
 else:
     SkippableModule = nn.Module
 

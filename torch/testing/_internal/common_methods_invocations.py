@@ -21,8 +21,10 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY)
 
+if TEST_SCIPY:
+    import scipy.special
 
 class SkipInfo(object):
     """Describes which test, or type of tests, should be skipped when testing
@@ -247,6 +249,10 @@ op_db = [
                    ref=np.arcsin,
                    domain=(-1, 1),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   promotes_integers_to_float=True,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -346,9 +352,10 @@ op_db = [
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
                    domain=(-1, float('inf')),
-                   dtypesIfCPU=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),)),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
+                   promotes_integers_to_float=True),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
                    domain=(0, float('inf')),
@@ -468,6 +475,27 @@ op_db = [
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
 ]
+
+if TEST_SCIPY:
+    op_db_scipy_reference = [
+        UnaryUfuncInfo('erf',
+                       ref=scipy.special.erf,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       promotes_integers_to_float=True),
+        UnaryUfuncInfo('erfc',
+                       ref=scipy.special.erfc,
+                       decorators=(precisionOverride({torch.float16: 1e-2,
+                                                      torch.bfloat16: 1e-2}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       promotes_integers_to_float=True),
+    ]
+    op_db = op_db + op_db_scipy_reference
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
@@ -671,6 +699,16 @@ def method_tests():
         ('transpose', (1,), (0, 0), '1d', (False,)),
         ('transpose', (L, L), (0, 1), '2d', (False,)),
         ('transpose', (S, S, S), (2, 0), '3d', (False,)),
+        ('swapdims', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
+        ('swapdims', (), (0, 0), 'scalar', (False,)),
+        ('swapdims', (1,), (0, 0), '1d', (False,)),
+        ('swapdims', (L, L), (0, 1), '2d', (False,)),
+        ('swapdims', (S, S, S), (2, 0), '3d', (False,)),
+        ('swapaxes', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
+        ('swapaxes', (), (0, 0), 'scalar', (False,)),
+        ('swapaxes', (1,), (0, 0), '1d', (False,)),
+        ('swapaxes', (L, L), (0, 1), '2d', (False,)),
+        ('swapaxes', (S, S, S), (2, 0), '3d', (False,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
         ('view', (S, S, S), (S * S, S), '', (False,)),
         ('view', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
@@ -1208,6 +1246,11 @@ def method_tests():
         ('diagonal', (M, M, M), (1, 1, 2), '3d_1'),
         ('diagonal', (M, M, M), (2, 0, 1), '3d_2'),
         ('diagonal', (M, M, M), (-2, 0, 1), '3d_3'),
+        ('tile', (S, S, S), ([S, S, S, S],), 'more_reps_dims', (False,)),
+        ('tile', (S, S, S), ([S, S, S],), 'same_reps_dims', (False,)),
+        ('tile', (S, S, S), ([S, M],), 'less_reps_dims', (False,)),
+        ('tile', (S, S, S), ([S, S, 0],), 'zero_rep_dim', (False,)),
+        ('tile', (), ([S, S, S],), 'empty_tensor', (False,)),
         ('tril', (M, M), NO_ARGS),
         ('tril', (M, M), (2,), 'idx'),
         ('tril', (S, M, M), NO_ARGS, 'batched'),
