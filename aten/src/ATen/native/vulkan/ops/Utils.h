@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/native/vulkan/ops/Common.h>
-
 #ifdef USE_VULKAN_API
+
+#include <ATen/native/vulkan/ops/Common.h>
 
 namespace at {
 namespace native {

@@ -2665,6 +2665,9 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
     if eigenvalues and eigenvectors are all real valued.
 
+    When :attr:`input` is on CUDA, :func:`torch.eig() <torch.eig>` causes
+    host-device synchronization.
+
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
         will be computed
@@ -2689,6 +2692,32 @@ Returns:
           true eigenvectors can be computed as
           :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
           :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
+
+Example::
+
+    Trivial example with a diagonal matrix. By default, only eigenvalues are computed:
+
+    >>> a = torch.diag(torch.tensor([1, 2, 3], dtype=torch.double))
+    >>> e, v = torch.eig(a)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([], dtype=torch.float64)
+
+    Compute also the eigenvectors:
+
+    >>> e, v = torch.eig(a, eigenvectors=True)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]], dtype=torch.float64)
+
 """)
 
 add_docstr(torch.eq, r"""

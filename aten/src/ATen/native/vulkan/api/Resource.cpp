@@ -394,9 +394,9 @@ Resource::Image Resource::Pool::image(
     {
       VK_IMAGE_ASPECT_COLOR_BIT,
       0u,
-      1u,
+      VK_REMAINING_MIP_LEVELS,
       0u,
-      1u,
+      VK_REMAINING_ARRAY_LAYERS,
     },
   };
 

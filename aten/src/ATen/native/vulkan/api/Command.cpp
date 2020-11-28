@@ -143,7 +143,7 @@ void Command::Buffer::barrier() {
             VK_QUEUE_FAMILY_IGNORED,
             VK_QUEUE_FAMILY_IGNORED,
             barrier.object.handle,
-            VkImageSubresourceRange{
+            {
               VK_IMAGE_ASPECT_COLOR_BIT,
               0u,
               VK_REMAINING_MIP_LEVELS,

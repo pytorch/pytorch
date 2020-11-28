@@ -12,7 +12,9 @@ using namespace api::utils;
 vTensor pack_weights(
     api::Resource::Pool& pool,
     const Tensor& weight_arg) {
-  return convert(weight_arg.vulkan());
+  // Pending Stephen's fix.
+  const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+  return convert(weight);
 }
 
 vTensor pack_biases(
