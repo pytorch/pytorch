@@ -80,9 +80,9 @@ bool isSupported(Node* node) {
       "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-      "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
-      // TODO : do we support pow.Scalar ?
-      "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+      // TODO: uncomment when we properly support pow
+      // "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
+      // "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
       // TODO: support clamp_min, clamp_max
       "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
       "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
@@ -142,12 +142,14 @@ bool isSupported(Node* node) {
       "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
       "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
       "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
-      "aten::where(Tensor condition) -> Tensor[]",
       // TODO: enable other min/max variants, operators that can be both
       // elementwise or reductions:
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
+  };
+  static const OperatorSet cuda_only_operator_set{
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
   };
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
@@ -167,6 +169,15 @@ bool isSupported(Node* node) {
     // Value is either an int or a float (can occur from .item())
     for (Value* v : node->inputs()) {
       if (v->type()->cast<NumberType>()) {
+        return false;
+      }
+    }
+    if (node->isMemberOf(cuda_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || device->is_cpu()) {
         return false;
       }
     }

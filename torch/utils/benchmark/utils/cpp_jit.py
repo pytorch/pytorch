@@ -3,6 +3,7 @@ import atexit
 import os
 import re
 import shutil
+import tempfile
 import textwrap
 import threading
 import uuid
@@ -30,8 +31,8 @@ SOURCE_ROOT = os.path.split(os.path.abspath(__file__))[0]
 # `setup` and `stmt` do not change, so we can reuse the executable from the
 # first pass through the loop.
 BUILD_ROOT = os.path.join(
-    torch._appdirs.user_cache_dir(appname="benchmark_utils_jit"),
-    f"build_{uuid.uuid4()}".replace("-", "")
+    tempfile.gettempdir(),
+    f"benchmark_utils_jit_build_{uuid.uuid4()}".replace("-", "")
 )
 
 # BACK_TESTING_NOTE:

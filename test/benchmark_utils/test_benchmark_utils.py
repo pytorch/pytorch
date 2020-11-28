@@ -510,7 +510,7 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             "x += 1;",
             setup="torch::Tensor x = torch::ones({1});",
-            language="C++",
+            language="c++",
         )
         stats = [
             timer.collect_callgrind()

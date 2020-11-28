@@ -16,16 +16,21 @@ from torch.quantization.quantize_fx import (
 
 from torch.quantization import (
     QuantType,
+    QuantStub,
+    DeQuantStub,
     quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
-    default_dynamic_quant_observer,
     default_qat_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_dynamic_qconfig,
+    float_qparams_weight_only_qconfig,
+    get_default_qconfig,
+    get_default_qat_qconfig,
+    fuse_modules,
     prepare,
     prepare_qat,
     convert,
+    default_placeholder_observer,
     PerChannelMinMaxObserver,
     QConfigDynamic,
     FixedQParamsFakeQuantize,
@@ -331,14 +336,18 @@ class TestQuantizeFx(QuantizationTestCase):
                 super().__init__()
                 self.conv = convs[dim](3, 3, 3)
                 self.bn = bns[dim](3)
-                self.relu = nn.ReLU()
+                self.relu = nn.ReLU() if has_relu else nn.Identity()
                 self.has_relu = has_relu
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
 
             def forward(self, x):
+                x = self.quant(x)
                 x = self.conv(x)
                 x = self.bn(x)
                 if self.has_relu:
                     x = self.relu(x)
+                x = self.dequant(x)
                 return x
 
         options = itertools.product([1, 2], [True, False], self.static_quant_types)
@@ -346,12 +355,37 @@ class TestQuantizeFx(QuantizationTestCase):
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
                 else quantized_convs[dim])
-            self.checkGraphModeFxOp(
-                M(dim, has_relu),
+            m = M(dim, has_relu)
+            m_eager = copy.deepcopy(m)
+            result = self.checkGraphModeFxOp(
+                m,
                 self.img_data_dict[dim],
                 quant_type,
                 expected_node=expected_node,
             )
+
+            # check numerics
+            qengine = torch.backends.quantized.engine
+            if quant_type == QuantType.STATIC:
+                m_eager.eval()
+                qconfig = get_default_qconfig(qengine)
+                prepare_fn = prepare
+            else:
+                m_eager.train()
+                qconfig = get_default_qat_qconfig(qengine)
+                prepare_fn = prepare_qat
+
+            fuse_list = ["conv", "bn"]
+            if has_relu:
+                fuse_list.append("relu")
+            fuse_modules(m_eager, fuse_list, inplace=True)
+            m_eager.qconfig = qconfig
+            m_eager = prepare_fn(m_eager)
+            m_eager(*self.img_data_dict[dim][0])
+            m_eager = convert(m_eager)
+            result_eager = m_eager(*self.img_data_dict[dim][0])
+            self.assertEqual(result, result_eager)
+
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):
@@ -1913,8 +1947,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         quantized_node = ns.call_module(nnq.Embedding)
         configs = [
-            (float_qparams_dynamic_qconfig, ns.call_module(nnq.Embedding)),
-            (None, ns.call_module(nn.Embedding))
+            (float_qparams_weight_only_qconfig, ns.call_module(nnq.Embedding)),
+            (None, ns.call_module(nn.Embedding)),
+            (default_qconfig, ns.call_module(nn.Embedding)),
         ]
 
         for qconfig, node in configs:
@@ -1947,7 +1982,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+            float_qparams_qconfig = QConfigDynamic(activation=default_placeholder_observer,
                                                    weight=float_qparams_observer)
             self.checkGraphModeFxOp(
                 model,
@@ -1957,17 +1992,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 custom_qconfig=float_qparams_qconfig
             )
 
-        # check it works in None qconfig
-        qconfig_dict = {"": None}
-        m = M().eval()
-        m = prepare_fx(model, qconfig_dict)
-        self.checkGraphModuleNodes(m, expected_node_occurrence={
-            ns.call_module(torch.quantization.MinMaxObserver): 0
-        })
-        m = convert_fx(m)
-        self.checkGraphModuleNodes(m, expected_node=ns.call_module(nn.EmbeddingBag))
-        # make sure it runs
-        m(*inputs)
+        # check it works in None and static qconfig
+        for qconfig in [None, default_qconfig]:
+            qconfig_dict = {"": default_qconfig}
+            m = M().eval()
+            m = prepare_fx(model, qconfig_dict)
+            self.checkGraphModuleNodes(m, expected_node_occurrence={
+                ns.call_module(torch.quantization.MinMaxObserver): 0
+            })
+            m = convert_fx(m)
+            self.checkGraphModuleNodes(m, expected_node=ns.call_module(nn.EmbeddingBag))
+            # make sure it runs
+            m(*inputs)
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
