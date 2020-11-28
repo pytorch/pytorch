@@ -141,6 +141,7 @@ import sys
 import subprocess
 import os
 from argparse import ArgumentParser, REMAINDER
+from typing import Optional, IO
 
 node_local_rank_stdout_filename = "node_{}_local_rank_{}_stdout"
 node_local_rank_stderr_filename = "node_{}_local_rank_{}_stderr"
@@ -269,6 +270,8 @@ def main():
 
         cmd.extend(args.training_script_args)
 
+        stdout_handle: Optional[IO]
+        stderr_handle: Optional[IO]
         if args.logdir:
             directory_path = os.path.join(os.getcwd(), args.logdir)
             node_rank = args.node_rank

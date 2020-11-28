@@ -105,7 +105,7 @@ def get_nvidia_driver_version(run_lambda):
 
 
 def get_gpu_info(run_lambda):
-    if get_platform() == 'darwin' or (TORCH_AVAILABLE and torch.version.hip is not None):
+    if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(torch.version, 'hip') and torch.version.hip is not None):
         if TORCH_AVAILABLE and torch.cuda.is_available():
             return torch.cuda.get_device_name(None)
         return None
@@ -211,7 +211,7 @@ def get_os(run_lambda):
         version = get_mac_version(run_lambda)
         if version is None:
             return None
-        return 'Mac OSX {} ({})'.format(version, machine())
+        return 'macOS {} ({})'.format(version, machine())
 
     if platform == 'linux':
         # Ubuntu/Debian based
@@ -270,7 +270,7 @@ def get_env_info():
         debug_mode_str = str(torch.version.debug)
         cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
-        if torch.version.hip is None:  # cuda version
+        if not hasattr(torch.version, 'hip') or torch.version.hip is None:  # cuda version
             hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
         else:  # HIP version
             cfg = torch._C._show_config().split('\n')
