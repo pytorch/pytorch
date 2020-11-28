@@ -132,7 +132,10 @@ std::string generate_code(
     declare_load_arrays << common_dtype_string << " arg" << std::to_string(i) << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
-  std::stringstream  load_inputs;
+  std::stringstream declare_store_arrays;
+  declare_store_arrays << common_dtype_string << " out" << "[" << std::to_string(thread_work_size) << "];\n";
+  env.s("declare_store_arrays", declare_store_arrays.str());
+  std::stringstream load_inputs;
   for (int i=0; i < nInputs; i++){
     load_inputs << "arg" << std::to_string(i) << "[j] = *(reinterpret_cast<" << common_dtype_string << "*>(data[" <<
     std::to_string(i + iter.noutputs()) << "]) + input_offsets[" << std::to_string(i) << "]);\n";
