@@ -25,6 +25,8 @@ from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_
 from torch.autograd import gradcheck, gradgradcheck
 
 # Protects against includes accidentally setting the default dtype
+# NOTE: jit_metaprogramming_utils sets the default dtype to double!
+torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
 
 if TEST_SCIPY:
@@ -275,7 +277,7 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypes(torch.float64, torch.complex128)
     def test_old_cholesky_autograd(self, device, dtype):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-1, -2).conj())

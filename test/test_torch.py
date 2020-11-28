@@ -6854,11 +6854,17 @@ class TestTensorDeviceOps(TestCase):
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
 
+# TODO: this empy class is temporarily instantiated for XLA compatibility
+#   once XLA updates their test suite it should be removed
+class TestViewOps(TestCase):
+    pass
+
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.
 add_neg_dim_tests()
 generate_tensor_op_tests(TestTensorDeviceOps)
+instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
