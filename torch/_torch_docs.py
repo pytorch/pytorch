@@ -2515,6 +2515,12 @@ Args:
 Keyword args:
     {out}
 
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From version 1.8 onwards, the digamma function returns `NaN` for non-positive integers,
+           while for `0`, it returns `-Inf` to be consistent with SciPy and C++ Standard.
+           Prior to version 1.8, the function would return `NaN` for non-positive integers and `0`.
+
 Example::
 
     >>> a = torch.tensor([1, 0.5])
