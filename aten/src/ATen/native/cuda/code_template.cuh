@@ -4,6 +4,21 @@
   constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
 
+  template <typename T, int size>
+  struct Array {
+    T data[size];
+
+    __device__ T operator[](int i) const {
+      return data[i];
+    }
+    __device__ T& operator[](int i) {
+      return data[i];
+    }
+    Array() = default;
+    Array(const Array&) = default;
+    Array& operator=(const Array&) = default;
+  };
+
   template <typename T>
   struct DivMod {
     T div;
@@ -38,11 +53,12 @@
   unsigned int shift;  // Shift amounts.
 };
 
+  template<int NARGS>
   struct OffsetCalculator {
     OffsetCalculator() = default;
-    __device__ void index_to_offset(${index_type} offsets[${nInputs}], ${index_type} linear_idx) const {
-      #pragma unroll
-      for (int arg = 0; arg < ${nInputs}; ++arg) {
+    __device__ void index_to_offset(${index_type} offsets[NARGS], ${index_type} linear_idx) const {
+#pragma unroll
+      for (int arg = 0; arg < NARGS; ++arg) {
         offsets[arg] = 0;
       }
 
@@ -65,7 +81,7 @@
     int dims;
     IntDivider sizes_[25];
     // NOTE: this approach will not support nInputs == 0
-    ${index_type} strides_[25][${nInputs}];
+    ${index_type} strides_[25][NARGS];
   };
 
   ${functor}
@@ -76,14 +92,51 @@
   void ${name}_kernel(
       ${name}<${scalar_type}> functor,
       const int numel,
-      char* data,
-      OffsetCalculator input_calculator,
-      OffsetCalculator output_calculator) {
+      Array<char*, ${nInputs}+1> data, //[${nInputs}+1],
+      OffsetCalculator<${nInputs}> input_calculator,
+      OffsetCalculator<1> output_calculator) {
+    ${declare_load_arrays}
+    ${index_type} input_offsets[${nInputs}];
+    ${index_type} output_offsets[1];
 
     int remaining = numel - block_work_size * blockIdx.x;
+    auto thread_idx = threadIdx.x;
+
+    #pragma unroll
+    for (int j = 0; j < thread_work_size; j++){
+      if (thread_idx >= remaining) {
+        break;
+      }
+      int linear_idx = thread_idx + block_work_size * blockIdx.x;
+      input_calculator.index_to_offset(input_offsets, linear_idx);
+      // printf(
+      //     "thread %d data %p %p %p offset %d %d\n",
+      //     threadIdx.x,
+      //     data[0], data[1], data[2],
+      //     input_offsets[0], input_offsets[1]);
+      ${load_inputs}
+      thread_idx += num_threads;
+    }
+
+    thread_idx = threadIdx.x;
+    for (int j = 0; j < thread_work_size; j++){
+      //do compute and store in one loop, according to godbold it generates
+      //same code as separate loops for compute and store;
+      if (thread_idx >= remaining) {
+        break;
+      }
+      //TODO maybe think about unifying offset calculators and reuse
+      //offsets computed in the load loop
+      int linear_idx = thread_idx + block_work_size * blockIdx.x;
+      output_calculator.index_to_offset(output_offsets, linear_idx);
+      //TODO handle multi-return functors
+      *(reinterpret_cast<${scalar_type}*>(data[0])+output_offsets[0]) = functor(${args});
+      thread_idx += num_threads;
+    }
 
     // NOTE: only the first thread operates on the first element for now
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
+    //if (blockIdx.x == 0 && threadIdx.x == 0)
+    {
       // ${scalar_type} a_value;
       // int a_offset = a.index_to_offset(0);
 
@@ -115,7 +168,7 @@
       // }
 
       // printf("%f\n", out_value);
-    }
+      }
   }
 
 // instantiations here

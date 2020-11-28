@@ -368,12 +368,12 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   // Creates functor arg
   // TODO: refactor with dispatch macro?
   // TODO: support float or double dynamically
-  FooFunctor<double> my_functor{alpha_scalar.to<double>()};
+  FooFunctor<float> my_functor{alpha_scalar.to<float>()};
   args.push_back((void*)&my_functor);
 
   // Adds numel arg
   // NOTE: the intermediate capture is neccessary
-  int64_t numel = iter.numel();
+  const int64_t numel = iter.numel();
   args.push_back((void*)&numel);
 
   // Adds data ptrs
@@ -391,12 +391,12 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   args.push_back((void*)&output_offset_calculator);
 
   // Constructs kernel code
+  const int nInputs = iter.ninputs();
   torch::jit::TemplateEnv env;
   env.s("name", "FooFunctor");
   env.s("functor", jittable_foo_functor);
   env.s("index_type", "unsigned int");
-  env.s("nInputs", "2");
-
+  env.s("nInputs", std::to_string(nInputs));
   // Identifies scalar type
   // TODO: there has to be an existing way of doing this (i.e. converting scalar type to string)
   const auto& common_dtype = iter.common_dtype();
@@ -407,10 +407,29 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
     common_dtype_string = "double";
   }
   env.s("scalar_type", common_dtype_string);
+  std::stringstream declare_load_arrays;
+  for (int i=0; i < nInputs; i++){
+//TODO these arrays are potentially of the different types, use function traits to determine the types
+    declare_load_arrays << common_dtype_string << " arg" << std::to_string(i) << "[" << std::to_string(thread_work_size) << "];\n";
+  }
+  env.s("declare_load_arrays", declare_load_arrays.str());
+  std::stringstream  load_inputs;
+  for (int i=0; i < nInputs; i++){
+    load_inputs << "arg" << std::to_string(i) << "[j] = *(reinterpret_cast<" << common_dtype_string << "*>(data[" <<
+    std::to_string(i + iter.noutputs()) << "]) + input_offsets[" << std::to_string(i) << "]);\n";
+  }
+  env.s("load_inputs", load_inputs.str());
+  std::stringstream functor_args;
+  for (int i=0; i < nInputs - 1; i++){
+    functor_args << "arg" << std::to_string(i) << "[j], ";
+  }
+  functor_args << "arg" << std::to_string(nInputs-1) << "[j]";
+  env.s("args", functor_args.str());
+
   cuda_template = at::cuda::detail::load_code_template("/private/home/ngimel/pytorch/aten/src/ATen/native/cuda/code_template.cuh");
 
   std::string code = cuda_template.format(env);
-  // std::cout << "code: \n" << code << std::endl;
+//  std::cout << "code: \n" << code << std::endl;
 
   JiteratorKey key = construct_jiterator_key(iter.common_dtype());
   c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
