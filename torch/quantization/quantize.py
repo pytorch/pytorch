@@ -295,7 +295,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
         model = copy.deepcopy(model)
     model.eval()
     prepare(model, inplace=True)
-    run_fn(model, run_args)
+    run_fn(model, *run_args)
     convert(model, mapping, inplace=True)
     return model
 
