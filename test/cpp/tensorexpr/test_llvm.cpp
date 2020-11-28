@@ -1,4 +1,6 @@
 #ifdef TORCH_ENABLE_LLVM
+#include <gtest/gtest.h>
+
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include "test/cpp/tensorexpr/padded_buffer.h"
@@ -33,7 +35,7 @@ using LLVMExprEval = ExprEval<LLVMCodeGen>;
   _(at::Half, Half, 0.128f)
 
 #define IMM_TEST(Type, Name, Val)                  \
-  void testLLVM##Name##ImmTest() {                 \
+  TEST(LLVM, Name##ImmTest) {                      \
     KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val);                 \
     LLVMExprEval cg(a);                            \
@@ -47,7 +49,7 @@ TEST_LLVM_SCALAR_TYPES(IMM_TEST)
 #undef IMM_TEST
 
 #define ADD_TEST(Type, Name, Val)                  \
-  void testLLVM##Name##AddTest() {                 \
+  TEST(LLVM, Name##AddTest) {                      \
     KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val);                 \
     auto b = Name##Imm::make(Val * 2);             \
@@ -63,7 +65,7 @@ TEST_LLVM_SCALAR_TYPES(ADD_TEST)
 #undef ADD_TEST
 
 #define SUB_TEST(Type, Name, Val)                  \
-  void testLLVM##Name##SubTest() {                 \
+  TEST(LLVM, Name##SubTest) {                      \
     KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val * 2);             \
     auto b = Name##Imm::make(Val);                 \
@@ -79,7 +81,7 @@ TEST_LLVM_SCALAR_TYPES(SUB_TEST)
 #undef SUB_TEST
 
 #define MUL_TEST(Type, Name, Val)                  \
-  void testLLVM##Name##MulTest() {                 \
+  TEST(LLVM, Name##MulTest) {                      \
     KernelScope kernel_scope;                      \
     auto a = Name##Imm::make(Val);                 \
     auto b = Name##Imm::make((Type)4);             \
@@ -95,7 +97,7 @@ TEST_LLVM_SCALAR_TYPES(MUL_TEST)
 #undef MUL_TEST
 
 #define DIV_TEST(Type, Name, Val)                  \
-  void testLLVM##Name##DivTest() {                 \
+  TEST(LLVM, Name##DivTest) {                      \
     KernelScope kernel_scope;                      \
     auto a = Name##Imm::make((Type)6);             \
     auto b = Name##Imm::make((Type)3);             \
@@ -110,7 +112,7 @@ TEST_LLVM_SCALAR_TYPES(MUL_TEST)
 TEST_LLVM_SCALAR_TYPES(DIV_TEST)
 #undef DIV_TEST
 
-void testLLVMIntToFloatCastTest() {
+TEST(LLVM, IntToFloatCastTest) {
   KernelScope kernel_scope;
   auto a = IntImm::make(2);
   auto b = Cast::make(kFloat, a);
@@ -118,7 +120,7 @@ void testLLVMIntToFloatCastTest() {
   ASSERT_EQ(cg.value<float>(), 2.0);
 }
 
-void testLLVMFloatToIntCastTest() {
+TEST(LLVM, FloatToIntCastTest) {
   KernelScope kernel_scope;
   auto a = FloatImm::make(2.0);
   auto b = Cast::make(kInt, a);
@@ -126,7 +128,7 @@ void testLLVMFloatToIntCastTest() {
   ASSERT_EQ(cg.value<int>(), 2);
 }
 
-void testLLVMIntToLongCastTest() {
+TEST(LLVM, IntToLongCastTest) {
   KernelScope kernel_scope;
   auto a = IntImm::make(12345);
   auto b = Cast::make(kLong, a);
@@ -134,7 +136,7 @@ void testLLVMIntToLongCastTest() {
   ASSERT_EQ(cg.value<int64_t>(), 12345);
 }
 
-void testLLVMByteToCharCastTest() {
+TEST(LLVM, ByteToCharCastTest) {
   KernelScope kernel_scope;
   auto a = ByteImm::make(250);
   auto b = Cast::make(kChar, a);
@@ -142,7 +144,7 @@ void testLLVMByteToCharCastTest() {
   ASSERT_EQ(cg.value<int8_t>(), (int8_t)250);
 }
 
-void testLLVMHalfToLongCastTest() {
+TEST(LLVM, HalfToLongCastTest) {
   KernelScope kernel_scope;
   auto a = HalfImm::make(2.0);
   auto b = Cast::make(kLong, a);
@@ -150,7 +152,7 @@ void testLLVMHalfToLongCastTest() {
   ASSERT_EQ(cg.value<int64_t>(), 2);
 }
 
-void testLLVMByteToDoubleCastTest() {
+TEST(LLVM, ByteToDoubleCastTest) {
   KernelScope kernel_scope;
   auto a = ByteImm::make(2);
   auto b = Cast::make(kDouble, a);
@@ -158,7 +160,7 @@ void testLLVMByteToDoubleCastTest() {
   ASSERT_EQ(cg.value<double>(), 2);
 }
 
-void testLLVMLetTest01() {
+TEST(LLVM, LetTest01) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("A", {1}, kFloat));
@@ -175,7 +177,7 @@ void testLLVMLetTest01() {
   ASSERT_EQ(v[0], 2.f + 3.f * 3.f + 4.f);
 }
 
-void testLLVMLetTest02() {
+TEST(LLVM, LetTest02) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("A", {1}, kFloat));
@@ -195,7 +197,7 @@ void testLLVMLetTest02() {
   ASSERT_EQ(v[0], 2.f + 3.f * 3.f + 6.f * 4.f);
 }
 
-void testLLVMLetTestMultitype() {
+TEST(LLVM, LetTestMultitype) {
   KernelScope kernel_scope;
 
   Placeholder a(BufHandle("A", {1}, kDouble));
@@ -218,7 +220,7 @@ void testLLVMLetTestMultitype() {
   ASSERT_EQ(v[0], 2.f + 3 * 3.f + 6.f * 4.f);
 }
 
-void testLLVMBufferTest() {
+TEST(LLVM, BufferTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {32}, kFloat));
   std::vector<int32_t> v(5);
@@ -228,7 +230,7 @@ void testLLVMBufferTest() {
   ASSERT_EQ(cg.value<int>(args), 0);
 }
 
-void testLLVMBlockTest() {
+TEST(LLVM, BlockTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {32}, kInt));
   std::vector<int32_t> v = {1, 2};
@@ -246,7 +248,7 @@ void testLLVMBlockTest() {
   ASSERT_EQ(v[1], 4);
 }
 
-void testLLVMLoadStoreTest() {
+TEST(LLVM, LoadStoreTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
   Placeholder b(BufHandle("B", {1}, kInt));
@@ -261,7 +263,7 @@ void testLLVMLoadStoreTest() {
   ASSERT_EQ(b_buffer[0], 42);
 }
 
-void testLLVMIfThenElseTest() {
+TEST(LLVM, IfThenElseTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
   Placeholder b(BufHandle("B", {1}, kInt));
@@ -279,7 +281,7 @@ void testLLVMIfThenElseTest() {
 }
 
 // if (x < 10) x = x + 1
-void testLLVMCondNoFalseBlockTest() {
+TEST(LLVM, CondNoFalseBlockTest) {
   KernelScope kernel_scope;
 
   Placeholder x(BufHandle("X", {1}, kInt));
@@ -304,7 +306,7 @@ void testLLVMCondNoFalseBlockTest() {
 // } else {
 //   x = x - 1;
 // }
-void testLLVMCondTest() {
+TEST(LLVM, CondTest) {
   KernelScope kernel_scope;
 
   Placeholder x(BufHandle("X", {1}, kInt));
@@ -342,7 +344,7 @@ void testLLVMCondTest() {
 //     x = x - 2;
 //   }
 // }
-void testLLVMCondNestedTest() {
+TEST(LLVM, CondNestedTest) {
   KernelScope kernel_scope;
 
   Placeholder x(BufHandle("X", {1}, kInt));
@@ -378,7 +380,7 @@ void testLLVMCondNestedTest() {
   }
 }
 
-void testLLVMVecLoadStoreTest() {
+TEST(LLVM, VecLoadStoreTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
   Placeholder b(BufHandle("B", {1}, kInt));
@@ -404,7 +406,7 @@ void testLLVMVecLoadStoreTest() {
 }
 
 #define FLOAT_INTRINSICS_TEST(Name, Lanes)                       \
-  void testLLVMVecFloat_##Name##Lane##Lanes##Test() {            \
+  TEST(LLVM, VecFloat_##Name##Lane##Lanes##Test) {               \
     KernelScope kernel_scope;                                    \
     Placeholder a(BufHandle("A", {1}, kFloat));                  \
     Placeholder b(BufHandle("B", {1}, kFloat));                  \
@@ -447,7 +449,7 @@ FLOAT_INTRINSICS_TEST(lgamma, 8)
 #undef FLOAT_INTRINSICS_TEST
 
 #define DOUBLE_INTRINSICS_TEST(Name, Lanes)                      \
-  void testLLVMVecDouble_##Name##Lane##Lanes##Test() {           \
+  TEST(LLVM, VecDouble_##Name##Lane##Lanes##Test) {              \
     KernelScope kernel_scope;                                    \
     Placeholder a(BufHandle("A", {1}, kDouble));                 \
     Placeholder b(BufHandle("B", {1}, kDouble));                 \
@@ -489,7 +491,7 @@ DOUBLE_INTRINSICS_TEST(expm1, 4)
 DOUBLE_INTRINSICS_TEST(lgamma, 4)
 #undef DOUBLE_INTRINSICS_TEST
 
-void testLLVMVectorizerLoadStoreTest() {
+TEST(LLVM, VectorizerLoadStoreTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
 
@@ -512,7 +514,7 @@ void testLLVMVectorizerLoadStoreTest() {
   assertAllEqual(c_vec, 21);
 }
 
-void testLLVMMemcpyTest() {
+TEST(LLVM, MemcpyTest) {
   KernelScope kernel_scope;
   constexpr int N = 32;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -534,7 +536,7 @@ void testLLVMMemcpyTest() {
   assertAllEqual(b_buffer, 42);
 }
 
-void testLLVMBzeroTest() {
+TEST(LLVM, BzeroTest) {
   KernelScope kernel_scope;
   constexpr int N = 32;
   Placeholder b(BufHandle("B", {N}, kInt));
@@ -552,7 +554,7 @@ void testLLVMBzeroTest() {
   assertAllEqual(b_buffer, 0);
 }
 
-void testLLVMElemwiseAdd() {
+TEST(LLVM, ElemwiseAdd) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -578,7 +580,7 @@ void testLLVMElemwiseAdd() {
   assertAllEqual(c_buffer, 42);
 }
 
-void testLLVMElemwiseAddFloat() {
+TEST(LLVM, ElemwiseAddFloat) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -604,7 +606,7 @@ void testLLVMElemwiseAddFloat() {
   assertAllEqual(c_buffer, 42.0f);
 }
 
-void testLLVMElemwiseLog10Float() {
+TEST(LLVM, ElemwiseLog10Float) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -634,7 +636,7 @@ void testLLVMElemwiseLog10Float() {
   assertAllEqual(b_buffer, 1.0f);
 }
 
-void testLLVMElemwiseLog1pFloat() {
+TEST(LLVM, ElemwiseLog1pFloat) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -664,7 +666,7 @@ void testLLVMElemwiseLog1pFloat() {
   ExpectAllNear(b_buffer, 3.0f, 1e-5f);
 }
 
-void testLLVMElemwiseMaxInt() {
+TEST(LLVM, ElemwiseMaxInt) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -691,7 +693,7 @@ void testLLVMElemwiseMaxInt() {
   assertAllEqual(c_buffer, 41);
 }
 
-void testLLVMElemwiseMinInt() {
+TEST(LLVM, ElemwiseMinInt) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -718,7 +720,7 @@ void testLLVMElemwiseMinInt() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testLLVMElemwiseMaxFloat() {
+TEST(LLVM, ElemwiseMaxFloat) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -745,7 +747,7 @@ void testLLVMElemwiseMaxFloat() {
   assertAllEqual(c_buffer, 41.0f);
 }
 
-void testLLVMElemwiseMaxNaNFloat() {
+TEST(LLVM, ElemwiseMaxNaNFloat) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -773,7 +775,7 @@ void testLLVMElemwiseMaxNaNFloat() {
   }
 }
 
-void testLLVMElemwiseMinFloat() {
+TEST(LLVM, ElemwiseMinFloat) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -800,7 +802,7 @@ void testLLVMElemwiseMinFloat() {
   assertAllEqual(c_buffer, 1.0f);
 }
 
-void testLLVMElemwiseMinNaNFloat() {
+TEST(LLVM, ElemwiseMinNaNFloat) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -828,7 +830,7 @@ void testLLVMElemwiseMinNaNFloat() {
   }
 }
 
-void testLLVMElemwiseMod() {
+TEST(LLVM, ElemwiseMod) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -854,7 +856,7 @@ void testLLVMElemwiseMod() {
   assertAllEqual(c_buffer, 18);
 }
 
-void testLLVMCompareSelectIntEQ() {
+TEST(LLVM, CompareSelectIntEQ) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -895,7 +897,7 @@ void testLLVMCompareSelectIntEQ() {
   }
 }
 
-void testLLVMCompareSelectFloatEQ() {
+TEST(LLVM, CompareSelectFloatEQ) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kFloat));
@@ -929,7 +931,7 @@ void testLLVMCompareSelectFloatEQ() {
   assertAllEqual(c_buffer, 1);
 }
 
-void testLLVMCompareSelectByteGT() {
+TEST(LLVM, CompareSelectByteGT) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
@@ -970,7 +972,7 @@ void testLLVMCompareSelectByteGT() {
   }
 }
 
-void testLLVMCompareSelectByteGE() {
+TEST(LLVM, CompareSelectByteGE) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
@@ -1006,7 +1008,7 @@ void testLLVMCompareSelectByteGE() {
   }
 }
 
-void testLLVMCompareSelectByteLT() {
+TEST(LLVM, CompareSelectByteLT) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
@@ -1047,7 +1049,7 @@ void testLLVMCompareSelectByteLT() {
   }
 }
 
-void testLLVMCompareSelectByteLE() {
+TEST(LLVM, CompareSelectByteLE) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
   Placeholder a(BufHandle("A", {N}, kByte));
@@ -1083,7 +1085,7 @@ void testLLVMCompareSelectByteLE() {
   }
 }
 
-void testLLVMStoreFloat() {
+TEST(LLVM, StoreFloat) {
   KernelScope kernel_scope;
   Placeholder result(BufHandle("result", {1}, kFloat));
   std::vector<float> result_buffer = {0.0f};
@@ -1094,7 +1096,7 @@ void testLLVMStoreFloat() {
   ASSERT_EQ(result_buffer[0], 3.14f);
 }
 
-void testLLVMSimpleMath01() {
+TEST(LLVM, SimpleMath01) {
   KernelScope kernel_scope;
   const int N = 1024;
   Tensor* tensor = Compute("f", {{N, "i"}}, [](const VarHandle& i) {
@@ -1116,7 +1118,7 @@ void testLLVMSimpleMath01() {
   ExpectAllNear(f_v, f_ref, 1e-5);
 }
 
-void testLLVMComputeMul() {
+TEST(LLVM, ComputeMul) {
   KernelScope kernel_scope;
   const int N = 1024;
   Placeholder a(BufHandle("a", {N}, kFloat));
@@ -1139,7 +1141,7 @@ void testLLVMComputeMul() {
   assertAllEqual(c_vec, 42.0f);
 }
 
-void testLLVMBroadcastAdd() {
+TEST(LLVM, BroadcastAdd) {
   KernelScope kernel_scope;
   const int M = 32;
   const int N = 1024;
@@ -1172,7 +1174,7 @@ void testLLVMBroadcastAdd() {
   }
 }
 
-void testLLVMBitwiseOps() {
+TEST(LLVM, BitwiseOps) {
   KernelScope kernel_scope;
   auto a = IntImm::make(59);
   auto b = IntImm::make(11);
@@ -1185,7 +1187,7 @@ void testLLVMBitwiseOps() {
   ASSERT_EQ(cg.value<int>(), 11);
 }
 
-void testLLVMDynamicShapeAdd() {
+TEST(LLVM, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
@@ -1207,7 +1209,7 @@ void testLLVMDynamicShapeAdd() {
   testWithSize(37);
 }
 
-void testLLVMBindDynamicShapeAdd() {
+TEST(LLVM, BindDynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
@@ -1228,7 +1230,7 @@ void testLLVMBindDynamicShapeAdd() {
   testWithSize(37);
 }
 
-void testLLVMTensorDynamicShapeAdd() {
+TEST(LLVM, TensorDynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
     VarHandle n("n", kInt);
@@ -1251,7 +1253,7 @@ void testLLVMTensorDynamicShapeAdd() {
   testWithSize(37);
 }
 
-void testLLVMDynamicShape2D() {
+TEST(LLVM, DynamicShape2D) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
@@ -1277,7 +1279,7 @@ void testLLVMDynamicShape2D() {
   testWithSize(37, 11);
 }
 
-void testLLVMEmptyStmt() {
+TEST(LLVM, EmptyStmt) {
   KernelScope kernel_scope;
   Stmt* s = new Block({});
 
@@ -1286,7 +1288,7 @@ void testLLVMEmptyStmt() {
   // Just don't crash.
 }
 
-void testLLVMEliminatedStmt() {
+TEST(LLVM, EliminatedStmt) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {1}, kFloat));
 
@@ -1302,7 +1304,7 @@ void testLLVMEliminatedStmt() {
   cg.call({aData, cData});
 }
 
-void testLLVMSimpleReduction() {
+TEST(LLVM, SimpleReduction) {
   KernelScope kernel_scope;
 
   int M = 128;
@@ -1341,7 +1343,7 @@ void testLLVMSimpleReduction() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-void testLLVMRFactorReduction() {
+TEST(LLVM, RFactorReduction) {
   KernelScope kernel_scope;
 
   int M = 128;
@@ -1390,8 +1392,7 @@ void testLLVMRFactorReduction() {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-// TODO: disabled since this doesn't work.
-void DISABLED_testLLVMRFactorVectorizedReduction() {
+TEST(LLVM, RFactorVectorizedReduction) {
   KernelScope kernel_scope;
 
   int M = 128;
@@ -1400,34 +1401,31 @@ void DISABLED_testLLVMRFactorVectorizedReduction() {
 
   Placeholder a("a", kFloat, {1, M, N});
 
-  // TODO: why doesn't implicit vector<DimArg> work?
-  std::vector<DimArg> axis = {DimArg(1)};
-  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor* b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor* b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
   LoopNest loopnest({b});
   std::vector<For*> loops = loopnest.getLoopStmtsFor(b);
   For* loop_k = loops.at(0);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  loopnest.reorderAxis(loop_n, loop_m);
-  loops = loopnest.getLoopStmtsFor(b);
-  loop_k = loops.at(0);
-  loop_n = loops.at(1);
-  loop_m = loops.at(2);
-  // Case-III reductions
   loopnest.rfactor(b->body(), loop_n->var());
+
+  loops = NodeFinder<For>::find(loopnest.root_stmt());
+  loop_k = loops.at(0);
+  // loop 1 is the initializer of tmp_buf
+  loop_m = loops.at(2);
+  loop_n = loops.at(3);
+  loopnest.reorderAxis(loop_n, loop_m);
+
+  // Case-III reductions
+  loops = NodeFinder<For>::find(loopnest.root_stmt());
+  // Vectorize initializer of tmp_buf
+  loopnest.vectorize(loops[1]);
+  // Vectorize producer of tmp_buf
+  loopnest.vectorize(loops[2]);
+
   loopnest.prepareForCodegen();
-  Stmt* s = loopnest.root_stmt();
-  s = IRSimplifier::simplify(s);
 
-  Block* root_block = dynamic_cast<Block*>(s);
-  auto I = root_block->begin();
-  ++I;
-
-  For* outer_loop = dynamic_cast<For*>(*I);
-  loopnest.vectorize(outer_loop);
-
-  s = IRSimplifier::simplify(s);
+  Stmt* s = IRSimplifier::simplify(loopnest.root_stmt());
   LLVMCodeGen cg(s, {a, b});
 
   PaddedBuffer<float> a_v(1, M, N, "a_v");
@@ -1446,6 +1444,94 @@ void DISABLED_testLLVMRFactorVectorizedReduction() {
   cg.call({a_v, b_v});
 
   ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
+TEST(LLVM, VectorizedGEMM) {
+  KernelScope ks;
+
+  int M = 32;
+  int N = 32;
+  int K = 48;
+
+  Placeholder AP(BufHandle("A", {M, K}, kFloat));
+  Placeholder BP(BufHandle("B", {K, N}, kFloat));
+  Tensor* CT = Reduce(
+      "gemm",
+      {{M, "M"}, {N, "N"}},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {{K, "K"}});
+  LoopNest loop({CT});
+
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* m = loops[0];
+    For* mo;
+    For* mi;
+    loop.splitWithMask(m, 16, &mo, &mi);
+  }
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* n = loops[2];
+    For* no;
+    For* ni;
+    loop.splitWithMask(n, 16, &no, &ni);
+  }
+  // mo, mi, no, ni, k ->
+  // mo, no, mi, ni, k
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* mi = loops[1];
+    For* no = loops[2];
+    loop.reorderAxis(mi, no);
+  }
+  // mo, no, mi, ni, k ->
+  // mo, no, mi, k, ni
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* ni = loops[3];
+    For* k = loops[4];
+    loop.reorderAxis(ni, k);
+  }
+  // mo, no, mi, k, ni ->
+  // mo, no, k, mi, ni
+  {
+    auto const& loops = loop.getLoopStmtsFor(CT);
+    For* mi = loops[2];
+    For* k = loops[3];
+    loop.reorderAxis(mi, k);
+  }
+  {
+    auto loops = NodeFinder<For>::find(loop.root_stmt());
+    loop.vectorize(loops[3]);
+    loop.vectorize(loops.back());
+  }
+
+  loop.prepareForCodegen();
+
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+  LLVMCodeGen cg(s, {AP, BP, CT});
+
+  PaddedBuffer<float> a_v(M, K, "a_v");
+  PaddedBuffer<float> b_v(K, N, "b_v");
+  PaddedBuffer<float> c_v(M, N, "c_v");
+  PaddedBuffer<float> c_ref(M, N, "c_ref");
+
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      c_ref(m, n) = 0.f;
+      for (int k = 0; k < K; k++) {
+        c_ref(m, n) += a_v(m, k) * b_v(k, n);
+      }
+    }
+  }
+
+  cg.call({a_v, b_v, c_v});
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
 } // namespace jit
