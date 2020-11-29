@@ -1106,9 +1106,10 @@ class TestCase(expecttest.TestCase):
                                                          equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                          exact_device=exact_device)
 
-                if not result and msg is None:
+                if not result:
                     assert debug_msg is not None
-                    msg = "Tensors failed to compare as equal! " + debug_msg
+                    msg = msg or "Tensors failed to compare as equal!"
+                    msg = f'{msg}\n{debug_msg}'
                 self.assertTrue(result, msg=msg)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super().assertEqual(x, y, msg=msg)
