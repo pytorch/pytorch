@@ -1083,7 +1083,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = quantize_qat(ManualLinearQATModel(qengine), test_only_train_fn,
-                                     self.train_data)
+                                     [self.train_data])
                 checkQuantized(model)
 
     def test_eval_only_fake_quant(self):
@@ -1123,7 +1123,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = ManualConvLinearQATModel()
-                model = quantize_qat(model, test_only_train_fn, self.img_data_2d_train)
+                model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
 
     def test_train_save_load_eval(self):
@@ -1434,7 +1434,7 @@ class TestFusion(QuantizationTestCase):
         model = ModelForFusion(default_qat_qconfig).train()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
-        model = quantize_qat(model, test_only_train_fn, self.img_data_1d_train)
+        model = quantize_qat(model, test_only_train_fn, [self.img_data_1d_train])
         with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
 
