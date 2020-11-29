@@ -366,6 +366,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.frobenius_norm: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.floor: lambda input, out=None: -1,
         torch.floor_divide: lambda input, other: -1,
+        torch.float_power: lambda input, exponent, out=None: -1,
         torch.fmod: lambda input, other, out=None: -1,
         torch.frac: lambda input, out=None: -1,
         torch.full_like: lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
