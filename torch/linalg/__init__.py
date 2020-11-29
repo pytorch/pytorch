@@ -340,7 +340,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 cond = _add_docstr(_linalg.linalg_cond, r"""
-linalg.norm(input, p=None, *, out=None) -> Tensor
+linalg.cond(input, p=None, *, out=None) -> Tensor
 
 Computes the condition number of a matrix :attr:`input`,
 or of each matrix in a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
