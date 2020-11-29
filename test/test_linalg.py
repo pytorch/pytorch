@@ -1628,7 +1628,7 @@ class TestLinalg(TestCase):
             L = torch.cholesky(A, upper)
             x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
-            # issue gh-42695
+            # https://github.com/pytorch/pytorch/issues/42695
             x = torch.cholesky_solve(b, L, upper=upper, out=x)
             self.assertEqual(x, x_exp)
 
