@@ -17,6 +17,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <torch/custom_class.h>
@@ -211,10 +212,25 @@ class ProcessGroupNCCL : public ProcessGroup {
    public:
     explicit FutureNCCL(
         at::IValue value,
+        c10::DeviceIndex index,
         std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           value_(std::move(value)),
+          index_(index),
           cudaEvents_(std::move(cudaEvents)) {
+        for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+          if (data_ptr.device().is_cuda()) {
+            LOG(ERROR) << "Got data ptr on device " << std::to_string(data_ptr.device().index());
+            bool found = false;
+            for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
+              LOG(ERROR) << "Got event on device " << std::to_string(event.device_index());
+              if (event.device_index() == data_ptr.device().index()) {
+                found = true;
+              }
+            }
+            TORCH_INTERNAL_ASSERT(found, "Got data ptr on device ", std::to_string(data_ptr.device().index()));
+          }
+        }
     }
 
     FutureNCCL()
@@ -229,7 +245,9 @@ class ProcessGroupNCCL : public ProcessGroup {
         throw *error_;
       }
 
+      c10::cuda::OptionalCUDAGuard g;
       for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        g.set_index(cudaEvent.device_index());
         cudaEvent.block(
             at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
       }
@@ -247,6 +265,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       value_ = std::move(value);
 
       if (cudaEvents_ == nullptr) {
+        c10::cuda::OptionalCUDAGuard g;
+
         std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
         for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
           if (data_ptr.device().is_cuda()) {
@@ -257,11 +277,14 @@ class ProcessGroupNCCL : public ProcessGroup {
         cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
         for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
           if (isCudaDeviceUsed[idx]) {
+            g.set_index(idx);
             at::cuda::CUDAEvent cudaEvent;
             cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
             (*cudaEvents_).push_back(std::move(cudaEvent));
           }
         }
+
+        index_ = g.original_device()->index();
       }
     }
 
@@ -283,31 +306,36 @@ class ProcessGroupNCCL : public ProcessGroup {
     // this callback. This new FutureNCCL's cudaEvents will record the
     // callback's stream and will have the result value of the callback.
     void addCallback(std::function<void(void)> callback) override {
+      c10::cuda::OptionalCUDAGuard g;
+
       // Get a stream for all devices, even those that are not used by the
       // value, because the user's callback could use those other devices.
-      std::vector<at::cuda::CUDAStream> streams;
-      for (c10::DeviceIndex idx = 0; idx < c10::cuda::device_count(); idx++) {
+      std::unordered_map<c10::DeviceIndex, at::cuda::CUDAStream> streamMap;
+      std::vector<at::cuda::CUDAStream> streamVec;
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        c10::DeviceIndex idx = cudaEvent.device_index();
+        g.set_index(idx);
         // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        streams.push_back(
-            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
+        // streamMap?
+        at::cuda::CUDAStream stream = at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
+        cudaEvent.block(stream);
+        streamMap.emplace(idx, stream);
+        streamVec.push_back(stream);
       }
 
       // Do not free the underlying data storage of value_ before its
       // usage on the stream finishes.
       for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
         if (data_ptr.device().is_cuda()) {
+          g.set_index(data_ptr.device().index());
           c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, streams[data_ptr.device().index()]);
+              data_ptr, streamMap.at(data_ptr.device().index()));
         }
       }
 
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-        cudaEvent.block(streams[cudaEvent.device_index()]);
-      }
-
       // Use the dedicated callback stream to run callback.
-      at::cuda::CUDAMultiStreamGuard streamGuard(streams);
+      at::cuda::CUDAMultiStreamGuard streamGuard(streamVec);
+      g.set_index(index_);
       callback();
     }
 
@@ -366,6 +394,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
    private:
     at::IValue value_;
+    c10::DeviceIndex index_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     DataPtrExtractor dataPtrExtractor_;
     c10::optional<FutureError> error_;
