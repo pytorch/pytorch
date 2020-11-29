@@ -123,7 +123,7 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     use_new_jit_passes = False  # For testing main code-path
-    onnx_shape_inference = False
+    onnx_shape_inference = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -930,6 +930,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
+    @unittest.skip("If operator rank mismatch between outputs of two branches.")
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
@@ -2242,14 +2243,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
-    def test_batchnorm1d_norunningstats(self):
-        x = torch.randn(10, 10)
-        model = torch.nn.BatchNorm1d(10, track_running_stats=False)
-        self.run_test(model, x)
-
-        x = torch.randn(10, 10, 128)
-        self.run_test(model, x)  
-
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
@@ -2258,11 +2251,6 @@ class TestONNXRuntime(unittest.TestCase):
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
-        self.run_test(model, x)
-
-    def test_batchnorm2d_norunningstats(self):
-        x = torch.randn(10, 3, 128, 128)
-        model = torch.nn.BatchNorm2d(3, track_running_stats=False)
         self.run_test(model, x)
 
     def test_batchnorm3d(self):
@@ -2510,6 +2498,14 @@ class TestONNXRuntime(unittest.TestCase):
             model = torch.nn.LogSoftmax(dim=i)
             input = torch.randn(3, 4, 5, 6)
             self.run_test(model, input)
+
+    def test_logsoftmax_dtype(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.log_softmax(x, dim=1, dtype=torch.float64)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(Model(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()  # scripting prim_dtype
@@ -3016,10 +3012,15 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, y))
 
-    @disableScriptTest()  # ONNX Shape inference failure in if/else block for Gemm
     def test_weight_norm(self):
+        # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
         x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        # addmm for 2-d inputs converts to onnx::Gemm
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
+        x = torch.randn(4, 5, requires_grad=True)
         self.run_test(model, x)
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3))
@@ -3034,10 +3035,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 3, 5, requires_grad=True)
         self.run_test(model, x)
 
-    @disableScriptTest()  # ONNX Shape inference failure in if/else block for Gemm
     def test_weight_norm_nodim(self):
+        # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
         x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        # addmm for 2-d inputs converts to onnx::Gemm
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
+        x = torch.randn(4, 5, requires_grad=True)
         self.run_test(model, x)
 
     def test_flatten(self):
@@ -3340,6 +3346,20 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_loop_multi_dim(self):
+        class LoopMultiDimModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                for x_ in torch.flip(x.narrow(0, 0, 7), [0]):
+                    y = x_[0][y]
+                return y
+
+        model = LoopMultiDimModel()
+        x = torch.randint(0, 5, (8, 1, 17), dtype=torch.long)
+        y = torch.ones(1, dtype=torch.long)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_list(self):
         class ListModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3395,7 +3415,9 @@ class TestONNXRuntime(unittest.TestCase):
     def test_eye(self):
         class TensorFactory(torch.nn.Module):
             def forward(self, x):
-                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), torch.eye(x.size()[1], 2, dtype=torch.long)
+                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), \
+                    torch.eye(x.size()[1], 2, dtype=torch.long), torch.eye(x.shape[0]), \
+                    torch.eye(x.shape[0], dtype=torch.float64)
 
         x = torch.randn(2, 3, 4)
         another_x = torch.randn(5, 6, 7)
@@ -3420,7 +3442,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_tolist(self):
+        class List(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                cur_shape = torch._shape_as_tensor(input)
+                final_shape: List[int] = cur_shape.tolist()
+                pad_tensor = torch.zeros([1, 2] + final_shape)
+                return pad_tensor
+
+        x = torch.randn(2, 3)
+        self.run_test(List(), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
     def test_list_pass(self):
         class Slice(torch.nn.Module):
             def forward(self, x, y):
@@ -3591,6 +3628,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MaskedSelectModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()  # dtype not available
     def test_index_put_to_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
@@ -3604,6 +3642,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MaskedFillModel(), (mask, constant))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()  # dtype not available
     def test_index_put_to_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
@@ -3628,7 +3667,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
-                return x.size(0) * 2 * x
+                return x.size(0) * 2 * x, 2 - x
 
         x = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ArithmeticModel(), x)
@@ -3671,7 +3710,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(FullModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # dtype mismatch
     def test_full_like(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x):
@@ -3681,7 +3719,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(FullLikeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # dtype mismatch
     def test_full_like_value(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x, y):
@@ -4010,6 +4047,28 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x,))
 
+    def test_dtype(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, other):
+                return input.to(dtype=other.dtype) + other
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(MyModel(), (x, y))
+
+    def test_dtype_eq(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, other):
+                if input.dtype == other.dtype:
+                    return input + other
+                return input
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(MyModel(), (x, y))
+
     def test_cast_to(self):
         class MyModule(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -4112,7 +4171,39 @@ class TestONNXRuntime(unittest.TestCase):
         self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
                          'Please try opset version 11.', the_exception.args[0])
 
-    @disableScriptTest()  # export prim::Uninitialized
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfONNXShapeInference(False)
+    def test_uninitialized(self):
+        class UninitializedModel(torch.nn.Module):
+            def forward(self, y):
+                if y.shape[1] < 5:
+                    if y.size(0) == 1:
+                        y = y + 4
+                    else:
+                        return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        self.run_test(UninitializedModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfONNXShapeInference(False)
+    def test_uninitialized_dynamic(self):
+        class UninitializedModel(torch.nn.Module):
+            def forward(self, y):
+                if y.shape[1] < 5:
+                    if y.size(0) == 1:
+                        y = y + 4
+                    else:
+                        return y
+                return y
+
+        x = torch.ones((3, 4), dtype=torch.int)
+        y = torch.ones((6, 7), dtype=torch.int)
+        self.run_test(UninitializedModel(), x, test_with_inputs=[y],
+                      input_names=['input_1'],
+                      dynamic_axes={'input_1': [0, 1]})
+
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -4122,7 +4213,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
-    @disableScriptTest()  # export prim::Uninitialized
     def test_replication_pad(self):
         model = torch.nn.ReplicationPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -4133,7 +4223,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # export prim::Uninitialized
     def test_im2col(self):
         class Unfold(torch.nn.Module):
             def forward(self, input):
@@ -4330,7 +4419,6 @@ class TestONNXRuntime(unittest.TestCase):
 
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()   # Output dtype mismatch
     def test_kldiv_loss(self):
 
         x = torch.randn(5)

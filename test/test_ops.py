@@ -2,7 +2,7 @@ from functools import partial, wraps
 
 import torch
 
-from torch.testing import floating_and_complex_types
+from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, IS_SANDCASTLE)
 from torch.testing._internal.common_methods_invocations import \
@@ -131,6 +131,11 @@ class TestGradients(TestCase):
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
 
+# Tests operators for consistency between JIT and eager, also checks
+#   correctness of JIT specific alias schemas and intended
+#   autodifferentiation behavior. 
+# Inherits from JitCommonTestCase instead of TestCase directly to share
+#   functionality with original test_jit.py method operator tests 
 class TestCommon(JitCommonTestCase):
     exact_dtype = True
 
@@ -155,7 +160,7 @@ class TestCommon(JitCommonTestCase):
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
-    #   for eager 
+    #   against eager's gold standard op function variant 
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -169,6 +174,7 @@ class TestCommon(JitCommonTestCase):
             variants = (v for v in (method, inplace) if v is not None)
             # Computes expected forward
 
+            # below calls op's function variant 
             expected_forward = op(sample.input, *sample.args, **sample.kwargs)
 
             # Computes expected backward
@@ -185,7 +191,7 @@ class TestCommon(JitCommonTestCase):
             # Test eager consistency
             for variant in variants:
                 # Verifies that inplace operations that promote int->float fail
-                # on tensors with integer dtypes.
+                #   on tensors with integer dtypes.
                 if (variant is inplace and op.promotes_integers_to_float and
                         dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
                     try:
@@ -199,7 +205,7 @@ class TestCommon(JitCommonTestCase):
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
-                if variant is not inplace and op.test_inplace_grad:
+                if variant is not inplace or op.test_inplace_grad:
                     self.check_variant_backward(sample.input, variant_forward,
                                                 expected_grad, exception_during_backwards)
 
@@ -239,47 +245,57 @@ class TestCommon(JitCommonTestCase):
                     name = op.name + "_"
                     func_type = 'inplace'
 
+                # run with disable_autodiff_subgraph_inlining(True) to test
+                #   autodiff support. Context manager forces the graph to contain
+                #   DifferentiableGraph nodes if they are present
                 with disable_autodiff_subgraph_inlining():
                     def fn(*inputs, **kwargs):
                         attr = getattr(inputs[0], name)
                         output = attr(*inputs[1:], **kwargs)
                         return op.output_func(output)
 
-                    # Check scripted forward and grad
+                    # bfloat16 grad doesn't work for some operators
+                    dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
+                        if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16) 
+
+                    # Check scripted forward, grad, and grad grad
                     script_fn = create_script_fn(self, name, func_type, op.output_func)
                     check_against_reference(self, 
                                             script_fn,
                                             fn, 
                                             (sample.input,) + sample.args, 
                                             sample.kwargs, 
-                                            no_grad=(dtype not in floating_and_complex_types()))
+                                            no_grad=(dtype not in dtypes_to_grad_check))
 
-                    # Check traced forward and grad
+                    # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
                     check_against_reference(self, 
                                             traced_fn,
                                             fn, 
                                             (sample.input,) + sample.args, 
                                             sample.kwargs, 
-                                            no_grad=(dtype not in floating_and_complex_types()))
+                                            no_grad=(dtype not in dtypes_to_grad_check))
 
-                    # Check alias annotation schema for correctness (make sure inputs that aren't supposed to be modified aren't)
-                    # Op-writer TODO: make sure op supports one of the operators in below list to ensure alias annotation is checked
+                    # Check alias annotation schema for correctness (make
+                    #   sure inputs that aren't supposed to be modified aren't)
+                    # Note: only runs in float32 and int64 because schema isn't affected by dtype, 
+                    #   so running it on all dtypes is would be excessive
                     if dtype in [torch.float32, torch.int32]:
                         check_alias_annotation(name, (sample.input,) + sample.args, sample.kwargs)
 
-                    # Check autodiff of nodes for traced and scripted graphs
-                    # only need to check once per sample 
+                    # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample 
                     if dtype is torch.float32:
+                        # Sandcastle doesn't fuse nodes
                         if IS_SANDCASTLE:
+                            # fusible nodes are expected to be found in FusionGroups in the DifferentiableGraphs
                             nonfusible_nodes = op.autodiff_nonfusible_nodes + op.autodiff_fusible_nodes
                             fusible_nodes = []
                         else:
                             nonfusible_nodes = op.autodiff_nonfusible_nodes
                             fusible_nodes = op.autodiff_fusible_nodes
 
-                        self.assertAutodiffNode(traced_fn.last_graph, op.is_autodiffed, nonfusible_nodes, fusible_nodes)
-                        self.assertAutodiffNode(script_fn.last_graph, op.is_autodiffed, nonfusible_nodes, fusible_nodes)
+                        self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+                        self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
 
 
     @ops(op_db)

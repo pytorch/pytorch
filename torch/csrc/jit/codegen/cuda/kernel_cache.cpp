@@ -553,7 +553,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
         // TODO: I think merge cannot handle broadcast - Go verify it later;
         // TODO: Since we are only handling permutation here, we should just
         //       merge the stride_index_;
-        acc_type = acc_type->merge(input_type);
+        acc_type = acc_type->merge(*input_type);
       } else {
         acc_type = input_type;
       }

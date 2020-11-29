@@ -510,6 +510,13 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
     set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Workaround for https://github.com/pytorch/pytorch/issues/47292
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
+      # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
+      # Fails with internal compiler error
+      # Workaround by forcing -O1 for XNNPACK (i.e. build it with RelWithDebInfo)
+      set_property(TARGET XNNPACK APPEND_STRING PROPERTY COMPILE_FLAGS "-O1")
+    endif()
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
@@ -706,7 +713,6 @@ else()
     "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
-
 
 # ---[ LMDB
 if(USE_LMDB)
@@ -1636,6 +1642,8 @@ if(NOT INTERN_BUILD_MOBILE)
   if(LAPACK_FOUND)
     set(USE_LAPACK 1)
     list(APPEND Caffe2_PRIVATE_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+  else()
+    set(USE_LAPACK 0)
   endif()
 
   if(NOT USE_CUDA)
@@ -1756,3 +1764,19 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+
+# ---[ Kineto
+if(USE_KINETO)
+  if(USE_KINETO AND NOT TARGET kineto)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
+    set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
+    set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
+
+    add_subdirectory("${KINETO_SOURCE_DIR}")
+    message(STATUS "Configured libkineto as a dependency.")
+  endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
+endif()
