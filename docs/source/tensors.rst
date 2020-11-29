@@ -322,6 +322,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fliplr
    .. automethod:: flipud
    .. automethod:: float
+   .. automethod:: float_power
+   .. automethod:: float_power_
    .. automethod:: floor
    .. automethod:: floor_
    .. automethod:: floor_divide
@@ -396,6 +398,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: kthvalue
    .. automethod:: lcm
    .. automethod:: lcm_
+   .. automethod:: ldexp
+   .. automethod:: ldexp_
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: less_equal
@@ -595,6 +599,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: tensor_split
+   .. automethod:: tile
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take
