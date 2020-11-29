@@ -86,6 +86,7 @@ std::unique_ptr<TransportRegistration> makeUvTransport() {
 
 // The UV transport is implemented using standard TCP connections. It leverages
 // libuv (https://github.com/libuv/libuv) in order to be cross-platform.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
@@ -112,6 +113,7 @@ std::unique_ptr<TransportRegistration> makeShmTransport() {
 // memory (plus UNIX domain sockets to bootstrap the connection and exchange
 // file descriptors). It is Linux-only due to some advanced features (O_TMPFILE,
 // eventfd, ...).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
 #endif
@@ -124,6 +126,7 @@ std::unique_ptr<CpuChannelRegistration> makeBasicChannel() {
 
 // The basic channel is just a straightforward adapter wrapper that allows any
 // transport to be used as a channel.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeCpuChannelRegistry, basic, makeBasicChannel);
 
 #if TENSORPIPE_HAS_CMA_CHANNEL
@@ -139,6 +142,7 @@ std::unique_ptr<CpuChannelRegistration> makeCmaChannel() {
 // process (as long as they belong to the same user and other security
 // constraints are satisfied). It does, more or less, what GDB does when it's
 // attached to a running process.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeCpuChannelRegistry, cma, makeCmaChannel);
 
 #endif
@@ -166,6 +170,7 @@ std::unique_ptr<CpuChannelRegistration> makeMultiplexedUvChannel() {
 // is split in equal chunks and each chunks is sent on a different connection
 // and thus driven by a different thread. This is needed to reach very high
 // bandwidths.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     TensorPipeCpuChannelRegistry,
     mpt_uv,
@@ -179,8 +184,8 @@ std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
       CudaChannelRegistration{std::move(context), kCudaIpcChannelPriority});
 }
 
-// The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across
-// processes.
+// The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across processes
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeCudaChannelRegistry, cuda_ipc, makeCudaIpcChannel);
 
 #endif
@@ -324,12 +329,16 @@ void TensorPipeAgent::startImpl() {
         priority, std::move(key), std::move(reg->channel));
   }
 
+#ifdef USE_CUDA
+
   for (auto& key : TensorPipeCudaChannelRegistry()->Keys()) {
     std::unique_ptr<CudaChannelRegistration> reg =
         TensorPipeCudaChannelRegistry()->Create(key);
     context_->registerChannel(
         reg->priority, std::move(key), std::move(reg->channel));
   }
+
+#endif
 
   listener_ = context_->listen(addresses);
 

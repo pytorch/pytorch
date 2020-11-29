@@ -63,6 +63,7 @@ struct TransportRegistration {
   std::string address;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct CpuChannelRegistration {
@@ -70,16 +71,20 @@ struct CpuChannelRegistration {
   int64_t priority;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
-struct CudaChannelRegistration {
 #ifdef USE_CUDA
+
+struct CudaChannelRegistration {
   std::shared_ptr<tensorpipe::channel::CudaContext> channel;
-#endif
   int64_t priority;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
+
+#endif
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
