@@ -174,7 +174,7 @@ static Tensor _mkldnn_pooling(
       algo,
       ideep::prop_kind::forward);
 
-  return new_with_itensor_mkldnn(std::move(y), input.options());
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
 }
 
 Tensor mkldnn_max_pool2d(

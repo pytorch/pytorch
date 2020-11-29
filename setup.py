@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_KINETO=1
+#     enables experimental usage of libkineto
+#
 #   USE_NUMPY=0
 #     disables the NumPy build
 #
@@ -308,7 +311,6 @@ def build_deps():
                             'benchmark', 'CMakeLists.txt'))
 
     check_pydep('yaml', 'pyyaml')
-    check_pydep('typing', 'typing')
 
     build_caffe2(version=version,
                  cmake_python_library=cmake_python_library,

@@ -7,7 +7,7 @@ import torch.jit.frontend
 import torch.jit.quantized
 
 # Testing utils
-from torch.testing import floating_and_complex_types
+from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import TestCase, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
@@ -45,7 +45,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
             vs = (vs,)
         return sum((i + 1) * v.sum()
                    for i, v in enumerate(vs)
-                   if v is not None and v.dtype in floating_and_complex_types())
+                   if v is not None and v.dtype in floating_and_complex_types_and(torch.half, torch.bfloat16))
 
     def clone_inputs(requires_grad):
         inputs = [
@@ -143,26 +143,18 @@ class JitCommonTestCase(TestCase):
             torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
-    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
-        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
-        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
+    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):	
+        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')	
+        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]	
 
-        # For any non-fusible node, it must show up in one of the DifferentiableGraph.
-        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
+        # For any non-fusible node, it must show up in one of the DifferentiableGraph.	
+        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0) \
+            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])	
 
-        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
-        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
-        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
-        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
+        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.	
+        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))	
+        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]	
+        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0) \
+            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])	
 
-        err_msg = "Failure in testing node's autodifferentiation, "
-        if should_autodiff_node:
-            err_msg += "one or more nodes were expected to be autodiffed, " \
-                "but weren't found in specified fusible/nonfusible DifferentiableGraph group"
-        else: 
-            err_msg += "one or more nodes weren't expected to be autodiffed, " \
-                "but were found in a fused/nonfused DifferentiableGraph group"
-
-        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
+        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)    

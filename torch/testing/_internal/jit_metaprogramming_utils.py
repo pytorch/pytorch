@@ -237,14 +237,12 @@ def get_call(method_name, func_type, args, kwargs):
     argument_str += ', ' if len(args) and len(kwargs) else ''
     argument_str += kwargs_str
 
-    if func_type == 'functional':
+    if func_type == 'functional' or func_type == 'function':
         call = 'torch.{}({})'.format(method_name, argument_str)
     elif func_type == 'method':
         call = '{}.{}({})'.format(self_arg, method_name, argument_str)
     elif func_type == 'nn_functional':
         call = 'torch.nn.functional.{}({})'.format(method_name, argument_str)
-    elif func_type == 'function':
-        call = 'torch.{}({})'.format(method_name, argument_str)
     else:
         raise TypeError('Unsupported function type')
 
