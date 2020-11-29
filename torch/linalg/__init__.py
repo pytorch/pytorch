@@ -224,6 +224,7 @@ If :attr:`tol` is not specified, :attr:`tol` is set to
 ``S.max(dim=-1) * max(input.shape[-2:]) * eps`` where ``S`` is the singular values
 (or the absolute eigenvalues when :attr:`hermitian` is ``True``),
 and ``eps`` is the epsilon value for the datatype of :attr:`input`.
+The epsilon value can be obtained using ``eps`` attribute of :class:`torch.finfo`.
 
 The method to compute the matrix rank is done using singular value decomposition (see :func:`torch.linalg.svd`) by default.
 If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
