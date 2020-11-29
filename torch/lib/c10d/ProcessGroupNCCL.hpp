@@ -243,10 +243,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       TORCH_INTERNAL_ASSERT(
           cudaEvents_->size() == 1,
           "FutureNCCL only supports single-process single-device mode.");
-      for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
-        TORCH_INTERNAL_ASSERT(event.isCreated());
-        TORCH_INTERNAL_ASSERT(event.device_index() == deviceIndex_);
-      }
     }
     // We need this because it will be the ::make() static method that actually
     // creates the instance. This is a brittle approach and the passkey idiom
@@ -371,7 +367,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-	    // To avoid races with other threads that may be using the extractor, we
+      // To avoid races with other threads that may be using the extractor, we
       // won't modify it after it's first set.
       if (dataPtrExtractor_ == nullptr) {
         dataPtrExtractor_ = std::move(data_ptr_extractor);
