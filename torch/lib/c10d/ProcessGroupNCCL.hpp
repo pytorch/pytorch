@@ -352,7 +352,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-	    // To avoid races with other threads that may be using the extractor, we
+      // To avoid races with other threads that may be using the extractor, we
       // won't modify it after it's first set.
       if (dataPtrExtractor_ == nullptr) {
         dataPtrExtractor_ = std::move(data_ptr_extractor);
