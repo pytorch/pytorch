@@ -15,7 +15,11 @@ def _invoke_rpc(rref, rpc_api, func_name, *args, **kwargs):
     rref_type = rref._get_type()
 
     _invoke_func = _local_invoke
-    if not issubclass(rref_type, torch.jit.ScriptModule):
+    # Bypass ScriptModules when checking for async function attribute.
+    bypass_type = issubclass(rref_type, torch.jit.ScriptModule) or issubclass(
+        rref_type, torch._C.ScriptModule
+    )
+    if not bypass_type:
         func = getattr(rref_type, func_name)
         if hasattr(func, "_wrapped_async_rpc_function"):
             _invoke_func = _local_invoke_async_execution
