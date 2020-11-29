@@ -984,13 +984,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::erf: {
-      return computeOneOperand(
-          "aten_erf", v, [](const ExprHandle& a) { return erf(a); });
+      return computeOneOperand("aten_erf", v, [](const ExprHandle& a) {
+        return erf(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::erfc: {
-      return computeOneOperand(
-          "aten_erfc", v, [](const ExprHandle& a) { return erfc(a); });
+      return computeOneOperand("aten_erfc", v, [](const ExprHandle& a) {
+        return erfc(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::cos: {
@@ -1125,8 +1127,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::asin: {
-      return computeOneOperand(
-          "aten_asin", v, [](const ExprHandle& a) { return asin(a); });
+      return computeOneOperand("aten_asin", v, [](const ExprHandle& a) {
+        return asin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::cosh: {
