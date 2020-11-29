@@ -1715,9 +1715,7 @@ Tensor _linalg_cond_exception_helper(const Tensor& self) {
       "One or more matrices in the batch was not invertible! "
       "linalg_cond does not support yet this case.");
   }
-  auto result_shape = self.sizes().vec();
-  result_shape.pop_back();
-  result_shape.pop_back();  // result's shape is equal to self.shape[0:-2]
+  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
   Tensor result = at::full(result_shape, INFINITY, self.options());
   return result;
 }
