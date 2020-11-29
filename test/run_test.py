@@ -263,7 +263,7 @@ if dist.is_available():
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
-    if not TEST_WITH_ROCM and dist.is_gloo_available():
+    if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'
@@ -309,7 +309,7 @@ def get_executable_command(options, allow_pytest):
 def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None):
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
-        unittest_args.append('--verbose')
+        unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
     if test_module in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [arg for arg in unittest_args if not arg.startswith('--run-parallel')]
     if extra_unittest_args:
@@ -391,24 +391,6 @@ def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
     return _test_cpp_extensions_aot('test_cpp_extensions_aot',
                                     test_directory, options, use_ninja=False)
 
-def test_rpc(test_module, test_directory, options):
-    for use_tcp_init in [True, False]:
-        if use_tcp_init:
-            if options.verbose:
-                print_to_stderr("Running RPC tests with TCP init_method")
-            os.environ["RPC_INIT_WITH_TCP"] = "1"
-        else:
-            if options.verbose:
-                print_to_stderr("Running RPC tests with FILE init_method")
-        return_code = run_test(test_module, test_directory, options)
-        if return_code != 0:
-            return return_code
-
-        # Clear environment variable for future runs
-        if os.environ.get("RPC_INIT_WITH_TCP", None) is not None:
-            del os.environ["RPC_INIT_WITH_TCP"]
-
-    return 0
 
 def test_distributed(test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
@@ -473,9 +455,6 @@ CUSTOM_HANDLERS = {
     'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
     'distributed/test_distributed_fork': test_distributed,
     'distributed/test_distributed_spawn': test_distributed,
-    'distributed/rpc/test_process_group_agent': test_rpc,
-    'distributed/rpc/test_tensorpipe_agent': test_rpc,
-    'distributed/rpc/test_faulty_agent': test_rpc,
 }
 
 
@@ -498,7 +477,8 @@ def parse_args():
     parser.add_argument(
         '-v',
         '--verbose',
-        action='store_true',
+        action='count',
+        default=0,
         help='print verbose information and test-by-test results')
     parser.add_argument(
         '--jit',
