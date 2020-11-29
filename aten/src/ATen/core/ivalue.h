@@ -82,6 +82,19 @@ struct OptionalArray {
   }
 };
 
+// Capsule is an internal implementation detail of custom C++ classes. We
+// define it as an owning wrapper for
+// c10::intrusive_ptr<torch::CustomClassHolder> This wrapper is here to serve as
+// an abstraction of the type erased custom class object pointer. It also allow
+// pybind11 to treat this as a standalone class to register as a separate type
+// caster, instead of a custom pointer holder which the pointer holder type
+// caster try to "unwrap" it automatically.
+struct Capsule {
+  c10::intrusive_ptr<torch::CustomClassHolder> obj_ptr;
+  explicit Capsule(c10::intrusive_ptr<torch::CustomClassHolder> ptr)
+      : obj_ptr(std::move(ptr)) {}
+};
+
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
 // It is a 16-byte object with an 8-byte payload and an 8-byte tag.
@@ -206,6 +219,24 @@ struct CAFFE2_API IValue final {
    */
   bool is(const IValue& rhs) const;
 
+   /**
+   * Hashing for IValues. Returns an IValue-boxed int.
+   *
+   * Some notes:
+   * - Like eager, Tensors are hashed by looking at the pointer. This is not
+   *   strictly correct because two value-equal tensors with different tensor
+   *   pointers will hash differently, but we choose to reproduce the eager
+   *   semantics.
+   * - Hashing is not defined on all built-in IValue types (e.g. list and
+   *   dict), following Python. Calling `hash()` on these types will throw.
+   */
+  IValue hash() const {
+    return (int64_t)IValue::hash(*this);
+  }
+  // This is defined because `c10::hash` dispatches to a function of this
+  // signature. See the member function `hash()`.
+  static size_t hash(const IValue& iv);
+
   /**
    * @private [doxygen private]
    * [container equality]
@@ -309,8 +340,7 @@ struct CAFFE2_API IValue final {
   /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() const&;
 
-  // Capsule. Capsule is an internal implementation detail
-  // of custom C++ classes. No new callsites of these APIs should
+  // Capsule. No new callsites of these APIs should
   // be introduced.
   static inline IValue make_capsule(
       intrusive_ptr<torch::CustomClassHolder> blob);

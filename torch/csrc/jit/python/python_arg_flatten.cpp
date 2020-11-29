@@ -21,6 +21,7 @@ static constexpr char TupleOpen = '(';
 static constexpr char TupleClose = ')';
 static constexpr char Variable = 'v';
 static constexpr char String = 's';
+static constexpr char NoneType = 'n';
 } // namespace D
 
 namespace {
@@ -62,6 +63,8 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
+  } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
+    args.desc.structure.push_back(D::NoneType);
   } else {
     std::string msg =
         "Only tuples, lists and Variables supported as JIT inputs/outputs. "
@@ -136,6 +139,8 @@ py::object unflatten_rec(
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto str = *str_it++;
     return py::reinterpret_borrow<py::object>(THPUtils_packString(str));
+  } else if (type == D::NoneType) {
+    return py::reinterpret_borrow<py::object>(py::none());
   } else {
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");

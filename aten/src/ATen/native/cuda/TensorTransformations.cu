@@ -95,6 +95,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
       kernel_pointwise_flip_apply2<scalar_t, int64_t>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           in_tensor_info, out_tensor_info, N, flip_dim, total_dims);
+      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     });
     return out_tensor;
   }
@@ -131,6 +132,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
       stride_contiguous.cuda().data_ptr<int64_t>(),
       shape_t.cuda().data_ptr<int64_t>(),
       total_dims);
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   return out_tensor;
@@ -195,6 +197,7 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
       size,
       in_tensor.stride(dim),
       total_dims);
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   return out_tensor;

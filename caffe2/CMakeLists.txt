@@ -833,6 +833,11 @@ endif()
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
+  if(USE_KINETO)
+    target_include_directories(torch_cpu PRIVATE
+      ${TORCH_ROOT}/third_party/kineto/libkineto/include
+      ${TORCH_ROOT}/third_party/kineto/libkineto/src)
+  endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
@@ -1198,6 +1203,18 @@ if(USE_CUDA)
 
 endif()
 
+# ---[ Metal(OSX) modification
+if(APPLE AND USE_PYTORCH_METAL)
+  if(NOT INTERN_BUILD_MOBILE)
+    include(../cmake/Metal.cmake)
+    # We need to link the system frameworks explicitly
+    find_library(metal NAMES Metal)
+    find_library(mps NAMES MetalPerformanceShaders)
+    find_library(foundation NAMES Foundation)
+    find_library(accelerate NAMES Accelerate)
+    target_link_libraries(torch_cpu PUBLIC ${metal} ${mps} ${foundation} ${accelerate})
+  endif()
+endif()
 
 # Note [Global dependencies]
 # Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,

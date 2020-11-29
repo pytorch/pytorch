@@ -18,7 +18,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
   QTensorImpl(
       Storage&& storage,
       DispatchKeySet key_set,
-      const caffe2::TypeMeta& data_type,
+      const caffe2::TypeMeta data_type,
       QuantizerPtr quantizer);
 
   // TODO: Expose in PyTorch Frontend

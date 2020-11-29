@@ -72,7 +72,7 @@ void FuseWithListUnpack(Node* n) {
       Symbol::fromQualString("attr::_outputs"),
       static_cast<int64_t>(listUnpack_node->outputs().size()));
 
-  for (auto i = 0; i < listUnpack_node->outputs().size(); ++i) {
+  for (size_t i = 0; i < listUnpack_node->outputs().size(); ++i) {
     auto new_output = n->addOutput();
     new_output->copyMetadata(listUnpack_node->output(i));
   }
@@ -159,79 +159,57 @@ static void ReplaceAddWithConcat(Block* b) {
   }
 }
 
-// Replace aten::index_put_ with aten::masked_scatter or aten::masked_fill
-// when inputs to the index_put node contains boolean inputs
+// This pass also covers the case when the input to ListUnpack
+// is int[] comming from some other op than ListConstruct (like Slice or Shape)
 //
-// before the pass (index_put -> masked_fill):
-// graph(%0 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu)):
-//  %mask.1 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu)
-//  %22 : Tensor?[] = prim::ListConstruct(%21)
-//  %23 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
-//  %24 : bool = prim::Constant[value=0]()
-//  %mask : Float(2:4, 2:2, 2:1) = aten::index_put_(%mask.1, %22, %23, %24)
-//
-// after the pass
-// graph(%0 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu)):
-//  %46 : Float(requires_grad=0, device=cpu) = prim::Constant[value={5}]()
-//  %mask.1 : Float(2:4, 2:2, 2:1, requires_grad=0, device=cpu) =
-//  %23 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
-//  %24 : bool = prim::Constant[value=0]()
-//  %49 : Tensor = aten::masked_fill(%mask.1, %21, %23)
-//
-// before the pass (index_put -> masked_scatter)
-//  %48 : Float(8:1, requires_grad=0, device=cpu) = prim::Constant[value= 1  1
-//                                     1  1  1  1  1  1 [ CPUFloatType{8} ]]()
-//  %42 : Tensor?[] = prim::ListConstruct(%41)
-//  %43 : bool = prim::Constant[value=0]()
-//  %44 : Float(2:4, 2:2, 2:1) = aten::index_put_(%mask, %42, %48, %43)
-//  return (%44)
+// before the pass
+// graph(%x.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
+//   %1 : None = prim::Constant()
+//   %2 : int[] = aten::size(%x.1) # <string>:7:9
+//   %a.1 : int, %b.1 : int = prim::ListUnpack(%2)
+//   %5 : int[] = prim::ListConstruct(%a.1, %b.1)
+//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1) #
+//   test/onnx/test_pytorch_onnx_onnxruntime.py:1757:23 return (%6)
 //
 // after the pass:
-//  %48 : Float(8:1, requires_grad=0, device=cpu) = prim::Constant[value= 1  1
-//                                     1  1  1  1  1  1 [ CPUFloatType{8} ]]()
-//  %49 : Tensor = aten::masked_fill(%mask.1, %21, %23)
-//  %41 : Bool(2:4, 2:2, 2:1) = aten::to()
-//  %50 : Tensor = aten::masked_scatter(%49, %41, %48)
-//  return (%50)
-static void ReplaceIndexPutWithMaskedScatter(Block* b) {
+// graph(%x.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
+//   %1 : None = prim::Constant()
+//   %2 : int[] = aten::size(%x.1) # <string>:7:9
+//   %7 : Tensor = onnx::Constant[value={0}]()
+//   %8 : Tensor = onnx::Gather(%2, %7)
+//   %9 : Tensor = onnx::Constant[value={1}]()
+//   %10 : Tensor = onnx::Gather(%2, %9)
+//   %a.1 : int, %b.1 : int = prim::ListUnpack(%2)
+//   %5 : int[] = prim::ListConstruct(%8, %10)
+//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1) #
+//   test/onnx/test_pytorch_onnx_onnxruntime.py:1757:23 return (%6)
+static void fuseListAndListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      ReplaceIndexPutWithMaskedScatter(child_block);
+      fuseListAndListUnpack(child_block);
     }
-    if (it->kind() == aten::index_put_) {
-      auto* lc_node = it->input(1)->node();
-      TensorTypePtr mask_tensor = lc_node->input(0)->type()->cast<TensorType>();
-      if (!(mask_tensor) || !(mask_tensor->scalarType().has_value()) ||
-          (mask_tensor->scalarType().value()) != c10::ScalarType::Bool) {
-        continue;
-      }
-
-      if ((!lc_node->inputs().size()) == 1) {
-        continue;
-      }
-
-      // If equated value is just a single scalar, then convert to masked_fill,
-      // and if value is a tensor of appropriate size, we convert to
-      // masked_scatter.
-      Node* masked_node;
-      TensorTypePtr val_tensor = it->input(2)->type()->cast<TensorType>();
-      if ((val_tensor) && (val_tensor->sizes().size().has_value())) {
-        if ((val_tensor->sizes().size().value()) == 0) {
-          masked_node = b->owningGraph()->create(aten::masked_fill, 1);
-        } else {
-          masked_node = b->owningGraph()->create(aten::masked_scatter, 1);
+    if (it->kind() == prim::ListUnpack) {
+      for (size_t i = 0; i < it->outputs().size(); i++) {
+        auto output = it->outputs().at(i);
+        if (it->inputs().size() == 1 &&
+            it->input()->node()->kind() != prim::ListConstruct &&
+            it->input()->type()->cast<ListType>() &&
+            it->input()
+                ->type()
+                ->cast<ListType>()
+                ->getElementType()
+                ->cast<IntType>()) {
+          Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
+          gather_indices->insertBefore(*it);
+          gather_indices->t_(
+              attr::value, at::scalar_to_tensor(at::Scalar(int(i))));
+          Node* gather_node = b->owningGraph()->create(onnx::Gather, 1);
+          gather_node->insertBefore(*it);
+          gather_node->addInput(it->input());
+          gather_node->addInput(gather_indices->output());
+          output->replaceAllUsesWith(gather_node->output());
         }
-      } else {
-        continue;
       }
-
-      masked_node->insertBefore(*it);
-      masked_node->addInput(it->input(0));
-      masked_node->addInput(lc_node->input(0));
-      masked_node->addInput(it->input(2));
-      it->replaceAllUsesWith(masked_node);
-      it->removeAllInputs();
-      it.destroyCurrent();
     }
   }
 }
@@ -241,7 +219,7 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
   FuseWithListUnpack(graph->block());
   ReplaceAddWithConcat(graph->block());
-  ReplaceIndexPutWithMaskedScatter(graph->block());
+  fuseListAndListUnpack(graph->block());
 }
 
 } // namespace jit
