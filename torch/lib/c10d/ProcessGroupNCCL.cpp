@@ -462,7 +462,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   if (blockingWait_ && asyncErrorHandling_) {
     LOG(INFO) << "[Rank " << rank_
               << "] NCCL_BLOCKING_WAIT and NCCL_ASYNC_ERROR_HANDLING "
-              << "should not both be enabled. " 
+              << "should not both be enabled. "
               << "Only NCCL_BLOCKING_WAIT is being used in this process.";
     asyncErrorHandling_ = false;
   }
@@ -1073,14 +1073,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   if (work->recordFunctionEndCallback_) {
     // recordFunctionEndCallback_ is normally called in fininsh() function by
-    // base class, but since finish is not called by WorkNCCL, we schedule this
-    // function to be run when work is done.
+    // base class, but since finish is not called by WorkNCCL, we run this
+    // function now.
     // Note when can_profile is false, profilingTitle is not provided and so,
     // recordFunctionEndCallback_ is not set.
-    work->getFuture()->addCallback(std::move(work->recordFunctionEndCallback_));
+    work->recordFunctionEndCallback_();
   }
-
-
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
