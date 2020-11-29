@@ -16,6 +16,8 @@ import math  # noqa: F401
 
 # Testing utils
 from torch._six import inf
+
+# TODO: include files like this should not set the default dtype
 torch.set_default_dtype(torch.double)
 
 L = 20
