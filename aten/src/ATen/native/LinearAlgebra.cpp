@@ -1750,7 +1750,7 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string>
 
 // Numerical or None norms
 Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
-  TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
+  TORCH_CHECK(!(self.numel() == 0 && self.size(-2)*self.size(-1) == 0), "linalg_cond is not defined for empty tensors.");
   TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
     self.dim(), " dimensions.");
 
@@ -1760,8 +1760,9 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   // If ord == None or ord == ±2
   if (std::abs(ord.toDouble()) == 2.0) {
     auto singular_values = std::get<1>(at::svd(self));
-    auto s_max = std::get<0>(singular_values.max(/*dim=*/-1));
-    auto s_min = std::get<0>(singular_values.min(/*dim=*/-1));
+    // singular values are sorted in descending order
+    auto s_max = at::narrow(singular_values, /*dim=*/-1, /*start=*/0, /*length=*/1);
+    auto s_min = at::narrow(singular_values, /*dim=*/-1, /*start=*/-1, /*length=*/1);
     Tensor result;
     if (ord.toDouble() == -2.0) {
       result = s_min / s_max;
@@ -1800,7 +1801,7 @@ Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt
 
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, std::string ord) {
-  TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
+  TORCH_CHECK(!(self.numel() == 0 && self.size(-2)*self.size(-1) == 0), "linalg_cond is not defined for empty tensors.");
   // the same checks as squareCheckInputs(self) but with a slightly more informative error message
   TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
     self.dim(), " dimensions.");
