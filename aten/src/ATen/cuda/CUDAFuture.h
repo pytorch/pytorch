@@ -66,39 +66,52 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
   std::function<void(void)> wrapCallback(
       std::function<void(void)> callback) override {
     return [this, callback{std::move(callback)}]() {
-      // Get a stream for all devices, even those that are not used by the
-      // value, because the user's callback could use those other devices.
+      // We'd love to get a stream for all devices, even those that are not used
+      // by the value, because the callback could use those other devices, but
+      // unfortunately this could cause a deadlock with NCCL. See
+      // https://github.com/pytorch/pytorch/pull/48500#issuecomment-735395414
+      // In general, if some devices haven't been used yet, by getting a stream
+      // for them we'd initialize them, and in addition to causing NCCL to
+      // misbehaving this also ends up using memory on those devices, which the
+      // user might not want.
       std::vector<at::cuda::CUDAStream> streams;
-      for (c10::DeviceIndex idx = 0; idx < c10::cuda::device_count(); idx++) {
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
+        c10::DeviceIndex idx = cudaEvent.device_index();
         // FIXME Should we find a way to allow to change the priority of
         // streams?
-        streams.push_back(
-            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
+        at::cuda::CUDAStream stream =
+            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
+        cudaEvent.block(stream);
+        streams.push_back(stream);
       }
+
+      // Use the dedicated callback stream to run callback.
+      at::cuda::CUDAMultiStreamGuard streamGuard(streams);
 
       // Do not free the underlying data storage of value_ before its
       // usage on the stream finishes.
       for (const at::DataPtr& data_ptr : extractDataPtrs(constValue())) {
         if (data_ptr.device().is_cuda()) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, streams[data_ptr.device().index()]);
+              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
         }
       }
-
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-        cudaEvent.block(streams[cudaEvent.device_index()]);
-      }
-
-      // Use the dedicated callback stream to run callback.
-      at::cuda::CUDAMultiStreamGuard streamGuard(streams);
 
       callback();
     };
   }
 
-  void postWaitHook() override {
+  void postWaitHook(const at::IValue& value) override {
     for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-      cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+      cudaEvent.block(
+          at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+    }
+
+    for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+      if (data_ptr.device().is_cuda()) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+      }
     }
   }
 
@@ -113,6 +126,9 @@ struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
  private:
   DataPtrExtractor dataPtrExtractor_;
 
+  // FIXME This too is protected so that it can be used by FutureNCCL. Please
+  // undo that once FutureNCCL is dropped in favor of a "vanilla" CUDAFuture.
+ protected:
   std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
       const at::IValue& value) {
     std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;

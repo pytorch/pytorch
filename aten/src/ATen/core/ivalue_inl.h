@@ -296,7 +296,9 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
       finished_cv_.wait(lock);
     }
 
-    postWaitHook();
+    if (!eptr_) {
+      postWaitHook(value_);
+    }
   }
 
   /**
@@ -309,11 +311,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
       finished_cv_.wait(lock);
     }
 
-    postWaitHook();
-
     if (eptr_) {
       std::rethrow_exception(eptr_);
     }
+
+    postWaitHook(value_);
   }
 
   /**
@@ -491,7 +493,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   virtual std::function<void(void)> wrapCallback(std::function<void(void)> callback) { return callback; }
 
-  virtual void postWaitHook() {}
+  virtual void postWaitHook(const at::IValue& value) {}
 
  private:
   void setErrorInternal(

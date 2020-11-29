@@ -214,6 +214,18 @@ class ProcessGroupNCCL : public ProcessGroup {
         at::IValue value,
         std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::cuda::CUDAFuture(c10::ListType::create(c10::TensorType::get())){
+      for (const at::cuda::CUDAEvent& event : *cudaEvents) {
+        TORCH_INTERNAL_ASSERT(event.isCreated());
+      }
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+        TORCH_INTERNAL_ASSERT(
+            std::find_if(
+                cudaEvents->begin(),
+                cudaEvents->end(),
+                [&](const at::cuda::CUDAEvent& ev) {
+                  return ev.device_index() == data_ptr.device().index();
+                }) != cudaEvents->end());
+      }
       cudaEvents_ = std::move(cudaEvents);
       markCompleted(std::move(value));
     }
