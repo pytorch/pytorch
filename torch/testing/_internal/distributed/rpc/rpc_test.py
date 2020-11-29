@@ -1567,8 +1567,8 @@ class RpcTest(RpcAgentTestFixture):
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
-                self.assertTrue(scope_event.cpu_interval.start < rpc_event.cpu_interval.start)
-                self.assertTrue(scope_event.cpu_interval.end > rpc_event.cpu_interval.end)
+                self.assertTrue(scope_event.time_range.start < rpc_event.time_range.start)
+                self.assertTrue(scope_event.time_range.end > rpc_event.time_range.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
             self_worker_name = worker_name(self.rank)
@@ -1760,10 +1760,10 @@ class RpcTest(RpcAgentTestFixture):
             last_end_time = 0
             for event in thread_local_events:
                 event_name = event.name
-                cpu_interval = event.cpu_interval
-                if cpu_interval.start > last_end_time:
+                time_range = event.time_range
+                if time_range.start > last_end_time:
                     top_level_event_names.append(event_name)
-                    last_end_time = cpu_interval.end
+                    last_end_time = time_range.end
         self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
 
     @dist_init
