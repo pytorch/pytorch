@@ -149,19 +149,20 @@ std::string generate_code(
   std::stringstream declare_store_arrays;
   declare_store_arrays << common_dtype_string << " out" << "[" << std::to_string(thread_work_size) << "];\n";
   env.s("declare_store_arrays", declare_store_arrays.str());
-  env.s("loader", "LoadWithoutCast l;");
+  env.s("loader", "LoadWithoutCast");
+  env.s("storer", "StoreWithoutCast");
   std::stringstream load_inputs;
   for (int i=0; i < nInputs; i++){
-    // load_inputs << "arg" << std::to_string(i) << "[j] = *(reinterpret_cast<"
-    //             << common_dtype_string << "*>(data["
-    //             << std::to_string(i + iter.noutputs()) << "]) + input_offsets["
-    //             << std::to_string(i) << "]);\n";
     load_inputs << "arg" << std::to_string(i) << "[j] = l.load<"
                 << common_dtype_string << ">(data["
                 << std::to_string(i + iter.noutputs()) << "], input_offsets["
-                << std::to_string(i) << "]);\n";
+                << std::to_string(i) << "], j);\n";
   }
   env.s("load_inputs", load_inputs.str());
+  std::stringstream store_outputs;
+  store_outputs << "s.store<" << common_dtype_string
+                << ">(out[j], data[0], output_offsets[0]);\n";
+  env.s("store_outputs", store_outputs.str());
   std::stringstream functor_args;
   for (int i=0; i < nInputs - 1; i++){
     functor_args << "arg" << std::to_string(i) << "[j], ";
@@ -270,7 +271,8 @@ void launch_jitted_pwise_function(
 //launch has to happen in this function because of lifetime of
 //objects going into args vector
 template <typename func_t>
-void prepare_args_and_launch_impl(CUfunction function, TensorIterator iter, func_t f){
+void prepare_args_and_launch_impl(CUfunction function, TensorIterator iter, func_t f,
+bool needs_dynamic_cast){
 // Constructs kernel args
   std::vector<void*> args;
   args.push_back((void*)&f);
@@ -292,22 +294,33 @@ void prepare_args_and_launch_impl(CUfunction function, TensorIterator iter, func
   auto output_offset_calculator = make_output_offset_calculator(iter);
   args.push_back((void*)&input_offset_calculator);
   args.push_back((void*)&output_offset_calculator);
+
   int64_t grid = (numel + block_work_size - 1) / block_work_size;
-  launch_jitted_pwise_function(function, args, grid, num_threads);
+  if (needs_dynamic_cast) {
+    TORCH_CHECK(false, "dynamic cast not supported yet")
+  } else {
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    args.push_back((void*)&loader);
+    args.push_back((void*)&storer);
+    // need to launch inside the if block because of loader runtime
+    // alternative is to make this function templated on loader and storer types
+    launch_jitted_pwise_function(function, args, grid, num_threads);
+  }
 }
 
 template <typename func_t>
-void prepare_args_and_launch(CUfunction function, TensorIterator iter, func_t f){
+void prepare_args_and_launch(CUfunction function, TensorIterator iter, func_t f, bool needs_dynamic_cast){
   if (iter.numel() == 0) {
     return;
   }
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      prepare_args_and_launch(function, sub_iter, f);
+      prepare_args_and_launch(function, sub_iter, f, needs_dynamic_cast);
     }
     return;
   }
-  prepare_args_and_launch_impl(function, iter, f);
+  prepare_args_and_launch_impl(function, iter, f, needs_dynamic_cast);
 }
 
 // TODO: create a stringify-like macro so this looks like C++
@@ -473,10 +486,11 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
     // be split, the properties of the iter that are used for codegen
     // won't change if it is split
     auto code = generate_code(cuda_template, iter);
+    //std::cout << "code " << code << "\n";
     const std::string kernel_name{"FooFunctor_kernel"};
     function = jit_pwise_function(foo_cache, key, code, kernel_name);
   }
-  prepare_args_and_launch(function, iter, my_functor);
+  prepare_args_and_launch(function, iter, my_functor, false);
   return iter.output();
 }
 

@@ -204,11 +204,11 @@
       const int numel,
       Array<char*, ${nInputs}+1> data, //[${nInputs}+1],
       OffsetCalculator<${nInputs}> input_calculator,
-      OffsetCalculator<1> output_calculator) {
+      OffsetCalculator<1> output_calculator,
+      ${loader} l,
+      ${storer} s) {
     ${declare_load_arrays}
     ${declare_store_arrays}
-
-    ${loader}
 
     int idx = blockIdx.x;
 
@@ -237,6 +237,7 @@
     }
 
     thread_idx = threadIdx.x;
+    #pragma unroll
     for (int j = 0; j < thread_work_size; j++){
       if (thread_idx >= remaining) {
         break;
@@ -246,7 +247,8 @@
       int linear_idx = thread_idx + block_work_size * idx;
       auto output_offsets = output_calculator.get(linear_idx);
       //TODO handle multi-return functors
-      *(reinterpret_cast<${scalar_type}*>(data[0])+output_offsets[0]) = out[j];
+      ${store_outputs}
+      //*(reinterpret_cast<${scalar_type}*>(data[0])+output_offsets[0]) = out[j];
       thread_idx += num_threads;
     }
 
