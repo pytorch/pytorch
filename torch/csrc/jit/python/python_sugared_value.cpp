@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
+
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -114,21 +115,20 @@ FunctionSchema PythonValue::getSchema(
 std::shared_ptr<SugaredValue> PythonValue::call(
     const SourceRange& loc,
     Function& m,
-    at::ArrayRef<NamedValue> inputs_,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  std::vector<NamedValue> inputsWithSelf;
+  std::vector<NamedValue> argsWithSelf;
   if (moduleSelf_) {
-    inputsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
+    argsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
   }
-  inputsWithSelf.insert(inputsWithSelf.end(), inputs_.begin(), inputs_.end());
-  inputs_ = inputsWithSelf;
+  argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
 
-  auto schema = getSchema(inputs_.size(), n_binders, loc);
-  auto inputs = toValues(*m.graph(), inputs_);
+  auto schema = getSchema(argsWithSelf.size(), n_binders, loc);
+  auto inputs = toValues(*m.graph(), argsWithSelf);
 
   MatchedSchema matched_schema =
-      matchSchema(schema, loc, *m.graph(), inputs_, attributes);
+      matchSchema(schema, loc, *m.graph(), argsWithSelf, kwargs);
 
   // If if a function is marked as dropped,
   // we throw an exception if it is invoked.
@@ -234,9 +234,11 @@ SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
-    Value* idx) {
+    Value* idx,
+    TypePtr type_hint) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
-    return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
+    return getSugaredDict(loc, m)->getModules()->getitem(
+        loc, m, idx, type_hint);
   } else if (
       concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (auto ivalue = toIValue(idx)) {
@@ -252,6 +254,32 @@ SugaredValuePtr ModuleValue::getitem(
         }
       }
       throw ErrorReport(loc) << "Key Error, " << idx_str;
+    } else if (type_hint) {
+      // Check that all submodules comply with the type hint.
+      const auto& self_type = concreteType_->getJitType()->expect<ClassType>();
+      for (size_t i = 0; i < self_type->numAttributes(); ++i) {
+        const auto& attr_type = self_type->getAttribute(i);
+        if (attr_type->is_module()) {
+          std::stringstream ss;
+          if (!attr_type->isSubtypeOfExt(type_hint, &ss)) {
+            auto loc = self_->node()->sourceRange();
+            throw ErrorReport(loc)
+                << "Attribute " << self_type->getAttributeName(i)
+                << " is not of annotated type " << type_hint->annotation_str()
+                << ": " << ss.str();
+          }
+        }
+      }
+
+      // Emit a prim::ModuleDictIndex operator. This is needed because it's
+      // difficult to construct a dict in the graph representing the ModuleDict
+      // and use aten::__getitem__ ops to index into it because any call to
+      // ModuleDict.setAttr would invalidate that emitted dict.
+      auto graph = m.graph();
+      auto* getitem_node =
+          graph->insertNode(graph->create(prim::ModuleDictIndex, {self_, idx}));
+      getitem_node->output(0)->setType(type_hint);
+      return std::make_shared<SimpleValue>(getitem_node->output(0));
     }
     throw ErrorReport(loc)
         << "Unable to extract string literal index. "
@@ -652,8 +680,8 @@ void ModuleValue::setAttr(
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
     Function& caller,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   c10::optional<bool> result;
   Graph& graph = *(caller.graph());
@@ -662,14 +690,14 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   auto arg_name = py::str(dispatched_fn_["arg_name"]);
 
   ErrorReport error(loc);
-  if (index < inputs.size()) {
+  if (index < args.size()) {
     // Dispatch flag is in arg list
-    result = constant_as<bool>(inputs.at(index).value(graph));
+    result = constant_as<bool>(args.at(index).value(graph));
     error << "Argument for boolean dispatch at position " << index
           << " was not constant";
-  } else if (auto i = findInputWithName(arg_name, attributes)) {
+  } else if (auto i = findInputWithName(arg_name, kwargs)) {
     // Dispatch flag is in kwargs
-    result = constant_as<bool>(attributes[*i].value(graph));
+    result = constant_as<bool>(kwargs[*i].value(graph));
     error << "Keyword argument '" << arg_name
           << "' for boolean dispatch at position was not constant";
   } else {
@@ -688,28 +716,28 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   } else {
     value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
   }
-  return value->call(loc, caller, inputs, attributes, n_binders);
+  return value->call(loc, caller, args, kwargs, n_binders);
 }
 
 std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     const SourceRange& loc,
     Function& caller,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
   Value* error_message = nullptr;
-  if (inputs.size() == 0) {
+  if (args.size() == 0) {
     error_message = insertConstant(*caller.graph(), "", loc);
-  } else if (inputs.size() == 1) {
-    error_message = inputs.at(0).value(*caller.graph());
+  } else if (args.size() == 1) {
+    error_message = args.at(0).value(*caller.graph());
   } else {
     std::vector<Value*> message_values;
-    message_values.reserve(inputs.size() + attributes.size());
+    message_values.reserve(args.size() + kwargs.size());
 
-    for (auto inp : inputs) {
+    for (const auto& inp : args) {
       message_values.push_back(inp.value(*caller.graph()));
     }
-    for (auto kwarg_inp : attributes) {
+    for (const auto& kwarg_inp : kwargs) {
       message_values.push_back(kwarg_inp.value(*caller.graph()));
     }
     error_message =
@@ -802,10 +830,10 @@ std::shared_ptr<SugaredValue> createSimpleEnumValue(
 std::shared_ptr<SugaredValue> PythonSliceClass::call(
     const SourceRange& loc,
     Function& caller,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
-  if (!attributes.empty()) {
+  if (!kwargs.empty()) {
     throw ErrorReport(loc) << "Slice does not accept any keyword arguments";
   }
 
@@ -824,23 +852,23 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
   Value* start;
   Value* stop;
   Value* step;
-  size_t n = inputs.size();
+  size_t n = args.size();
   // Slice's constructor signature is Slice(start=None, stop, step=None)
   if (n == 1) {
     // Case where only `stop` is specified.
     start = ValOr(nullptr, default_start);
-    stop = ValOr(inputs[0].value(graph), default_stop);
+    stop = ValOr(args[0].value(graph), default_stop);
     step = ValOr(nullptr, default_step);
   } else if (n == 2) {
     // Case where `start` and `stop` are specified.
-    start = ValOr(inputs[0].value(graph), default_start);
-    stop = ValOr(inputs[1].value(graph), default_stop);
+    start = ValOr(args[0].value(graph), default_start);
+    stop = ValOr(args[1].value(graph), default_stop);
     step = ValOr(nullptr, default_step);
   } else if (n == 3) {
     // Case where `start`, `stop` and `step` are all specified.
-    start = ValOr(inputs[0].value(graph), default_start);
-    stop = ValOr(inputs[1].value(graph), default_stop);
-    step = ValOr(inputs[2].value(graph), default_step);
+    start = ValOr(args[0].value(graph), default_start);
+    stop = ValOr(args[1].value(graph), default_stop);
+    step = ValOr(args[2].value(graph), default_step);
   } else {
     throw ErrorReport(loc) << "slice accepts exactly 1, 2 or 3 arguments, got: "
                            << n;

@@ -10,11 +10,17 @@ struct BuiltinOpFunction : public Function {
   BuiltinOpFunction(
       c10::QualifiedName qualname,
       c10::FunctionSchema schema,
-      std::function<void(Stack&)> callable)
+      std::function<void(Stack&)> callable,
+      std::string doc_string = "")
       : name_(std::move(qualname)),
         callable_(std::move(callable)),
-        schema_(std::move(schema)) {
+        schema_(std::move(schema)),
+        doc_string_(std::move(doc_string)) {
     TORCH_INTERNAL_ASSERT(schema_.returns().size() == 1);
+  }
+
+  const std::string& doc_string() const override {
+    return doc_string_;
   }
 
   bool isGraphFunction() const override {
@@ -29,7 +35,9 @@ struct BuiltinOpFunction : public Function {
     callable_(stack);
   }
 
-  c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) override {
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      Stack& stack,
+      TaskLauncher /* not used */) override {
     run(stack);
     auto res = c10::make_intrusive<c10::ivalue::Future>(stack.front().type());
     res->markCompleted(std::move(stack.front()));
@@ -110,6 +118,8 @@ struct BuiltinOpFunction : public Function {
   std::function<void(Stack&)> callable_;
 
   c10::FunctionSchema schema_;
+
+  std::string doc_string_;
 };
 
 } // namespace jit

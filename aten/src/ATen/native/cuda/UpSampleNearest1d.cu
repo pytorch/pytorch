@@ -128,9 +128,8 @@ static void upsample_nearest1d_out_cuda_template(
 
         upsample_nearest1d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
             idata, nbatch, channels, input_width, output_width, odata, scale_factor);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_nearest1d_backward_out_cuda_template(
@@ -191,9 +190,8 @@ static void upsample_nearest1d_backward_out_cuda_template(
         upsample_nearest1d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(
                 odata, nbatch, channels, output_width, input_width, idata, scale_factor);
+        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace

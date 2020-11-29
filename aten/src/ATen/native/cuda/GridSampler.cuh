@@ -7,7 +7,7 @@ namespace at { namespace native {
 
 namespace detail {
 
-  enum class GridSamplerInterpolation {Bilinear, Nearest};
+  enum class GridSamplerInterpolation {Bilinear, Nearest, Bicubic};
   enum class GridSamplerPadding {Zeros, Border, Reflection};
 
 }  // namespace detail
@@ -153,15 +153,11 @@ scalar_t safe_downgrade_to_int_range(scalar_t x){
   return x;
 }
 
-// Computes the pixel source index value for a grid coordinate
-template <typename scalar_t>
+template<typename scalar_t>
 static __forceinline__ __device__
-scalar_t grid_sampler_compute_source_index(
-    scalar_t coord,
-    int size,
-    GridSamplerPadding padding_mode,
-    bool align_corners) {
-  coord = grid_sampler_unnormalize(coord, size, align_corners);
+scalar_t compute_coordinates(scalar_t coord, int size,
+                             GridSamplerPadding padding_mode,
+                             bool align_corners) {
   if (padding_mode == GridSamplerPadding::Border) {
     // clip coordinates to image borders
     coord = clip_coordinates(coord, size);
@@ -176,7 +172,20 @@ scalar_t grid_sampler_compute_source_index(
     coord = clip_coordinates(coord, size);
   }
 
-  coord = safe_downgrade_to_int_range(coord); 
+  coord = safe_downgrade_to_int_range(coord);
+  return coord;
+}
+
+// Computes the pixel source index value for a grid coordinate
+template <typename scalar_t>
+static __forceinline__ __device__
+scalar_t grid_sampler_compute_source_index(
+    scalar_t coord,
+    int size,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  coord = grid_sampler_unnormalize(coord, size, align_corners);
+  coord = compute_coordinates(coord, size, padding_mode, align_corners);
   return coord;
 }
 
@@ -226,6 +235,25 @@ bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
 
 template<typename scalar_t>
 static __forceinline__ __device__
+scalar_t get_value_bounded(
+    scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+
+  int ix = static_cast<int>(x);
+  int iy = static_cast<int>(y); 
+
+  if (within_bounds_2d(iy, ix, H, W)) {
+    return data[iy * sH + ix * sW];
+  }
+  return static_cast<scalar_t>(0);
+}
+
+template<typename scalar_t>
+static __forceinline__ __device__
 void safe_add_2d(scalar_t *data, int h, int w,
                  int sH, int sW, int H, int W,
                  scalar_t delta) {
@@ -243,5 +271,45 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
     gpuAtomicAdd(data + d * sD + h * sH + w * sW, delta);
   }
 }
+
+template<typename scalar_t>
+static __forceinline__ __device__
+void add_value_bounded(
+    scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    scalar_t delta,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+
+  int ix = static_cast<int>(x);
+  int iy = static_cast<int>(y); 
+
+  safe_add_2d(data, iy, ix, sH, sW, H, W, delta);
+}
+
+// Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
+template<typename scalar_t>
+static __forceinline__ __device__
+void get_cubic_coefficients_grad(
+    scalar_t coeffs[4],
+    scalar_t t) {
+
+  // Must be the same as forward calculation in
+  // aten/src/ATen/native/cuda/UpSample.cuh:get_cubic_upsample_coefficients
+  scalar_t A = -0.75;
+
+  scalar_t x;
+  x = -1 - t;  // 1 < x = |-1 - tx| < 2
+  coeffs[0] = (-3 * A * x - 10 * A ) * x - 8 * A;
+  x = -t;     // x = |0 - tx| <= 1
+  coeffs[1] = (-3 * (A + 2) * x - 2 * (A + 3)) * x;
+  x = 1 - t;  // x = |1 - tx| <= 1
+  coeffs[2] = (3 * (A + 2) * x - 2 * (A + 3)) * x;
+  x = 2 - t;  // 1 < x = |2 - tx| < 2
+  coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
+}
+
 
 }}  // namespace at::native

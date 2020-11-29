@@ -340,6 +340,56 @@ struct NanSumOps {
 #endif
 };
 
+template <typename acc_t>
+struct AndOps {
+  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
+    return static_cast<bool>(a) && static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return static_cast<bool>(a) && static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
+template <typename acc_t>
+struct OrOps {
+  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
+    return static_cast<bool>(a) || static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return static_cast<bool>(a) || static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
 namespace detail {
 
 template <typename scalar_t>

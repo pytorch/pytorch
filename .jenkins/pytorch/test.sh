@@ -11,22 +11,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [ -n "${IN_CI}" ]; then
-  # TODO move this to docker
-  pip_install unittest-xml-reporting coverage pytest
+if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+  export PYTORCH_TEST_WITH_SLOW=1
+  export PYTORCH_TEST_SKIP_FAST=1
+fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
-    export PYTORCH_TEST_WITH_SLOW=1
-    export PYTORCH_TEST_SKIP_FAST=1
-  fi
-  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-    export PYTORCH_COLLECT_COVERAGE=1
-  fi
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  export PYTORCH_COLLECT_COVERAGE=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
-  rocminfo | egrep 'Name:.*\sgfx|Marketing'
+  rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -36,18 +32,6 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
-
-  # TODO: Please move this to Docker
-  # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  pip_install --user "hypothesis==4.53.2"
-  # Pin MyPy version because new errors are likely to appear with each release
-  pip_install --user "mypy==0.770"
-  # Update scikit-learn to a python-3.8 compatible version
-  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
-    pip_install -U scikit-learn
-  fi
-
-  pip_install --user tb-nightly
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -109,7 +93,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); then
+if [ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
@@ -133,7 +117,7 @@ test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
   # scalar_tensor_test, basic, native_test
-  if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
@@ -271,7 +255,7 @@ test_torch_function_benchmark() {
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
   # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
-  XLA_PORT=`shuf -i 40701-40999 -n 1`
+  XLA_PORT=$(shuf -i 40701-40999 -n 1)
   export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
   pushd xla
   echo "Running Python Tests"
@@ -401,10 +385,15 @@ else
   test_distributed
   test_benchmarks
   test_rpc
-  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-    pushd test
-    echo "Generating XML coverage report"
-    time python -mcoverage xml
-    popd
-  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  pushd test
+  echo "Generating XML coverage report"
+  time python -mcoverage xml
+  popd
+  pushd build
+  echo "Generating lcov coverage report for C++ sources"
+  time lcov --capture --directory . --output-file coverage.info
+  popd
 fi

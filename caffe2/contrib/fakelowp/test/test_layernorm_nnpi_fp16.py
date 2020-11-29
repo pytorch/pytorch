@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 from caffe2.proto import caffe2_pb2
