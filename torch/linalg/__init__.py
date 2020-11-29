@@ -347,7 +347,7 @@ or of each matrix in a batched :attr:`input`, using the matrix norm defined by :
 The condition number is defined as the matrix norm of
 :attr:`input` times the matrix norm of the inverse of :attr:`input`.
 
-This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``cdouble`` dtype for :attr:`input`.
+This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
 
 .. note:: For `p = {None, 2, -2}` :attr:`input` can be non-square. For other norm types :attr:`input` must be
           a square matrix or a batch of square matrices. If :attr:`input` does not satisfy this requirement
