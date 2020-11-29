@@ -1402,7 +1402,7 @@ AT_ERROR("cholesky: MAGMA library not found in "
     // Compute as many batches of 262140 possible
     // 262140 is the size of the largest batch of matrices that can be run with
     // violating maximum kernel configuration
-    // For complex input the batch limit is 65535
+    // For complex input the batch limit is 65535 (determined experimentally, see https://github.com/pytorch/pytorch/pull/47047#discussion_r516086923 for more information)
     // The number of "mini"-batches are floor(batch_size / batch_limit)
     // and these cover floor(batch_size / batch_limit) * batch_limit cholesky calls
     int64_t mini_batches = batch_size / batch_limit, mini_idx;
