@@ -74,17 +74,16 @@ struct CpuChannelRegistration {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
-#ifdef USE_CUDA
-
 struct CudaChannelRegistration {
+#ifdef USE_CUDA
   std::shared_ptr<tensorpipe::channel::CudaContext> channel;
   int64_t priority;
+#endif
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
 
-#endif
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 

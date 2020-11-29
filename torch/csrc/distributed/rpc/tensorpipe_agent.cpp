@@ -37,12 +37,8 @@ C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
-#ifdef USE_CUDA
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
-
-#endif
 
 std::string TensorPipeAgent::guessUvAddress(
     tensorpipe::transport::uv::Context& uvContext) {
