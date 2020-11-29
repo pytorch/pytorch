@@ -369,14 +369,14 @@ Args:
         =====  ============================
         p      norm for matrices
         =====  ============================
-        None   2-norm (ratio of the largest singular value to the smallest singular value)
+        None   ratio of the largest singular value to the smallest singular value
         'fro'  Frobenius norm
         'nuc'  nuclear norm
         inf    max(sum(abs(x), dim=1))
         -inf   min(sum(abs(x), dim=1))
         1      max(sum(abs(x), dim=0))
         -1     min(sum(abs(x), dim=0))
-        2      2-norm (ratio of the largest singular value to the smallest singular value)
+        2      ratio of the largest singular value to the smallest singular value
         -2     ratio of the smallest singular value to the largest singular value
         =====  ============================
 
