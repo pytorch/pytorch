@@ -963,7 +963,7 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, result)
 
         norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
-        input_sizes = [(32, 32), (2, 3, 3, 3)]
+        input_sizes = [(32, 32), (2, 3, 3, 3), (0, 3, 3), (0, 2, 5, 5)]
         for input_size in input_sizes:
             input = torch.randn(*input_size, dtype=dtype, device=device)
             for ord in norm_types:
