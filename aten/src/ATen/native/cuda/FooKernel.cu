@@ -81,6 +81,20 @@ static void getMajorMinor(
   }
 }
 
+static inline std::string string_repr(ScalarType t) {
+#define CASE_STRING_CASE(ctype, name) \
+  case ScalarType::name:                   \
+    return std::string(#ctype);
+
+  switch (t) {
+    //TODO use a different macro that starts with commonly used types
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_STRING_CASE)
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
+#undef CASE_STRING_CASE
+}
+
 void store_jitted_function(
     JiteratorCache& cache,
     const JiteratorKey key,
@@ -119,13 +133,13 @@ std::string generate_code(
   // Identifies scalar type
   // TODO: there has to be an existing way of doing this (i.e. converting scalar type to string)
   const auto& common_dtype = iter.common_dtype();
-  std::string common_dtype_string;
-  if (common_dtype == kFloat) {
-    common_dtype_string = "float";
-  } else if (common_dtype == kDouble) {
-    common_dtype_string = "double";
-  }
-    env.s("scalar_type", common_dtype_string);
+  std::string common_dtype_string = string_repr(common_dtype);
+  // if (common_dtype == kFloat) {
+  //   common_dtype_string = "float";
+  // } else if (common_dtype == kDouble) {
+  //   common_dtype_string = "double";
+  // }
+  env.s("scalar_type", common_dtype_string);
   std::stringstream declare_load_arrays;
   for (int i=0; i < nInputs; i++){
 //TODO these arrays are potentially of the different types, use function traits to determine the types
@@ -135,10 +149,17 @@ std::string generate_code(
   std::stringstream declare_store_arrays;
   declare_store_arrays << common_dtype_string << " out" << "[" << std::to_string(thread_work_size) << "];\n";
   env.s("declare_store_arrays", declare_store_arrays.str());
+  env.s("loader", "LoadWithoutCast l;");
   std::stringstream load_inputs;
   for (int i=0; i < nInputs; i++){
-    load_inputs << "arg" << std::to_string(i) << "[j] = *(reinterpret_cast<" << common_dtype_string << "*>(data[" <<
-    std::to_string(i + iter.noutputs()) << "]) + input_offsets[" << std::to_string(i) << "]);\n";
+    // load_inputs << "arg" << std::to_string(i) << "[j] = *(reinterpret_cast<"
+    //             << common_dtype_string << "*>(data["
+    //             << std::to_string(i + iter.noutputs()) << "]) + input_offsets["
+    //             << std::to_string(i) << "]);\n";
+    load_inputs << "arg" << std::to_string(i) << "[j] = l.load<"
+                << common_dtype_string << ">(data["
+                << std::to_string(i + iter.noutputs()) << "], input_offsets["
+                << std::to_string(i) << "]);\n";
   }
   env.s("load_inputs", load_inputs.str());
   std::stringstream functor_args;
@@ -172,7 +193,6 @@ CUfunction jit_pwise_function(
   const auto& nvrtc = at::globalContext().getNVRTC();
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
-
   // constructs nvrtc build arguments
   const std::string compute = "--gpu-architecture=compute_" +
     std::to_string(major) + std::to_string(minor);
