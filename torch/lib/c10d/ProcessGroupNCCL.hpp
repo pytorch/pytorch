@@ -221,12 +221,25 @@ class ProcessGroupNCCL : public ProcessGroup {
       TORCH_INTERNAL_ASSERT(
           cudaEvents_->size() == 1,
           "FutureNCCL only supports single-process single-device mode.");
+      for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
+        TORCH_INTERNAL_ASSERT(event.isCreated());
+        TORCH_INTERNAL_ASSERT(event.device_index() == deviceIndex_);
+      }
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        TORCH_INTERNAL_ASSERT(data_ptr.device().index() == deviceIndex_);
+      }
     }
 
+   private:
     explicit FutureNCCL(c10::DeviceIndex deviceIndex)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           deviceIndex_(deviceIndex) {}
+    // We need this because it will be the ::make() static method that actually
+    // creates the instance. This is a brittle approach and the passkey idiom
+    // would be a more robust solution. However, this will go away in #48505.
+    friend c10::intrusive_ptr<FutureNCCL>;
 
+   public:
     // Gets the current stream of the device and synchronizes recorded streams
     // with that. It will return after synchronizing the correct GPU streams to
     // ensure we can have async CUDA execution and it does not wait for the
@@ -248,16 +261,18 @@ class ProcessGroupNCCL : public ProcessGroup {
           "Attempting to set value of a FutureNCCL which has a value."
           "FutureNCCL's value was internally set to NCCL collective's "
           "outputs or the return value of the callback.");
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+        TORCH_INTERNAL_ASSERT(data_ptr.device().index() == deviceIndex_);
+      }
       value_ = std::move(value);
 
-      if (cudaEvents_ == nullptr) {
-        // Create a new cudaEvents object of size 1 that will record the current
-        // stream after callback and will be passed to the new FutureNCCL.
-        cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
-        // In case of chained then callback calls, cudaEvents
-        // records callback's stream.
-        (*cudaEvents_)[0].record(at::cuda::getCurrentCUDAStream(deviceIndex_));
-      }
+      TORCH_INTERNAL_ASSERT(cudaEvents_ == nullptr);
+      // Create a new cudaEvents object of size 1 that will record the current
+      // stream after callback and will be passed to the new FutureNCCL.
+      cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
+      // In case of chained then callback calls, cudaEvents
+      // records callback's stream.
+      (*cudaEvents_)[0].record(at::cuda::getCurrentCUDAStream(deviceIndex_));
     }
 
     // Just returns FutureNCCL's value after wait returns.
@@ -301,6 +316,13 @@ class ProcessGroupNCCL : public ProcessGroup {
         std::function<at::IValue(void)> callback,
         at::TypePtr /* unused */) override {
       auto fut = c10::make_intrusive<FutureNCCL>(deviceIndex_);
+      // The new future needs the DataPtr extractor when it gets marked complete
+      // but this might happen immediately inline or in parallel by another
+      // thread. In both these cases this would/might happen before the user has
+      // time to set their own DataPtr extractor, which might lead to failures
+      // if the default extractor can't handle some of the user's types.
+      // Therefore we propagate our extractor.
+      fut->setDataPtrExtractor(dataPtrExtractor_);
 
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
@@ -333,7 +355,11 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-      dataPtrExtractor_ = std::move(data_ptr_extractor);
+	    // To avoid races with other threads that may be using the extractor, we
+      // won't modify it after it's first set.
+      if (dataPtrExtractor_ == nullptr) {
+        dataPtrExtractor_ = std::move(data_ptr_extractor);
+      }
     }
 
    private:
