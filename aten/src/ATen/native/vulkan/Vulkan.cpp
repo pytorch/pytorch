@@ -1038,12 +1038,6 @@ ComputeUnit& ComputeUnitFactory::get(
 // VBuffer <-> VImage
 void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   const auto device = context().device();
-  struct ConstBlock {
-    int32_t w;
-    int32_t h;
-  };
-  const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
@@ -1065,7 +1059,6 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
 
   image.bindStorageImage(descrSet, 0);
   buffer.bind(descrSet, 1);
-  constBuffer.bind(descrSet, 2);
   WorkGroupSize workGroupSize{8, 8, 1};
 
   auto& computeUnit = context().computeUnitFactory().get(
@@ -1097,12 +1090,6 @@ void copy_image_to_buffer(
   TORCH_INTERNAL_ASSERT(
       buffer.sizeBytes() >= image.capacityBytes(),
       "VulkanBuffer's capacity is less than VulkanImage capacity to copy from");
-  struct ConstBlock {
-    int32_t w;
-    int32_t h;
-  };
-  const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   const VkDescriptorSetLayoutBinding bindings[] = {
@@ -1125,7 +1112,6 @@ void copy_image_to_buffer(
 
   image.bindShaderRead(descrSet, 0);
   buffer.bind(descrSet, 1);
-  constBuffer.bind(descrSet, 2);
 
   const WorkGroupSize workGroupSize{8, 8, 1};
   auto& computeUnit = context().computeUnitFactory().get(

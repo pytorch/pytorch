@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_KINETO=1
+#     enables experimental usage of libkineto
+#
 #   USE_NUMPY=0
 #     disables the NumPy build
 #
@@ -308,7 +311,6 @@ def build_deps():
                             'benchmark', 'CMakeLists.txt'))
 
     check_pydep('yaml', 'pyyaml')
-    check_pydep('typing', 'typing')
 
     build_caffe2(version=version,
                  cmake_python_library=cmake_python_library,
@@ -368,6 +370,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             return
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
         libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
+        if not os.path.exists(libtorch_cpu_path):
+            return
         # Parse libtorch_cpu load commands
         otool_cmds = subprocess.check_output(['otool', '-l', libtorch_cpu_path]).decode('utf-8').split('\n')
         rpaths, libs = [], []
@@ -435,7 +439,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Building without distributed package')
 
-        # Do not use clang to compile exensions if `-fstack-clash-protection` is defined
+        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
         if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
@@ -658,13 +662,13 @@ def configure_extension_build():
             extra_link_args += ['-g']
 
 
-    def make_relative_rpath(path):
+    def make_relative_rpath_args(path):
         if IS_DARWIN:
-            return '-Wl,-rpath,@loader_path/' + path
+            return ['-Wl,-rpath,@loader_path/' + path]
         elif IS_WINDOWS:
-            return ''
+            return []
         else:
-            return '-Wl,-rpath,$ORIGIN/' + path
+            return ['-Wl,-rpath,$ORIGIN/' + path]
 
     ################################################################################
     # Declare extensions and package
@@ -679,7 +683,7 @@ def configure_extension_build():
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
-                  extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')])
+                  extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
 
     if not IS_WINDOWS:

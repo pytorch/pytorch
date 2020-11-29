@@ -119,10 +119,17 @@ variable_list Gather::apply(variable_list&& inputs) {
     }
   }
 
-  // This is special logic for torch::cuda::gather!
-  const auto destination_index =
-      destination_device_.is_cpu() ? -1 : destination_device_.index();
-  auto variable = torch::cuda::gather(tensors, dim_, destination_index);
+  // Disable the autograd during the actual computation
+  // torch::cuda::gather does not return a view or change things inplace
+  // so no need for extra logic here
+  at::Tensor variable;
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    // This is special logic for torch::cuda::gather!
+    const auto destination_index =
+        destination_device_.is_cpu() ? -1 : destination_device_.index();
+    variable = torch::cuda::gather(tensors, dim_, destination_index);
+  }
   if (grad_fn) {
     set_history(variable, grad_fn);
   }
