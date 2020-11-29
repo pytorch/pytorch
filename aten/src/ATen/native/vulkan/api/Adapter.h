@@ -4,6 +4,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Runtime.h>
+#include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
 namespace native {
@@ -29,6 +30,10 @@ struct Adapter final {
     // is both host-visible, and device-local.  This should be a good proxy
     // for now.
     return VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU == properties.deviceType;
+  }
+
+  inline Shader::WorkGroup local_work_group_size() const {
+    return { 8u, 8u, 1u, };
   }
 };
 

@@ -1,11 +1,17 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/SmallVector.h>
+#include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
 #include <memory>
 
 #include <functional>
+
+namespace c10 {
+class CAFFE2_API OperatorHandle;
+}
 
 namespace at {
 
@@ -147,6 +153,7 @@ struct TORCH_API RecordFunction {
   // start callbacks
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
+  void before(c10::OperatorHandle const& op, int64_t sequence_nr = -1);
 
   // Sets node ID for distributed profiling
   static void setDefaultNodeId(int64_t defaultNodeId);
@@ -178,16 +185,25 @@ struct TORCH_API RecordFunction {
     return handle_;
   }
 
+  inline c10::optional<OperatorName> operator_name() const {
+    return operator_name_;
+  }
+
   inline void setHandle(RecordFunctionHandle handle) {
     handle_ = handle;
   }
 
-  // Whether this RecordFunction runs any callbacks
-  bool active = false;
+  bool isActive() const {
+    return active_;
+  }
+
   // Whether any of the picked callbacks require inputs
   bool needs_inputs = false;
 
  private:
+  // Whether this RecordFunction runs any callbacks
+  bool active_ = false;
+
   // Allows the modification of some internal states for callbacks.
   friend class CallbackManager;
 
@@ -212,6 +228,8 @@ struct TORCH_API RecordFunction {
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
+
+  c10::optional<c10::OperatorName> operator_name_;
 
   // Kind of scope this RecordFunction is observing
   const RecordScope scope_;
@@ -349,7 +367,7 @@ class TORCH_API RecordFunctionCallback {
 // optional argument - function's seq_no
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
-  if (guard.active) { \
+  if (guard.isActive()) {          \
     if (guard.needs_inputs) { \
       guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \

@@ -26,7 +26,7 @@ void initStaticRuntimeBindings(PyObject* module) {
       .def(
           "run",
           py::overload_cast<const std::vector<at::Tensor>&>(
-              &StaticRuntime::run, py::const_))
+              &StaticRuntime::run))
       .def(
           "run",
           [](StaticRuntime& self,
