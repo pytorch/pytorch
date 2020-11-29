@@ -162,6 +162,10 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(
+      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
+      "asin: result type cannot be Integral, got:",
+      r.scalar_type());
 
   if (is_same_tensor(r, t)) {
     // don't have in-place asin for uncoalesced input because coalesce() is not in-place, see above comment
@@ -171,6 +175,11 @@ SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
   }
   r._values().asin_();
   return r;
+}
+
+SparseTensor asin_sparse(const SparseTensor& t) {
+  auto result = get_result_tensor_for_unary_op(t);
+  return asin_out_sparse(result, t);
 }
 
 SparseTensor& asin_sparse_(SparseTensor& t) {

@@ -645,7 +645,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: asin
+    CPU, CUDA: asin
+    SparseCPU, SparseCUDA: asin_sparse
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
@@ -6229,14 +6230,14 @@
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
     CPU: legacy::cpu::_th_eig_out
-    CUDA: legacy::cuda::_th_eig_out
+    CUDA: eig_cuda_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eig
-    CUDA: legacy::cuda::_th_eig
+    CUDA: eig_cuda
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   dispatch:
@@ -6870,6 +6871,47 @@
   dispatch:
     CPU, CUDA: pow
     SparseCPU, SparseCUDA: pow_sparse_scalar
+
+- func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: float_power
+
+- func: float_power.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Scalar(Scalar self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    Math: float_power
+
+- func: float_power.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: float_power
+
+- func: float_power_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    Math: float_power_
+
+- func: float_power_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    Math: float_power_
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
