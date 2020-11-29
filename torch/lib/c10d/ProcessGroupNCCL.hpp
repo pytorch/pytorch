@@ -222,11 +222,32 @@ class ProcessGroupNCCL : public ProcessGroup {
         "The device indices and the events must be paired up. Got ",
         deviceIndices_.size(), " devices and ", cudaEvents_->size(),
         " events.");
+      for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
+        TORCH_INTERNAL_ASSERT(event.isCreated());
+        TORCH_INTERNAL_ASSERT(
+            std::find(
+                deviceIndices_.begin(),
+                deviceIndices_.end(),
+                event.device_index()) != deviceIndices_.end());
+      }
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        TORCH_INTERNAL_ASSERT(
+            std::find(
+                deviceIndices_.begin(),
+                deviceIndices_.end(),
+                data_ptr.device().index()) != deviceIndices_.end());
+      }
     }
 
+   private:
     FutureNCCL()
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())) {}
+    // We need this because it will be the ::make() static method that actually
+    // creates the instance. This is a brittle approach and the passkey idiom
+    // would be a more robust solution. However, this will go away in #48505.
+    friend c10::intrusive_ptr<FutureNCCL>;
 
+   public:
     // Gets the current stream of the device and synchronizes recorded streams
     // with that. It will return after synchronizing the correct GPU streams to
     // ensure we can have async CUDA execution and it does not wait for the
@@ -239,6 +260,13 @@ class ProcessGroupNCCL : public ProcessGroup {
       for (int i = 0; i < deviceIndices_.size(); i++) {
         (*cudaEvents_)[i].block(
             at::cuda::getCurrentCUDAStream(deviceIndices_[i]));
+      }
+
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        if (data_ptr.device().is_cuda()) {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+        }
       }
     }
 
@@ -253,22 +281,21 @@ class ProcessGroupNCCL : public ProcessGroup {
           "outputs or the return value of the callback.");
       value_ = std::move(value);
 
-      if (cudaEvents_ == nullptr) {
-        std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-        for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-          if (data_ptr.device().is_cuda()) {
-            isCudaDeviceUsed[data_ptr.device().index()] = true;
-          }
+      TORCH_INTERNAL_ASSERT(cudaEvents_ == nullptr);
+      std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        if (data_ptr.device().is_cuda()) {
+          isCudaDeviceUsed[data_ptr.device().index()] = true;
         }
+      }
 
-        cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
-        for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-          if (isCudaDeviceUsed[idx]) {
-            at::cuda::CUDAEvent cudaEvent;
-            cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-            deviceIndices_.push_back(idx);
-            (*cudaEvents_).push_back(std::move(cudaEvent));
-          }
+      cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
+      for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
+        if (isCudaDeviceUsed[idx]) {
+          at::cuda::CUDAEvent cudaEvent;
+          cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
+          deviceIndices_.push_back(idx);
+          (*cudaEvents_).push_back(std::move(cudaEvent));
         }
       }
     }
@@ -291,31 +318,37 @@ class ProcessGroupNCCL : public ProcessGroup {
     // this callback. This new FutureNCCL's cudaEvents will record the
     // callback's stream and will have the result value of the callback.
     void addCallback(std::function<void(void)> callback) override {
-      // Get a stream for all devices, even those that are not used by the
-      // value, because the user's callback could use those other devices.
+      // We'd love to get a stream for all devices, even those that are not used
+      // by the value, because the callback could use those other devices, but
+      // unfortunately this could cause a deadlock with NCCL. See
+      // https://github.com/pytorch/pytorch/pull/48500#issuecomment-735395414
+      // In general, if some devices haven't been used yet, by getting a stream
+      // for them we'd initialize them, and in addition to causing NCCL to
+      // misbehaving this also ends up using memory on those devices, which the
+      // user might not want.
       std::vector<at::cuda::CUDAStream> streams;
-      for (c10::DeviceIndex idx = 0; idx < c10::cuda::device_count(); idx++) {
+      for (int i = 0; i < deviceIndices_.size(); i++) {
+        c10::DeviceIndex idx = deviceIndices_[i];
         // FIXME Should we find a way to allow to change the priority of
         // streams?
-        streams.push_back(
-            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
+        at::cuda::CUDAStream stream =
+            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx);
+        (*cudaEvents_)[i].block(stream);
+        streams.push_back(stream);
       }
+
+      // Use the dedicated callback stream to run callback.
+      at::cuda::CUDAMultiStreamGuard streamGuard(streams);
 
       // Do not free the underlying data storage of value_ before its
       // usage on the stream finishes.
       for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
         if (data_ptr.device().is_cuda()) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, streams[data_ptr.device().index()]);
+              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
         }
       }
 
-      for (int i = 0; i < deviceIndices_.size(); i++) {
-        (*cudaEvents_)[i].block(streams[deviceIndices_[i]]);
-      }
-
-      // Use the dedicated callback stream to run callback.
-      at::cuda::CUDAMultiStreamGuard streamGuard(streams);
       callback();
     }
 
@@ -349,15 +382,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       return fut;
     }
 
-    // Checks cudaEventQuery with cudaEvents. Returns true if a FutureError was
-    // recorded or the entire operation is completed on the GPU.
     bool completed() const override {
-      if (error_) {
-        return true;
-      }
-      // Checking the work's corresponding CUDA events' status
-      auto ret = cudaEventQuery((*cudaEvents_)[0]);
-      return ret != cudaErrorNotReady || ret == cudaSuccess;
+      return true;
     }
 
     bool hasValue() const override {
