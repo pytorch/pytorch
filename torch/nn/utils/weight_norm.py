@@ -20,7 +20,7 @@ class WeightNorm(object):
     # TODO Make return type more specific
     def compute_weight(self, module: Module) -> Any:
         g = getattr(module, self.name + '_g')
-        v = getattr(module, self.name + '_v')
+        v = getattr(module, self.name + '_v') + 1e-10 # eps to remove NaNs in output
         return _weight_norm(v, g, self.dim)
 
     @staticmethod
