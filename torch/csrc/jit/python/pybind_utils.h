@@ -224,7 +224,6 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   // allocator.
   static std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrExtractor(
       const at::IValue& value) {
-    TORCH_INTERNAL_ASSERT(PyGILState_Check() == 0);
     if (value.isPyObject()) {
       pybind11::gil_scoped_acquire gil;
       py::object obj = torch::jit::toPyObject(value);
