@@ -13,7 +13,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -197,8 +196,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   // or NCCL's barrier().
   //
   // If created by WorkNCCL's getFuture API, FutureNCCL has a reference to
-  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device indices of
-  // outputs' devices. Its value is NCCL collective's outputs.
+  // WorkNCCL's cudaEvents, NCCL collective's outputs, and the device index of
+  // outputs' device. Its value is NCCL collective's
+  // outputs. FutureNCCL only supports single-process single-device mode where
+  // the size of outputs is equal to 1.
   //
   // If created by FutureNCCL's then callback, its value becomes the value of
   // callback() and its cudaEvents will record the NCCL stream that runs that
@@ -211,14 +212,34 @@ class ProcessGroupNCCL : public ProcessGroup {
    public:
     explicit FutureNCCL(
         at::IValue value,
+        c10::DeviceIndex deviceIndex,
         std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           value_(std::move(value)),
+          deviceIndex_(deviceIndex),
           cudaEvents_(std::move(cudaEvents)) {
+      TORCH_INTERNAL_ASSERT(
+          cudaEvents_->size() == 1,
+          "FutureNCCL only supports single-process single-device mode.");
+      for (const at::cuda::CUDAEvent& event : *cudaEvents_) {
+        TORCH_INTERNAL_ASSERT(event.isCreated());
+        TORCH_INTERNAL_ASSERT(event.device_index() == deviceIndex_);
+      }
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        TORCH_INTERNAL_ASSERT(data_ptr.device().index() == deviceIndex_);
+      }
     }
 
-    FutureNCCL(at::TypePtr type) : at::ivalue::Future(std::move(type)) {}
+   private:
+    explicit FutureNCCL(c10::DeviceIndex deviceIndex)
+        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
+          deviceIndex_(deviceIndex) {}
+    // We need this because it will be the ::make() static method that actually
+    // creates the instance. This is a brittle approach and the passkey idiom
+    // would be a more robust solution. However, this will go away in #48505.
+    friend c10::intrusive_ptr<FutureNCCL>;
 
+   public:
     // Gets the current stream of the device and synchronizes recorded streams
     // with that. It will return after synchronizing the correct GPU streams to
     // ensure we can have async CUDA execution and it does not wait for the
@@ -227,11 +248,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       if (error_) {
         throw *error_;
       }
-
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-        cudaEvent.block(
-            at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
-      }
+      auto stream = at::cuda::getCurrentCUDAStream(deviceIndex_);
+      (*cudaEvents_)[0].block(stream);
     }
 
     // If FutureNCCL was created by FutureNCCL::then, its value would be empty
@@ -243,25 +261,18 @@ class ProcessGroupNCCL : public ProcessGroup {
           "Attempting to set value of a FutureNCCL which has a value."
           "FutureNCCL's value was internally set to NCCL collective's "
           "outputs or the return value of the callback.");
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value)) {
+        TORCH_INTERNAL_ASSERT(data_ptr.device().index() == deviceIndex_);
+      }
       value_ = std::move(value);
 
-      if (cudaEvents_ == nullptr) {
-        std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-        for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-          if (data_ptr.device().is_cuda()) {
-            isCudaDeviceUsed[data_ptr.device().index()] = true;
-          }
-        }
-
-        cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
-        for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-          if (isCudaDeviceUsed[idx]) {
-            at::cuda::CUDAEvent cudaEvent;
-            cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-            (*cudaEvents_).push_back(std::move(cudaEvent));
-          }
-        }
-      }
+      TORCH_INTERNAL_ASSERT(cudaEvents_ == nullptr);
+      // Create a new cudaEvents object of size 1 that will record the current
+      // stream after callback and will be passed to the new FutureNCCL.
+      cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
+      // In case of chained then callback calls, cudaEvents
+      // records callback's stream.
+      (*cudaEvents_)[0].record(at::cuda::getCurrentCUDAStream(deviceIndex_));
     }
 
     // Just returns FutureNCCL's value after wait returns.
@@ -282,31 +293,19 @@ class ProcessGroupNCCL : public ProcessGroup {
     // this callback. This new FutureNCCL's cudaEvents will record the
     // callback's stream and will have the result value of the callback.
     void addCallback(std::function<void(void)> callback) override {
-      // Get a stream for all devices, even those that are not used by the
-      // value, because the user's callback could use those other devices.
-      std::vector<at::cuda::CUDAStream> streams;
-      for (c10::DeviceIndex idx = 0; idx < c10::cuda::device_count(); idx++) {
-        // FIXME Should we find a way to allow to change the priority of
-        // streams?
-        streams.push_back(
-            at::cuda::getStreamFromPool(/*isHighPriority=*/false, idx));
-      }
+      // FIXME Should we find a way to allow to change the priority of streams?
+      at::cuda::CUDAStream stream =
+          at::cuda::getStreamFromPool(/*isHighPriority=*/false, deviceIndex_);
 
       // Do not free the underlying data storage of value_ before its
       // usage on the stream finishes.
       for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
-        if (data_ptr.device().is_cuda()) {
-          c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, streams[data_ptr.device().index()]);
-        }
+        c10::cuda::CUDACachingAllocator::recordStream(data_ptr, stream);
       }
 
-      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-        cudaEvent.block(streams[cudaEvent.device_index()]);
-      }
-
+      (*cudaEvents_)[0].block(stream);
       // Use the dedicated callback stream to run callback.
-      at::cuda::CUDAMultiStreamGuard streamGuard(streams);
+      c10::StreamGuard streamGuard{stream};
       callback();
     }
 
@@ -315,8 +314,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     // stream that runs this callback.
     c10::intrusive_ptr<Future> then(
         std::function<at::IValue(void)> callback,
-        at::TypePtr type) override {
-      auto fut = c10::make_intrusive<FutureNCCL>(std::move(type));
+        at::TypePtr /* unused */) override {
+      auto fut = c10::make_intrusive<FutureNCCL>(deviceIndex_);
       // The new future needs the DataPtr extractor when it gets marked complete
       // but this might happen immediately inline or in parallel by another
       // thread. In both these cases this would/might happen before the user has
@@ -349,7 +348,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) override {
-      // To avoid races with other threads that may be using the extractor, we
+	    // To avoid races with other threads that may be using the extractor, we
       // won't modify it after it's first set.
       if (dataPtrExtractor_ == nullptr) {
         dataPtrExtractor_ = std::move(data_ptr_extractor);
@@ -358,6 +357,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
    private:
     at::IValue value_;
+    c10::DeviceIndex deviceIndex_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     DataPtrExtractor dataPtrExtractor_;
     c10::optional<FutureError> error_;
@@ -374,6 +374,7 @@ class ProcessGroupNCCL : public ProcessGroup {
         // If a C++ communication hook is used, use the default extractor.
         data_ptrs = at::ivalue::Future::defaultDataPtrExtractor(value);
       }
+      TORCH_INTERNAL_ASSERT(data_ptrs.size() == 1, "expected exactly 1 tensor");
       return data_ptrs;
     }
   };

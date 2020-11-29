@@ -61,8 +61,6 @@ inline IValue toIValue(
 
 py::object toPyObject(IValue ivalue);
 
-IValue toTypeInferredIValue(py::handle input);
-
 // The PythonFutureWrapper for ivalue::Future
 //
 // NB: VISIBILITY_HIDDEN is for silencing compiling error,
@@ -222,16 +220,17 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   // This callback is only used by subclasses of Future that deal with CUDA,
   // in order to register the pointers on the right streams with the caching
   // allocator.
+  // By default, assume that the input value is or can be casted into a tensor
+  // vector that has exactly one tensor.
   static std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrExtractor(
       const at::IValue& value) {
     TORCH_INTERNAL_ASSERT(PyGILState_Check() == 0);
     if (value.isPyObject()) {
       pybind11::gil_scoped_acquire gil;
       py::object obj = torch::jit::toPyObject(value);
-      // FIXME This could fail. As a fallback we could try to pickle the
-      // object, since the pickler might support broader types and it is able
-      // to extract the tensors from the object as a vector.
-      auto new_value = torch::jit::toTypeInferredIValue(obj);
+      // FIXME Should we support more types than just tensor lists?
+      auto new_value = torch::jit::toIValue(
+          obj, c10::ListType::create(c10::TensorType::get()));
       return at::ivalue::Future::defaultDataPtrExtractor(new_value);
     }
     return at::ivalue::Future::defaultDataPtrExtractor(value);
