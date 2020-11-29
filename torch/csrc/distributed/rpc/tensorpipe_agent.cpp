@@ -31,10 +31,13 @@ const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
 
 std::string TensorPipeAgent::guessUvAddress(
