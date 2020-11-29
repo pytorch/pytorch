@@ -250,6 +250,10 @@ class ProcessGroupNCCL : public ProcessGroup {
       }
       auto stream = at::cuda::getCurrentCUDAStream(deviceIndex_);
       (*cudaEvents_)[0].block(stream);
+
+      for (const at::DataPtr& data_ptr : extractDataPtrs(value_)) {
+        c10::cuda::CUDACachingAllocator::recordStream(data_ptr, stream);
+      }
     }
 
     // If FutureNCCL was created by FutureNCCL::then, its value would be empty
