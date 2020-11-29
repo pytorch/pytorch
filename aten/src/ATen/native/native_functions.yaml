@@ -9484,25 +9484,25 @@
   python_module: linalg
   variants: function
 
-- func: linalg_cond(Tensor self, Scalar? ord=None) -> Tensor
+- func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_cond
 
-- func: linalg_cond.out(Tensor self, Scalar? ord=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_cond.out(Tensor self, Scalar? p=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_cond_out
 
-- func: linalg_cond.ord_str(Tensor self, str ord) -> Tensor
+- func: linalg_cond.p_str(Tensor self, str p) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
     Math: linalg_cond
 
-- func: linalg_cond.ord_str_out(Tensor self, str ord, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_cond.p_str_out(Tensor self, str p, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
   dispatch:
