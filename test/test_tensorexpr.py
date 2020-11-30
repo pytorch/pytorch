@@ -967,7 +967,8 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
 
     def test_double_intrinsics(self):
-        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+        # TODO: add "cpu" device once `pow` is supported there
+        devices = ["cuda"] if torch.cuda.is_available() else []
 
         def do_pow(x):
             return torch.pow(x, 7)
