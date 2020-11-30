@@ -840,6 +840,23 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
+Tensor tile(const Tensor& self, IntArrayRef reps){
+  // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
+  // 1’s to it to keep the same behaviour as `numpy.tile`.
+  // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
+  // as (1, 1, 2, 2).
+  const int64_t size_diff = self.dim() - static_cast<int64_t>(reps.size());
+  if (size_diff > 0){
+    std::vector<int64_t> new_reps(size_diff, 1);
+    for(auto i = decltype(reps.size()){0}; i < reps.size(); ++i){
+      new_reps.emplace_back(reps[i]);
+    }
+    return self.repeat(IntArrayRef(new_reps));
+  }
+  // `torch.tile` is equivalent to the already implemented `torch.Tensor.repeat`
+  return self.repeat(reps);
+}
+
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const c10::IntArrayRef sizes,
@@ -1983,6 +2000,22 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
 
 Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
+}
+
+Tensor swapaxes(const Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose(axis0, axis1);
+}
+
+Tensor& swapaxes_(Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose_(axis0, axis1);
+}
+
+Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose(dim0, dim1);
+}
+
+Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
+  return self.transpose_(dim0, dim1);
 }
 
 }} // at::native

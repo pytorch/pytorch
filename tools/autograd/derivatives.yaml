@@ -554,6 +554,10 @@
   self: 'not_implemented("igamma: input")'
   other: grad * exp((self - 1) * log(other) - other - lgamma(self))
 
+- name: igammac(Tensor self, Tensor other) -> Tensor
+  self: 'not_implemented("igammac: input")'
+  other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
+
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
   indices: TensorList()
@@ -1039,6 +1043,12 @@
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: symeig_backward(grads, self, eigenvectors, upper, eigenvalues, eigenvectors_return)
+
+- name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
+  self: symeig_backward(grads, self, /*eigenvectors=*/true, /*upper=*/true, eigenvalues, eigenvectors)
+
+- name: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
+  self: non_differentiable
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
