@@ -295,9 +295,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       (*cudaEvents_)[0].block(*futureNCCLCallbackStream_);
       c10::OptionalStreamGuard streamGuard{
           c10::Stream(*futureNCCLCallbackStream_)};
-      torch::Tensor t1 = torch::ones({2, 2}, torch::device({torch::kCUDA, 1}));
-      torch::Tensor t2 = torch::ones({2, 2}, torch::device({torch::kCUDA, 1}));
-      torch::add(t1, t2);
       callback();
     }
 
