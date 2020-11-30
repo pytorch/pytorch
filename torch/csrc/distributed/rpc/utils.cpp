@@ -36,7 +36,7 @@ void processRemoteProfiledEvents(
       "Profiler was expected to be enabled. This can happen in callback "
       " continutations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
-  std::vector<torch::autograd::profiler::Event> events =
+  std::vector<torch::autograd::profiler::LegacyEvent> events =
       rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();
   auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
@@ -46,7 +46,7 @@ void processRemoteProfiledEvents(
   std::for_each(
       events.begin(),
       events.end(),
-      [&keyPrefixStr](torch::autograd::profiler::Event& event) {
+      [&keyPrefixStr](torch::autograd::profiler::LegacyEvent& event) {
         std::string name = keyPrefixStr + std::string(event.name());
         event.setName(at::StringView(name));
       });
@@ -511,9 +511,9 @@ std::vector<at::IValue> readWrappedPayload(
 }
 
 void populateRemoteProfiledEvents(
-    std::vector<torch::autograd::profiler::Event>& profiledEvents,
+    std::vector<torch::autograd::profiler::LegacyEvent>& profiledEvents,
     const torch::autograd::profiler::ProfilerConfig& profilingConfig,
-    const std::vector<std::vector<torch::autograd::profiler::Event>>&
+    const std::vector<std::vector<torch::autograd::profiler::LegacyEvent>>&
         eventLists) {
   // Gather all events into a vector
   for (auto& l : eventLists) {
@@ -525,11 +525,11 @@ void populateRemoteProfiledEvents(
   bool cudaProfilingEnabled =
       profilingConfig.state == torch::autograd::profiler::ProfilerState::CUDA;
   bool foundCpuStart = false;
-  const torch::autograd::profiler::Event* profilerStart = nullptr;
+  const torch::autograd::profiler::LegacyEvent* profilerStart = nullptr;
   // Each device has its own cudaProfilerStart, so we must take
   // care to use the correct one depending on the device the
   // operation ran on.
-  std::unordered_map<int, const torch::autograd::profiler::Event*>
+  std::unordered_map<int, const torch::autograd::profiler::LegacyEvent*>
       cudaProfilerStarts;
   for (auto& e : profiledEvents) {
     if (!foundCpuStart && 0 == strcmp(e.name(), "__start_profile")) {
