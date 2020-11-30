@@ -1056,9 +1056,10 @@ Tensor compute_T12(const Tensor& A) {
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
     reinterpret_cast<void*>(&b),
-    num_prods * num_prods,
+    {num_prods, num_prods},
+    {num_prods, 1},
     c10::toValueType(A.scalar_type())
-  ).reshape({num_prods, num_prods});
+  );
   bs = _move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
@@ -1127,9 +1128,10 @@ Tensor compute_T18(const Tensor& A) {
   // and move them to device `device_of(A)`
   auto bs = at::from_blob(
     reinterpret_cast<void*>(&b),
-    num_prods * num_prods,
+    {num_prods, num_prods},
+    {num_prods, 1},
     c10::toValueType(A.scalar_type())
-  ).reshape({num_prods, num_prods});
+  );
   bs = _move_memory_if_cuda_input(bs, A);
 
   auto As = _allocate_buffer(A, num_prods);
