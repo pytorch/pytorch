@@ -52,7 +52,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
-        self.zero_bias = nn.Parameter(torch.Tensor(out_channels))
+        self.zero_bias = torch.Tensor(out_channels)
         if bias:
             self.bias = nn.Parameter(torch.Tensor(out_channels))
         else:
