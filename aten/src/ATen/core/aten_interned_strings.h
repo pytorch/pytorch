@@ -552,6 +552,7 @@ _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, pow) \
+_(aten, float_power) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
 _(aten, prod) \
@@ -679,6 +680,7 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
+_(aten, tile) \
 _(aten, slow_conv3d) \
 _(aten, slow_conv3d_backward) \
 _(aten, slow_conv3d_forward) \
