@@ -297,6 +297,7 @@ struct TORCH_API RecordFunction {
  */
 class TORCH_API RecordFunctionCallback {
  public:
+
   // This interface supports observers that require passing an ObserverContext
   // between start and end callbacks.
   explicit RecordFunctionCallback(
@@ -305,17 +306,6 @@ class TORCH_API RecordFunctionCallback {
         [](const RecordFunction&, ObserverContext*) {}):
       start_(std::move(start)),
       end_(std::move(end)) {
-    scopes_.fill(true);
-  }
-
-  // This interface is for observers that do not pass an ObserverContext object
-  // between start and end callbacks.
-  explicit RecordFunctionCallback(
-      std::function<void(const RecordFunction&)> start,
-      std::function<void(const RecordFunction&)> end =
-        [](const RecordFunction&) {}):
-      start_{[start](const RecordFunction& rf) { start(rf); return nullptr; }},
-      end_{[end](const RecordFunction& rf, ObserverContext*) { end(rf); }} {
     scopes_.fill(true);
   }
 

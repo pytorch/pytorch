@@ -27,15 +27,15 @@ void setupBenchmarkCallbacks() {
   at::clearCallbacks();
   // non-sampled callback
   at::addGlobalCallback(at::RecordFunctionCallback(
-      [&](const at::RecordFunction& fn) {},
-      [](const at::RecordFunction&) {})
+      [](const at::RecordFunction& fn) { return nullptr; },
+      [](const at::RecordFunction&, at::ObserverContext*) {})
     .needsInputs(true));
 
   // sampled
   for (auto idx = 0; idx < kNumSampledCb; ++idx) {
     at::addGlobalCallback(at::RecordFunctionCallback(
-        [](const at::RecordFunction& fn) {},
-        [](const at::RecordFunction&) {})
+        [](const at::RecordFunction& fn) { return nullptr; },
+        [](const at::RecordFunction&, at::ObserverContext*) {})
       .needsInputs(true)
       .samplingProb(kSampingProb)
     );
@@ -107,8 +107,9 @@ int main(int argc, char** argv) {
   at::addGlobalCallback(at::RecordFunctionCallback(
       [&](const at::RecordFunction& fn) {
         ++cb_count;
+        return nullptr;
       },
-      [](const at::RecordFunction&) {})
+      [](const at::RecordFunction&, at::ObserverContext*) {})
     .needsInputs(true)
     .samplingProb(kLowSamplingProb)
   );

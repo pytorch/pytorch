@@ -743,8 +743,8 @@ void checkScopeCallbacks() {
             std::string(fn.name().str()) == "test_user_scope") {
           found_user_scope = true;
         }
-      },
-      [](const at::RecordFunction&) {}));
+        return nullptr;
+      }));
 
   bool bad_scope = false;
   auto pushScopedCallback = [&](at::RecordScope scope, size_t& cnt) {
@@ -756,9 +756,8 @@ void checkScopeCallbacks() {
               } else {
                 bad_scope = true;
               }
-              return true;
-            },
-            [](const at::RecordFunction&) {})
+              return nullptr;
+            })
             .scopes({scope}));
   };
 
@@ -817,8 +816,8 @@ TEST(RecordFunctionTest, Basic) {
             } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
               ts_names.insert(fn.name().str());
             }
-          },
-          [](const RecordFunction&) {})
+            return nullptr;
+          })
           .needsInputs(true));
 
   TracedTestInputs eager_inputs, jit_inputs;
@@ -855,9 +854,8 @@ TEST(RecordFunctionTest, Basic) {
                                    if (std::string(fn.name().str()) == "test") {
                                      ++sampled_cb_ctr;
                                    }
-                                   return true;
-                                 },
-                                 [](const RecordFunction&) {})
+                                   return nullptr;
+                                 })
                                  .samplingProb(sampling_prob));
   };
 
@@ -867,9 +865,8 @@ TEST(RecordFunctionTest, Basic) {
         if (std::string(fn.name().str()) == "test") {
           ++non_sampled_cb_ctr;
         }
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
 
   auto handle = setup_sampled_callback(0.5);
 
@@ -912,9 +909,8 @@ TEST(RecordFunctionTest, Basic) {
       [&fn_names, &mtx](const RecordFunction& fn) {
         std::lock_guard<std::mutex> lock(mtx);
         fn_names.push_back(fn.name().str());
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
   {
     RecordFunctionGuard g1(false);
     {
@@ -938,8 +934,10 @@ TEST(RecordFunctionTest, Basic) {
   std::vector<size_t> ids;
   auto add_remove_test_add_cb = [&ids](size_t id) {
     return addGlobalCallback(RecordFunctionCallback(
-        [&ids, id](const RecordFunction& fn) { ids.push_back(id); },
-        [](const RecordFunction&) {}));
+        [&ids, id](const RecordFunction& fn) {
+          ids.push_back(id);
+          return nullptr ;
+        }));
   };
 
   auto h1 = add_remove_test_add_cb(1);
@@ -976,8 +974,7 @@ TEST(RecordFunctionTest, Basic) {
 
   ids.clear();
   addGlobalCallback(RecordFunctionCallback(
-      [&ids](const RecordFunction& fn) { ids.push_back(1); },
-      [](const RecordFunction&) {}));
+      [&ids](const RecordFunction& fn) { ids.push_back(1); return nullptr; }));
 
   { RECORD_USER_SCOPE("test"); }
 
@@ -987,8 +984,7 @@ TEST(RecordFunctionTest, Basic) {
 
   auto th = std::thread([&ids]() {
     addThreadLocalCallback(RecordFunctionCallback(
-        [&ids](const RecordFunction& fn) { ids.push_back(2); },
-        [](const RecordFunction&) {}));
+        [&ids](const RecordFunction& fn) { ids.push_back(2); return nullptr; }));
 
     { RECORD_USER_SCOPE("test_thread"); }
   });
@@ -1074,8 +1070,7 @@ TEST(RecordFunctionTest, Basic) {
   bool ran = false;
   should_run = false;
   addGlobalCallback(RecordFunctionCallback(
-                        [&ran](const RecordFunction& fn) { ran = true; },
-                        [](const RecordFunction&) {})
+                        [&ran](const RecordFunction& fn) { ran = true; return nullptr; })
                         .setShouldRun(shouldRunCallback));
 
   { RECORD_USER_SCOPE("test"); }
@@ -1097,8 +1092,8 @@ TEST(RecordFunctionTest, Basic) {
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
         [&recorded_op](const RecordFunction& fn) {
           recorded_op = fn.name().str();
-        },
-        [](const RecordFunction&) {}));
+          return nullptr;
+        }));
     ThreadLocalState state;
     std::thread t_child([state]() {
       ThreadLocalStateGuard g_tls(state);
@@ -1115,16 +1110,20 @@ TEST(RecordFunctionTest, Basic) {
   bool has_ids = false;
   addGlobalCallback(
       RecordFunctionCallback(
-          [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
-          [](const RecordFunction&) {})
+          [&has_ids](const RecordFunction& fn) {
+            has_ids = fn.handle() > 0;
+            return nullptr;
+          })
           .needsIds(true));
   { RECORD_USER_SCOPE("test"); }
   TORCH_CHECK(has_ids);
   clearCallbacks();
   has_ids = false;
   addGlobalCallback(RecordFunctionCallback(
-      [&has_ids](const RecordFunction& fn) { has_ids = fn.handle() > 0; },
-      [](const RecordFunction&) {}));
+      [&has_ids](const RecordFunction& fn) {
+        has_ids = fn.handle() > 0;
+        return nullptr;
+      }));
   { RECORD_USER_SCOPE("test"); }
   TORCH_CHECK(!has_ids);
   clearCallbacks();
@@ -1142,6 +1141,7 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
         } else {
           operator_names.insert("No Operator Name");
         }
+        return nullptr;
       }).scopes({at::RecordScope::FUNCTION}));
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(false);
@@ -1212,9 +1212,8 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
       [&done](const RecordFunction&) {
         checkDebugInfo(c10::DebugInfoKind::TEST_INFO, 42);
         done = true;
-        return true;
-      },
-      [](const RecordFunction&) {}));
+        return nullptr;
+      }));
   {
     c10::DebugInfoGuard guard(c10::DebugInfoKind::TEST_INFO, debug_info);
     auto t = torch::randn({1, 2, 3}, at::kCPU);

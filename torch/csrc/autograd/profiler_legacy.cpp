@@ -417,7 +417,7 @@ void pushProfilingCallbacksLegacy() {
       [](const at::RecordFunction& fn) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
-          return;
+          return nullptr;
         }
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
@@ -432,8 +432,10 @@ void pushProfilingCallbacksLegacy() {
         } else {
           state_ptr->pushRange(fn, record_cuda, msg);
         }
+
+        return nullptr;
       },
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn, at::ObserverContext*) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
