@@ -35,6 +35,9 @@ class PowerSGDState(object):
     def __init__(self, process_group, matrix_approximation_rank=1, random_seed=0):
         self.process_group = process_group
         self.matrix_approximation_rank = matrix_approximation_rank
+        # The purpose of RNG is to generate different random seed for initializing Q across iterations, but in the same order for all replicas.
+        # Different random seeds across iterations means different 'projections' of the gradients at different SGD steps.
+        # If the same random projection is used, there will be differences between the gradients that are never synchronized.
         self.rng = np.random.RandomState(random_seed)
 
 
@@ -99,6 +102,7 @@ def powerSGD_hook(
         "Returns a low-rank 2D tensor of square_side_length * matrix_approximation_rank."
         if fill_random_values:
             with torch.random.fork_rng(devices=[]):
+                # Fork this RNG to avoid chaning the seed globally and affecting the random sampling anywhere else in the training.
                 # The seed makes sure that the initial random values are the same across all the DDP replicas.
                 # Such seed should differ at every step.
                 # Since it is very slow to fork RNG state across all the CUDA devices,
