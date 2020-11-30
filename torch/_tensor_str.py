@@ -6,7 +6,7 @@ from typing import Union, Optional
 
 class __PrinterOptions(object):
     precision: int = 4
-    threshold: Union[str, float] = 1000
+    threshold: float = 1000
     edgeitems: int = 3
     linewidth: int = 80
     sci_mode: Optional[bool] = None
