@@ -132,9 +132,7 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
     // TODO: replace self.svd with linalg_svd
     std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
   } else {
-    Tensor eigvecs;
-    // TODO: replace self.symeig with linalg_eigvalsh
-    std::tie(S, eigvecs) = self.symeig(/*eigenvectors=*/false);
+    S = at::linalg_eigvalsh(self);
     S = S.abs();
   }
 
