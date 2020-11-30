@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <c10/core/DeviceType.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -39,37 +40,132 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("Disabled", ProfilerState::Disabled)
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
-      .value("NVTX", ProfilerState::NVTX);
+      .value("NVTX", ProfilerState::NVTX)
+      .value("KINETO", ProfilerState::KINETO);
+
+  py::enum_<ActivityType>(m, "ProfilerActivity")
+      .value("CPU", ActivityType::CPU)
+      .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<ProfilerState, bool, bool, bool>());
 
-  py::class_<Event>(m, "ProfilerEvent")
-      .def("kind", &Event::kind)
-      .def("name", [](const Event& e) { return e.name(); })
-      .def("thread_id", &Event::threadId)
-      .def("fwd_thread_id", &Event::fwdThreadId)
-      .def("device", &Event::device)
-      .def("cpu_elapsed_us", &Event::cpuElapsedUs)
-      .def("cuda_elapsed_us", &Event::cudaElapsedUs)
-      .def("has_cuda", &Event::hasCuda)
-      .def("shapes", &Event::shapes)
-      .def("cpu_memory_usage", &Event::cpuMemoryUsage)
-      .def("cuda_memory_usage", &Event::cudaMemoryUsage)
-      .def("handle", &Event::handle)
-      .def("node_id", &Event::nodeId)
-      .def("is_remote", &Event::isRemote)
-      .def("sequence_nr", &Event::sequenceNr)
-      .def("stack", &Event::stack)
-      .def("scope", &Event::scope);
+  py::class_<LegacyEvent>(m, "ProfilerEvent")
+      .def("kind", &LegacyEvent::kindStr)
+      .def("name", [](const LegacyEvent& e) { return e.name(); })
+      .def("thread_id", &LegacyEvent::threadId)
+      .def("fwd_thread_id", &LegacyEvent::fwdThreadId)
+      .def("device", &LegacyEvent::device)
+      .def("cpu_elapsed_us", &LegacyEvent::cpuElapsedUs)
+      .def("cuda_elapsed_us", &LegacyEvent::cudaElapsedUs)
+      .def("has_cuda", &LegacyEvent::hasCuda)
+      .def("shapes", &LegacyEvent::shapes)
+      .def("cpu_memory_usage", &LegacyEvent::cpuMemoryUsage)
+      .def("cuda_memory_usage", &LegacyEvent::cudaMemoryUsage)
+      .def("handle", &LegacyEvent::handle)
+      .def("node_id", &LegacyEvent::nodeId)
+      .def("is_remote", &LegacyEvent::isRemote)
+      .def("sequence_nr", &LegacyEvent::sequenceNr)
+      .def("stack", &LegacyEvent::stack)
+      .def("scope", &LegacyEvent::scope)
+      .def("correlation_id", &LegacyEvent::correlationId)
+      .def("start_us", &LegacyEvent::cpuUs);
 
-  py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
-    .def(py::init<bool, bool>());
+  py::enum_<c10::DeviceType>(m, "DeviceType")
+      .value("CPU", c10::DeviceType::CPU)
+      .value("CUDA", c10::DeviceType::CUDA)
+      .value("MKLDNN", c10::DeviceType::MKLDNN)
+      .value("OPENGL", c10::DeviceType::OPENGL)
+      .value("OPENCL", c10::DeviceType::OPENCL)
+      .value("IDEEP", c10::DeviceType::IDEEP)
+      .value("HIP", c10::DeviceType::HIP)
+      .value("FPGA", c10::DeviceType::FPGA)
+      .value("MSNPU", c10::DeviceType::MSNPU)
+      .value("XLA", c10::DeviceType::XLA)
+      .value("Vulkan", c10::DeviceType::Vulkan)
+      .value("Metal", c10::DeviceType::Metal);
+
+#ifdef USE_KINETO
+  py::class_<KinetoEvent>(m, "KinetoEvent")
+      // name of the event
+      .def("name", &KinetoEvent::name)
+      // PyTorch thread id of the start callback
+      .def("start_thread_id", [](const KinetoEvent& e) {
+        return e.startThreadId();
+      })
+      // PyTorch thread id of the end callback
+      .def("end_thread_id", [](const KinetoEvent& e) {
+        return e.endThreadId();
+      })
+      // for events of scope BACKWARD_FUNCTION - PyTorch thread id
+      // of the corresponding forward op
+      .def("fwd_thread_id", [](const KinetoEvent& e) {
+        return e.fwdThreadId();
+      })
+      // together with fwd_thread_id, used to uniquely identify
+      // the forward op
+      .def("sequence_nr", [](const KinetoEvent& e) {
+        return e.sequenceNr();
+      })
+      // absolute start time (since unix epoch) in us
+      .def("start_us", &KinetoEvent::startUs)
+      // duration in us
+      .def("duration_us", &KinetoEvent::durationUs)
+      // used for correlation between high-level PyTorch events
+      // and low-level device events
+      .def("correlation_id", [](const KinetoEvent& e) {
+        return e.correlationId();
+      })
+      // shapes of input tensors
+      .def("shapes", [](const KinetoEvent& e) {
+        if (e.hasShapes()) {
+          return e.shapes();
+        } else {
+          return std::vector<std::vector<int64_t>>();
+        }
+      })
+      // stack traces of the PyTorch CPU events
+      .def("stack", [](const KinetoEvent& e) {
+        if (e.hasStack()) {
+          return e.stack();
+        } else {
+          return std::vector<std::string>();
+        }
+      })
+      // type of the RecordFunction that generated a PyTorch CPU event
+      // (op, torchscript function, user label, etc)
+      .def("scope", [](const KinetoEvent& e) {
+        return e.scope();
+      })
+      // device number, for CPU - process id
+      .def("device_index", &KinetoEvent::deviceIndex)
+      // for CUDA - stream id, for CPU - start thread id
+      .def("device_resource_id", &KinetoEvent::deviceResourceId)
+      // device type
+      .def("device_type", [](const KinetoEvent& e) {
+        return e.deviceType();
+      })
+      // correlation id of a linked event
+      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId);
+
+  py::class_<ProfilerResult>(m, "ProfilerResult")
+    .def("events", &ProfilerResult::events)
+    .def("legacy_events", &ProfilerResult::legacy_events)
+    .def("save", &ProfilerResult::save);
 
   m.def("_enable_profiler", enableProfiler);
+  m.def("_disable_profiler", disableProfiler);
+  m.def("_prepare_profiler", prepareProfiler);
+#endif
+
+  m.def("kineto_available", kinetoAvailable);
+
+  m.def("_enable_profiler_legacy", enableProfilerLegacy);
+  py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
+      .def(py::init<bool, bool>());
   m.def(
-      "_disable_profiler",
-      disableProfiler,
+      "_disable_profiler_legacy",
+      disableProfilerLegacy,
       py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
   m.def("_enable_record_function", [](bool enable) {
