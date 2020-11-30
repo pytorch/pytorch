@@ -3056,6 +3056,14 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: moveaxis.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: moveaxis.int(Tensor(a) self, int source, int destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
 # Only exposed from C++ -- in Python,
 # we expose it as an attribute `T`, not a function.
 #
