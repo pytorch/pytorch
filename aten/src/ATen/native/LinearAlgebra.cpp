@@ -1748,14 +1748,26 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, std::string>
   }, ord_variant);
 }
 
+// Return zero for each matrix in the batch
+Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
+  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
+  return at::zeros(result_shape, self.options().dtype(dtype));
+}
+
 // Numerical or None norms
 Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
-  TORCH_CHECK(!(self.numel() == 0 && self.size(-2)*self.size(-1) == 0), "linalg_cond is not defined for empty tensors.");
   TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
     self.dim(), " dimensions.");
 
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
+
+  // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
+  if (self.numel() == 0) {
+    auto real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    auto expected_dtype = std::abs(ord.toDouble()) == 2.0 ? real_dtype : self.scalar_type();
+    return _linalg_cond_empty_matrix(self, expected_dtype);
+  }
 
   // If ord == None or ord == ±2
   if (std::abs(ord.toDouble()) == 2.0) {
@@ -1801,13 +1813,17 @@ Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt
 
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, std::string ord) {
-  TORCH_CHECK(!(self.numel() == 0 && self.size(-2)*self.size(-1) == 0), "linalg_cond is not defined for empty tensors.");
   // the same checks as squareCheckInputs(self) but with a slightly more informative error message
   TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
     self.dim(), " dimensions.");
   TORCH_CHECK(self.size(-1) == self.size(-2),
               "linalg_cond with frobenius or nuclear norm types only supports square matrices or batches of square matrices "
               "but got ", self.size(-1), " by ", self.size(-2), " matrices");
+
+  // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
+  if (self.numel() == 0) {
+    return _linalg_cond_empty_matrix(self, self.scalar_type());
+  }
 
   c10::variant<Scalar, std::string> ord_variant = ord;
   return _linalg_cond_helper(self, ord_variant);
