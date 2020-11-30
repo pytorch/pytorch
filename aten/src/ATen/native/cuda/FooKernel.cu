@@ -122,7 +122,8 @@ const auto jittable_foo_functor = stringify(
 
 std::string generate_code(
     torch::jit::CodeTemplate cuda_template,
-    const TensorIterator& iter) {
+    const TensorIterator& iter,
+    bool dynamic_casting) {
   // Constructs kernel code
   const int nInputs = iter.ninputs();
   torch::jit::TemplateEnv env;
@@ -149,8 +150,13 @@ std::string generate_code(
   std::stringstream declare_store_arrays;
   declare_store_arrays << common_dtype_string << " out" << "[" << std::to_string(thread_work_size) << "];\n";
   env.s("declare_store_arrays", declare_store_arrays.str());
-  env.s("loader", "LoadWithoutCast");
-  env.s("storer", "StoreWithoutCast");
+  if (!dynamic_casting) {
+    env.s("loader", "LoadWithoutCast");
+    env.s("storer", "StoreWithoutCast");
+  } else {
+    env.s("loader", std::string("LoadWithCast<"+std::to_string(nInputs) + ">"));
+    env.s("storer", "StoreWithCast");
+  }
   std::stringstream load_inputs;
   for (int i=0; i < nInputs; i++){
     load_inputs << "arg" << std::to_string(i) << "[j] = l.load<"
@@ -297,6 +303,13 @@ bool needs_dynamic_cast){
 
   int64_t grid = (numel + block_work_size - 1) / block_work_size;
   if (needs_dynamic_cast) {
+    //uh-oh, need to find a way to not hardcode the number of inputs
+    at::detail::Array<ScalarType, 2> dtypes;
+    for (int i = 0; i < iter.ninputs(); i++) {
+      dtypes[i] = iter.tensor(i + iter.noutputs()).scalar_type();
+    }
+    auto loader = memory::LoadWithCast<2>(dtypes);
+    auto storer = memory::StoreWithCast(iter.tensor(0).scalar_type());
     TORCH_CHECK(false, "dynamic cast not supported yet")
   } else {
     auto loader = memory::LoadWithoutCast();
@@ -463,7 +476,6 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   std::cout << "iter.tensor(1).scalar_type(): " << iter.tensor(1).scalar_type() << std::endl;
   std::cout << "iter.tensor(2).scalar_type(): " << iter.tensor(2).scalar_type() << std::endl;
   std::cout << "common_dtype: " << iter.common_dtype() << std::endl;
-
   // std::cout << "jittable functor string" << std::endl;
   // std::cout << jittable_foo_functor << std::endl;
 
@@ -471,7 +483,7 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   // TODO: refactor with dispatch macro?
   // TODO: support float or double dynamically
   FooFunctor<float> my_functor{alpha_scalar.to<float>()};
-
+  bool dynamic_casting = needs_dynamic_casting<FooFunctor<float>>::check(iter);
 
   JiteratorKey key = construct_jiterator_key(iter.common_dtype());
   c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
@@ -485,12 +497,12 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
     // Note: even though code is generated on an iter that can potentially
     // be split, the properties of the iter that are used for codegen
     // won't change if it is split
-    auto code = generate_code(cuda_template, iter);
+    auto code = generate_code(cuda_template, iter, dynamic_casting);
     //std::cout << "code " << code << "\n";
     const std::string kernel_name{"FooFunctor_kernel"};
     function = jit_pwise_function(foo_cache, key, code, kernel_name);
   }
-  prepare_args_and_launch(function, iter, my_functor, false);
+  prepare_args_and_launch(function, iter, my_functor, dynamic_casting);
   return iter.output();
 }
 
