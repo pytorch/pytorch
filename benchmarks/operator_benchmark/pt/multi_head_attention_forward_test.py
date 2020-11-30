@@ -1,7 +1,6 @@
 
 import operator_benchmark as op_bench
 import torch
-import torch.nn as nn
 
 
 """
@@ -50,7 +49,7 @@ class MHABenchmark(op_bench.TorchBenchmarkBase):
 
         self.attn_mask = torch.multinomial(
             torch.Tensor([sparsity, 1. - sparsity]),
-            num_samples=L*S,
+            num_samples=L * S,
             replacement=True,
         ).view(S, L).to(torch.bool)
 

@@ -4037,7 +4037,7 @@ def _pad_circular(input, padding):
 
     return out
 
-def _naive_masked_softmax(inputs, mask, dim=None, dtype=None):
+def _naive_masked_softmax(inputs, mask, dim=None, _stacklevel=3, dtype=None):
     """Reference pythonic implementation of masked softmax."""
     # Mask will be a bool tensor here. Type checking:
     if mask.dtype != torch.bool:
@@ -4050,14 +4050,55 @@ def _naive_masked_softmax(inputs, mask, dim=None, dtype=None):
         else:
             raise TypeError('mask must be of type torch.bool')
 
+    if dim is None:
+        dim = _get_softmax_dim('_naive_masked_softmax', inputs.dim(), _stacklevel)
+
     # To follow the logic of multi_head_attention_forward below,
     # this assumes the mask will be True where we want to zero out the
     # entries, and False where we want to preserve them.
     inputs = inputs.masked_fill(mask, float('-inf'))
     return torch.nn.functional.softmax(inputs, dim=dim, dtype=dtype)
 
-def masked_softmax(input, mask, dim=None, dtype=None):
-  return input.masked_softmax(mask, dim=dim, dtype=dtype)
+def masked_softmax(input, mask, dim=None, _stacklevel=3, dtype:None):
+    # type: (Tensor, Tensor, Optional[int], int, Optional[int]) -> Tensor
+    r"""Applies a softmax function after masking out the entries specified by
+    `mask`.
+
+    Softmax itself is defined as:
+
+    :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+
+    Masking implies that
+
+    :math:`x_{i} = -\infty \ \text{if} \ \text{mask}(x_{i}) == 1`
+
+    so that
+
+    :math:`\text{Softmax}(x_{i}) = 0 \ \text{if} \ \text{mask}(x_{i}) == 1`.
+
+    It is applied to all slices along dim, and will re-scale them so that the elements
+    lie in the range `[0, 1]` and sum to 1. If all elements in a slice along
+    dim are masked, that slice of the output will contain NaNs, as their sum
+    cannot possibly add to 1.
+
+    Arguments:
+        input (Tensor): input
+        mask (Tensor): binary mask (bool) that identifies masked (1) and
+          unmasked (0) entries in input. It must have the same shape as input.
+        dim (int): A dimension along which softmax will be computed. Default:
+          None, but check _get_softmax_dim for fallback behavior documentation.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+          If specified, the output tensor is casted to :attr:`dtype` after the operation
+          is performed. Default: None.
+
+    Outputs:
+        Tensor of the same shape as input corresponding to the softmax taken
+        after excluding the entries specified by mask.
+
+    """
+    if dim is None:
+        dim = _get_softmax_dim('masked_softmax', input.dim(), _stacklevel)
+    return input.masked_softmax(mask, dim=dim, dtype=dtype)
 
 def multi_head_attention_forward(query: Tensor,
                                  key: Tensor,
@@ -4317,7 +4358,7 @@ def multi_head_attention_forward(query: Tensor,
 
     combined_mask = torch.zeros(
         bsz, num_heads, tgt_len, src_len, dtype=torch.bool
-    ).to(device=attn_output_weights.device) # nothing is masked yet
+    ).to(device=attn_output_weights.device)  # nothing is masked yet
 
     if attn_mask is not None:
         if attn_mask.dtype == torch.bool:
@@ -4329,20 +4370,20 @@ def multi_head_attention_forward(query: Tensor,
         combined_mask |= key_padding_mask.unsqueeze(1).unsqueeze(2)
 
     if (
-      (attn_output_weights.device == torch.device('cpu')) &
-      (combined_mask.device == torch.device('cpu')) &
-      (attn_output_weights.dtype == torch.float32)
+        (attn_output_weights.device == torch.device('cpu')) &
+        (combined_mask.device == torch.device('cpu')) &
+        (attn_output_weights.dtype == torch.float32)
     ):  # only implemented for float inputs and cpu tensors
-      attn_output_weights = attn_output_weights.masked_softmax(
-          combined_mask.view(bsz * num_heads, tgt_len, src_len),
-          dim=-1
-      )
+        attn_output_weights = attn_output_weights.masked_softmax(
+            combined_mask.view(bsz * num_heads, tgt_len, src_len),
+            dim=-1
+        )
     else:  # fallback
-      attn_output_weights = _naive_masked_softmax(
-          attn_output_weights,
-          combined_mask.view(bsz * num_heads, tgt_len, src_len),
-          dim=-1
-      )
+        attn_output_weights = _naive_masked_softmax(
+            attn_output_weights,
+            combined_mask.view(bsz * num_heads, tgt_len, src_len),
+            dim=-1
+        )
 
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
 
