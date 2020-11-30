@@ -2188,34 +2188,35 @@ class TestLinalg(TestCase):
 
         def run_test(shape0, shape1, batch):
             a = torch.randn(*batch, shape0, shape1, dtype=dtype, device=device)
+            rank_a = matrix_rank(a)
 
-            self.assertEqual(matrix_rank(a), matrix_rank(a.conj().transpose(-2, -1)))
+            self.assertEqual(rank_a, matrix_rank(a.conj().transpose(-2, -1)))
             aaH = torch.matmul(a, a.conj().transpose(-2, -1))
-            self.assertEqual(matrix_rank(aaH), matrix_rank(aaH, hermitian=True))
+            rank_aaH = matrix_rank(aaH)
+            rank_aaH_hermitian = matrix_rank(aaH, hermitian=True)
+            self.assertEqual(rank_aaH, rank_aaH_hermitian)
             aHa = torch.matmul(a.conj().transpose(-2, -1), a)
             self.assertEqual(matrix_rank(aHa), matrix_rank(aHa, hermitian=True))
 
             # check against NumPy
-            self.assertEqual(matrix_rank(a), np.linalg.matrix_rank(a.cpu().numpy()))
+            self.assertEqual(rank_a, np.linalg.matrix_rank(a.cpu().numpy()))
             self.assertEqual(matrix_rank(a, 0.01), np.linalg.matrix_rank(a.cpu().numpy(), 0.01))
 
-            aaH = torch.matmul(a, a.conj().transpose(-2, -1))
-            self.assertEqual(matrix_rank(aaH), np.linalg.matrix_rank(aaH.cpu().numpy()))
+            self.assertEqual(rank_aaH, np.linalg.matrix_rank(aaH.cpu().numpy()))
             self.assertEqual(matrix_rank(aaH, 0.01), np.linalg.matrix_rank(aaH.cpu().numpy(), 0.01))
 
             # hermitian flag for NumPy was added in 1.14.0
             if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
-                self.assertEqual(matrix_rank(aaH, hermitian=True),
+                self.assertEqual(rank_aaH_hermitian,
                                  np.linalg.matrix_rank(aaH.cpu().numpy(), hermitian=True))
                 self.assertEqual(matrix_rank(aaH, 0.01, True),
                                  np.linalg.matrix_rank(aaH.cpu().numpy(), 0.01, True))
 
             # check out= variant
-            result = matrix_rank(a)
             out = torch.empty(a.shape[:-2], dtype=torch.int64, device=device)
             ans = matrix_rank(a, out=out)
             self.assertEqual(ans, out)
-            self.assertEqual(ans, result)
+            self.assertEqual(ans, rank_a)
 
         shapes = (3, 13)
         batches = ((), (0, ), (4, ), (3, 5, ))
@@ -2231,24 +2232,26 @@ class TestLinalg(TestCase):
         # NumPy doesn't work for input with no elements
         def run_test(shape0, shape1, batch):
             a = torch.randn(*batch, shape0, shape1, dtype=dtype, device=device)
+            rank_a = matrix_rank(a)
             expected = torch.zeros(batch, dtype=torch.int64, device=device)
 
-            self.assertEqual(matrix_rank(a), matrix_rank(a.conj().transpose(-2, -1)))
+            self.assertEqual(rank_a, matrix_rank(a.conj().transpose(-2, -1)))
 
             aaH = torch.matmul(a, a.conj().transpose(-2, -1))
-            self.assertEqual(matrix_rank(aaH), matrix_rank(aaH, hermitian=True))
+            rank_aaH = matrix_rank(aaH)
+            rank_aaH_hermitian = matrix_rank(aaH, hermitian=True)
+            self.assertEqual(rank_aaH, rank_aaH_hermitian)
 
             aHa = torch.matmul(a.conj().transpose(-2, -1), a)
             self.assertEqual(matrix_rank(aHa), matrix_rank(aHa, hermitian=True))
 
-            self.assertEqual(matrix_rank(a), expected)
+            self.assertEqual(rank_a, expected)
             self.assertEqual(matrix_rank(a, 0.01), expected)
 
-            aaH = torch.matmul(a, a.conj().transpose(-2, -1))
-            self.assertEqual(matrix_rank(aaH), expected)
+            self.assertEqual(rank_aaH, expected)
             self.assertEqual(matrix_rank(aaH, 0.01), expected)
 
-            self.assertEqual(matrix_rank(aaH, hermitian=True), expected)
+            self.assertEqual(rank_aaH_hermitian, expected)
             self.assertEqual(matrix_rank(aaH, 0.01, True), expected)
 
         batches = ((), (4, ), (3, 5, ))
