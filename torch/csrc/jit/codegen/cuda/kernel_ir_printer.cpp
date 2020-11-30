@@ -159,6 +159,15 @@ void IrPrinter::visit(const kir::Bool* node) {
   }
 }
 
+void IrPrinter::visit(const kir::Double* node) {
+  if (node->isConst()) {
+    const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
+    ir_str_ << "double(" << std::setprecision(digits) << *node->value() << ")";
+  } else {
+    ir_str_ << varName(node, "d");
+  }
+}
+
 void IrPrinter::visit(const kir::Float* node) {
   if (node->isConst()) {
     const int digits = std::numeric_limits<Float::ScalarType>::max_digits10;
@@ -229,12 +238,16 @@ void IrPrinter::visit(const kir::UnaryOp* node) {
       ir_str_ << cast_str.value();
     } else {
       ir_str_ << node->operation();
+      if (needFloatSuffix(node->operation()) &&
+          node->out()->dtype() == DataType::Float) {
+        ir_str_ << "f";
+      }
     }
 
-    ir_str_ << "(";
     if (node->operation() == UnaryOpType::RandLike) {
-      ir_str_ << "RND";
+      ir_str_ << "(RND";
     } else {
+      ir_str_ << "(";
       ir_str_ << use(node->in());
     }
     ir_str_ << ")";
@@ -253,7 +266,11 @@ void IrPrinter::visit(const kir::BinaryOp* node) {
   if (auto op = inline_op_str(operation)) {
     ir_str_ << lhs << " " << *op << " " << rhs;
   } else {
-    ir_str_ << operation << "(" << lhs << ", " << rhs << ")";
+    ir_str_ << operation;
+    if (needFloatSuffix(operation) && node->out()->dtype() == DataType::Float) {
+      ir_str_ << "f";
+    }
+    ir_str_ << "(" << lhs << ", " << rhs << ")";
   }
 
   ir_str_ << "\n";

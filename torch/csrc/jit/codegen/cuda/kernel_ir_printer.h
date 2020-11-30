@@ -53,6 +53,7 @@ class TORCH_CUDA_API IrPrinter : private kir::IrVisitor {
   void handleBlock(const kir::Scope& scope);
 
   void visit(const kir::Bool*) final;
+  void visit(const kir::Double*) final;
   void visit(const kir::Float*) final;
   void visit(const kir::Half*) final;
   void visit(const kir::Int*) final;

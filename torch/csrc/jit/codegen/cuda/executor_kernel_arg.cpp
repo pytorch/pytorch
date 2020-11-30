@@ -14,6 +14,8 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
     c10::ScalarType dtype,
     int nDims) {
   switch (dtype) {
+    case c10::ScalarType::Double:
+      return getTensorArg<double>(nDims);
     case c10::ScalarType::Float:
       return getTensorArg<float>(nDims);
     case c10::ScalarType::Half:
@@ -53,12 +55,13 @@ void KernelArgumentHolder::push(const IValue& val) {
       val.isScalar(),
       "Tried to push an arg to run in a fused kernel, expected a scalar but got, ",
       val);
-  switch (val.toScalar().type()) {
+  auto scalar_val = val.toScalar();
+  switch (scalar_val.type()) {
     case c10::ScalarType::Double:
-      arguments_.push_back(std::make_unique<FloatArg>((float)val.toDouble()));
+      arguments_.push_back(std::make_unique<DoubleArg>(scalar_val.toDouble()));
       return;
     case c10::ScalarType::Long:
-      arguments_.push_back(std::make_unique<LongArg>(val.toInt()));
+      arguments_.push_back(std::make_unique<LongArg>(scalar_val.toInt()));
       return;
     default:
       TORCH_INTERNAL_ASSERT(

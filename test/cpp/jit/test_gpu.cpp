@@ -2866,14 +2866,17 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
   if (desc.first == ValType::TensorView) {
     return makeSymbolicTensor(2, desc.second);
   } else if (desc.first == ValType::Scalar) {
-    if (desc.second == DataType::Float)
+    if (desc.second == DataType::Float) {
       return new Float();
-    else if (desc.second == DataType::Int)
+    } else if (desc.second == DataType::Double) {
+      return new Double();
+    } else if (desc.second == DataType::Int) {
       return new Int();
-    else
-      TORCH_CHECK("Not currently supported type", desc.first);
+    } else {
+      TORCH_CHECK(false, "Not currently supported type: ", desc.first);
+    }
   } else {
-    TORCH_CHECK("Not currently supported type", desc.first);
+    TORCH_CHECK(false, "Not currently supported type: ", desc.first);
   }
   return nullptr;
 }
@@ -2888,40 +2891,42 @@ IValue gen_aten_operand(
     int threads,
     bool rand) {
   if (desc.first == ValType::TensorView) {
-    if (desc.second == DataType::Float) {
-      auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-      if (rand)
+    if (desc.second == DataType::Double || desc.second == DataType::Float ||
+        desc.second == DataType::Half) {
+      auto options = at::TensorOptions()
+                         .dtype(data_type_to_aten(desc.second))
+                         .device(at::kCUDA, 0);
+      if (rand) {
         return IValue(at::rand({blocks, threads}, options));
-      else
+      } else {
         return IValue(at::empty({blocks, threads}, options));
-    } else if (desc.second == DataType::Half) {
-      auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-      if (rand)
-        return IValue(at::rand({blocks, threads}, options));
-      else
-        return IValue(at::empty({blocks, threads}, options));
+      }
     } else if (desc.second == DataType::Bool) {
       if (rand) {
         auto options =
             at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-        return IValue(at::rand({blocks, threads}, options).to(at::kBool));
+        return IValue(
+            at::rand({blocks, threads}, options).round().to(at::kBool));
       } else {
         auto options =
             at::TensorOptions().dtype(at::kBool).device(at::kCUDA, 0);
         return IValue(at::empty({blocks, threads}, options));
       }
     } else {
-      TORCH_CHECK("Not currently supported type", desc.second)
+      TORCH_CHECK(false, "Not currently supported type: ", desc.second)
     }
   } else if (desc.first == ValType::Scalar) {
-    if (desc.second == DataType::Float)
+    // IValue scalars can only be double int64 or bool
+    if (desc.second == DataType::Double || desc.second == DataType::Float ||
+        desc.second == DataType::Half) {
       return IValue(at::Scalar(1.f));
-    else if (desc.second == DataType::Int)
+    } else if (desc.second == DataType::Int) {
       return IValue(at::Scalar(1));
-    else
-      TORCH_CHECK("Not currently supported type", desc.first);
+    } else {
+      TORCH_CHECK(false, "Not currently supported type: ", desc.first);
+    }
   } else {
-    TORCH_CHECK("Not currently supported type", desc.first);
+    TORCH_CHECK(false, "Not currently supported type: ", desc.first);
   }
   return nullptr;
 }
@@ -3068,35 +3073,39 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
       OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
 
-  std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
+  std::vector<DataType> dtypes = {DataType::Float, DataType::Double};
+
+  for (auto dtype : dtypes) {
+    std::for_each(ops.begin(), ops.end(), [&](OpTuple& op) {
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ std::get<2>(op),
+          /*Aten Func   */
+          [&op](std::array<IValue, 1>& vals) {
+            return std::get<0>(op)(vals[0].toTensor());
+          },
+          /*JIT  Func   */
+          [&op](Val* in1) -> Val* { return unaryOp(std::get<1>(op), in1); },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    });
+
     test_op(
-        /*blocks*/ 640,
+        /*blocks*/ 128,
         /*threads*/ 64,
-        /*name*/ std::get<2>(op),
+        /*name*/ "rand_like",
         /*Aten Func   */
-        [&op](std::array<IValue, 1>& vals) {
-          return std::get<0>(op)(vals[0].toTensor());
+        [](std::array<IValue, 1>& vals) {
+          return at::rand_like(vals[0].toTensor());
         },
         /*JIT  Func   */
-        [&op](Val* in1) -> Val* { return unaryOp(std::get<1>(op), in1); },
-        /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+        [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
         /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
-  });
-
-  test_op(
-      /*blocks*/ 128,
-      /*threads*/ 64,
-      /*name*/ "rand_like",
-      /*Aten Func   */
-      [](std::array<IValue, 1>& vals) {
-        return at::rand_like(vals[0].toTensor());
-      },
-      /*JIT  Func   */
-      [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
+        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+  }
 }
 
 TEST(NVFuserTest, FusionBinaryOps_CUDA) {
@@ -3110,181 +3119,201 @@ TEST(NVFuserTest, FusionBinaryOps_CUDA) {
                                  OpTuple{at::le, BinaryOpType::LE, "le"},
                                  OpTuple{at::lt, BinaryOpType::LT, "lt"},
                                  OpTuple{at::ne, BinaryOpType::NE, "ne"}};
+  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
 
-  std::for_each(logic_ops.begin(), logic_ops.end(), [](OpTuple& op) {
+  for (auto dtype : dtypes) {
+    std::for_each(logic_ops.begin(), logic_ops.end(), [&](OpTuple& op) {
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ std::get<2>(op),
+          /*Aten Func   */
+          [&op](std::array<IValue, 2>& vals) {
+            return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+          },
+          /*JIT  Func   */
+          [&op](Val* in1, Val* in2) -> Val* {
+            return binaryOp(std::get<1>(op), in1, in2);
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, DataType::Bool),
+          /*Inputs Tuple*/
+          std::make_tuple(
+              std::make_pair(ValType::TensorView, dtype),
+              std::make_pair(ValType::TensorView, dtype)));
+    });
+
+    // see [Note: explicit tuple type for uniform initialization list]
+    std::vector<OpTuple> math_ops{
+        OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
+        OpTuple{at::div, BinaryOpType::Div, "div"},
+        OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
+        OpTuple{at::max, BinaryOpType::Max, "max"},
+        OpTuple{at::min, BinaryOpType::Min, "min"},
+        OpTuple{at::mul, BinaryOpType::Mul, "mul"},
+        OpTuple{at::pow, BinaryOpType::Pow, "pow"},
+        // NOTE: Remainder does not match the Aten impl exactly
+        // despite using an identical function.
+        OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"},
+    };
+
+    std::for_each(math_ops.begin(), math_ops.end(), [&](OpTuple& op) {
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ std::get<2>(op),
+          /*Aten Func   */
+          [&op](std::array<IValue, 2>& vals) {
+            return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+          },
+          /*JIT  Func   */
+          [&op](Val* in1, Val* in2) -> Val* {
+            return binaryOp(std::get<1>(op), in1, in2);
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(
+              std::make_pair(ValType::TensorView, dtype),
+              std::make_pair(ValType::TensorView, dtype)));
+    });
+
     test_op(
         /*blocks*/ 640,
         /*threads*/ 64,
-        /*name*/ std::get<2>(op),
+        /*name*/ "add_alpha",
         /*Aten Func   */
-        [&op](std::array<IValue, 2>& vals) {
-          return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+        [](std::array<IValue, 3>& vals) {
+          return at::add(
+              vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
         },
-        /*JIT  Func   */
-        [&op](Val* in1, Val* in2) -> Val* {
-          return binaryOp(std::get<1>(op), in1, in2);
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, DataType::Bool),
+        /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&add_alpha),
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
         /*Inputs Tuple*/
         std::make_tuple(
-            std::make_pair(ValType::TensorView, DataType::Float),
-            std::make_pair(ValType::TensorView, DataType::Float)));
-  });
-
-  // see [Note: explicit tuple type for uniform initialization list]
-  std::vector<OpTuple> math_ops{
-      OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
-      OpTuple{at::div, BinaryOpType::Div, "div"},
-      OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
-      OpTuple{at::max, BinaryOpType::Max, "max"},
-      OpTuple{at::min, BinaryOpType::Min, "min"},
-      OpTuple{at::mul, BinaryOpType::Mul, "mul"},
-      OpTuple{at::pow, BinaryOpType::Pow, "pow"},
-      // NOTE: Remainder does not match the Aten impl exactly
-      // despite using an identical function.
-      OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"},
-  };
-
-  std::for_each(math_ops.begin(), math_ops.end(), [](OpTuple& op) {
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::Scalar, dtype)));
     test_op(
         /*blocks*/ 640,
         /*threads*/ 64,
-        /*name*/ std::get<2>(op),
+        /*name*/ "sub_alpha",
         /*Aten Func   */
-        [&op](std::array<IValue, 2>& vals) {
-          return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+        [](std::array<IValue, 3>& vals) {
+          return at::sub(
+              vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
         },
-        /*JIT  Func   */
-        [&op](Val* in1, Val* in2) -> Val* {
-          return binaryOp(std::get<1>(op), in1, in2);
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
+        /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&sub_alpha),
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
         /*Inputs Tuple*/
         std::make_tuple(
-            std::make_pair(ValType::TensorView, DataType::Float),
-            std::make_pair(ValType::TensorView, DataType::Float)));
-  });
-
-  test_op(
-      /*blocks*/ 640,
-      /*threads*/ 64,
-      /*name*/ "add_alpha",
-      /*Aten Func   */
-      [](std::array<IValue, 3>& vals) {
-        return at::add(
-            vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
-      },
-      /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&add_alpha),
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::Scalar, DataType::Float)));
-  test_op(
-      /*blocks*/ 640,
-      /*threads*/ 64,
-      /*name*/ "sub_alpha",
-      /*Aten Func   */
-      [](std::array<IValue, 3>& vals) {
-        return at::sub(
-            vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
-      },
-      /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&sub_alpha),
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::Scalar, DataType::Float)));
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::Scalar, dtype)));
+  }
 }
 
 TEST(NVFuserTest, FusionTernaryOps_CUDA) {
-  test_op(
-      /*blocks*/ 640,
-      /*threads*/ 64,
-      /*name*/ "clamp",
-      /*Aten Func   */
-      [](std::array<IValue, 1>& vals) {
-        return at::clamp(vals[0].toTensor(), 0.f, 1.f);
-      },
-      /*JIT  Func   */
-      [](Val* in1) -> Val* {
-        return clamp(in1, new Float(0.f), new Float(1.f));
-      },
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
-  test_op(
-      /*blocks*/ 640,
-      /*threads*/ 64,
-      /*name*/ "threshold",
-      /*Aten Func   */
-      [](std::array<IValue, 1>& vals) {
-        return at::threshold(vals[0].toTensor(), 0.f, 1.f);
-      },
-      /*JIT  Func   */
-      [](Val* in1) -> Val* {
-        return threshold(in1, new Float(0.f), new Float(1.f));
-      },
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
-  test_op(
-      /*blocks*/ 640,
-      /*threads*/ 64,
-      /*name*/ "where",
-      /*Aten Func   */
-      [](std::array<IValue, 3>& vals) {
-        return at::where(
-            vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
-      },
-      /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&where),
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(
-          std::make_pair(ValType::TensorView, DataType::Bool),
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::TensorView, DataType::Float)));
+  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+
+  for (auto dtype : dtypes) {
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ "clamp",
+        /*Aten Func   */
+        [](std::array<IValue, 1>& vals) {
+          return at::clamp(vals[0].toTensor(), 0.f, 1.f);
+        },
+        /*JIT  Func   */
+        [&](Val* in1) -> Val* {
+          if (dtype == DataType::Float) {
+            return clamp(in1, new Float(0.f), new Float(1.f));
+          } else {
+            return clamp(in1, new Double(0.f), new Double(1.f));
+          }
+        },
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
+        /*Inputs Tuple*/
+        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ "threshold",
+        /*Aten Func   */
+        [](std::array<IValue, 1>& vals) {
+          return at::threshold(vals[0].toTensor(), 0.f, 1.f);
+        },
+        /*JIT  Func   */
+        [&](Val* in1) -> Val* {
+          if (dtype == DataType::Float) {
+            return threshold(in1, new Float(0.f), new Float(1.f));
+          } else {
+            return threshold(in1, new Double(0.f), new Double(1.f));
+          }
+        },
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
+        /*Inputs Tuple*/
+        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ "where",
+        /*Aten Func   */
+        [](std::array<IValue, 3>& vals) {
+          return at::where(
+              vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
+        },
+        /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&where),
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
+        /*Inputs Tuple*/
+        std::make_tuple(
+            std::make_pair(ValType::TensorView, DataType::Bool),
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::TensorView, dtype)));
+  }
 }
 
 TEST(NVFuserTest, FusionCompoundOps_CUDA) {
-  test_op(
-      /*blocks*/ 640,
-      /*threads*/ 64,
-      /*name*/ "lerp",
-      /*Aten Func   */
-      [](std::array<IValue, 3>& vals) {
-        return at::lerp(
-            vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
-      },
-      /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&lerp),
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::TensorView, DataType::Float)));
-  test_op(
-      /*blocks*/ 640,
-      /*threads*/ 64,
-      /*name*/ "addcmul",
-      /*Aten Func   */
-      [](std::array<IValue, 4>& vals) {
-        return at::addcmul(
-            vals[0].toTensor(),
-            vals[1].toTensor(),
-            vals[2].toTensor(),
-            vals[3].toScalar());
-      },
-      /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*, Val*)>(&addcmul),
-      /*Output      */ std::make_pair(ValType::TensorView, DataType::Float),
-      /*Inputs Tuple*/
-      std::make_tuple(
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::TensorView, DataType::Float),
-          std::make_pair(ValType::Scalar, DataType::Float)));
+  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+
+  for (auto dtype : dtypes) {
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ "lerp",
+        /*Aten Func   */
+        [](std::array<IValue, 3>& vals) {
+          return at::lerp(
+              vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
+        },
+        /*JIT  Func   */ static_cast<Val* (*)(Val*, Val*, Val*)>(&lerp),
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
+        /*Inputs Tuple*/
+        std::make_tuple(
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::TensorView, dtype)));
+    test_op(
+        /*blocks*/ 640,
+        /*threads*/ 64,
+        /*name*/ "addcmul",
+        /*Aten Func   */
+        [](std::array<IValue, 4>& vals) {
+          return at::addcmul(
+              vals[0].toTensor(),
+              vals[1].toTensor(),
+              vals[2].toTensor(),
+              vals[3].toScalar());
+        },
+        /*JIT  Func   */
+        static_cast<Val* (*)(Val*, Val*, Val*, Val*)>(&addcmul),
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
+        /*Inputs Tuple*/
+        std::make_tuple(
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::TensorView, dtype),
+            std::make_pair(ValType::Scalar, dtype)));
+  }
 }
 
 TEST(NVFuserTest, FusionCastOps_CUDA) {
@@ -5999,12 +6028,9 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
 }
 
 TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
-  std::vector<bool> fp16_usage = {true, false};
+  std::vector<DataType> dtypes = {
+      DataType::Double, DataType::Float, DataType::Half};
   std::vector<int> red_dims;
-
-  // Making sure we get deterministic results
-  // (see https://github.com/csarofeen/pytorch/issues/399)
-  at::manual_seed(0);
 
   // Tried to cut down the number iterations with just
   // doing every other power of 2.
@@ -6012,41 +6038,38 @@ TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
     red_dims.push_back(i);
   }
 
-  for (auto fp16 : fp16_usage) {
+  for (auto dtype : dtypes) {
+    at::ScalarType aten_dtype = data_type_to_aten(dtype);
     for (auto& rdim : red_dims) {
       Fusion fusion;
       FusionGuard fg(&fusion);
 
-      TensorView* tv0 =
-          makeSymbolicTensor(1, (fp16 ? DataType::Half : DataType::Float));
+      bool is_fp16 = dtype == DataType::Half;
+
+      TensorView* tv0 = makeSymbolicTensor(1, dtype);
       fusion.addInput(tv0);
 
-      Val* tv0_cast = nullptr;
-      if (fp16) {
+      TensorView* tv0_cast = tv0;
+      if (is_fp16) {
         tv0_cast = castOp(DataType::Float, tv0);
       }
 
-      TensorView* tv1 = reductionOp(
-          BinaryOpType::Add,
-          {0},
-          new Float(0),
-          (fp16 ? tv0_cast->as<TensorView>() : tv0));
+      TensorView* tv1 = sum(tv0_cast, {0});
 
-      TensorView* tv1_cast = nullptr;
-      if (fp16) {
+      TensorView* tv1_cast = tv1;
+      if (is_fp16) {
         tv1_cast = castOp(DataType::Half, tv1);
       }
 
-      fusion.addOutput((fp16 ? tv1_cast : tv1));
+      fusion.addOutput(tv1_cast);
 
-      auto options = at::TensorOptions()
-                         .dtype((fp16 ? at::kHalf : at::kFloat))
-                         .device(at::kCUDA, 0);
+      auto options = at::TensorOptions().dtype(aten_dtype).device(at::kCUDA, 0);
+
       at::Tensor aten_input = at::randn({rdim}, options);
       auto aten_output = aten_input.to(at::kDouble).sum({0});
 
       std::vector<TensorView*> outputs_of_red;
-      if (fp16) {
+      if (is_fp16) {
         outputs_of_red.push_back(tv1_cast);
       }
 
@@ -6075,7 +6098,8 @@ TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
 }
 
 TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
-  std::vector<bool> fp16_usage = {true, false};
+  std::vector<DataType> dtypes = {
+      DataType::Double, DataType::Float, DataType::Half};
   std::vector<int> red_axis = {1, 0};
   std::vector<int> output_dims = {160, 320};
   std::vector<int> red_dims;
@@ -6086,44 +6110,42 @@ TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
     red_dims.push_back(i);
   }
 
-  for (auto fp16 : fp16_usage) {
+  for (auto dtype : dtypes) {
+    at::ScalarType aten_dtype = data_type_to_aten(dtype);
     for (auto& axis : red_axis) {
       for (auto& odim : output_dims) {
         for (auto& rdim : red_dims) {
           Fusion fusion;
           FusionGuard fg(&fusion);
 
-          TensorView* tv0 =
-              makeSymbolicTensor(2, (fp16 ? DataType::Half : DataType::Float));
+          bool is_fp16 = dtype == DataType::Half;
+
+          TensorView* tv0 = makeSymbolicTensor(2, dtype);
           fusion.addInput(tv0);
 
-          Val* tv0_cast = nullptr;
-          if (fp16) {
+          TensorView* tv0_cast = tv0;
+          if (is_fp16) {
             tv0_cast = castOp(DataType::Float, tv0);
           }
 
-          TensorView* tv1 = reductionOp(
-              BinaryOpType::Add,
-              {axis},
-              new Float(0),
-              (fp16 ? tv0_cast->as<TensorView>() : tv0));
+          TensorView* tv1 = sum(tv0_cast, {axis});
 
-          TensorView* tv1_cast = nullptr;
-          if (fp16) {
+          TensorView* tv1_cast = tv1;
+          if (is_fp16) {
             tv1_cast = castOp(DataType::Half, tv1);
           }
 
-          fusion.addOutput((fp16 ? tv1_cast : tv1));
+          fusion.addOutput(tv1_cast);
 
-          auto options = at::TensorOptions()
-                             .dtype((fp16 ? at::kHalf : at::kFloat))
-                             .device(at::kCUDA, 0);
+          auto options =
+              at::TensorOptions().dtype(aten_dtype).device(at::kCUDA, 0);
+
           at::Tensor aten_input =
               (axis ? at::randn({odim, rdim}, options)
                     : at::randn({rdim, odim}, options));
 
           std::vector<TensorView*> outputs_of_red;
-          if (fp16) {
+          if (is_fp16) {
             outputs_of_red.push_back(tv1_cast);
           }
 

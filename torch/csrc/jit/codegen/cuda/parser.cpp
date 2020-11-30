@@ -702,10 +702,11 @@ class IrParser {
             // TODO: support cast of output types yet;
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
-              // We can only handle output as half and float;
+              // We can only handle output as half, float, and double;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
-                if (scalar_type == at::ScalarType::Float ||
+                if (scalar_type == at::ScalarType::Double ||
+                    scalar_type == at::ScalarType::Float ||
                     scalar_type == at::ScalarType::Half) {
                   return true;
                 }

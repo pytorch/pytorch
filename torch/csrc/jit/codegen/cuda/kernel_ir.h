@@ -34,6 +34,7 @@ class Expr;
 // Values
 class NamedScalar;
 class Bool;
+class Double;
 class Float;
 class Half;
 class Int;
@@ -88,6 +89,9 @@ class TORCH_CUDA_API IrVisitor : public PolymorphicBase {
     unhandled(named_scalar);
   }
   virtual void visit(const Bool* value) {
+    unhandled(value);
+  }
+  virtual void visit(const Double* value) {
     unhandled(value);
   }
   virtual void visit(const Float* value) {
@@ -347,6 +351,38 @@ class TORCH_CUDA_API Bool final : public Val {
 
  private:
   const c10::optional<bool> maybe_value_;
+};
+
+class TORCH_CUDA_API Double final : public Val {
+ public:
+  using ScalarType = double;
+
+  explicit Double(Passkey passkey, const c10::optional<ScalarType>& value)
+      : Val(passkey, DataType::Double), maybe_value_(value) {}
+
+  explicit Double(Passkey passkey, const fuser::cuda::Double* node)
+      : Val(passkey, DataType::Double), maybe_value_(node->value()) {
+    setName(node->name());
+  }
+
+  void accept(IrVisitor* visitor) const override {
+    visitor->visit(this);
+  }
+
+  bool isScalar() const override {
+    return true;
+  }
+
+  bool isConst() const override {
+    return maybe_value_.has_value();
+  }
+
+  c10::optional<ScalarType> value() const {
+    return maybe_value_;
+  }
+
+ private:
+  const c10::optional<ScalarType> maybe_value_;
 };
 
 class TORCH_CUDA_API Float final : public Val {

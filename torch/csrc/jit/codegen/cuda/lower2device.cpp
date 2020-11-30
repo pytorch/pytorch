@@ -219,6 +219,11 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
   }
 
+  void handle(const Double* node) final {
+    const auto lowered_node = ir_builder_.create<kir::Double>(node);
+    TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);
+  }
+
   void handle(const Float* node) final {
     const auto lowered_node = ir_builder_.create<kir::Float>(node);
     TORCH_CHECK(gpu_lower_->kir_val_map_.insert({node, lowered_node}).second);

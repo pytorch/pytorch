@@ -71,6 +71,9 @@ bool validateKernelArgTensor(
   DataType param_data_type = *param->getDataType();
   bool match = false;
   switch (arg_data_type) {
+    case at::ScalarType::Double:
+      match = param_data_type == DataType::Double;
+      break;
     case at::ScalarType::Half:
       match = param_data_type == DataType::Half;
       break;
@@ -93,32 +96,33 @@ bool validateKernelArgTensor(
 
 // Return false if  arg_type doesn't match the type in param
 bool validateKernelArgScalar(
-    const c10::TypePtr& arg_type,
+    const c10::IValue& arg,
     const Val* param,
     std::stringstream& msg) {
-  if (!param->isScalar()) {
+  if (!arg.isScalar()) {
     msg << "Argument is a scalar, but the parameter is not."
         << "\n";
     return false;
   }
   DataType param_type = *param->getDataType();
   bool match = false;
-  switch (arg_type->kind()) {
-    case c10::TypeKind::IntType:
+  switch (arg.toScalar().type()) {
+    case c10::ScalarType::Long:
       match = param_type == DataType::Int;
       break;
-    case c10::TypeKind::FloatType:
-      match = param_type == DataType::Float;
+    case c10::ScalarType::Double:
+      match = param_type == DataType::Double || param_type == DataType::Float ||
+          param_type == DataType::Half;
       break;
-    case c10::TypeKind::BoolType:
+    case c10::ScalarType::Bool:
       match = param_type == DataType::Bool;
       break;
     default:
       match = false;
   }
   if (!match) {
-    msg << "Argument type is " << *arg_type << ", but the parameter is "
-        << param_type << "\n";
+    msg << "Argument type is " << arg.toScalar().type()
+        << ", but the parameter is " << param_type << "\n";
   }
   return match;
 }
@@ -133,7 +137,7 @@ bool validateKernelArg(
   if (arg.isTensor()) {
     return validateKernelArgTensor(arg.toTensor(), param, device, msg);
   } else {
-    return validateKernelArgScalar(arg.type(), param, msg);
+    return validateKernelArgScalar(arg, param, msg);
   }
 }
 

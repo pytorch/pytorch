@@ -60,25 +60,7 @@ void IrPrinter::handle(const TensorDomain* td) {
 
 void IrPrinter::handle(const TensorView* tv) {
   if (tv->nDims() == 0) {
-    switch (tv->getDataType().value()) {
-      case DataType::Bool:
-        os_ << "b";
-        break;
-      case DataType::Float:
-        os_ << "f";
-        break;
-      case DataType::Half:
-        os_ << "h";
-        break;
-      case DataType::Int:
-        os_ << "i";
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(
-            false, "Did not recognize type ", tv->getDataType().value());
-    }
-    os_ << tv->name();
-
+    os_ << typePrefix(tv->getDataType().value()) << tv->name();
   } else {
     os_ << "T" << tv->name();
     handle(tv->domain());
@@ -118,6 +100,24 @@ void IrPrinter::handle(const Bool* b) {
     os_ << "b" << b->name();
   } else {
     os_ << "bool(" << *(b->value()) << ")";
+  }
+}
+
+void IrPrinter::handle(const Double* d) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(d) != nullptr) {
+    os_ << "( ";
+    handle(FusionGuard::getCurFusion()->origin(d));
+    os_ << " )";
+    return;
+  }
+
+  if (d->isSymbolic()) {
+    os_ << "d" << d->name();
+  } else {
+    os_ << "double("
+        << std::setprecision(
+               std::numeric_limits<Double::ScalarType>::max_digits10)
+        << *(d->value()) << ")";
   }
 }
 
@@ -210,12 +210,18 @@ void IrPrinter::handle(const UnaryOp* uop) {
       os_ << cast_str.value();
     } else {
       os_ << uop->getUnaryOpType();
+      if (needFloatSuffix(uop->getUnaryOpType()) &&
+          uop->out()->getDataType().value() == DataType::Float) {
+        os_ << "f";
+      }
     }
-    os_ << "(";
-    if (uop->getUnaryOpType() == UnaryOpType::RandLike)
+    if (uop->getUnaryOpType() == UnaryOpType::RandLike) {
+      os_ << "(";
       os_ << "rnd";
-    else
+    } else {
+      os_ << "(";
       handle(uop->in());
+    }
     os_ << ")";
   }
 
@@ -253,7 +259,12 @@ void IrPrinter::handle(const BinaryOp* bop) {
     os_ << " " << inline_bop.value() << " ";
     handle(bop->rhs());
   } else {
-    os_ << bop->getBinaryOpType() << "(";
+    os_ << bop->getBinaryOpType();
+    if (needFloatSuffix(bop->getBinaryOpType()) &&
+        bop->out()->getDataType().value() == DataType::Float) {
+      os_ << "f";
+    }
+    os_ << "(";
     handle(bop->lhs());
     if (istvop) {
       os_ << "\n";

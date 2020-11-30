@@ -155,15 +155,10 @@ class TestCudaFuser(JitTestCase):
             return o
         t_jit = torch.jit.script(t)
 
-        prev_fallback = os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK']
-        os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '0'
-
         x = torch.randn(8, 4, 16, dtype=torch.double, device="cuda")
         jit_o = t_jit(x)
         jit_o = t_jit(x)
         o = t(x)
-
-        os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = prev_fallback
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

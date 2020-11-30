@@ -59,6 +59,7 @@ __device__ float __half2float(const __half h) {
 }
 )";
 #endif
+
 // struct and code for functions that need random number generation
 static auto code_random_number_gen = R"(
 class Philox {
@@ -95,6 +96,7 @@ public:
     STATE = (STATE + 1) % 4;
     return ret;
   }
+  
 private:
   uint4 counter;
   uint4 output;
@@ -142,9 +144,19 @@ private:
 };
 // Inverse of 2^32.
 #define M_RAN_INVM32 2.3283064e-10f
-__device__  __inline__ float uniform(unsigned int x) {
+__device__  __inline__ float uniformf(unsigned int x) {
   return x * M_RAN_INVM32;
 }
+
+
+#define M_RAN_2POW53_INV_DOUBLE 1.1102230246251565e-16
+__device__  __inline__  double uniform(unsigned int _x, unsigned int _y)
+{
+    unsigned long long z = (unsigned long long)_x ^
+        ((unsigned long long)_y << (53 - 32));
+    return z * M_RAN_2POW53_INV_DOUBLE + (M_RAN_2POW53_INV_DOUBLE/2.0);
+}
+
 )";
 
 // Helper functions for Operations
@@ -155,37 +167,69 @@ __device__ constexpr int ceilDiv(const int a, const int b) {
 __device__ constexpr int alignBufferSize(const int buffer, const int size) {
   return (buffer + (size-1)) & ~(size-1);
 }
+__device__ double clamp(const double x, const double minv, const double maxv) {
+  return x < minv ? minv : (x > maxv ? maxv : x);
+}
 __device__ float clamp(const float x, const float minv, const float maxv) {
   return x < minv ? minv : (x > maxv ? maxv : x);
 }
+__device__ double frac(const double x) {
+  return x - trunc(x);
+}
 __device__ float frac(const float x) {
-  return x - truncf(x);
+  return x - trunc(x);
+}
+__device__ double gelu(const double x) {
+  return x * normcdf(x);
 }
 __device__ float gelu(const float x) {
   return x * normcdf(x);
 }
+__device__ double reciprocal(const double x) {
+  return 1.f / x;
+}
 __device__ float reciprocal(const float x) {
   return 1.f / x;
 }
+__device__ double relu(const double x) {
+  return x <= 0.f ? 0.f : x;
+}
 __device__ float relu(const float x) {
   return x <= 0.f ? 0.f : x;
+}
+__device__ double remainder(const double a, const double b) {
+  auto mod = ::fmod(a, b);
+  if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
+  return mod;
 }
 __device__ float remainder(const float a, const float b) {
   auto mod = ::fmod(a, b);
   if ((mod != 0) && ((b < 0) != (mod < 0))) mod += b;
   return mod;
 }
+__device__ double sigmoid(const double x) {
+  return 1.f / (1.f + exp(-x));
+}
 __device__ float sigmoid(const float x) {
-  return 1.f / (1.f + expf(-x));
+  return 1.f / (1.f + exp(-x));
+}
+__device__ double threshold(const double x, const double t, const double v) {
+  return x <= t ? v : x;
 }
 __device__ float threshold(const float x, const float t, const float v) {
   return x <= t ? v : x;
 }
+__device__ double where(const bool c, const double a, const double b) {
+  return c ? a : b;
+}
 __device__ float where(const bool c, const float a, const float b) {
   return c ? a : b;
 }
-__device__ float randLike(Philox rnd) {
-  return uniform(rnd());
+__device__ double randLike(Philox rnd) {
+  return uniform(rnd(), rnd());
+};
+__device__ float randLikef(Philox rnd) {
+  return uniformf(rnd());
 };
 )";
 

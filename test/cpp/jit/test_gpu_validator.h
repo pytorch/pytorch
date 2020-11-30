@@ -48,7 +48,10 @@ std::pair<double, double> getTolerance(
     int64_t reduction_size,
     const ValidationConstants& tolerances) {
   switch (dtype) {
-    case DataType::Float: {
+    case DataType::Float:
+    // TODO: Pull new tolerances for Double, for now we will just use float
+    // tolerances as it should be no worse.
+    case DataType::Double: {
       const auto& sum_tolerance_entry = tolerances.sum_tolerances_float;
       const auto& base_abs = tolerances.base_float_abs_tol;
       const auto& base_rel = tolerances.base_float_rel_tol;
@@ -331,9 +334,7 @@ void testValidate(
           line_number,
           " in file ",
           file_name,
-          ".\n  Detected abs error in output ",
-          i,
-          " of: ",
+          ".\n  Detected abs error of: ",
           aten_output_tensor.sub(fusion_output_tensor)
               .abs()
               .max()

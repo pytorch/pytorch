@@ -36,6 +36,8 @@ static const char* data_type2string(DataType t) {
   switch (t) {
     case DataType::Bool:
       return "bool";
+    case DataType::Double:
+      return "double";
     case DataType::Float:
       return "float";
     case DataType::Half:
@@ -89,50 +91,67 @@ static const char* expr_type2string(ExprType t) {
   }
 }
 
+bool needFloatSuffix(UnaryOpType t) {
+  switch (t) {
+    case UnaryOpType::Abs:
+    case UnaryOpType::Cast:
+    case UnaryOpType::Frac:
+    case UnaryOpType::Gelu:
+    case UnaryOpType::Neg:
+    case UnaryOpType::Relu:
+    case UnaryOpType::Reciprocal:
+    case UnaryOpType::Set:
+    case UnaryOpType::Sigmoid:
+      return false;
+    default:
+      return true;
+  }
+}
+
 static const char* unary_op_type2string(UnaryOpType t) {
   switch (t) {
     case UnaryOpType::Abs:
-      return "fabs";
+      return "abs";
     case UnaryOpType::Acos:
-      return "acosf";
+      return "acos";
     case UnaryOpType::Asin:
-      return "asinf";
+      return "asin";
     case UnaryOpType::Atan:
-      return "atanf";
+      return "atan";
     case UnaryOpType::Atanh:
-      return "atanhf";
+      return "atanh";
     case UnaryOpType::Cast:
       return "cast";
     case UnaryOpType::Ceil:
-      return "ceilf";
+      return "ceil";
     case UnaryOpType::Cos:
-      return "cosf";
+      return "cos";
     case UnaryOpType::Cosh:
-      return "coshf";
+      return "cosh";
     case UnaryOpType::Exp:
-      return "expf";
+      return "exp";
     case UnaryOpType::Expm1:
-      return "expm1f";
+      return "expm1";
     case UnaryOpType::Erf:
-      return "erff";
+      return "erf";
     case UnaryOpType::Erfc:
-      return "erfcf";
+      return "erfc";
     case UnaryOpType::Floor:
-      return "floorf";
+      return "floor";
     case UnaryOpType::Frac:
       return "frac";
     case UnaryOpType::Gelu:
       return "gelu";
     case UnaryOpType::Lgamma:
-      return "lgammaf";
+      return "lgamma";
     case UnaryOpType::Log:
-      return "logf";
+      return "log";
     case UnaryOpType::Log10:
-      return "log10f";
+      return "log10";
     case UnaryOpType::Log1p:
-      return "log1pf";
+      return "log1p";
     case UnaryOpType::Log2:
-      return "log2f";
+      return "log2";
     case UnaryOpType::Neg:
       return "neg";
     case UnaryOpType::RandLike:
@@ -142,25 +161,25 @@ static const char* unary_op_type2string(UnaryOpType t) {
     case UnaryOpType::Relu:
       return "relu";
     case UnaryOpType::Rsqrt:
-      return "rsqrtf";
+      return "rsqrt";
     case UnaryOpType::Round:
-      return "nearbyintf";
+      return "nearbyint";
     case UnaryOpType::Set:
       return "set";
     case UnaryOpType::Sigmoid:
       return "sigmoid";
     case UnaryOpType::Sin:
-      return "sinf";
+      return "sin";
     case UnaryOpType::Sinh:
-      return "sinhf";
+      return "sinh";
     case UnaryOpType::Sqrt:
-      return "sqrtf";
+      return "sqrt";
     case UnaryOpType::Tan:
-      return "tanf";
+      return "tan";
     case UnaryOpType::Tanh:
-      return "tanhf";
+      return "tanh";
     case UnaryOpType::Trunc:
-      return "truncf";
+      return "trunc";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
@@ -178,24 +197,38 @@ static const char* unary_op_type_inline_op2string(UnaryOpType t) {
   return nullptr;
 }
 
+bool needFloatSuffix(BinaryOpType t) {
+  switch (t) {
+    case BinaryOpType::Atan2:
+    case BinaryOpType::Div:
+    case BinaryOpType::Fmod:
+    case BinaryOpType::Max:
+    case BinaryOpType::Min:
+    case BinaryOpType::Pow:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static const char* binary_op_type2string(BinaryOpType t) {
   switch (t) {
     case BinaryOpType::Add:
       return "add";
     case BinaryOpType::Atan2:
-      return "atan2f";
+      return "atan2";
     case BinaryOpType::Div:
       return "div";
     case BinaryOpType::Fmod:
-      return "fmodf";
+      return "fmod";
     case BinaryOpType::Max:
-      return "fmaxf";
+      return "fmax";
     case BinaryOpType::Min:
-      return "fminf";
+      return "fmin";
     case BinaryOpType::Mul:
       return "mul";
     case BinaryOpType::Pow:
-      return "powf";
+      return "pow";
     case BinaryOpType::Remainder:
       return "remainder";
     case BinaryOpType::Sub:
@@ -381,6 +414,8 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
   switch (scalar_type) {
     case at::ScalarType::Bool:
       return DataType::Bool;
+    case at::ScalarType::Double:
+      return DataType::Double;
     case at::ScalarType::Float:
       return DataType::Float;
     case at::ScalarType::Half:
@@ -396,6 +431,8 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
   switch (data_type) {
     case DataType::Bool:
       return at::ScalarType::Bool;
+    case DataType::Double:
+      return at::ScalarType::Double;
     case DataType::Float:
       return at::ScalarType::Float;
     case DataType::Half:
@@ -464,6 +501,22 @@ std::string stringifyThread(const ParallelType ptype) {
   return parallel_type2string(ptype);
 }
 
+std::string typePrefix(const DataType data_type) {
+  switch (data_type) {
+    case DataType::Bool:
+      return "b";
+    case DataType::Double:
+      return "d";
+    case DataType::Float:
+    case DataType::Half:
+      return "f";
+    case DataType::Int:
+      return "i";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
+  }
+}
+
 bool isParallelTypeThreadDim(ParallelType ptype) {
   return ptype == ParallelType::TIDx || ptype == ParallelType::TIDy ||
       ptype == ParallelType::TIDz;
@@ -489,12 +542,14 @@ size_t dataTypeSize(DataType type) {
   switch (type) {
     case DataType::Bool:
       return sizeof(bool);
+    case DataType::Double:
+      return sizeof(double);
     case DataType::Float:
-      return 4;
+      return sizeof(float);
     case DataType::Half:
-      return 2;
+      return sizeof(at::Half);
     case DataType::Int:
-      return 4;
+      return sizeof(uint64_t);
     default:
       TORCH_INTERNAL_ASSERT(false, "Size undefined for data type, ", type);
   }

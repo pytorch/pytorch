@@ -87,6 +87,10 @@ Statement* OptOutMutator::mutate(Bool* b) {
   return b;
 }
 
+Statement* OptOutMutator::mutate(Double* d) {
+  return d;
+}
+
 Statement* OptOutMutator::mutate(Float* f) {
   return f;
 }

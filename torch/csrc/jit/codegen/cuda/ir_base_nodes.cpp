@@ -69,6 +69,10 @@ class ConstCheck : OptOutConstDispatch {
     is_const_ = is_const_ && b->isConst();
   }
 
+  void handle(const Double* d) override {
+    is_const_ = is_const_ && d->isConst();
+  }
+
   void handle(const Float* f) override {
     is_const_ = is_const_ && f->isConst();
   }

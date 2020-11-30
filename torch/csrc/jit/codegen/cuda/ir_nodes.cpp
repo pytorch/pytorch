@@ -39,6 +39,10 @@ class ScalarCheck : OptInConstDispatch {
     same_ = v1_->as<Bool>()->sameAs(v2_->as<Bool>());
   }
 
+  void handle(const Double* d) override {
+    same_ = v1_->as<Double>()->sameAs(v2_->as<Double>());
+  }
+
   void handle(const Float* f) override {
     same_ = v1_->as<Float>()->sameAs(v2_->as<Float>());
   }
@@ -75,6 +79,15 @@ Bool::Bool(const Bool* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
 bool Bool::sameAs(const Bool* const other) const {
+  if (isConst() && other->isConst())
+    return *value() == *(other->value());
+  return this == other;
+}
+
+Double::Double(const Double* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
+
+bool Double::sameAs(const Double* const other) const {
   if (isConst() && other->isConst())
     return *value() == *(other->value());
   return this == other;

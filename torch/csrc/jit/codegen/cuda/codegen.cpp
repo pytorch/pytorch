@@ -60,10 +60,37 @@ class CudaKernelGenerator : private kir::IrVisitor {
               << TensorDomain::noReductions(
                      tv->fuserTv()->getMaybeRFactorDomain())
                      .size()
-              << "> " << varName(tv, "T");
+              << "> " << varName(tv);
       } else {
         TORCH_INTERNAL_ASSERT(val->isScalar());
-        code_ << val->dtype() << " " << gen(val);
+        // All floating point arguments come in as double, all int arguments
+        // come in as int64
+        bool isFloatingPoint = true;
+        switch (val->dtype()) {
+          case (DataType::Double):
+          case (DataType::Float):
+          case (DataType::Half):
+            break;
+          case (DataType::Int):
+            isFloatingPoint = false;
+            break;
+          default:
+            TORCH_INTERNAL_ASSERT(
+                false,
+                "Scalar type of ",
+                val->dtype(),
+                " is not currently supported as a scalar argument to kernels.");
+        }
+        if (isFloatingPoint) {
+          code_ << DataType::Double;
+        } else {
+          code_ << DataType::Int;
+        }
+        if (val->definition() != nullptr) {
+          code_ << " " << gen(val);
+        } else {
+          code_ << " " << varName(val);
+        }
       }
 
       if (val != params.back()) {
@@ -86,7 +113,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
                 id->iterType() != IterType::BroadcastWithoutStride;
           });
       code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
-            << varName(tv, "T");
+            << varName(tv);
     }
 
     // Kernels generating random numbers take extra (seed, offset) arguments
@@ -177,7 +204,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   // TODO(kir): consider automatic var naming
-  std::string varName(const kir::Val* val, const char* prefix) {
+  std::string varName(const kir::Val* val) {
+    std::string prefix = "";
+    if (val->isA<kir::TensorView>()) {
+      prefix = "T";
+    } else {
+      prefix = typePrefix(val->dtype());
+    }
+
     std::stringstream value_name;
     if (val->name() != kInvalidStmName) {
       value_name << prefix << val->name();
@@ -202,7 +236,21 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else if (node->isConst()) {
       code_ << *node->value();
     } else {
-      code_ << varName(node, "b");
+      code_ << varName(node);
+    }
+  }
+
+  void visit(const kir::Double* node) final {
+    const auto def = node->definition();
+    if (print_inline_ && def != nullptr) {
+      code_ << "(" << gen(def) << ")";
+    } else if (node->isConst()) {
+      const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
+      code_ << "double(" << std::setprecision(digits) << *node->value() << ")";
+    } else if (def == nullptr) {
+      code_ << "(double)" << varName(node);
+    } else {
+      code_ << varName(node);
     }
   }
 
@@ -213,8 +261,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else if (node->isConst()) {
       const int digits = std::numeric_limits<Float::ScalarType>::max_digits10;
       code_ << "float(" << std::setprecision(digits) << *node->value() << ")";
+    } else if (def == nullptr) {
+      code_ << "(float) " << varName(node);
     } else {
-      code_ << varName(node, "f");
+      code_ << varName(node);
     }
   }
 
@@ -225,7 +275,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else if (node->isConst()) {
       code_ << "__float2half(" << *node->value() << ")";
     } else {
-      code_ << varName(node, "h");
+      code_ << varName(node);
     }
   }
 
@@ -236,7 +286,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else if (node->isConst()) {
       code_ << *node->value();
     } else {
-      code_ << varName(node, "i");
+      code_ << varName(node);
     }
   }
 
@@ -245,7 +295,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::TensorIndex* node) final {
-    code_ << varName(node->view(), "T") << "[";
+    code_ << varName(node->view()) << "[";
 
     bool first = true;
     for (auto* ind : node->indices()) {
@@ -296,6 +346,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
         code_ << cast_str.value();
       } else {
         code_ << node->operation();
+        if (needFloatSuffix(node->operation()) &&
+            node->out()->dtype() == DataType::Float) {
+          code_ << "f";
+        }
       }
 
       code_ << "(";
@@ -314,13 +368,18 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   std::string genBinaryOp(
       BinaryOpType op_type,
+      kir::Val* out,
       const std::string& lhs,
       const std::string& rhs) {
     std::stringstream expr;
     if (auto op = inline_op_str(op_type)) {
       expr << lhs << " " << *op << " " << rhs;
     } else {
-      expr << op_type << "(" << lhs << ", " << rhs << ")";
+      expr << op_type;
+      if (needFloatSuffix(op_type) && out->dtype() == DataType::Float) {
+        expr << "f";
+      }
+      expr << "(" << lhs << ", " << rhs << ")";
     }
     return expr.str();
   }
@@ -329,13 +388,15 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const auto op_type = node->operation();
     if (print_inline_) {
       // Inline expression: `lhs op rhs`
-      code_ << genBinaryOp(op_type, gen(node->lhs()), gen(node->rhs()));
+      code_ << genBinaryOp(
+          op_type, node->out(), gen(node->lhs()), gen(node->rhs()));
     } else {
       indent() << gen(node->out());
       if (node->out()->isScalar()) {
         // Single line: `out = lhs op rhs;`
         code_ << " = "
-              << genBinaryOp(op_type, gen(node->lhs()), gen(node->rhs()));
+              << genBinaryOp(
+                     op_type, node->out(), gen(node->lhs()), gen(node->rhs()));
       } else {
         // Split TensorView expressions across multiple lines:
         //
@@ -375,10 +436,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  std::string genReductionOp(BinaryOpType op_type, DataType data_type) {
+  std::string genReductionOp(BinaryOpType op_type, kir::Val* out) {
     std::stringstream lambda;
+    DataType data_type = out->dtype();
     lambda << "[](" << data_type << " &a, " << data_type << " b) "
-           << "{ a = " << genBinaryOp(op_type, "a", "b") << "; }";
+           << "{ a = " << genBinaryOp(op_type, out, "a", "b") << "; }";
     return lambda.str();
   }
 
@@ -430,7 +492,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
       const auto gen_out = gen(out);
       const auto op_type = node->operation();
       indent() << gen_out << " = "
-               << genBinaryOp(op_type, gen_out, gen(node->in())) << ";\n";
+               << genBinaryOp(op_type, out, gen_out, gen(node->in())) << ";\n";
       return;
     }
 
@@ -458,7 +520,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
         indent() << kTab << gen(node->out()) << ",\n";
       }
       indent() << kTab << gen(node->in()) << ",\n";
-      indent() << kTab << genReductionOp(op_type, data_type) << ",\n";
+      indent() << kTab << genReductionOp(op_type, node->out()) << ",\n";
       indent() << kTab << "threadIdx,\n";
       indent() << kTab << "blockDim,\n";
       indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
@@ -540,9 +602,9 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else {
       indent() << kTab << gen(rop->in()) << ",\n";
     }
-    indent() << kTab << genReductionOp(op_type, data_type) << ",\n";
-    indent() << kTab << "&" << varName(work_buffer, "T") << "[0],\n";
-    indent() << kTab << varName(sync_buffer, "T") << ",\n";
+    indent() << kTab << genReductionOp(op_type, out) << ",\n";
+    indent() << kTab << "&" << varName(work_buffer) << "[0],\n";
+    indent() << kTab << varName(sync_buffer) << ",\n";
     indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
     if (node->predicate() == nullptr) {
       indent() << kTab << "true,\n";
@@ -612,25 +674,25 @@ class CudaKernelGenerator : private kir::IrVisitor {
       // Allocate alias another Allocate node
       const auto alias_tv = node->alias()->buffer()->as<kir::TensorView>();
       indent() << "// Alias Allocation - " << node->memoryType() << "\n";
-      indent() << buffer_dtype << "* " << varName(tv, "T") << " = "
-               << varName(alias_tv, "T") << ";\n";
+      indent() << buffer_dtype << "* " << varName(tv) << " = "
+               << varName(alias_tv) << ";\n";
     } else {
       // Standard Memory Allocation
       switch (tv->memoryType()) {
         case MemoryType::Global:
-          indent() << "// Allocate global tensor " << varName(tv, "T") << "\n";
+          indent() << "// Allocate global tensor " << varName(tv) << "\n";
           break;
         case MemoryType::Shared:
           if (kir::ExpressionEvaluator::isConst(size)) {
             // Static shared memory
-            indent() << "__shared__ " << buffer_dtype << " " << varName(tv, "T")
+            indent() << "__shared__ " << buffer_dtype << " " << varName(tv)
                      << "[" << genInline(size) << "];\n";
           } else {
             // Align Offset Position
             indent() << "offset = alignBufferSize(offset,"
                      << dataTypeSize(buffer_dtype) << ");\n";
             // Shared Memory Pointer
-            indent() << buffer_dtype << "* " << varName(tv, "T")
+            indent() << buffer_dtype << "* " << varName(tv)
                      << " = reinterpret_cast<" << buffer_dtype << "*>"
                      << "(array + offset);\n";
             // Increment Offset Position
@@ -639,7 +701,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
           }
           break;
         case MemoryType::Local:
-          indent() << buffer_dtype << " " << varName(tv, "T") << "["
+          indent() << buffer_dtype << " " << varName(tv) << "["
                    << genInline(size) << "];\n";
           break;
         default:
