@@ -181,6 +181,17 @@ class TestProfiler(TestCase):
 
         self.assertEqual(called_num[0], 2)
 
+        # case without enable_pred
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA]
+        ) as p:
+            self.payload()
+        print(p.key_averages().table(
+            sort_by="self_cuda_time_total", row_limit=-1))
+
+
     def test_module_attrib_eager(self):
         model = DummyModule_2()
         inp = torch.randn(2, 3, 2, 2)
