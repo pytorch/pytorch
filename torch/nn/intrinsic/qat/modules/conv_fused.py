@@ -43,6 +43,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = _BN_CLASS_MAP[dim](out_channels, eps, momentum, True, True)
         self.weight_fake_quant = self.qconfig.weight()
+        self.zero_bias = Parameter(torch.Tensor(out_channels))
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
@@ -94,7 +95,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         bias_shape[1] = -1
         scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
         # this does not include the conv bias
-        conv = self._conv_forward(input, scaled_weight)
+        conv = self._conv_forward(input, scaled_weight, self.zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:
             conv_orig = conv_orig + self.bias.reshape(bias_shape)
@@ -402,7 +403,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
 
     def forward(self, input):
         return F.relu(
-            self._conv_forward(input, self.weight_fake_quant(self.weight)))
+            self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod):

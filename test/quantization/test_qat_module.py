@@ -52,6 +52,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
         self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
+        self.zero_bias = nn.Parameter(torch.Tensor(out_channels))
         if bias:
             self.bias = nn.Parameter(torch.Tensor(out_channels))
         else:
@@ -110,7 +111,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         running_std = torch.sqrt(self.running_var + self.eps)
         scale_factor = self.gamma / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
-        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight))
+        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), self.zero_bias)
 
         if self.training and not self.freeze_bn:
             # recovering original conv to get original batch_mean and batch_var
