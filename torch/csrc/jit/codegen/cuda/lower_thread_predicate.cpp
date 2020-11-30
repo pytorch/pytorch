@@ -42,19 +42,23 @@ kir::Bool* getPredicate(
     return ir_builder.create<kir::Bool>(true);
   }
 
-  kir::Val* pred = nullptr;
+  kir::Bool* pred = nullptr;
 
   for (const auto& pt_bool : bits.getMap()) {
     if (pt_bool.second) {
       const auto tp = getPredicatePerParallelType(pt_bool.first, source_map);
-      pred = (pred == nullptr) ? tp : ir_builder.andExpr(pred, tp);
+      if (pred == nullptr) {
+        pred = ir_builder.create<kir::Bool>(c10::nullopt);
+        ir_builder.create<kir::UnaryOp>(UnaryOpType::Set, pred, tp);
+      } else {
+        pred = ir_builder.andExpr(pred, tp)->as<kir::Bool>();
+      }
     }
   }
 
   TORCH_INTERNAL_ASSERT(pred != nullptr);
-  TORCH_INTERNAL_ASSERT(pred->dtype() == DataType::Bool);
 
-  return pred->as<kir::Bool>();
+  return pred;
 }
 
 void mergeSourceMap(

@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -33,6 +34,28 @@ kir::ForLoop* cloneLoopNest(
   return new_loop;
 }
 
+// Returns true if expr is an expression that initializes a reduction
+// buffer.
+bool isReductionInitExpr(const kir::Expr* expr) {
+  // False if its output isn't a TensorView
+  if (!ir_utils::isTVOp(expr)) {
+    return false;
+  }
+  // False if it doesn't have any reduction axis
+  const auto out_tv = expr->outputs()[0]->as<kir::TensorView>();
+  if (!out_tv->domain()->hasReduction()) {
+    return false;
+  }
+  // False if it has have TensorView inputs as initialization should
+  // never use TensorViews
+  const auto tv_filter_inp_view =
+      ir_utils::filterByType<kir::TensorView>(expr->inputs());
+  if (tv_filter_inp_view.begin() != tv_filter_inp_view.end()) {
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 kir::Bool* UnrollPass::getThreadPredicate(const kir::TensorView* tv) {
@@ -58,13 +81,16 @@ void UnrollPass::handle(kir::Expr* expr) {
     if (!should_predicate) {
       return;
     }
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    const auto thread_pred = isReductionInitExpr(expr)
+        ? ir_builder.create<kir::Bool>(true)
+        : getThreadPredicate(out_tv);
     const auto pred = PredicateCompute::getInlinePredicate(
-        expr, for_loops_, getThreadPredicate(out_tv), ca_root_map_);
+        expr, for_loops_, thread_pred, ca_root_map_);
 
     // If we need a predicate, put expr inside an if then else
     if (!pred->isConst() || !(pred->isConst() && pred->value().value())) {
       non_trivial_pred_found_ = true;
-      kir::IrBuilder ir_builder(GpuLower::current()->kernel());
       kir::ForLoop* insert_scope =
           for_loops_.empty() ? nullptr : for_loops_.back();
       kir::IfThenElse* inline_ite =
