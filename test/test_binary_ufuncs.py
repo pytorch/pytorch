@@ -162,16 +162,27 @@ class TestBinaryUfuncs(TestCase):
         t = torch.tensor([1 << 5], dtype=torch.uint8)
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t < s   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             s < t   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t <= s  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             s <= t  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t > s   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             s > t   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t >= s  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             s >= t  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t == s  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             s == t  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t != s  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             s != t  # noqa: B015
 
     # TODO: update to work on CUDA, too
@@ -183,16 +194,27 @@ class TestBinaryUfuncs(TestCase):
         ts2 = torch.tensor(1 << 40, dtype=torch.int64)
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t1 < ts1    # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             ts2 < t2   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t1 <= ts1   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             ts2 <= t2  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t1 > ts1    # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             ts2 > t2   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t1 >= ts1   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             ts2 >= t2  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t1 == ts1   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             ts2 == t2  # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             t1 != ts1   # noqa: B015
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
             ts2 != t2  # noqa: B015
 
     # TODO: update to work on CUDA, too
