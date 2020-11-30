@@ -297,7 +297,6 @@ struct TORCH_API RecordFunction {
  */
 class TORCH_API RecordFunctionCallback {
  public:
-
   // This interface supports observers that require passing an ObserverContext
   // between start and end callbacks.
   explicit RecordFunctionCallback(

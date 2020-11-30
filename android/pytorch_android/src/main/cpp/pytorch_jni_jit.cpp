@@ -93,7 +93,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   static std::unique_ptr<at::ObserverContext> onFunctionEnter(
       const at::RecordFunction& fn) {
     Trace::beginSection(fn.name().str());
-    return nullptr;;
+    return nullptr;
   }
 
   static void onFunctionExit(const at::RecordFunction&, at::ObserverContext*) {
