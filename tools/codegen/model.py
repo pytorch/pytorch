@@ -125,6 +125,22 @@ class NativeFunction:
     # in terms of the out kernel referenced by the string here.
     structured_delegate: Optional['OperatorName']
 
+    # Note [Abstract ATen methods]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # An abstract ATen method is one whose dispatch differs between
+    # types.  These are implemented in derived types (with a
+    # standard (throwing) definition in Type).  A concrete ATen
+    # method is one which has the same dispatch for all types;
+    # we just implement it in the base Type.  This is exposed
+    # in Declarations.yaml via a field named 'abstract'.
+    @property
+    def is_abstract(self) -> bool:
+        if self.structured_delegate:
+            # Structured functions MUST have a dispatch table
+            return True
+        else:
+            return self.dispatch.keys() != {'Math'}
+
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
     # to explicitly write it out.
@@ -517,9 +533,6 @@ class FunctionSchema:
         - Out arguments are stripped
         - Mutability annotations are stripped  (this is sound
           because you cannot overload on mutability annotation)
-
-        This function is based off of get_signature in
-        tools.autograd.load_derivatives
         """
 
         def strip_ret_annotation(r: Return) -> Return:
