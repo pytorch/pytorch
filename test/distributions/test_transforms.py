@@ -198,42 +198,6 @@ def test_forward_inverse(transform, test_cached):
         ])
 
 
-@pytest.mark.parametrize('transform', ALL_TRANSFORMS, ids=transform_id)
-def test_univariate_forward_jacobian(transform):
-    if transform.event_dim > 0:
-        pytest.skip('Not univariate.')
-    x = generate_data(transform).requires_grad_()
-    try:
-        y = transform(x)
-        actual = transform.log_abs_det_jacobian(x, y)
-    except NotImplementedError:
-        pytest.skip('Not implemented.')
-    expected = torch.abs(grad([y.sum()], [x])[0]).log()
-    assert torch.allclose(actual, expected, atol=1e-5), '\n'.join([
-        'Bad {}.log_abs_det_jacobian() disagrees with ()'.format(transform),
-        'Expected: {}'.format(expected),
-        'Actual: {}'.format(actual),
-    ])
-
-
-@pytest.mark.parametrize('transform', ALL_TRANSFORMS, ids=transform_id)
-def test_univariate_inverse_jacobian(transform):
-    if transform.event_dim > 0:
-        pytest.skip('Not univariate.')
-    y = generate_data(transform.inv).requires_grad_()
-    try:
-        x = transform.inv(y)
-        actual = transform.log_abs_det_jacobian(x, y)
-    except NotImplementedError:
-        pytest.skip('Not implemented.')
-    expected = -torch.abs(grad([x.sum()], [y])[0]).log()
-    assert torch.allclose(actual, expected, atol=1e-5), '\n'.join([
-        '{}.log_abs_det_jacobian() disagrees with .inv()'.format(transform),
-        'Expected: {}'.format(expected),
-        'Actual: {}'.format(actual),
-    ])
-
-
 def test_compose_transform_shapes():
     transform0 = ExpTransform()
     transform1 = SoftmaxTransform()
@@ -368,6 +332,8 @@ def test_jacobian(transform):
     # 1. Transforms with 0 off-diagonal elements
     if transform.input_event_dim == 0:
         jac = jacobian(transform, x_)
+        # assert off-diagonal elements are zero
+        assert torch.allclose(jac, jac.diagonal().diag_embed())
         expected = jac.diagonal().abs().log().reshape(x.shape)
     # 2. Transforms with non-0 off-diagonal elements
     else:
