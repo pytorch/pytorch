@@ -92,6 +92,7 @@ Indexing, Slicing, Joining, Mutating Ops
     index_select
     masked_select
     movedim
+    moveaxis
     narrow
     nonzero
     reshape
