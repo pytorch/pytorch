@@ -18,6 +18,7 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig,
     PartitionMode
 )
+from torch.fx.experimental.fuser import fuse
 from typing import Union, Callable
 
 try:
@@ -474,6 +475,19 @@ class TestFXExperimental(JitTestCase):
                 new_target=operator.mul,
             )
             assert (input1 * input2) == traced(input1, input2)
+
+    @skipIfNoTorchVision
+    def test_conv_bn_fusion(self):
+        rn18 = resnet18().eval()
+        traced = symbolic_trace(rn18)
+        fused = fuse(traced)
+
+        self.assertTrue(all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules()))
+
+        N, C, H, W = 20, 3, 224, 224
+        inp = torch.randn(N, C, H, W)
+
+        self.assertEqual(fused(inp), rn18(inp))
 
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
