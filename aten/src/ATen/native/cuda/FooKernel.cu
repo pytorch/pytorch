@@ -20,7 +20,7 @@ namespace at { namespace native {
 namespace {
 
 // TODO jiterator cache design does not handle multiple gpus currently
-using JiteratorKey = ScalarType;
+using JiteratorKey = int32_t;
 using JiteratorCache = std::unordered_map<JiteratorKey, CUfunction>;
 
 // global jiterator mutex
@@ -29,8 +29,8 @@ using JiteratorCache = std::unordered_map<JiteratorKey, CUfunction>;
 //   be consolidated
 std::mutex jiterator_mutex;
 
-JiteratorKey construct_jiterator_key(const ScalarType scalar_type) {
-  return scalar_type;
+JiteratorKey construct_jiterator_key(const ScalarType scalar_type, bool dynamic_casting) {
+  return (uint8_t)scalar_type * 2 + dynamic_casting;
 }
 
 // NOTE: get does not acquire the lock
@@ -485,7 +485,7 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
   FooFunctor<float> my_functor{alpha_scalar.to<float>()};
   bool dynamic_casting = needs_dynamic_casting<FooFunctor<float>>::check(iter);
 
-  JiteratorKey key = construct_jiterator_key(iter.common_dtype());
+  JiteratorKey key = construct_jiterator_key(iter.common_dtype(), dynamic_casting);
   c10::optional<CUfunction> maybe_function = get_jitted_function(foo_cache, key);
   CUfunction function;
   if (maybe_function) {
