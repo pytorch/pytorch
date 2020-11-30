@@ -98,10 +98,11 @@ def broadcast_shapes(*shapes):
         RuntimeError: If shapes are incompatible.
     """
     # TODO Movie this to C++ once the jit has better support for torch.Size.
-    scalar = torch.zeros((), device="cpu")
-    tensors = [scalar.expand(shape) for shape in shapes]
-    tensors = torch.broadcast_tensors(*tensors)
-    return tensors[0].shape
+    with torch.no_grad():
+        scalar = torch.zeros((), device="cpu")
+        tensors = [scalar.expand(shape) for shape in shapes]
+        tensors = torch.broadcast_tensors(*tensors)
+        return tensors[0].shape
 
 
 def split(tensor, split_size_or_sections, dim=0):
