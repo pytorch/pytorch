@@ -7240,15 +7240,16 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(c.grad.stride(), (2, 1))
 
     def test_movedim(self, device):
-        x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
+        for fn in [torch.movedim, torch.moveaxis]:
+            x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
 
-        # Positive axis
-        gradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
-        gradgradcheck(lambda x: torch.movedim(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+            # Positive axis
+            gradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
+            gradgradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
 
-        # Negative axis
-        gradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
-        gradgradcheck(lambda x: torch.movedim(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+            # Negative axis
+            gradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
+            gradgradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
 
     def _test_atleast(self, device, torch_fn):
         # 0-dim
