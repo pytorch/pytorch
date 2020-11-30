@@ -6872,6 +6872,47 @@
     CPU, CUDA: pow
     SparseCPU, SparseCUDA: pow_sparse_scalar
 
+- func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: float_power
+
+- func: float_power.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Scalar(Scalar self, Tensor exponent) -> Tensor
+  use_c10_dispatcher: full
+  dispatch:
+    Math: float_power
+
+- func: float_power.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: float_power_out
+
+- func: float_power.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    Math: float_power
+
+- func: float_power_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    Math: float_power_
+
+- func: float_power_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    Math: float_power_
+
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
