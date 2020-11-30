@@ -56,10 +56,7 @@ bool dontUseLLVMFlag() {
   if (!enable_c_str) {
     return false;
   }
-  if (std::string(enable_c_str) == "1") {
-    return true;
-  }
-  return false;
+  return std::string(enable_c_str) == "1";
 }
 
 int& getTECudaPointwiseLoopLevels() {
