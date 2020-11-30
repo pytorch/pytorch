@@ -262,7 +262,22 @@ struct Resource final {
 
   class Pool final {
    public:
-    explicit Pool(const GPU& gpu);
+    class Policy {
+     public:
+      virtual ~Policy() = default;
+
+      virtual void enact(
+          VmaAllocator allocator,
+          const VkBuffer buffer,
+          VmaAllocationCreateInfo& allocation);
+
+      virtual void enact(
+          VmaAllocator allocator,
+          const VkImage image,
+          VmaAllocationCreateInfo& allocation);
+    };
+
+    explicit Pool(const GPU& gpu, std::unique_ptr<Policy> = {});
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
@@ -291,6 +306,21 @@ struct Resource final {
 
     VkDevice device_;
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
+
+    struct {
+      // class Deleter final {
+      //  public:
+      //   explicit Deleter(VmaAllocator);
+      //   void operator()(VmaPool) const;
+
+      //  private:
+      //   VmaAllocator allocator_;
+      // };
+
+      // c10::SmallVector<Handle<VmaPool, Deleter>, 4u> pool;
+      // VkDeviceSize block;
+      std::unique_ptr<Policy> policy;
+    } memory_;
 
     struct {
       std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
