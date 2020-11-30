@@ -2343,6 +2343,9 @@ class Net(object):
         )
 
     def is_external_input(self, blob):
+        if self._recreate_lookup_tables:
+            self._RecreateLookupTables()
+
         name = str(blob)
         return name in self._external_input_map
 

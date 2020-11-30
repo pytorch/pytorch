@@ -88,6 +88,131 @@ linalg.det(input) -> Tensor
 Alias of :func:`torch.det`.
 """)
 
+eigh = _add_docstr(_linalg.linalg_eigh, r"""
+linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
+
+This function computes the eigenvalues and eigenvectors
+of a complex Hermitian (or real symmetric) matrix, or batch of such matrices, :attr:`input`.
+For a single matrix :attr:`input`, the tensor of eigenvalues :math:`w` and the tensor of eigenvectors :math:`V`
+decompose the :attr:`input` such that :math:`\text{input} = V \text{diag}(w) V^H`,
+where :math:`^H` is the conjugate transpose operation.
+
+Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
+is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of
+each matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+
+See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues,
+however that function is not differentiable.
+
+.. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
+
+.. note:: The eigenvectors of matrices are not unique, so any eigenvector multiplied by a constant remains
+          a valid eigenvector. This function may compute different eigenvector representations on
+          different device types. Usually the difference is only in the sign of the eigenvector.
+
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd`` and ``_heevd``.
+          This function always checks whether the call to LAPACK/MAGMA is successful
+          using ``info`` argument of ``_syevd``, ``_heevd`` and throws a RuntimeError if it isn't.
+          On CUDA this causes a cross-device memory synchronization.
+
+Args:
+    input (Tensor): the Hermitian :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    UPLO ('L', 'U', optional): controls whether to use the upper-triangular or the lower-triangular part
+                               of :attr:`input` in the computations. Default: ``'L'``
+
+Returns:
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
+
+        - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`.
+            The eigenvalues in ascending order.
+        - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
+            The orthonormal eigenvectors of the ``input``.
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = a + a.t().conj()  # creates a Hermitian matrix
+    >>> a
+    tensor([[2.9228+0.0000j, 0.2029-0.0862j],
+            [0.2029+0.0862j, 0.3464+0.0000j]], dtype=torch.complex128)
+    >>> w, v = torch.linalg.eigh(a)
+    >>> w
+    tensor([0.3277, 2.9415], dtype=torch.float64)
+    >>> v
+    tensor([[-0.0846+-0.0000j, -0.9964+0.0000j],
+            [ 0.9170+0.3898j, -0.0779-0.0331j]], dtype=torch.complex128)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.to(v.dtype).diag_embed(), v.t().conj())), a)
+    True
+
+    >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
+    >>> a = a + a.transpose(-2, -1)  # creates a symmetric matrix
+    >>> w, v = torch.linalg.eigh(a)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.diag_embed(), v.transpose(-2, -1))), a)
+    True
+""")
+
+eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
+linalg.eigvalsh(input, UPLO='L') -> Tensor
+
+This function computes the eigenvalues of a complex Hermitian (or real symmetric) matrix,
+or batch of such matrices, :attr:`input`. The eigenvalues are returned in ascending order.
+
+Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
+is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of
+each matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+
+See :func:`torch.linalg.eigh` for a related function that computes both eigenvalues and eigenvectors.
+
+.. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
+
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd`` and ``_heevd``.
+          This function always checks whether the call to LAPACK/MAGMA is successful
+          using ``info`` argument of ``_syevd``, ``_heevd`` and throws a RuntimeError if it isn't.
+          On CUDA this causes a cross-device memory synchronization.
+
+.. note:: This function doesn't support backpropagation, please use :func:`torch.linalg.eigh` instead,
+          that also computes the eigenvectors.
+
+Args:
+    input (Tensor): the Hermitian :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    UPLO ('L', 'U', optional): controls whether to use the upper-triangular or the lower-triangular part
+                               of :attr:`input` in the computations. Default: ``'L'``
+
+Examples::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = a + a.t().conj()  # creates a Hermitian matrix
+    >>> a
+    tensor([[2.9228+0.0000j, 0.2029-0.0862j],
+            [0.2029+0.0862j, 0.3464+0.0000j]], dtype=torch.complex128)
+    >>> w = torch.linalg.eigvalsh(a)
+    >>> w
+    tensor([0.3277, 2.9415], dtype=torch.float64)
+
+    >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
+    >>> a = a + a.transpose(-2, -1)  # creates a symmetric matrix
+    >>> a
+    tensor([[[ 2.8050, -0.3850],
+            [-0.3850,  3.2376]],
+
+            [[-1.0307, -2.7457],
+            [-2.7457, -1.7517]],
+
+            [[ 1.7166,  2.2207],
+            [ 2.2207, -2.0898]]], dtype=torch.float64)
+    >>> w = torch.linalg.eigvalsh(a)
+    >>> w
+    tensor([[ 2.5797,  3.4629],
+            [-4.1605,  1.3780],
+            [-3.1113,  2.7381]], dtype=torch.float64)
+""")
+
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
@@ -212,6 +337,46 @@ Using the :attr:`dim` argument to compute matrix norms::
     tensor([ 3.7417, 11.2250])
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
+""")
+
+tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
+linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
+
+Computes a tensor ``input_inv`` such that ``tensordot(input_inv, input, ind) == I_n`` (inverse tensor equation),
+where ``I_n`` is the n-dimensional identity tensor and ``n`` is equal to ``input.ndim``.
+The resulting tensor ``input_inv`` has shape equal to ``input.shape[ind:] + input.shape[:ind]``.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+
+.. note:: If :attr:`input` is not invertible or does not satisfy the requirement
+          ``prod(input.shape[ind:]) == prod(input.shape[:ind])``,
+          then a RuntimeError will be thrown.
+
+.. note:: When :attr:`input` is a 2-dimensional tensor and ``ind=1``, this function computes the
+          (multiplicative) inverse of :attr:`input`, equivalent to calling :func:`torch.inverse`.
+
+Args:
+    input (Tensor): A tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
+    ind (int): A positive integer that describes the inverse tensor equation. See :func:`torch.tensordot` for details. Default: 2.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> a = torch.eye(4 * 6).reshape((4, 6, 8, 3))
+    >>> ainv = torch.linalg.tensorinv(a, ind=2)
+    >>> ainv.shape
+    torch.Size([8, 3, 4, 6])
+    >>> b = torch.randn(4, 6)
+    >>> torch.allclose(torch.tensordot(ainv, b), torch.linalg.tensorsolve(a, b))
+    True
+
+    >>> a = torch.randn(4, 4)
+    >>> a_tensorinv = torch.linalg.tensorinv(a, ind=1)
+    >>> a_inv = torch.inverse(a)
+    >>> torch.allclose(a_tensorinv, a_inv)
+    True
 """)
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""

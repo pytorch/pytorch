@@ -308,7 +308,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
       [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); },
-      upper_bound<scalar_t>());
+      static_cast<double>(upper_bound<scalar_t>()));
   });
 }
 
