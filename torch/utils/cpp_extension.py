@@ -24,6 +24,24 @@ from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 
+# Taken directly from python stdlib < 3.9
+# See https://github.com/pytorch/pytorch/issues/48617
+def _nt_quote_args(args: List) -> List:
+    """Quote command-line arguments for DOS/Windows conventions.
+
+    Just wraps every argument which contains blanks in double quotes, and
+    returns a new argument list.
+    """
+    # XXX this doesn't seem very robust to me -- but if the Windows guys
+    # say it'll work, I guess I'll have to accept it.  (What if an arg
+    # contains quotes?  What other magic characters, other than spaces,
+    # have to be escaped?  Is there an escaping mechanism other than
+    # quoting?)
+    for i, arg in enumerate(args):
+        if ' ' in arg:
+            args[i] = '"%s"' % arg
+    return args
+
 def _find_cuda_home() -> Optional[str]:
     r'''Finds the CUDA install path.'''
     # Guess #1
@@ -400,7 +418,7 @@ class BuildExtension(build_ext, object):
             # overriding the option if the user explicitly passed it.
             _ccbin = os.getenv("CC")
             if (
-                _ccbin is not None 
+                _ccbin is not None
                 and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
             ):
                 cflags.extend(['-ccbin', _ccbin])
@@ -646,7 +664,6 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = list(extra_postargs)
                 cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
 
-            from distutils.spawn import _nt_quote_args  # type: ignore
             cflags = _nt_quote_args(cflags)
             post_cflags = _nt_quote_args(post_cflags)
             if with_cuda:
@@ -1630,7 +1647,6 @@ def _write_ninja_file_to_build_library(path,
 
     if IS_WINDOWS:
         cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
-        from distutils.spawn import _nt_quote_args  # type: ignore
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
