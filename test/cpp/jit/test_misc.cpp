@@ -368,6 +368,10 @@ TEST(ATenNativeBatchNormTest, Basic) {
 }
 
 TEST(CustomFusionTest, Basic) {
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
+
   auto graph_string = R"IR(
     graph(%0 : Float(2, 3, 4),
           %1 : Float(2, 3, 4)):
@@ -402,6 +406,10 @@ TEST(CustomFusionTest, Basic) {
 }
 
 TEST(CustomFusionTest, NestedBlocks) {
+  #if defined(FBCODE_CAFFE2)
+      return;
+  #endif
+
   auto graph_string = R"IR(
   graph(%0 : Float(2, 3, 4),
         %1 : Float(2, 3, 4),
@@ -1163,10 +1171,10 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
 };
 
 void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
-  auto debug_info = c10::ThreadLocalDebugInfo::get(kind);
+  auto* debug_info = c10::ThreadLocalDebugInfo::get(kind);
   TORCH_CHECK(debug_info != nullptr);
   auto* test_debug_info =
-      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info.get());
+      dynamic_cast<TestThreadLocalDebugInfo*>(debug_info);
   TORCH_CHECK(test_debug_info != nullptr);
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }
@@ -2155,7 +2163,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
   // test running callbacks with propagation of TLS state.
   {
     // Enable the profiler in this thread
-    torch::autograd::profiler::enableProfiler(
+    torch::autograd::profiler::enableProfilerLegacy(
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2164,12 +2172,12 @@ TEST(TLSFutureCallbacksTest, Basic) {
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
     t.join();
-    torch::autograd::profiler::disableProfiler();
+    torch::autograd::profiler::disableProfilerLegacy();
   }
   // then() with TLS State
   {
     // Enable the profiler in this thread
-    torch::autograd::profiler::enableProfiler(
+    torch::autograd::profiler::enableProfilerLegacy(
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2182,7 +2190,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     t.join();
     s2->wait();
-    torch::autograd::profiler::disableProfiler();
+    torch::autograd::profiler::disableProfilerLegacy();
   }
 }
 
@@ -2191,7 +2199,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   auto profilerEnabledCb = []() {
     ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
   };
-  torch::autograd::profiler::enableProfiler(
+  torch::autograd::profiler::enableProfilerLegacy(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2204,10 +2212,10 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
     // Don't cleanup TLSState, and just consolidate.
     auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
     auto thread_event_lists =
-        torch::autograd::profiler::disableProfiler(std::move(opts));
+        torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
     // Ensure that the events from this thread are still profiled and we obtain
     // the expected in events in our consolidated list when calling
-    // disableProfiler().
+    // disableProfilerLegacy().
     bool found_ones = false;
     bool found_add = false;
     for (const auto& li : thread_event_lists) {
@@ -2229,13 +2237,13 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.
   auto opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
-  torch::autograd::profiler::disableProfiler(std::move(opts));
+  torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
   std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
   t.join();
 
   // Similar to above test, but verifies correctness in the case where
   // continuation runs on the main thread.
-  torch::autograd::profiler::enableProfiler(
+  torch::autograd::profiler::enableProfilerLegacy(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   s1 = c10::make_intrusive<Future>(IntType::get());
@@ -2243,7 +2251,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   // Runs callback inline
   s1->markCompleted(at::IValue(1));
   opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
-  torch::autograd::profiler::disableProfiler(std::move(opts));
+  torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
 TEST(IValueKWargsTest, Basic) {

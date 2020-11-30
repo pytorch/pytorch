@@ -830,27 +830,6 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
-
-    if IS_HIP_EXTENSION:
-        build_dir = os.getcwd()
-        if not include_dirs:
-            include_dirs = ['*']
-        hipify_result = hipify_python.hipify(
-            project_directory=build_dir,
-            output_directory=build_dir,
-            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs],
-            extra_files=[os.path.abspath(s) for s in sources],
-            show_detailed=True,
-            is_pytorch_extension=True,
-        )
-
-        hipified_sources = set()
-        for source in sources:
-            s_abs = os.path.abspath(source)
-            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
-
-        sources = list(hipified_sources)
-
     include_dirs += include_paths(cuda=True)
     kwargs['include_dirs'] = include_dirs
 
@@ -883,11 +862,9 @@ def include_paths(cuda: bool = False) -> List[str]:
     ]
     if cuda and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
-        rocm_include_path = _join_rocm_home('include')
-        paths.append(rocm_include_path)
+        paths.append(_join_rocm_home('include'))
         if MIOPEN_HOME is not None:
             paths.append(os.path.join(MIOPEN_HOME, 'include'))
-        paths.extend([f.path for f in os.scandir(rocm_include_path) if f.is_dir()])
     elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -1664,7 +1641,7 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         sources = [s if not _is_cuda_file(s) else
                    os.path.abspath(os.path.join(
-                       path, get_hip_file_path(os.path.relpath(s, path), is_pytorch_extension=True)))
+                       path, get_hip_file_path(os.path.relpath(s, path))))
                    for s in sources]
     elif with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()

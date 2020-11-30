@@ -588,8 +588,6 @@ void StaticRuntime::deallocate_registers(const std::vector<size_t>& internals) {
         reg_[i] = IValue();
       }
     } else {
-      // TensorLists and Tuples
-      // TODO: cache the List and Tuple objects but release what's inside
       reg_[i] = IValue();
     }
   }
@@ -733,12 +731,15 @@ ProcessedNode::ProcessedNode(
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to out variant for node: " << ss.str();
-  }
-  if (canRunNatively(node)) {
+  } else if (canRunNatively(node)) {
     native_fn_ = getNativeOperation(node);
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to native impl for node: " << ss.str();
+  } else {
+    std::ostringstream ss;
+    node->print(ss, 0, nullptr, false);
+    VLOG(1) << "Fallback interpreter for node: " << ss.str();
   }
 }
 
@@ -754,32 +755,10 @@ void ProcessedNode::run(std::vector<IValue>& reg) const {
     for (size_t i = 0; i < size; i++) {
       stack.emplace_back(Input(i, reg));
     }
-    if (op_) {
-      op_->operator()(&stack);
-    } else {
-      if (node_->kind() == prim::ListConstruct) {
-        listConstruct(
-            stack,
-            node_->output()->type()->expect<ListType>(),
-            node_->inputs().size());
-      } else if (node_->kind() == prim::TupleConstruct) {
-        bool named =
-            node_->output()->type()->expect<TupleType>()->name().has_value();
-        if (named) {
-          namedTupleConstruct(
-              stack,
-              node_->output()->type()->expect<TupleType>(),
-              node_->inputs().size());
-        } else {
-          tupleConstruct(stack, node_->inputs().size());
-        }
-      } else if (node_->kind() == prim::ListUnpack) {
-        size_t num_outputs = node_->outputs().size();
-        listUnpack(stack, num_outputs);
-      } else {
-        TORCH_CHECK(0, "Unhandled operation!", node_->kind().toQualString());
-      }
-    }
+
+    DCHECK(op_);
+    op_->operator()(&stack);
+
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (auto i = 0; i < node_->outputs().size(); i++) {
       Output(i, reg) = std::move(stack[i]);
