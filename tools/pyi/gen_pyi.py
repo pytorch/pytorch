@@ -370,6 +370,28 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
         'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
                     'def nonzero(input: Tensor, *, as_tuple: bool=...) -> Tensor: ...'],
+        'binary_cross_entropy_with_logits': ['def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, weight: Optional[Tensor] = None, '
+                                             'size_average: Optional[bool] = None, reduce: Optional[bool] = None, reduction: str = ..., '
+                                             'pos_weight: Optional[Tensor] = None) -> Tensor: ...'],
+        'cosine_embedding_loss': ['def cosine_embedding_loss(input1: Tensor, input2: Tensor, target: Tensor, margin: float = ..., '
+                                  'size_average: Optional[bool] = ..., reduce: Optional[bool] = ..., '
+                                  'reduction: str = ...) -> Tensor: ...'],
+        'ctc_loss': ['def ctc_loss(log_probs: Tensor, targets: Tensor, input_lengths: Tensor, target_lengths: Tensor, blank: int = ..., '
+                     'reduction: str = ..., zero_infinity: bool = ...) -> Tensor: ...'],
+        'hinge_embedding_loss': ['def hinge_embedding_loss(input: Tensor, target: Tensor, margin: float = ..., size_average: Optional[bool] = ..., '
+                                 'reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
+        'kl_div': ['def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ..., '
+                   'reduction: str = ..., log_target: bool = ...) -> Tensor: ...'],
+        'margin_ranking_loss': ['def margin_ranking_loss(input1: Tensor, input2: Tensor, target: Tensor, margin: float = ..., '
+                                'size_average: Optional[bool] = ..., reduce: Optional[bool] = ..., '
+                                'reduction: str = ...) -> Tensor: ...'],
+        'triplet_margin_loss': ['def triplet_margin_loss(anchor: Tensor, positive: Tensor, negative: Tensor, margin: float = ..., p: float = ..., '
+                                'eps: float = ..., swap: bool = ..., size_average: Optional[bool] = ..., '
+                                'reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
+        'dsmm': ['def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
+        'hsmm': ['def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
+        'saddmm': ['def saddmm(input: Tensor, mat1: Tensor, mat2: Tensor, *, beta: Number=1, alpha: Number=1, out: Optional[Tensor]=None) -> Tensor: ...'],
+        'spmm': ['def spmm(input: Tensor, mat2: Tensor) -> Tensor: ...'],
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         unsorted_function_hints[binop].append(
