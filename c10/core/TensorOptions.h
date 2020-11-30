@@ -73,7 +73,7 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 ///
 ///     at::zeros({2,2}, at::kCUDA);
 ///     at::zeros({2,2}, at::kLong);
-///     at::zeros({2,2}, at::device(at::kCUDA).dtype(at::kLong()));
+///     at::zeros({2,2}, at::device(at::kCUDA).dtype(at::kLong));
 ///     at::zeros({2,2}, at::device({at::kCUDA, 1})); // place on device 1
 ///     at::zeros({2,2}, at::requires_grad());
 ///
