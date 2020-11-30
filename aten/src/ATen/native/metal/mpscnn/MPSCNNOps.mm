@@ -356,7 +356,7 @@ Tensor binaryElementwiseKernel(
     const Tensor& input1,
     const Tensor& input2,
     NSString* arrayKernel,
-    NSString* nonarrayKernal) {
+    NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
@@ -367,7 +367,7 @@ Tensor binaryElementwiseKernel(
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
   MPSImage* Y = imageFromMetalTensor(mt);
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernal)];
+      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[X1 texture] atIndex:0];
@@ -388,7 +388,7 @@ Tensor& binaryElementwiseKernel_(
     Tensor& input1,
     const Tensor& input2,
     NSString* arrayKernel,
-    NSString* nonarrayKernal) {
+    NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
@@ -397,7 +397,7 @@ Tensor& binaryElementwiseKernel_(
   TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
   MPSImage* Y = [MPSImage temporaryImageFromSize:outputSize commandBuffer:cb1];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernal)];
+      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[X1 texture] atIndex:0];
