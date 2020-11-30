@@ -6293,10 +6293,6 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-    # skip this test if running on rocm, because in cdist
-    # we use __shfl_down_sync on CUDA for fast reduction
-    # and it gives incorrect results on rocm platform
-    @skipCUDAIfRocm
     def test_cdist(self, device):
         def _test_cdist_for_size(sizex, sizey=None):
             if sizey is None:
@@ -6380,8 +6376,6 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-    # NOTE: flaky on ROCm CI
-    @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def _test(size, sparse_dim, nnz, device):
@@ -6702,7 +6696,6 @@ class TestAutogradDeviceType(TestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
-    @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_neg_slope(self, device):
         a = torch.tensor([-1., 1.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), -2)
@@ -6714,7 +6707,6 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
             b.backward(torch.ones(2, device=device))
 
-    @skipCUDAIfRocm
     def test_leaky_relu_inplace_with_zero_slope(self, device):
         a = torch.tensor([-2., 0., 2.], device=device, requires_grad=True)
         b = torch.nn.functional.leaky_relu_(a.clone(), 0.0)
@@ -7436,9 +7428,7 @@ for test in method_tests():
 instantiate_device_type_tests(
     TestAutogradDeviceType,
     globals(),
-    # Exclude ROCM for now, there are a lot of failures.  See
-    # https://github.com/pytorch/pytorch/issues/30845
-    except_for='cuda' if TEST_WITH_ROCM else None
+    except_for=None
 )
 
 if __name__ == '__main__':
