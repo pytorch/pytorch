@@ -365,8 +365,7 @@ struct trivially_copyable_optimization_optional_base {
 
 // CUDA 9.2 and below doesn't compile default move constructor correctly
 // see https://github.com/pytorch/csprng/issues/84
-//#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
-#if (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
 #else 
   explicit constexpr trivially_copyable_optimization_optional_base(const trivially_copyable_optimization_optional_base<T>& v)
     : init_(v.init_), storage_(trivial_init) {
@@ -503,8 +502,7 @@ class optional : private OptionalBase<T> {
 
 // CUDA 9.2 and below doesn't compile default move constructor correctly
 // see https://github.com/pytorch/csprng/issues/84
-//#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
-#if (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   optional(optional&& rhs) = default;
 #else
   optional(optional&& rhs) noexcept(
