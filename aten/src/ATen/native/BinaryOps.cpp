@@ -920,7 +920,7 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_(Tensor& self, Scalar other) {
-  return native::fmod_out(self, self, wrapped_scalar_tensor(other));
+  return native::fmod_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -1074,6 +1074,18 @@ Tensor heaviside(const Tensor& self, const Tensor& values) {
 
 Tensor& heaviside_(Tensor& self, const Tensor& values) {
   return at::heaviside_out(self, self, values);
+}
+
+Tensor& ldexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::mul_out(result, self, at::pow(2.0, other));
+}
+
+Tensor ldexp(const Tensor& self, const Tensor& other) {
+  return at::mul(self, at::pow(2.0, other));
+}
+
+Tensor& ldexp_(Tensor& self, const Tensor& other) {
+  return at::ldexp_out(self, self, other);
 }
 
 // TODO: Deduplicate this with the TensorIterator logic.  This would
