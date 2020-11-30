@@ -1270,9 +1270,6 @@ void TensorIterator::build(TensorIteratorConfig& config) {
   populate_operands(config);
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
-  // Check that the outputs have no internal overlap
-  // and do not share memory with inputs.
-  compute_mem_overlaps(config);
   // Check that input dimensions are aligned correctly & compute outnames.
   compute_names(config);
   // compute the broadcasted shape
@@ -1294,6 +1291,10 @@ void TensorIterator::build(TensorIteratorConfig& config) {
   }
   // perform name inference
   propagate_names_to_outputs();
+
+  // Check that the outputs have no internal overlap
+  // and do not share memory with inputs.
+  compute_mem_overlaps(config);
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
