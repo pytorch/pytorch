@@ -43,7 +43,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = _BN_CLASS_MAP[dim](out_channels, eps, momentum, True, True)
         self.weight_fake_quant = self.qconfig.weight()
-        self.zero_bias = torch.Tensor(out_channels)
+        self.zero_bias = torch.zeros(out_channels)
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
