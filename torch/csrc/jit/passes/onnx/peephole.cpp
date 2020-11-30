@@ -749,9 +749,9 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
           // onnx::Reshape(%35, %36) return (%37)
           auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
           TORCH_INTERNAL_ASSERT(nllloss_output->kind() == onnx::Reshape);
-          TORCH_INTERNAL_ASSERT(
-              nllloss_output->inputs()[1]->node()->kind() ==
-              prim::ListConstruct);
+          // TORCH_INTERNAL_ASSERT(
+          //     nllloss_output->inputs()[1]->node()->kind() ==
+          //     prim::ListConstruct);
           // make output of reshape the output of nllloss
           nllloss_output->replaceAllUsesWith(origNllLossNode);
           origNllLossNode->output(0)->copyMetadata(nllloss_output->output(0));
@@ -833,6 +833,10 @@ static bool checkIfFold(Node* node) {
     return false;
 
   auto cast_node = node->input()->node();
+  // assumes that Cast node is always before If node,
+  // but sometimes that is not the case.
+  if (cast_node->kind() != onnx::Cast)
+    return false;
   auto prev_node = cast_node->input()->node();
   Node* compare_node;
   if (prev_node->kind() == onnx::Not || prev_node->kind() == onnx::Identity) {
@@ -974,6 +978,8 @@ static void foldIfNode(Block* b) {
     }
     if (it->kind() == onnx::If) {
       auto if_node = *it;
+      //auto a = checkIfFold(if_node);
+      std::cout << "==================== Check If Node ========================    " << std::endl;
       if (checkIfFold(if_node)) {
         Block* then_block = it->blocks()[0];
         Block* else_block = it->blocks()[1];
@@ -1041,12 +1047,13 @@ void PeepholeOptimizeONNX(
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
+  foldIfNode(graph->block());
   fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
-  foldIfNode(graph->block());
+  //foldIfNode(graph->block());
 }
 
 } // namespace jit

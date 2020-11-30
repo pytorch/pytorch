@@ -4449,10 +4449,10 @@ class TestONNXRuntime(unittest.TestCase):
 
             self._crossentropyloss(x, y, ignore_index)
 
-            # x = torch.randn(3, 5, 2)
-            # y = torch.empty(3, 2, dtype=torch.long).random_(5)
-            # y[y == 1] = ignore_index
-            # self._crossentropyloss(x, y, ignore_index)
+            x = torch.randn(3, 5, 2)
+            y = torch.empty(3, 2, dtype=torch.long).random_(5)
+            y[y == 1] = ignore_index
+            self._crossentropyloss(x, y, ignore_index)
 
             x = torch.randn(3, 5, 2, 7)
             y = torch.empty(3, 2, 7, dtype=torch.long).random_(5)
