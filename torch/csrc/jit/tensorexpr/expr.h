@@ -36,6 +36,8 @@ enum IRNodeType {
   kPolynomial,
   kTerm,
   kRoundOff,
+  kMaxTerm,
+  kMinTerm,
   kNone,
   kExtra
 };
@@ -192,6 +194,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return dims_.size();
   }
   const Expr* dim(size_t index) const {
+    if (index >= ndim()) {
+      throw out_of_range_index();
+    }
     return dims_[index];
   }
   std::vector<const Expr*> dims() const {
@@ -206,7 +211,6 @@ class TORCH_API Buf : public ExprNode<Buf> {
   std::vector<const Expr*> dims_;
 };
 
-// TODO: Merge this class with 'Buffer'
 class TORCH_API BufHandle : public ExprHandle {
  public:
   BufHandle(
@@ -305,6 +309,8 @@ TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
 
 TORCH_API ExprHandle
 ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
+
+TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
 
 } // namespace tensorexpr
 } // namespace jit

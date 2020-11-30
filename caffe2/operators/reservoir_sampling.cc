@@ -150,10 +150,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
         // append
         pos = *num_visited;
       } else {
-        auto& gen = context_.RandGenerator();
         // uniform between [0, num_visited]
-        std::uniform_int_distribution<int64_t> uniformDist(0, *num_visited);
-        pos = uniformDist(gen);
+        at::uniform_int_from_to_distribution<int64_t> uniformDist(*num_visited+1, 0);
+        pos = uniformDist(context_.RandGenerator());
         if (pos >= numToCollect_) {
           // discard
           pos = -1;

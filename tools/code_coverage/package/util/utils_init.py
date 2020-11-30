@@ -45,7 +45,7 @@ def add_arguments_utils(parser: argparse.ArgumentParser) -> argparse.ArgumentPar
         action="store_true",
     )
     parser.add_argument(
-        "--interested-folder",
+        "--interest-only",
         help="Final report will be only about these folders and its sub-folders; for example: caff2/c10;",
         nargs="+",
         default=None,

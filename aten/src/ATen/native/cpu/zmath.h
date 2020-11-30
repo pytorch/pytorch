@@ -138,6 +138,15 @@ inline c10::complex<double> ceil_impl (c10::complex<double> z) {
   return c10::complex<double>(std::ceil(z.real()), std::ceil(z.imag()));
 }
 
+template<typename T>
+inline c10::complex<T> sgn_impl (c10::complex<T> z) {
+  if (z == c10::complex<T>(0, 0)) {
+    return c10::complex<T>(0, 0);
+  } else {
+    return z / zabs(z);
+  }
+}
+
 template <typename TYPE>
 inline TYPE floor_impl (TYPE z) {
   return std::floor(z);
@@ -183,7 +192,7 @@ inline c10::complex<double> trunc_impl (c10::complex<double> z) {
   return c10::complex<double>(std::trunc(z.real()), std::trunc(z.imag()));
 }
 
-template <typename TYPE, std::enable_if_t<!c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -192,7 +201,7 @@ inline TYPE max_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE max_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a)) {
     return a;
@@ -203,7 +212,7 @@ inline TYPE max_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<!c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<!c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
@@ -212,7 +221,7 @@ inline TYPE min_impl (TYPE a, TYPE b) {
   }
 }
 
-template <typename TYPE, std::enable_if_t<c10::is_complex_t<TYPE>::value, int> = 0>
+template <typename TYPE, std::enable_if_t<c10::is_complex<TYPE>::value, int> = 0>
 inline TYPE min_impl (TYPE a, TYPE b) {
   if (_isnan<TYPE>(a)) {
     return a;

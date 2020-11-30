@@ -5,74 +5,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 
-void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, src1, src2));
-  THArgCheck(THCTensor_(nElement)(state, src1) ==
-             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
-
-  if (self == src1) {
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self, src2, TensorMaxOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self, src1);
-    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self, src1, src2, TensorMaxOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-}
-
-void THCTensor_(cmin)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, src1, src2));
-  THArgCheck(THCTensor_(nElement)(state, src1) ==
-             THCTensor_(nElement)(state, src2), 2, "sizes do not match");
-
-  if (self == src1) {
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self, src2, TensorMinOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self, src1);
-    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self, src1, src2, TensorMinOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-}
-
-void THCTensor_(cmaxValue)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-
-  if (self == src) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self, TensorMaxValueOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self, src);
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self, src, TensorMaxValueOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-}
-
-void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-
-  if (self == src) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self, TensorMinValueOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self, src);
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self, src, TensorMinValueOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-}
-
 #if !defined(THC_REAL_IS_BOOL)
 
 static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor* src) {
@@ -145,38 +77,10 @@ c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl> retainTensorImpl(THC
 }
 }
 
-void THCTensor_(cadd)(THCState *state, THCTensor *self_, THCTensor* src1, scalar_t value, THCTensor *src2)
-{
-  auto out = at::Tensor(retainTensorImpl(self_));
-#ifdef THC_REAL_IS_HALF
-  auto alpha = at::Half(value);
-#else
-  auto alpha = value;
-#endif
-  at::add_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)), alpha);
-}
-
-void THCTensor_(csub)(THCState *state, THCTensor *self_, THCTensor* src1, scalar_t value, THCTensor *src2)
-{
-  auto out = at::Tensor(retainTensorImpl(self_));
-#ifdef THC_REAL_IS_HALF
-  auto alpha = at::Half(value);
-#else
-  auto alpha = value;
-#endif
-  at::sub_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)), alpha);
-}
-
 void THCTensor_(cmul)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   auto out = at::Tensor(retainTensorImpl(self_));
   at::mul_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)));
-}
-
-void THCTensor_(cdiv)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
-{
-  auto out = at::Tensor(retainTensorImpl(self_));
-  at::div_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)));
 }
 
 void THCTensor_(cfmod)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2)

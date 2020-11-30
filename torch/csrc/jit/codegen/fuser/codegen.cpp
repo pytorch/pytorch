@@ -210,7 +210,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::floor, {"floorf(${0})", "floor(${0})"}},
       {aten::round, {"roundf(${0})", "round(${0})"}},
       {aten::trunc, {"truncf(${0})", "trunc(${0})"}},
-      {aten::frac, {"fracf(${0})", "frac(${0})"}},
+      {aten::frac, {"${0} - truncf(${0})", "${0} - trunc(${0})"}},
       {aten::reciprocal, {"1.f/(${0})", "1./(${0})"}},
       {aten::neg, "-${0}"},
       // simple binary
@@ -252,10 +252,6 @@ static std::string encodeRHS(const Node* n) {
 
       // where
       {aten::where, "(${0} ? ${1} : ${2})"},
-
-      // simple derivatives
-      {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-      {aten::_tanh_backward, "${0} * (1.f - ${1} * ${1})"},
   };
 
   TemplateEnv env;

@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <system_error>
 
+#include <c10/util/Exception.h>
+
 namespace c10d {
 
 void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
@@ -75,6 +77,17 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
   const uint8_t* strB = reinterpret_cast<const uint8_t*>(str.c_str());
   map_[key] = std::vector<uint8_t>(strB, strB + str.size());
   return ti;
+}
+
+int64_t HashStore::getNumKeys() {
+  std::unique_lock<std::mutex> lock(m_);
+  return map_.size();
+}
+
+bool HashStore::deleteKey(const std::string& key) {
+  std::unique_lock<std::mutex> lock(m_);
+  auto numDeleted = map_.erase(key);
+  return (numDeleted == 1);
 }
 
 bool HashStore::check(const std::vector<std::string>& keys) {

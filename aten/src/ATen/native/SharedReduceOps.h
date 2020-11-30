@@ -340,6 +340,56 @@ struct NanSumOps {
 #endif
 };
 
+template <typename acc_t>
+struct AndOps {
+  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
+    return static_cast<bool>(a) && static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return static_cast<bool>(a) && static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
+template <typename acc_t>
+struct OrOps {
+  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
+    return static_cast<bool>(a) || static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return static_cast<bool>(a) || static_cast<bool>(b);
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
 namespace detail {
 
 template <typename scalar_t>
@@ -431,6 +481,37 @@ struct MinOps :
 template <typename scalar_t>
 struct MaxOps :
   public detail::MinMaxReductionOps<detail::GreaterOrNan<scalar_t>> {
+};
+
+template <typename scalar_t, typename acc_scalar_t, typename index_t>
+struct MinMaxOps {
+  using acc_t = detail::pair<acc_scalar_t, acc_scalar_t>;
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, index_t /*idx*/) const {
+    return combine(acc, {data, data});
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    auto min_val = (at::_isnan(a.first) || a.first < b.first) ? a.first : b.first;
+    auto max_val = (at::_isnan(a.second) || a.second > b.second) ? a.second : b.second;
+
+    return {min_val, max_val};
+  }
+
+  inline C10_DEVICE acc_t project(acc_t acc) const {
+    return acc;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t acc, int offset) const {
+    return {
+      WARP_SHFL_DOWN(acc.first, offset), WARP_SHFL_DOWN(acc.second, offset)
+    };
+  }
+#endif
 };
 
 }} // namespace at::native

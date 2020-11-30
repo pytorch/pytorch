@@ -9,23 +9,46 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Shader::Layout::Factory::Factory(const VkDevice device)
-  : device_(device) {
+Shader::Layout::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device!");
 }
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
+  c10::SmallVector<VkDescriptorSetLayoutBinding, 8u> bindings;
+
+  uint32_t binding = 0u;
+  for (const VkDescriptorType type : descriptor.signature) {
+    bindings.push_back({
+      binding++,
+      type,
+      1u,
+      VK_SHADER_STAGE_COMPUTE_BIT,
+      nullptr,
+    });
+  }
+
   const VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
     nullptr,
     0u,
-    static_cast<uint32_t>(descriptor.bindings.size()),
-    descriptor.bindings.data(),
+    static_cast<uint32_t>(bindings.size()),
+    bindings.data(),
   };
 
   VkDescriptorSetLayout descriptor_set_layout{};
   VK_CHECK(vkCreateDescriptorSetLayout(
-      device_, &descriptor_set_layout_create_info, nullptr, &descriptor_set_layout));
+      device_,
+      &descriptor_set_layout_create_info,
+      nullptr,
+      &descriptor_set_layout));
+
+  TORCH_CHECK(
+      descriptor_set_layout,
+      "Invalid Vulkan descriptor set layout!");
 
   return Handle{
     descriptor_set_layout,
@@ -33,20 +56,8 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
   };
 }
 
-Shader::Descriptor::Descriptor(const char* const glsl)
- : type(Type::Source) {
-  shader.source = {
-    glsl,
-    0u,
-  };
-}
-
-Shader::Descriptor::Descriptor(const uint32_t* const code, const uint32_t size)
- : type(Type::Binary) {
-  shader.binary = {
-    code,
-    size,
-  };
+Shader::Layout::Cache::Cache(Factory factory)
+  : cache_(std::move(factory)) {
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
@@ -56,6 +67,7 @@ struct Shader::Factory::Compiler final {
   shaderc::CompileOptions options;
 
   Compiler() {
+    options.SetNanClamp(/*enable =*/ true);
     options.SetSourceLanguage(shaderc_source_language_glsl);
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
     options.SetWarningsAsErrors();
@@ -68,6 +80,10 @@ struct Shader::Factory::Compiler final {
   }
 
   std::vector<uint32_t> compile(const char* const source) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        source,
+        "Invalid shader source code!");
+
     const shaderc::SpvCompilationResult result = context.CompileGlslToSpv(
         source,
         ::strlen(source),
@@ -95,8 +111,8 @@ struct Shader::Factory::Compiler final {
 
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
-Shader::Factory::Factory(const VkDevice device)
- : device_(device),
+Shader::Factory::Factory(const GPU& gpu)
+ : device_(gpu.device),
    compiler_(new Compiler) {
 }
 
@@ -139,7 +155,14 @@ typename Shader::Factory::Handle Shader::Factory::operator()(
 
   VkShaderModule shader_module{};
   VK_CHECK(vkCreateShaderModule(
-      device_, &shader_module_create_info, nullptr, &shader_module));
+      device_,
+      &shader_module_create_info,
+      nullptr,
+      &shader_module));
+
+  TORCH_CHECK(
+      shader_module,
+      "Invalid Vulkan shader module!");
 
   return Handle{
     shader_module,

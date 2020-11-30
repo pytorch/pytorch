@@ -1,6 +1,9 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
@@ -14,73 +17,52 @@ namespace api {
 
 //
 // Vulkan Context holds onto all relevant Vulkan state as it pertains to our
-// use of Vulkan in PyTorch.  The context is currently a global object, but
-// technically it does not need to be if we were to make it explicit to the
-// user.
+// use of Vulkan in PyTorch.  A Context is associated with one, and only one,
+// Adapter as a precursor to multi-GPU support.  All Vulkan tensors in PyTorch
+// are associated with a Context to make tensor <-> device affinity explicit.
+// The context is currently a global object, but technically it does not need
+// to be if we were to make it explicit to the user.
 //
 
-class C10_EXPORT Context final {
+class Context final {
  public:
-  explicit Context(bool enable_validation_layers);
-  ~Context() = default;
+  explicit Context(const Adapter& adapter);
+  Context(const Context&) = delete;
+  Context(Context&&) = default;
+  Context& operator=(const Context&) = delete;
+  Context& operator=(Context&&) = default;
+  ~Context();
 
-  inline VkInstance instance() const {
-    return instance_.get();
-  }
+  GPU gpu();
+  Command& command();
+  Shader& shader();
+  Pipeline& pipeline();
+  Descriptor& descriptor();
+  Resource& resource();
 
-  inline VkPhysicalDevice physical_device() const {
-    return physical_device_;
-  }
+  // GPU RPC
 
-  inline const VkPhysicalDeviceLimits& physical_device_limits() const {
-    return physical_device_limits_;
-  }
+  template<typename... Arguments>
+  void dispatch(
+      Command::Buffer& command_buffer,
+      const Shader::Layout::Signature& shader_layout_signature,
+      const Shader::Descriptor& shader_descriptor,
+      const Shader::WorkGroup& global_work_group,
+      Arguments&&... arguments);
 
-  inline VkDevice device() const {
-    return device_.get();
-  }
+  // This function is expensive and its use consequential for performance. Only
+  // use this function for debugging or as a short term hack on way to a more
+  // performant solution.
 
-  inline VkQueue queue() const {
-    return queue_;
-  }
-
-  inline Command& command() {
-    return command_;
-  }
-
-  inline Shader& shader() {
-    return shader_;
-  }
-
-  inline Pipeline& pipeline() {
-    return pipeline_;
-  }
-
-  inline Descriptor& descriptor() {
-    return descriptor_;
-  }
-
-  inline Resource& resource() {
-    return resource_;
-  }
+  void flush();
 
  private:
-  class Debug final {
-   public:
-    explicit Debug(VkInstance instance);
-    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
-
-   private:
-    VkInstance instance_;
-  };
+  VkDevice device();
+  VkQueue queue();
 
  private:
   // Construction and destruction order matters.  Do not move members around.
-  Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
-  Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
-  VkPhysicalDevice physical_device_;
-  VkPhysicalDeviceLimits physical_device_limits_;
-  uint32_t compute_queue_family_index_;
+  Adapter adapter_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
   Command command_;
@@ -90,10 +72,108 @@ class C10_EXPORT Context final {
   Resource resource_;
 };
 
-C10_EXPORT bool available();
-C10_EXPORT Context& context();
+bool available();
+Context* context();
+
+//
+// Impl
+//
+
+inline GPU Context::gpu() {
+  // A GPU is simply a (physical device, logical device, device queue) trio.
+  return {
+    &adapter_,
+    device(),
+    queue(),
+  };
+}
+
+inline Command& Context::command() {
+  return command_;
+}
+
+inline Shader& Context::shader() {
+  return shader_;
+}
+
+inline Pipeline& Context::pipeline() {
+  return pipeline_;
+}
+
+inline Descriptor& Context::descriptor() {
+  return descriptor_;
+}
+
+inline Resource& Context::resource() {
+  return resource_;
+}
+
+inline VkDevice Context::device() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
+  return device_.get();
+}
+
+inline VkQueue Context::queue() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
+  return queue_;
+}
+
+namespace detail {
+
+template<
+    size_t...Indices,
+    typename ...Arguments>
+inline void bind(
+    Descriptor::Set& descriptor_set,
+    const std::index_sequence<Indices...>,
+    Arguments&&...arguments) {
+  C10_UNUSED const int _[]{
+    (descriptor_set.bind(Indices, arguments), 0)...,
+  };
+}
+
+} // namespace detail
+
+template<typename... Arguments>
+inline void Context::dispatch(
+    Command::Buffer& command_buffer,
+    const Shader::Layout::Signature& shader_layout_signature,
+    const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& global_work_group,
+    Arguments&&... arguments) {
+  // Forward declaration
+  Descriptor::Set dispatch_prologue(
+      Command::Buffer&,
+      const Shader::Layout::Signature&,
+      const Shader::Descriptor&);
+
+  // Factor out template parameter independent code to minimize code bloat.
+  Descriptor::Set descriptor_set = dispatch_prologue(
+      command_buffer,
+      shader_layout_signature,
+      shader_descriptor);
+
+  detail::bind(
+      descriptor_set,
+      std::index_sequence_for<Arguments...>{},
+      std::forward<Arguments>(arguments)...);
+
+  // Forward declaration
+  void dispatch_epilogue(
+      Command::Buffer&,
+      const Descriptor::Set&,
+      const Shader::WorkGroup&);
+
+  // Factor out template parameter independent code to minimize code bloat.
+  dispatch_epilogue(
+      command_buffer,
+      descriptor_set,
+      global_work_group);
+}
 
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

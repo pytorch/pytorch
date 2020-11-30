@@ -2,11 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathPointwise.h"
 #else
 
-THC_API void THCTensor_(cmax)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2);
-THC_API void THCTensor_(cmin)(THCState *state, THCTensor *self, THCTensor *src1, THCTensor *src2);
-THC_API void THCTensor_(cmaxValue)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
-THC_API void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);
-
 #if !defined(THC_REAL_IS_BOOL)
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)

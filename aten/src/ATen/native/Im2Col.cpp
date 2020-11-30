@@ -10,7 +10,7 @@
 namespace at {
 namespace native {
 namespace {
-
+  
 static void im2col_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
@@ -87,7 +87,7 @@ static void im2col_out_cpu_template(
   output.resize_({batch_size, n_output_plane, output_length});
   output.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "im2col_out_cpu", [&] {
         Tensor input_n;
         Tensor output_n;

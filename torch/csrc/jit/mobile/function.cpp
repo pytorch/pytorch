@@ -13,6 +13,14 @@ namespace mobile {
 Function::Function(c10::QualifiedName name)
     : name_(name), code_(std::make_shared<Code>()) {}
 
+const c10::QualifiedName& Function::qualname() const {
+  return name_;
+}
+
+const std::string& Function::name() const {
+  return name_.name();
+}
+
 void Function::append_instruction(OpCode op, int X, int N) {
   TORCH_CHECK(
       op != CREATE_OBJECT,
@@ -102,6 +110,12 @@ std::string Function::get_module_debug_info(size_t pc) const {
 bool Function::run(Stack& stack) const {
   InterpreterState interp_state(code_);
   return interp_state.run(stack);
+}
+
+c10::IValue Function::operator()(Stack& stack) {
+  InterpreterState interp_state(code_);
+  interp_state.run(stack);
+  return stack.front();
 }
 
 } // namespace mobile

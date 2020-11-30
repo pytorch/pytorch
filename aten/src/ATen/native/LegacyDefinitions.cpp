@@ -3,12 +3,14 @@
 #include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at { namespace native {
 
 // Methods
 
 Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & source) {
+  at::assert_no_internal_overlap(self);
   Tensor b_mask;
   std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
   // As we dispatch on self and TH is type-checked, we need different definitions.

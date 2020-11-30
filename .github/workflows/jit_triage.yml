@@ -19,7 +19,7 @@ jobs:
             // - io: A reference to the @actions/io package
 
             // Check if issue has a JIT label.
-            const kJitLabel = "jit";
+            const kJitLabel = "oncall: jit";
 
             issue = await github.issues.get({
               owner: context.issue.owner,

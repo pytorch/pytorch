@@ -37,7 +37,6 @@ static void lerp_kernel_tensor(
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(ret)
     .add_input(self)
     .add_input(end)

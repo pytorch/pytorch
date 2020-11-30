@@ -34,13 +34,25 @@ Device = Union[_device, str, None]
 class Storage(object):
     _cdata: int
 
-    def _write_file(self, f: Any, is_real_file: _bool, save_size: _bool) -> None:
-        ...
-
-    def size(self) -> int:
+    def __deepcopy__(self, memo) -> 'Storage':
         ...
 
     def _new_shared(self, int) -> 'Storage':
+        ...
+
+    def _write_file(self, f: Any, is_real_file: _bool, save_size: _bool) -> None:
+        ...
+
+    def element_size(self) -> int:
+        ...
+
+    def is_shared(self) -> bool:
+        ...
+
+    def share_memory_(self) -> 'Storage':
+        ...
+
+    def size(self) -> int:
         ...
 
     ...

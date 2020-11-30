@@ -1,12 +1,22 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/ATen.h>
+
+#ifdef USE_VULKAN_SHADERC_RUNTIME
+#include <ATen/native/vulkan/glsl.h>
+#define VK_KERNEL(name) { name##_glsl, }
+#else
+#include <ATen/native/vulkan/spv.h>
+#define VK_KERNEL(name) { name##_spv, name##_spv_len, }
+#endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 #ifdef USE_VULKAN_WRAPPER
 #include <vulkan_wrapper.h>
 #else
 #include <vulkan/vulkan.h>
-#endif
+#endif /* USE_VULKAN_WRAPPER */
 
 #define VK_CHECK(function)                                  \
   {                                                         \
@@ -24,10 +34,10 @@
     at::native::vulkan::api::destroy_##Handle
 
 #define VK_DELETER_DISPATCHABLE_DECLARE(Handle) \
-    C10_EXPORT void destroy_##Handle(const Vk##Handle handle)
+    void destroy_##Handle(const Vk##Handle handle)
 
 #define VK_DELETER_NON_DISPATCHABLE_DECLARE(Handle)   \
-  class C10_EXPORT destroy_##Handle final {           \
+  class destroy_##Handle final {                      \
    public:                                            \
     explicit destroy_##Handle(const VkDevice device); \
     void operator()(const Vk##Handle handle) const;   \
@@ -39,6 +49,21 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+
+struct Adapter;
+struct Command;
+class Context;
+struct Descriptor;
+struct Pipeline;
+struct Resource;
+class Runtime;
+struct Shader;
+
+struct GPU final {
+  const Adapter* adapter;
+  VkDevice device;
+  VkQueue queue;
+};
 
 VK_DELETER_DISPATCHABLE_DECLARE(Instance);
 VK_DELETER_DISPATCHABLE_DECLARE(Device);
@@ -78,11 +103,13 @@ class Handle final {
   Handle(const Handle&) = delete;
   Handle& operator=(const Handle&) = delete;
   Handle(Handle&&);
-  Handle& operator=(Handle&&);
+  Handle& operator=(Handle&&) &;
+  Handle& operator=(Handle&&) && = delete;
   ~Handle();
 
   operator bool() const;
-  Type get() const;
+  Type get() const &;
+  Type get() const && = delete;
   Type release();
   void reset(Type payload = kNull);
 
@@ -112,7 +139,7 @@ inline Handle<Type, Deleter>::Handle(Handle&& handle)
 
 template<typename Type, typename Deleter>
 inline Handle<Type, Deleter>&
-Handle<Type, Deleter>::operator=(Handle&& handle)
+Handle<Type, Deleter>::operator=(Handle&& handle) &
 {
   reset(handle.release());
   deleter_ = std::move(handle.deleter_);
@@ -130,7 +157,7 @@ inline Handle<Type, Deleter>::operator bool() const {
 }
 
 template<typename Type, typename Deleter>
-inline Type Handle<Type, Deleter>::get() const {
+inline Type Handle<Type, Deleter>::get() const & {
   return payload_;
 }
 
@@ -156,3 +183,5 @@ inline void Handle<Type, Deleter>::reset(Type payload) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

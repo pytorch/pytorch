@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
 
 import caffe2.python._import_c_extension as C
 from caffe2.proto.caffe2_pb2 import NetDef

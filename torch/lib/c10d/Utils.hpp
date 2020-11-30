@@ -1,6 +1,8 @@
 #pragma once
 
+#ifndef _WIN32
 #include <sys/socket.h>
+#endif
 #include <sys/types.h>
 
 #include <chrono>
@@ -50,6 +52,30 @@ inline void assertSameType(
           "mixed types (" + expected + " and " + actual + ")");
     }
   }
+}
+
+inline bool parseEnvVarFlag(const char* envVarName) {
+  char* stringValue = std::getenv(envVarName);
+  if (stringValue != nullptr) {
+    int val;
+    try {
+      val = std::stoi(stringValue);
+    } catch (std::exception& e) {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(envVarName));
+    }
+    if (val == 1) {
+      return true;
+    } else if (val == 0) {
+      return false;
+    } else {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(envVarName));
+    }
+  }
+  return false;
 }
 
 inline void assertSameSizes(
@@ -480,6 +506,7 @@ class ResourceGuard {
   bool released_;
 };
 
+#ifndef _WIN32
 namespace tcputil {
 
 constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
@@ -609,4 +636,5 @@ std::tuple<int, std::string> accept(
     const std::chrono::milliseconds& timeout = kNoTimeout);
 
 } // namespace tcputil
+#endif
 } // namespace c10d

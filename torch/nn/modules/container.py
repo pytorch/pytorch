@@ -398,6 +398,7 @@ class ParameterList(Module):
 
     def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
         super(ParameterList, self).__init__()
+        self._initialized = True
         if parameters is not None:
             self += parameters
 
@@ -428,6 +429,11 @@ class ParameterList(Module):
     def __setitem__(self, idx: int, param: 'Parameter') -> None:
         idx = self._get_abs_string_index(idx)
         return self.register_parameter(str(idx), param)
+
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterList is not supported.")
+        super(ParameterList, self).__setattr__(key, value)
 
     def __len__(self) -> int:
         return len(self._parameters)
@@ -480,6 +486,13 @@ class ParameterList(Module):
     def __call__(self, input):
         raise RuntimeError('ParameterList should not be called.')
 
+    def _replicate_for_data_parallel(self):
+        warnings.warn("nn.ParameterList is being used with DataParallel but this is not "
+                      "supported. This list will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
+        return super(ParameterList, self)._replicate_for_data_parallel()
+
 
 class ParameterDict(Module):
     r"""Holds parameters in a dictionary.
@@ -521,6 +534,7 @@ class ParameterDict(Module):
 
     def __init__(self, parameters: Optional[Mapping[str, 'Parameter']] = None) -> None:
         super(ParameterDict, self).__init__()
+        self._initialized = True
         if parameters is not None:
             self.update(parameters)
 
@@ -532,6 +546,11 @@ class ParameterDict(Module):
 
     def __delitem__(self, key: str) -> None:
         del self._parameters[key]
+
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if getattr(self, "_initialized", False) and not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterDict is not supported.")
+        super(ParameterDict, self).__setattr__(key, value)
 
     def __len__(self) -> int:
         return len(self._parameters)
@@ -621,3 +640,10 @@ class ParameterDict(Module):
 
     def __call__(self, input):
         raise RuntimeError('ParameterDict should not be called.')
+
+    def _replicate_for_data_parallel(self):
+        warnings.warn("nn.ParameterDict is being used with DataParallel but this is not "
+                      "supported. This dict will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
+        return super(ParameterDict, self)._replicate_for_data_parallel()

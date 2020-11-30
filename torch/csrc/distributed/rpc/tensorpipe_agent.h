@@ -16,6 +16,7 @@
 
 namespace tensorpipe {
 
+class CpuBuffer;
 class Context;
 class Error;
 class Listener;
@@ -30,7 +31,9 @@ class Context;
 } // namespace transport
 
 namespace channel {
+template <typename TBuffer>
 class Context;
+using CpuContext = Context<CpuBuffer>;
 } // namespace channel
 
 using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
@@ -53,7 +56,7 @@ struct TransportRegistration {
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct ChannelRegistration {
-  std::shared_ptr<tensorpipe::channel::Context> channel;
+  std::shared_ptr<tensorpipe::channel::CpuContext> channel;
   int64_t priority;
 };
 
@@ -138,11 +141,11 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      const std::shared_ptr<::c10d::Store>& store,
+      const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      std::shared_ptr<c10d::ProcessGroup> processGroup,
+      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts,
       std::unique_ptr<RequestCallback> cb);
 
@@ -197,14 +200,15 @@ class TensorPipeAgent : public RpcAgent {
   // by client, and read request messages by server.
   void pipeRead(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      std::function<void(const tensorpipe::Error&, Message&&)>);
+      std::function<void(const tensorpipe::Error&, Message&&)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
-      std::function<void(const tensorpipe::Error&)>);
+      std::vector<c10::DeviceIndex>&& devices,
+      std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -229,6 +233,10 @@ class TensorPipeAgent : public RpcAgent {
   void trackNetworkError(
       uint64_t requestSize,
       const std::string& destWorkerName);
+
+  inline std::vector<c10::DeviceIndex> getDevicesForTensors(
+      const std::string& remoteName,
+      const Message& message) const;
 
   // When a request+response completes, we need to mark the future message as
   // complete. However, if its timeout has already expired, it already has an
@@ -275,7 +283,7 @@ class TensorPipeAgent : public RpcAgent {
   // The join method is required to behave like a barrier and perform collective
   // operations. For simplicity and reliability, we offload this to a process
   // group, but probably one day we might want to re-implement them using RPCs.
-  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+  const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};

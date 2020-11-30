@@ -70,7 +70,7 @@ class CAFFE2_API Tensor final {
   explicit Tensor(at::Device device)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
             Storage::create_legacy(device),
-            c10::computeDispatchKey(at::device(device).layout(at::kStrided)),
+            c10::computeDispatchKey(c10::nullopt, at::kStrided, device),
             TypeMeta())) {}
 
   /**
@@ -299,14 +299,14 @@ class CAFFE2_API Tensor final {
 
   void ShareExternalPointer(
       void* src,
-      const TypeMeta& data_type,
+      const TypeMeta data_type,
       size_t nbytes = 0,
       MemoryDeleter d = nullptr) const {
     CAFFE_ENFORCE_WITH_CALLER(
         impl_->is_contiguous(),
         "Right now ShareExternalPointer is only supported for contiguous Tensor.");
     CAFFE_ENFORCE_WITH_CALLER(
-        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        data_type != ScalarType::Undefined,
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
     impl_.get()->ShareExternalPointer(
@@ -315,7 +315,7 @@ class CAFFE2_API Tensor final {
 
   void ShareExternalPointer(
       at::DataPtr&& data_ptr,
-      const TypeMeta& data_type,
+      const TypeMeta data_type,
       size_t nbytes) {
     impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, nbytes);
   }
@@ -342,7 +342,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->data<T>();
   }
 
-  inline void* raw_mutable_data(const TypeMeta& meta) const {
+  inline void* raw_mutable_data(const TypeMeta meta) const {
     return impl_.get()->raw_mutable_data(meta);
   }
 
@@ -358,7 +358,7 @@ class CAFFE2_API Tensor final {
   inline void* raw_mutable_data() const {
     const auto& data_type = impl_->dtype();
     CAFFE_ENFORCE_WITH_CALLER(
-        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        data_type != ScalarType::Undefined,
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(data_type);
@@ -469,7 +469,7 @@ class CAFFE2_API Tensor final {
   /**
    * Returns the TypeMeta object associated with the current data type.
    */
-  inline const TypeMeta& dtype() const {
+  inline const TypeMeta dtype() const {
     return impl_->dtype();
   }
 
@@ -477,7 +477,7 @@ class CAFFE2_API Tensor final {
    * (To be deprecated) Returns the TypeMeta object associated with the current
    * data type.
    */
-  inline const TypeMeta& meta() const {
+  inline const TypeMeta meta() const {
     return impl_->dtype();
   }
 

@@ -384,7 +384,7 @@ class TORCH_API OwnerRRef final : public RRef {
   // does not create any new py::object.
   void setValue(IValue&& value);
   // Sets the value of this ``OwnerRRef`` to contain an exception.
-  void setError(const std::string& err);
+  void setError(std::exception_ptr eptr);
 
   // Has a value or error been set?
   bool hasValue() const;

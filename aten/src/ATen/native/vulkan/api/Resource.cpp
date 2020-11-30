@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
@@ -10,6 +11,18 @@ VmaAllocator create_allocator(
     const VkInstance instance,
     const VkPhysicalDevice physical_device,
     const VkDevice device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      instance,
+      "Invalid Vulkan instance!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      physical_device,
+      "Invalid Vulkan physical device!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
   const VmaAllocatorCreateInfo allocator_create_info{
     0u,
     physical_device,
@@ -27,18 +40,19 @@ VmaAllocator create_allocator(
 
   VmaAllocator allocator{};
   VK_CHECK(vmaCreateAllocator(&allocator_create_info, &allocator));
+  TORCH_CHECK(allocator, "Invalid VMA allocator!");
 
   return allocator;
 }
 
 VmaAllocationCreateInfo create_allocation_create_info(
-    const VmaMemoryUsage usage) {
+    const Resource::Memory::Descriptor& descriptor) {
   return VmaAllocationCreateInfo{
     0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
         /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
-    usage,
-    0u,
-    0u,
+    descriptor.usage,
+    descriptor.required,
+    descriptor.preferred,
     0u,
     VK_NULL_HANDLE,
     nullptr,
@@ -46,22 +60,26 @@ VmaAllocationCreateInfo create_allocation_create_info(
 }
 
 void release_buffer(const Resource::Buffer& buffer) {
+  // Safe to pass null as buffer or allocation.
   vmaDestroyBuffer(
       buffer.memory.allocator,
-      buffer.handle,
+      buffer.object.handle,
       buffer.memory.allocation);
 }
 
 void release_image(const Resource::Image& image) {
-  if (VK_NULL_HANDLE != image.view) {
+  // Sampler is an immutable object. Its lifetime is managed through the cache.
+
+  if (VK_NULL_HANDLE != image.object.view) {
     VmaAllocatorInfo allocator_info{};
     vmaGetAllocatorInfo(image.memory.allocator, &allocator_info);
-    vkDestroyImageView(allocator_info.device, image.view, nullptr);
+    vkDestroyImageView(allocator_info.device, image.object.view, nullptr);
   }
 
+  // Safe to pass null as image or allocation.
   vmaDestroyImage(
       image.memory.allocator,
-      image.handle,
+      image.object.handle,
       image.memory.allocation);
 }
 
@@ -83,10 +101,17 @@ void* map(const Resource::Memory& memory) {
 Resource::Memory::Scope::Scope(
     const VmaAllocator allocator,
     const VmaAllocation allocation,
-    const Access access)
+    const Access::Flags access)
   : allocator_(allocator),
     allocation_(allocation),
     access_(access) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      allocator,
+      "Invalid VMA allocator!");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      allocation,
+      "Invalid VMA allocation!");
 }
 
 void Resource::Memory::Scope::operator()(const void* const data) const {
@@ -96,7 +121,7 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
 
   vmaUnmapMemory(allocator_, allocation_);
 
-  if (Access::Write == access_) {
+  if (access_ & Access::Write) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
     // we want.
@@ -104,17 +129,159 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
   }
 }
 
-Resource::Pool::Pool(
-    const VkInstance instance,
-    const VkPhysicalDevice physical_device,
-    const VkDevice device)
-  : device_(device),
-    allocator_(create_allocator(instance, physical_device, device), vmaDestroyAllocator) {
-    buffers_.reserve(Configuration::kReserve);
-    images_.reserve(Configuration::kReserve);
+Resource::Image::Sampler::Factory::Factory(const GPU& gpu)
+  : device_(gpu.device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device!");
 }
 
-Resource::Buffer Resource::Pool::allocate(const Buffer::Descriptor& descriptor) {
+typename Resource::Image::Sampler::Factory::Handle
+Resource::Image::Sampler::Factory::operator()(
+    const Descriptor& descriptor) const {
+  const VkSamplerCreateInfo sampler_create_info{
+    VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+    nullptr,
+    0u,
+    descriptor.filter,
+    descriptor.filter,
+    descriptor.mipmap_mode,
+    descriptor.address_mode,
+    descriptor.address_mode,
+    descriptor.address_mode,
+    0.0f,
+    VK_FALSE,
+    0.0f,
+    VK_FALSE,
+    VK_COMPARE_OP_NEVER,
+    0.0f,
+    0.0f,
+    descriptor.border,
+    VK_FALSE,
+  };
+
+  VkSampler sampler{};
+  VK_CHECK(vkCreateSampler(
+      device_,
+      &sampler_create_info,
+      nullptr,
+      &sampler));
+
+  TORCH_CHECK(
+      sampler,
+      "Invalid Vulkan image sampler!");
+
+  return Handle{
+    sampler,
+    Deleter(device_),
+  };
+}
+
+VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
+  if (!pool) {
+    return VK_NULL_HANDLE;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      id < pool->fence_.pool.size(),
+      "Invalid Vulkan fence!");
+
+  const VkFence fence = pool->fence_.pool[id].get();
+  if (add_to_waitlist) {
+    pool->fence_.waitlist.push_back(fence);
+  }
+
+  return fence;
+}
+
+void Resource::Fence::wait(const uint64_t timeout_nanoseconds) {
+  const VkFence fence = handle(/* add_to_waitlist = */ false);
+
+  const auto waitlist_itr = std::find(
+      pool->fence_.waitlist.cbegin(),
+      pool->fence_.waitlist.cend(),
+      fence);
+
+  if (pool->fence_.waitlist.cend() != waitlist_itr) {
+    VK_CHECK(vkWaitForFences(
+        pool->device_,
+        1u,
+        &fence,
+        VK_TRUE,
+        timeout_nanoseconds));
+
+    VK_CHECK(vkResetFences(
+        pool->device_,
+        1u,
+        &fence));
+
+    pool->fence_.waitlist.erase(waitlist_itr);
+  }
+}
+
+Resource::Pool::Pool(const GPU& gpu)
+  : device_(gpu.device),
+    allocator_(
+        create_allocator(
+          gpu.adapter->runtime->instance(),
+          gpu.adapter->handle,
+          device_),
+        vmaDestroyAllocator),
+    buffer_{},
+    image_{
+      .sampler = Image::Sampler{gpu},
+    },
+    fence_{} {
+  buffer_.pool.reserve(Configuration::kReserve);
+  image_.pool.reserve(Configuration::kReserve);
+  fence_.pool.reserve(Configuration::kReserve);
+}
+
+Resource::Pool::~Pool() {
+  try {
+    purge();
+  }
+  catch (const std::exception& e) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an exception!  Error: "
+        << e.what();
+  }
+  catch (...) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an unknown exception!";
+  }
+}
+
+Resource::Pool::Pool(Pool&& pool)
+  : device_(std::move(pool.device_)),
+    allocator_(std::move(pool.allocator_)),
+    buffer_(std::move(pool.buffer_)),
+    image_(std::move(pool.image_)),
+    fence_(std::move(pool.fence_)) {
+  pool.device_ = VK_NULL_HANDLE;
+}
+
+Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
+  if (&pool != this) {
+    device_ = std::move(pool.device_);
+    allocator_ = std::move(pool.allocator_);
+    buffer_ = std::move(pool.buffer_);
+    image_ = std::move(pool.image_);
+    fence_ = std::move(pool.fence_);
+
+    pool.device_ = VK_NULL_HANDLE;
+  };
+
+  return *this;
+}
+
+Resource::Buffer Resource::Pool::buffer(
+    const Buffer::Descriptor& descriptor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
   const VkBufferCreateInfo buffer_create_info{
     VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
     nullptr,
@@ -141,21 +308,33 @@ Resource::Buffer Resource::Pool::allocate(const Buffer::Descriptor& descriptor) 
       &allocation,
       &allocation_info));
 
-  buffers_.emplace_back(
+  TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
+  TORCH_CHECK(allocation, "Invalid VMA allocation!");
+
+  buffer_.pool.emplace_back(
       Buffer{
-        buffer,
+        Buffer::Object{
+          buffer,
+          0u,
+          descriptor.size,
+        },
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_buffer);
 
-  return buffers_.back().get();
+  return buffer_.pool.back().get();
 }
 
-Resource::Image Resource::Pool::allocate(const Image::Descriptor& descriptor) {
+Resource::Image Resource::Pool::image(
+    const Image::Descriptor& descriptor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
   const VkImageCreateInfo image_create_info{
     VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
     nullptr,
@@ -189,6 +368,9 @@ Resource::Image Resource::Pool::allocate(const Image::Descriptor& descriptor) {
       &allocation,
       &allocation_info));
 
+  TORCH_CHECK(image, "Invalid Vulkan image!");
+  TORCH_CHECK(allocation, "Invalid VMA allocation!");
+
   const VkImageViewCreateInfo image_view_create_info{
     VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
     nullptr,
@@ -213,26 +395,91 @@ Resource::Image Resource::Pool::allocate(const Image::Descriptor& descriptor) {
 
   VkImageView view{};
   VK_CHECK(vkCreateImageView(
-      device_, &image_view_create_info, nullptr, &view))
+      device_,
+      &image_view_create_info,
+      nullptr,
+      &view));
 
-  images_.emplace_back(
+  TORCH_CHECK(
+      view,
+      "Invalid Vulkan image view!");
+
+  image_.pool.emplace_back(
       Image{
-        image,
-        view,
+        Image::Object{
+          image,
+          VK_IMAGE_LAYOUT_UNDEFINED,
+          view,
+          image_.sampler.cache.retrieve(descriptor.sampler),
+        },
         Memory{
           allocator_.get(),
           allocation,
-          allocation_info,
         },
       },
       &release_image);
 
-  return images_.back().get();
+  return image_.pool.back().get();
+}
+
+Resource::Fence Resource::Pool::fence() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
+  if (fence_.pool.size() == fence_.in_use) {
+    const VkFenceCreateInfo fence_create_info{
+      VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+      nullptr,
+      0u,
+    };
+
+    VkFence fence{};
+    VK_CHECK(vkCreateFence(
+        device_,
+        &fence_create_info,
+        nullptr,
+        &fence));
+
+    TORCH_CHECK(
+        fence,
+        "Invalid Vulkan fence!");
+
+    fence_.pool.emplace_back(fence, VK_DELETER(Fence)(device_));
+  }
+
+  return Fence{
+    this,
+    fence_.in_use++,
+  };
 }
 
 void Resource::Pool::purge() {
-  images_.clear();
-  buffers_.clear();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
+  if (!fence_.waitlist.empty()) {
+    VK_CHECK(vkWaitForFences(
+        device_,
+        fence_.waitlist.size(),
+        fence_.waitlist.data(),
+        VK_TRUE,
+        UINT64_MAX));
+
+    VK_CHECK(vkResetFences(
+        device_,
+        fence_.waitlist.size(),
+        fence_.waitlist.data()));
+
+    fence_.waitlist.clear();
+  }
+
+  fence_.in_use = 0u;
+  image_.pool.clear();
+  buffer_.pool.clear();
 }
 
 } // namespace api

@@ -230,36 +230,6 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
 #undef MAX_LEVELS
 #undef M_SMALL
 
-void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
-{
-  dimension = at::maybe_wrap_dim(dimension, t);
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "invalid dimension %d",
-      dimension);
-
-  THTensor_(resizeAs)(rt_, t);
-  at::Tensor rt__wrap = THTensor_wrap(rt_);
-  at::Tensor t_wrap = THTensor_wrap(t);
-  at::native::copy_(rt__wrap, t_wrap);
-  THLongTensor_resize(ri_, t->sizes(), {});
-
-  if(descendingOrder)
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortdescend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-  else
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortascend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-}
-
 #endif
 
 #if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_HALF)
@@ -281,27 +251,6 @@ void THTensor_(preserveReduceDimSemantics)(
 }
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
-
-accreal THTensor_(trace)(THTensor *t)
-{
-  scalar_t *t_data = t->data<scalar_t>();
-  accreal sum = 0;
-  int64_t i = 0;
-  int64_t t_stride_0, t_stride_1, t_diag_size;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  t_diag_size = THMin(THTensor_(size)(t, 0), THTensor_(size)(t, 1));
-  while(i < t_diag_size)
-  {
-    sum += t_data[i*(t_stride_0+t_stride_1)];
-    i++;
-  }
-
-  return sum;
-}
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/

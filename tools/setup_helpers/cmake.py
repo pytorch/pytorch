@@ -1,6 +1,6 @@
 "Manages CMake."
 
-from __future__ import print_function
+
 
 import multiprocessing
 import os
@@ -168,7 +168,7 @@ class CMake:
         ninja_deps_file = os.path.join(self.build_dir, '.ninja_deps')
         if IS_WINDOWS and USE_NINJA and os.path.exists(ninja_deps_file):
             # Cannot rerun ninja on Windows due to a ninja bug.
-            # The workground is to remove `.ninja_deps`.
+            # The workaround is to remove `.ninja_deps`.
             os.remove(ninja_deps_file)
 
         args = []
@@ -245,6 +245,7 @@ class CMake:
              'MKL_THREADING',
              'MKLDNN_CPU_RUNTIME',
              'MSVC_Z7_OVERRIDE',
+             'CAFFE2_USE_MSVC_STATIC_RUNTIME',
              'Numa_INCLUDE_DIR',
              'Numa_LIBRARIES',
              'ONNX_ML',

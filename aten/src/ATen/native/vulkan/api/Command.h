@@ -1,85 +1,75 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Cache.h>
-#include <c10/util/hash.h>
+#include <ATen/native/vulkan/api/Descriptor.h>
+#include <ATen/native/vulkan/api/Pipeline.h>
+#include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
-struct C10_EXPORT Command final {
-  //
-  // Pool
-  //
-
-  struct Pool final {
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      uint32_t queue_family_index;
-    };
-
-    /*
-      Factory
-    */
-
-    class Factory final {
-     public:
-      explicit Factory(VkDevice device);
-
-      typedef Pool::Descriptor Descriptor;
-      typedef VK_DELETER(CommandPool) Deleter;
-      typedef Handle<VkCommandPool, Deleter> Handle;
-
-      struct Hasher {
-        size_t operator()(const Descriptor& descriptor) const;
-      };
-
-      Handle operator()(const Descriptor& descriptor) const;
-
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
-
-    explicit Pool(const VkDevice device)
-      : cache(Factory(device)) {
-    }
-
-    static void purge(VkDevice device, VkCommandPool command_pool);
-  } pool;
-
+struct Command final {
   //
   // Buffer
   //
 
   class Buffer final {
    public:
+    Buffer();
     Buffer(VkDevice device, VkCommandPool command_pool);
+    Buffer(const Buffer&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+    Buffer(Buffer&&);
+    Buffer& operator=(Buffer&&);
+    ~Buffer() = default;
+
+    operator bool() const;
 
     void begin();
     void end();
-
-    void bind(VkPipeline pipeline);
-    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
-    void dispatch();
+    void barrier(const Pipeline::Barrier& barrier);
+    void bind(const Pipeline::Object& pipeline);
+    void bind(const Descriptor::Set& set);
+    void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
+    void dispatch(const Shader::WorkGroup& global_work_group);
+    void submit(VkQueue queue, Resource::Fence fence = {});
 
    private:
     VkCommandBuffer command_buffer_;
+    struct {
+      Pipeline::Object pipeline;
+      VkDescriptorSet descriptor_set;
+    } bound_;
   };
 
-  explicit Command(const VkDevice device)
-    : pool(device) {
+  //
+  // Pool
+  //
+
+  class Pool final {
+   public:
+    explicit Pool(const GPU& gpu);
+    Pool(const Pool&) = delete;
+    Pool& operator=(const Pool&) = delete;
+    Pool(Pool&&);
+    Pool& operator=(Pool&&);
+    ~Pool() = default;
+
+    Buffer allocate();
+    void purge();
+
+   private:
+    VkDevice device_;
+    Handle<VkCommandPool, VK_DELETER(CommandPool)> command_pool_;
+  } pool /* [thread_count] */;
+
+  explicit Command(const GPU& gpu)
+    : pool(gpu) {
   }
 };
 
@@ -87,18 +77,30 @@ struct C10_EXPORT Command final {
 // Impl
 //
 
-inline bool operator==(
-    const Command::Pool::Descriptor& _1,
-    const Command::Pool::Descriptor& _2) {
-  return _1.queue_family_index == _2.queue_family_index;
+inline Command::Buffer::Buffer(Buffer&& buffer)
+  : command_buffer_(std::move(buffer.command_buffer_)),
+    bound_(std::move(buffer.bound_)) {
+  buffer.command_buffer_ = VK_NULL_HANDLE;
 }
 
-inline size_t Command::Pool::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  return c10::get_hash(descriptor.queue_family_index);
+inline Command::Buffer& Command::Buffer::operator=(Buffer&& buffer) {
+  if (&buffer != this) {
+    command_buffer_ = std::move(buffer.command_buffer_);
+    bound_ = std::move(buffer.bound_);
+
+    buffer.command_buffer_ = VK_NULL_HANDLE;
+  };
+
+  return *this;
+}
+
+inline Command::Buffer::operator bool() const {
+  return VK_NULL_HANDLE != command_buffer_;
 }
 
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

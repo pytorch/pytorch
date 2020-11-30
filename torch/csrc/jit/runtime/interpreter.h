@@ -6,10 +6,12 @@
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 
 namespace at {
 class Tensor;
-}
+CAFFE2_API void launch(std::function<void()> func);
+} // namespace at
 namespace c10 {
 struct IValue;
 struct OperatorName;
@@ -31,6 +33,7 @@ struct Node;
 struct Instruction;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
+using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
@@ -65,9 +68,11 @@ struct TORCH_API Code {
 };
 
 struct InterpreterState {
-  TORCH_API InterpreterState(const Code& code);
+  TORCH_API InterpreterState(
+      const Code& code,
+      TaskLauncher taskLauncher = at::launch);
   TORCH_API void run(Stack& stack);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  TORCH_API c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
   TORCH_API ~InterpreterState();
 
@@ -125,6 +130,9 @@ struct InterpreterContinuation {
 // this will cause the TensorType to have requires_grad=False.
 TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
     const at::Tensor& t);
+
+// current (TLS) TorchScript interpreter callstack
+TORCH_API std::vector<StackEntry> currentCallstack();
 
 } // namespace jit
 } // namespace torch
