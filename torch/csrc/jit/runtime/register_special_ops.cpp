@@ -431,6 +431,10 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, torch::GradMode::is_enabled()); },
         aliasAnalysisConservative()),
     Operator(
+        "aten::set_grad_enabled(bool val) -> ()",
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
+        aliasAnalysisConservative()),
+    Operator(
         "aten::current_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
           auto idx = uint16_t(pop(stack).toInt());
