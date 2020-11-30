@@ -4241,11 +4241,6 @@ class TestTorchDeviceType(TestCase):
         expected_ind = torch.tensor([[0, 1, 2, 3, 3, 3], [0, 1, 2, 3, 3, 5]], device=device, dtype=torch.long)
         self._test_cumminmax_helper(x, torch.cummin, expected_val, expected_ind)
 
-    @onlyCUDA
-    @expectedAlertNondeterministic('_histogram_cuda', fn_has_device_arg=False)
-    def test_histogram_alert_nondeterministic(self, device):
-        torch.histogram(torch.tensor([], device=device))
-
     @onlyCPU
     def test_histogram_bin_edges_sorted(self, device):
         # bins not sorted - the check is only performed on the CPU to avoid device synchronization
