@@ -97,10 +97,10 @@ def broadcast_shapes(*shapes):
     Raises:
         RuntimeError: If shapes are incompatible.
     """
-    # TODO Consider moving this to C++ once the jit has better support for torch.Size.
+    # TODO Movie this to C++ once the jit has better support for torch.Size.
     scalar = torch.zeros((), device="cpu")
     tensors = [scalar.expand(shape) for shape in shapes]
-    tensors = torch.broadcast_all(*tensors)
+    tensors = torch.broadcast_tensors(*tensors)
     return tensors[0].shape
 
 
