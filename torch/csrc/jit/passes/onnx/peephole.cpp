@@ -978,8 +978,10 @@ static void foldIfNode(Block* b) {
     }
     if (it->kind() == onnx::If) {
       auto if_node = *it;
-      //auto a = checkIfFold(if_node);
-      std::cout << "==================== Check If Node ========================    " << std::endl;
+      // auto a = checkIfFold(if_node);
+      std::cout
+          << "==================== Check If Node ========================    "
+          << std::endl;
       if (checkIfFold(if_node)) {
         Block* then_block = it->blocks()[0];
         Block* else_block = it->blocks()[1];
@@ -1053,7 +1055,7 @@ void PeepholeOptimizeONNX(
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
   removeSequenceSplitConcat(graph->block());
-  //foldIfNode(graph->block());
+  // foldIfNode(graph->block());
 }
 
 } // namespace jit
