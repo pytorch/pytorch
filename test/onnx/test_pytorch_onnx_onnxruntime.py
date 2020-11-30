@@ -122,7 +122,7 @@ class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
-    use_new_jit_passes = True  # For testing main code-path
+    use_new_jit_passes = False  # For testing main code-path
     onnx_shape_inference = True
 
     def setUp(self):
