@@ -297,7 +297,6 @@ struct TORCH_API RecordFunction {
  */
 class TORCH_API RecordFunctionCallback {
  public:
-
   using StartCallback = std::unique_ptr<ObserverContext>(*)(const RecordFunction&);
   using EndCallback = void (*)(const RecordFunction&, ObserverContext*);
 
