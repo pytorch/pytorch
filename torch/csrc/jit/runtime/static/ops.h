@@ -6,6 +6,24 @@
 namespace torch {
 namespace jit {
 
+using SROperator =
+    std::function<void(const ProcessedNode*, std::vector<IValue>&)>;
+using SROpFunctor = std::function<SROperator(Node* n)>;
+struct SROperatorFunctor {
+  virtual SROperator Generate(Node*) = 0;
+  virtual ~SROperatorFunctor() = default;
+};
+
+C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+#define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
+  struct SROperatorFunctor_##id : public SROperatorFunctor { \
+    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROperator Generate(Node* n) override {                  \
+      return fn(n);                                          \
+    }                                                        \
+  };                                                         \
+  C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
+
 bool canRunOutOfPlace(Node* n);
 std::function<void(const ProcessedNode*, std::vector<IValue>&)>
 getOutOfPlaceOperation(Node* n);
