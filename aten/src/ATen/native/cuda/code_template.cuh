@@ -230,6 +230,8 @@
       //     data[0], data[1], data[2],
       //     input_offsets[0], input_offsets[1]);
       ${load_inputs}
+      //printf(
+      //    "thread %d a %f b %f offsets %d %d\n", threadIdx.x, arg0[j], arg1[j], input_offsets[0], input_offsets[1]);
       thread_idx += num_threads;
     }
 

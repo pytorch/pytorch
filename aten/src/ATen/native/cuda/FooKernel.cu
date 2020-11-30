@@ -159,10 +159,11 @@ std::string generate_code(
   }
   std::stringstream load_inputs;
   for (int i=0; i < nInputs; i++){
-    load_inputs << "arg" << std::to_string(i) << "[j] = l.load<"
+    auto i_string = std::to_string(i);
+    load_inputs << "arg" << i_string << "[j] = l.load<"
                 << common_dtype_string << ">(data["
                 << std::to_string(i + iter.noutputs()) << "], input_offsets["
-                << std::to_string(i) << "], j);\n";
+                << i_string << "], " << i_string << ");\n";
   }
   env.s("load_inputs", load_inputs.str());
   std::stringstream store_outputs;
@@ -310,7 +311,10 @@ bool needs_dynamic_cast){
     }
     auto loader = memory::LoadWithCast<2>(dtypes);
     auto storer = memory::StoreWithCast(iter.tensor(0).scalar_type());
-    TORCH_CHECK(false, "dynamic cast not supported yet")
+    args.push_back((void*)&loader);
+    args.push_back((void*)&storer);
+    launch_jitted_pwise_function(function, args, grid, num_threads);
+    // TORCH_CHECK(false, "dynamic cast not supported yet")
   } else {
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
@@ -498,7 +502,7 @@ Tensor foo_cuda(const Tensor& self, const Tensor& other, Scalar alpha_scalar) {
     // be split, the properties of the iter that are used for codegen
     // won't change if it is split
     auto code = generate_code(cuda_template, iter, dynamic_casting);
-    //std::cout << "code " << code << "\n";
+//    std::cout << "code " << code << "\n";
     const std::string kernel_name{"FooFunctor_kernel"};
     function = jit_pwise_function(foo_cache, key, code, kernel_name);
   }
