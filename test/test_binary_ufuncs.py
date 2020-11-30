@@ -15,7 +15,8 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, make_tensor)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA)
+    dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
+    skipCUDAIfRocm)
 
 # TODO: remove this
 def _generate_input(shape, dtype, device, with_extremal):
@@ -1360,7 +1361,6 @@ class TestBinaryUfuncs(TestCase):
                 self.assertTrue(torch.all(x_ == value))
 
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fmod(self, device, dtype):
         # Use numpy as reference
         def _reference_implementation(x, mod):
