@@ -1,5 +1,6 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
+import torch.nn.functional as F
 from torch import Tensor, vmap
 import functools
 import itertools
@@ -2142,6 +2143,16 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(torch.div, device)
         self._test_arithmetic(lambda x, y: x / y, device)
 
+    @allowVmapFallbackUsage
+    def test_binary_cross_entropy(self, device):
+        x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
+        target = torch.rand(3, 2, device=device)
+
+        op = functools.partial(F.binary_cross_entropy, target=target)
+
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
+
     def test_expand(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
 
@@ -2240,6 +2251,15 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(lambda x: x[0:1], (x,))
         self._batched_grad_test(lambda x: x[:, 1:3], (x,))
         self._batched_grad_test(lambda x: x[..., 1:3], (x,))
+
+    @allowVmapFallbackUsage
+    def test_symeig(self, device):
+        def op(x):
+            return torch.symeig(x, eigenvectors=True)[0]
+
+        x = torch.randn(3, 3, device=device, requires_grad=True)
+        self._batched_grad_test(op, (x,), {})
+        self._batched_grad_grad_test(op, (x,), {})
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
