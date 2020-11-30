@@ -70,8 +70,7 @@ class AgentBase:
         self.batch_size = batch_size
         for rank in range(batch_size):
             ob_info = rpc.get_worker_info(OBSERVER_NAME.format(rank + 2))
-            self.ob_rrefs.append(
-                remote(ob_info, ObserverBase))
+
             self.rewards[ob_info.id] = []
 
         self.saved_log_probs = [] if self.batch else {
@@ -81,15 +80,18 @@ class AgentBase:
         self.state_size = state_size
         self.states = torch.zeros(self.batch_size, *state_size)
 
+    def store_ob_rrefs(self, ob_rrefs):
+        for ob_rref in ob_rrefs:
+            self.ob_rrefs.append(ob_rref)
+
+
     @staticmethod
     @rpc.functions.async_execution
     def select_action_batch(agent_rref, observer_id, state):
         self = agent_rref.local_value()
         observer_id -= 2
 
-        if self.pending_states == self.batch_size:
-            self.agent_latency_start = time.time()
-            # agent_latency_start = time.time()
+
 
         self.states[observer_id].copy_(state)
         future_action = self.future_actions.then(
@@ -97,6 +99,8 @@ class AgentBase:
         )
 
         with self.lock:
+            if self.pending_states == self.batch_size:
+                self.agent_latency_start = time.time()
             self.pending_states -= 1
             if self.pending_states == 0:
                 self.pending_states = self.batch_size
@@ -123,7 +127,6 @@ class AgentBase:
         self = agent_rref.local_value()
         observer_id -= 2
 
-        # self.agent_latency_start = time.time()
         agent_latency_start = time.time()
 
         state = state.float().unsqueeze(0)
@@ -133,7 +136,6 @@ class AgentBase:
 
         self.saved_log_probs[observer_id].append(m.log_prob(action))
 
-        # self.agent_latency_end = time.time()
         agent_latency_end = time.time()
 
         # non_batch_latency = self.agent_latency_end - self.agent_latency_start

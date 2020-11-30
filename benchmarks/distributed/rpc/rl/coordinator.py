@@ -1,5 +1,6 @@
 import torch
 import torch.distributed.rpc as rpc
+import matplotlib.pyplot as plt
 from torch.distributed.rpc import rpc_async, rpc_sync, remote
 
 from agent import AgentBase
@@ -32,6 +33,8 @@ class CoordinatorBase:
             self.ob_rrefs.append(ob_ref)
 
             ob_ref.rpc_sync().set_state(state_size, batch)
+
+        self.agent_rref.rpc_sync().store_ob_rrefs(self.ob_rrefs)
 
         self.agent_rref.rpc_sync().set_world(
             batch_size, state_size, nlayers, out_features, self.batch)
@@ -99,3 +102,17 @@ class CoordinatorBase:
         for p in [50, 75, 90, 95]:
             v = np.percentile(observer_throughput_final, p)
             print("p" + str(p) + ":", int(v))
+
+        #plot1 1. (with fixed state size and fixed batch num) x-axis: number of observers; left-y-axis: observer latency; right-y-axis: agent throughput
+        #for observ in number of observers, get observer latency and throughput across different percentiles? 
+        #plot data here
+        # width = 0.35  # the width of the bars
+        # fig, ax = plt.subplots()
+        # rects1 = ax.bar(x - width/2, batch_execution_time, width, label='Observer Latency')
+        # rects2 = ax.bar(x + width/2, non_batch_execution_time,
+        #         width, label='Agent Throughput')
+        # ax.set_ylabel('Observer Latency')
+        # #set ylabel right agent throughput
+        # ax.set_xlabel('Number of Observers')
+        # ax.set_title('RPC Benchmarks')
+

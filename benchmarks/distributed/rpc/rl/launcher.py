@@ -65,21 +65,34 @@ def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nl
 
 
 def main():
-    for world_size in range(12, 13):
-        delays = []
-        for batch in [True, False]:
-            print(world_size, batch, "==>\n")
-            tik = time.time()
-            mp.spawn(
-                run_worker,
-                args=(world_size, args.master_addr, args.master_port,
-                      batch, args.state_size, args.nlayers, args.out_features),
-                nprocs=world_size,
-                join=True
-            )
-            tok = time.time()
-            delays.append(tok - tik)
-        print(f"Time taken - {world_size}, {delays[0]}, {delays[1]}")
+    # for world_size in range(12, 13):
+        # delays = []
+        # for batch in [True, False]:
+        #     print(world_size, batch, "==>\n")
+        #     tik = time.time()
+        #     mp.spawn(
+        #         run_worker,
+        #         args=(world_size, args.master_addr, args.master_port,
+        #               batch, args.state_size, args.nlayers, args.out_features),
+        #         nprocs=world_size,
+        #         join=True
+        #     )
+        #     tok = time.time()
+        #     delays.append(tok - tik)
+        # print(f"Time taken - {world_size}, {delays[0]}, {delays[1]}")
+    batch = True
+    world_size = 12
+    tik = time.time()
+    mp.spawn(
+        run_worker,
+        args=(world_size, args.master_addr, args.master_port,
+              batch, args.state_size, args.nlayers, args.out_features),
+        nprocs=world_size,
+        join=True
+    )
+    tok = time.time()
+    delay = tok - tik
+    print(f"Time taken - worldsize: {world_size}, delay: {delay}")
 
 
 if __name__ == '__main__':
