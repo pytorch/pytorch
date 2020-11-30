@@ -504,8 +504,7 @@ class optional : private OptionalBase<T> {
   optional(optional&& rhs) = default;
 #else
   optional(optional&& rhs) noexcept(
-      std::is_nothrow_move_constructible<T>::value)
-      : OptionalBase<T>() {
+      std::is_nothrow_move_constructible<T>::value) {
     if (rhs.initialized()) {
       ::new (static_cast<void*>(dataptr())) T(std::move(*rhs));
       OptionalBase<T>::init_ = true;
