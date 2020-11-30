@@ -89,6 +89,9 @@ bool Tensor::is_xpu() const {
 bool is_xpu(Tensor self) {
   // NB: this is not a native function to avoid dispatching overhead.
   return self.is_xpu();
+
+bool Tensor::is_xla() const {
+    return impl_->is_xla();
 }
 
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
@@ -110,6 +113,10 @@ bool Tensor::has_names() const {
 
 bool is_cuda(Tensor self) {
   return self.is_cuda();
+}
+
+bool is_xla(Tensor self) {
+    return self.is_xla();
 }
 
 bool Tensor::is_hip() const {
