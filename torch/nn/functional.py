@@ -4037,7 +4037,8 @@ def _pad_circular(input, padding):
 
     return out
 
-def masked_softmax(input, mask, dim=None, dtype=None):
+def _naive_masked_softmax(inputs, mask, dim=None, dtype=None):
+    """Reference pythonic implementation of masked softmax."""
     # Mask will be a bool tensor here. Type checking:
     if mask.dtype != torch.bool:
         if mask.dtype == torch.uint8:
@@ -4052,8 +4053,11 @@ def masked_softmax(input, mask, dim=None, dtype=None):
     # To follow the logic of multi_head_attention_forward below,
     # this assumes the mask will be True where we want to zero out the
     # entries, and False where we want to preserve them.
-    input = input.masked_fill(mask, float('-inf'))
-    return torch.nn.functional.softmax(input, dim=dim, dtype=dtype)
+    inputs = inputs.masked_fill(mask, float('-inf'))
+    return torch.nn.functional.softmax(inputs, dim=dim, dtype=dtype)
+
+def masked_softmax(input, mask, dim=None, dtype=None):
+  return input.masked_softmax(mask, dim=dim, dtype=dtype)
 
 def multi_head_attention_forward(query: Tensor,
                                  key: Tensor,
@@ -4334,7 +4338,7 @@ def multi_head_attention_forward(query: Tensor,
           dim=-1
       )
     else:  # fallback
-      attn_output_weights = torch.nn.functional.masked_softmax(
+      attn_output_weights = _naive_masked_softmax(
           attn_output_weights,
           combined_mask.view(bsz * num_heads, tgt_len, src_len),
           dim=-1

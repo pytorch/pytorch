@@ -3155,8 +3155,17 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
+    def test_masked_softmax_reference(self):
+        inputs = torch.ones((2, 2), dtype=torch.float32)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
 
-    def test_masked_softmax_functional_smoke(self):
+        # ensure the specialized implementation matches the reference one
+        self.assertEqual(
+            torch.nn.functional._naive_masked_softmax(inputs, mask, dim=-1),
+            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
+        )
+
+    def test_masked_softmax_smoke(self):
         inputs = torch.ones((2, 2), dtype=torch.float32)
         mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
         self.assertEqual(
@@ -3168,19 +3177,7 @@ class TestNN(NNTestCase):
             torch.tensor([[1., 0.], [0.5, 0.5]], dtype=torch.float32),
         )
 
-    def test_masked_softmax_cpp_smoke(self):
-        inputs = torch.ones((2, 2), dtype=torch.float32)
-        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
-        self.assertEqualIgnoreType(
-            inputs.masked_softmax(mask, dim=0),
-            torch.tensor([[0.5, 0.], [0.5, 1.]]),
-        )
-        self.assertEqualIgnoreType(
-            inputs.masked_softmax(mask, dim=1),
-            torch.tensor([[1., 0.], [0.5, 0.5]]),
-        )
-
-    def test_masked_softmax_functional_dtype_conversion(self):
+    def test_masked_softmax_dtype_conversion(self):
         inputs = torch.ones((2, 2), dtype=torch.float32)
         mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
         outputs = torch.nn.functional.masked_softmax(
@@ -3188,55 +3185,32 @@ class TestNN(NNTestCase):
         )
         self.assertEqual(outputs.dtype, torch.float64)
 
-    def test_masked_softmax_cpp_dtype_conversion(self):
-        inputs = torch.ones((2, 2), dtype=torch.float32)
-        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
-        outputs = inputs.masked_softmax(mask, dim=0, dtype=torch.float64)
-        self.assertEqual(outputs.dtype, torch.float64)
-
-    def test_masked_softmax_functional_mask_dtype(self):
+    def test_masked_softmax_mask_dtype(self):
         inputs = torch.ones((2, 2), dtype=torch.float32)
 
         mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.uint8)
         with self.assertWarnsRegex(UserWarning, "deprecated"):
             torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
-
-        mask = torch.rand((2, 2))
-        with self.assertRaises(TypeError):
-            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
-
-    def test_masked_softmax_cpp_mask_dtype(self):
-        inputs = torch.rand((2, 2), dtype=torch.float32)
-
-        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.uint8)
-        with self.assertWarnsRegex(UserWarning, "deprecated"):
-            inputs.masked_softmax(mask, dim=0)
 
         mask = torch.rand((2, 2))
         with self.assertRaises(RuntimeError):
-            inputs.masked_softmax(mask, dim=0)
+            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
 
-    def test_masked_softmax_cpp_input_dtype(self):
+    def test_masked_softmax_input_dtype(self):
         inputs = torch.rand((2, 2), dtype=torch.float64)
         mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
 
         with self.assertRaises(RuntimeError):
             inputs.masked_softmax(mask, dim=0)
 
-    def test_masked_softmax_functional_mask_shape(self):
+    def test_masked_softmax_mask_shape(self):
         inputs = torch.rand((2, 2), dtype=torch.float32)
         print(inputs.dtype)
         mask = torch.triu(torch.ones((3, 3)), diagonal=1).to(torch.bool)
         with self.assertRaises(RuntimeError):
             torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
 
-    def test_masked_softmax_cpp_mask_shape(self):
-        inputs = torch.rand((2, 2), dtype=torch.float32)
-        mask = torch.triu(torch.ones((3, 3)), diagonal=1).to(torch.bool)
-        with self.assertRaises(RuntimeError):
-            inputs.masked_softmax(mask, dim=-1)
-
-    def test_masked_softmax_functional_nan(self):
+    def test_masked_softmax_nan(self):
         inputs = torch.rand((2, 2), dtype=torch.float32)
         mask = torch.tensor([[1, 1], [0, 1]], dtype=torch.bool)
         outputs = torch.nn.functional.masked_softmax(inputs, mask, dim=1)
@@ -3244,35 +3218,13 @@ class TestNN(NNTestCase):
         # is not defined, and the function should return nan
         self.assertTrue(all(math.isnan(item) for item in outputs[0]))
 
-    def test_masked_softmax_cpp_nan(self):
-        inputs = torch.rand((2, 2), dtype=torch.float32)
-        mask = torch.tensor([[1, 1], [0, 1]], dtype=torch.bool)
-        outputs = inputs.masked_softmax(mask, dim=1)
-        # all entries in channel 0 along dim 1 are masked so the probability
-        # is not defined, and the function should return nan
-        self.assertTrue(all(math.isnan(item) for item in outputs[0]))
-
-    def test_masked_softmax_functional(self):
+    def test_masked_softmax(self):
         AXIS = 0
         inputs = torch.rand(3, 4, 5).to(torch.float32)
         mask = torch.stack(
             [torch.ones(4, 5), torch.zeros(4, 5), torch.zeros(4, 5)]
         ).to(torch.bool)
         outputs = torch.nn.functional.masked_softmax(inputs, mask, dim=AXIS)
-
-        # check output is 0 where masked
-        self.assertEqual(torch.sum(outputs[mask]), 0)
-
-        # check probabilities sum to 1 along chosen axis
-        self.assertTrue(torch.all(outputs.sum(dim=AXIS) == 1))
-
-    def test_masked_softmax_cpp(self):
-        AXIS = 0
-        inputs = torch.rand(3, 4, 5).to(torch.float32)
-        mask = torch.stack(
-            [torch.ones(4, 5), torch.zeros(4, 5), torch.zeros(4, 5)]
-        ).to(torch.bool)
-        outputs = inputs.masked_softmax(mask, dim=AXIS)
 
         # check output is 0 where masked
         self.assertEqual(torch.sum(outputs[mask]), 0)
@@ -11991,14 +11943,14 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'mean', True, dtype=torch.bfloat16, test_backward=True)
 
     @onlyCUDA
-    def test_masked_softmax_cpp_device_input(self, device):
+    def test_masked_softmax_device_input(self, device):
         inputs = torch.ones((2, 2), dtype=torch.float32).to(device)
         mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
         with self.assertRaises(RuntimeError):
             inputs.masked_softmax(mask, dim=0)
 
     @onlyCUDA
-    def test_masked_softmax_cpp_device_mask(self, device):
+    def test_masked_softmax_device_mask(self, device):
         inputs = torch.ones((2, 2), dtype=torch.float32)
         mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool).to(device)
         with self.assertRaises(RuntimeError):
