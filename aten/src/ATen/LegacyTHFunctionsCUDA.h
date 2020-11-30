@@ -46,8 +46,6 @@ Tensor & _th_cross_kernel_out(Tensor & result, const Tensor & self, const Tensor
 Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim);
 std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A);
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
-std::tuple<Tensor &,Tensor &> _th_eig_out(Tensor & res1, Tensor & res2, const Tensor & self, bool eigenvectors);
-std::tuple<Tensor,Tensor> _th_eig(const Tensor & self, bool eigenvectors);
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);
 Tensor _th_potri(const Tensor & self, bool upper);
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self);
