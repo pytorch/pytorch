@@ -4049,10 +4049,6 @@ def masked_softmax(input, mask, dim=None, dtype=None):
         else:
             raise TypeError('mask must be of type torch.bool')
 
-    # Input assumed to be float32. Type checking:
-    if input.dtype != torch.float32:
-        raise TypeError('input must be of type torch.float32')
-
     # To follow the logic of multi_head_attention_forward below,
     # this assumes the mask will be True where we want to zero out the
     # entries, and False where we want to preserve them.
@@ -4317,7 +4313,7 @@ def multi_head_attention_forward(query: Tensor,
 
     combined_mask = torch.zeros(
         bsz, num_heads, tgt_len, src_len, dtype=torch.bool
-    )  # nothing is masked yet
+    ).to(device=attn_output_weights.device) # nothing is masked yet
 
     if attn_mask is not None:
         if attn_mask.dtype == torch.bool:
@@ -4328,10 +4324,21 @@ def multi_head_attention_forward(query: Tensor,
     if key_padding_mask is not None:
         combined_mask |= key_padding_mask.unsqueeze(1).unsqueeze(2)
 
-    attn_output_weights = attn_output_weights.masked_softmax(
-        combined_mask.view(bsz * num_heads, tgt_len, src_len),
-        dim=-1
-    )
+    if (
+      (attn_output_weights.device == torch.device('cpu')) &
+      (combined_mask.device == torch.device('cpu')) &
+      (attn_output_weights.dtype == torch.float32)
+    ):  # only implemented for float inputs and cpu tensors
+      attn_output_weights = attn_output_weights.masked_softmax(
+          combined_mask.view(bsz * num_heads, tgt_len, src_len),
+          dim=-1
+      )
+    else:  # fallback
+      attn_output_weights = torch.nn.functional.masked_softmax(
+          attn_output_weights,
+          combined_mask.view(bsz * num_heads, tgt_len, src_len),
+          dim=-1
+      )
 
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
 

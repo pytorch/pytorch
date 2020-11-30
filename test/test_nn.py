@@ -3216,13 +3216,6 @@ class TestNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             inputs.masked_softmax(mask, dim=0)
 
-    def test_masked_softmax_functional_input_dtype(self):
-        inputs = torch.ones((2, 2), dtype=torch.float64)
-        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
-
-        with self.assertRaises(TypeError):
-            torch.nn.functional.masked_softmax(inputs, mask, dim=-1)
-
     def test_masked_softmax_cpp_input_dtype(self):
         inputs = torch.rand((2, 2), dtype=torch.float64)
         mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
@@ -11997,15 +11990,28 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'sum', True, dtype=torch.bfloat16, test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, dtype=torch.bfloat16, test_backward=True)
 
+    @onlyCUDA
+    def test_masked_softmax_cpp_device_input(self, device):
+        inputs = torch.ones((2, 2), dtype=torch.float32).to(device)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool)
+        with self.assertRaises(RuntimeError):
+            inputs.masked_softmax(mask, dim=0)
 
     @onlyCUDA
-    @dtypes(torch.half, torch.float, torch.double)
+    def test_masked_softmax_cpp_device_mask(self, device):
+        inputs = torch.ones((2, 2), dtype=torch.float32)
+        mask = torch.triu(torch.ones_like(inputs), diagonal=1).to(torch.bool).to(device)
+        with self.assertRaises(RuntimeError):
+            inputs.masked_softmax(mask, dim=0)
+
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
     def test_multihead_attention_dtype(self, device, dtype):
         embed_dim = 128
         num_heads = 8
         sl = 10
         bs = 8
-        model = nn.MultiheadAttention(embed_dim, num_heads).cuda().to(dtype)
+        model = nn.MultiheadAttention(embed_dim, num_heads).to(dtype=dtype, device=device)
         q = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype)
         k = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype)
         v = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype)

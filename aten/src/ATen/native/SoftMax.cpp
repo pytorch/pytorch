@@ -145,13 +145,9 @@ void host_masked_softmax(Tensor output, const Tensor& input, const Tensor& mask,
               output_data_base + outer_idx * outer_stride + inner_idx;
           scalar_t max_input = input_data[0];
 
-          std::vector<int64_t> unmasked;
-          unmasked.reserve(dim_size);
-
           for (int64_t d = 0; d < dim_size; d++){
             if (mask_data[d * dim_stride] == false) {
               max_input = std::max(max_input, input_data[d * dim_stride]);
-              unmasked.push_back(d);
             }
             else {
               output_data[d * dim_stride] = 0;
@@ -159,10 +155,12 @@ void host_masked_softmax(Tensor output, const Tensor& input, const Tensor& mask,
           }
 
           acc_type<scalar_t, false> tmpsum = 0;
-          for (auto d: unmasked) {
-            scalar_t z = std::exp(input_data[d * dim_stride] - max_input);
-            output_data[d * dim_stride] = z;
-            tmpsum += z;
+          for (int64_t d = 0; d < dim_size; d++){
+            if (mask_data[d * dim_stride] == false) {
+              scalar_t z = std::exp(input_data[d * dim_stride] - max_input);
+              output_data[d * dim_stride] = z;
+              tmpsum += z;
+            }
           }
           for (int64_t d = 0; d < dim_size; d++) {
             // this is intentionally doing 0/0 = nan when an entire row is masked
@@ -198,6 +196,30 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
 }
 
 Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const int64_t dim_, const bool half_to_float) {
+  // check both on cpu
+  if (!(input_.device().type() == at::Device::Type::CPU)) {
+    AT_ERROR("masked_softmax only supports for CPU tensor inputs");
+  }
+  if (!(mask_.device().type() == at::Device::Type::CPU)) {
+    AT_ERROR("masked_softmax only supports for CPU tensor inputs");
+  }
+
+  // check input dype
+  if (!(input_.scalar_type() == ScalarType::Float)) {
+      AT_ERROR("masked_softmax requires input with dtype torch.float32.");
+  }
+  // check mask dtype + byte to bool conversion
+  if (!(mask_.dtype() == ScalarType::Bool)) {
+    if (mask_.dtype() == ScalarType::Byte) {
+      TORCH_WARN("masked_softmax received a mask with dtype torch.uint8, this behavior is now deprecated,"
+        "please use a mask with dtype torch.bool instead.");
+      auto mask = mask_.to(at::kBool);
+    }
+    else {
+      AT_ERROR("masked_softmax requires mask with dtype torch.bool.");
+    }
+  }
+
   AT_ASSERTM(!half_to_float, "masked_softmax with half to float conversion is not supported on CPU");
   auto input = input_.contiguous();
   auto mask = mask_.contiguous();
