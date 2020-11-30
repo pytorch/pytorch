@@ -127,7 +127,7 @@ class profile(object):
 
         if not self.enable_pred:
             print("Warning: using profiler without enable predicate may result in the skewed " +
-                    "results, use enable_pred to control the warmup time")
+                "results, use enable_pred to control the warmup time")
 
     def __enter__(self):
         self.next_step()
@@ -185,8 +185,7 @@ class profile(object):
         elif act == EnablePred.Action.STOP_TRACE:
             assert self.profiler is not None
             self.profiler.__exit__(None, None, None)
-            assert self.enable_pred
-            if self.enable_pred.output_fn:
+            if self.enable_pred and self.enable_pred.output_fn:
                 self.enable_pred.output_fn(self.profiler)
             if not keep_profiler:
                 self.profiler = None
