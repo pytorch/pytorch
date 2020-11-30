@@ -388,7 +388,7 @@ struct trivially_copyable_optimization_optional_base {
 
 // CUDA 9.2 and below fail while trying to compile default move constructor
 // see https://github.com/pytorch/csprng/issues/84
-#if (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
 template <class T>
 using OptionalBase = typename std::conditional<
     std::is_trivially_destructible<T>::value &&
@@ -412,13 +412,13 @@ using OptionalBase = typename std::conditional<
         constexpr_optional_base<typename std::remove_const<
             T>::type>, // use base with trivial destructor
         optional_base<typename std::remove_const<T>::type>>::type;
-#endif // (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#endif 
 
 template <class T>
 class optional : private OptionalBase<T> {
 // CUDA 9.2 and below fail while trying to compile default move constructor
 // see https://github.com/pytorch/csprng/issues/84
-#if (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = typename std::conditional<
       std::is_trivially_destructible<U>::value &&
@@ -438,7 +438,7 @@ class optional : private OptionalBase<T> {
           constexpr_optional_base<typename std::remove_const<
               U>::type>, // use base with trivial destructor
           optional_base<typename std::remove_const<U>::type>>::type;
-#endif // (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#endif 
 
   static_assert(
       !std::is_same<typename std::decay<T>::type, nullopt_t>::value,
@@ -500,7 +500,7 @@ class optional : private OptionalBase<T> {
 
 // CUDA 9.2 and below fail while trying to compile default move constructor
 // see https://github.com/pytorch/csprng/issues/84
-#if (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   optional(optional&& rhs) = default;
 #else
   optional(optional&& rhs) noexcept(
