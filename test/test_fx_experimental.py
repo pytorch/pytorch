@@ -1,5 +1,6 @@
 import torch
 import unittest
+import sys
 from typing import Dict
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
@@ -609,10 +610,18 @@ terrible spacing
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
 
         mod = symbolic_trace(Test())
-        mod.to_folder('foo', 'Foo')
-        from foo import Foo
+        module_name = 'Foo'
+        module_path = '/tmp/foo'
+        mod.to_folder(module_path, module_name)
+        # Recipe taken from here:
+        # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(module_name, module_path + '/__init__.py')
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
         t = torch.randn(2, 2)
-        self.assertEqual(Foo()(t), mod(t))
+        self.assertEqual(module.Foo()(t), mod(t))
 
 
 
