@@ -558,15 +558,6 @@ of size `m`, then :attr:`input` must be
 :math:`(n \times m)` and :attr:`out` will be a matrix of size
 :math:`(n \times m)`.
 
-For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
-:attr:`alpha` must be real numbers, otherwise they should be integers
-
-.. warning::
-    This function is deprecated and may be removed in a future release.
-    It can be implemented using :func:`torch.outer` as
-    ``alpha * torch.outer(vec1, vec2) + beta * input`` when :attr:`beta` is not zero,
-    and as ``alpha * torch.outer(vec1, vec2)`` when :attr:`beta` is zero.
-
 Args:
     input (Tensor): matrix to be added
     vec1 (Tensor): the first vector of the outer product
@@ -2610,11 +2601,21 @@ Alias for :func:`torch.div`.
 
 add_docstr(torch.dot,
            r"""
-dot(input, tensor) -> Tensor
+dot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors.
+Computes the dot product of two 1D tensors.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note::
+
+    Unlike NumPy's dot, torch.dot intentionally only supports computing the dot product
+    of two 1D tensors with the same number of elements.
+
+Args:
+    input (Tensor): first tensor in the dot product, must be 1D.
+    other (Tensor): second tensor in the dot product, must be 1D.
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -2626,15 +2627,18 @@ add_docstr(torch.vdot,
            r"""
 vdot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors. The vdot(a, b) function
-handles complex numbers differently than dot(a, b). If the first argument is complex,
-the complex conjugate of the first argument is used for the calculation of the dot product.
+Computes the dot product of two 1D tensors. The vdot(a, b) function handles complex numbers
+differently than dot(a, b). If the first argument is complex, the complex conjugate of the
+first argument is used for the calculation of the dot product.
 
-.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+.. note::
+
+    Unlike NumPy's vdot, torch.vdot intentionally only supports computing the dot product
+    of two 1D tensors with the same number of elements.
 
 Args:
-    input (Tensor): first tensor in the dot product. Its conjugate is used if it's complex.
-    other (Tensor): second tensor in the dot product.
+    input (Tensor): first tensor in the dot product, must be 1D. Its conjugate is used if it's complex.
+    other (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -2659,7 +2663,10 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 
 .. note::
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-    for :func:`torch.symeig`
+    if eigenvalues and eigenvectors are all real valued.
+
+    When :attr:`input` is on CUDA, :func:`torch.eig() <torch.eig>` causes
+    host-device synchronization.
 
 Args:
     input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
@@ -2685,6 +2692,32 @@ Returns:
           true eigenvectors can be computed as
           :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
           :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
+
+Example::
+
+    Trivial example with a diagonal matrix. By default, only eigenvalues are computed:
+
+    >>> a = torch.diag(torch.tensor([1, 2, 3], dtype=torch.double))
+    >>> e, v = torch.eig(a)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([], dtype=torch.float64)
+
+    Compute also the eigenvectors:
+
+    >>> e, v = torch.eig(a, eigenvectors=True)
+    >>> e
+    tensor([[1., 0.],
+            [2., 0.],
+            [3., 0.]], dtype=torch.float64)
+    >>> v
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]], dtype=torch.float64)
+
 """)
 
 add_docstr(torch.eq, r"""
@@ -3212,6 +3245,8 @@ A, in order as a namedtuple `solution, LU`.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `solution, LU`.
 
+Supports real-valued and complex-valued inputs.
+
 .. note::
 
     Irrespective of the original strides, the returned matrices
@@ -3414,7 +3449,7 @@ If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
 .. math::
     \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
 
-See :func:`torch.lgamma` for a related function.
+See :func:`torch.igammac` and :func:`torch.lgamma` for related functions.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
@@ -3433,8 +3468,58 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
     tensor([0.3528, 0.5665, 0.7350])
+    tensor([0.3528, 0.5665, 0.7350])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
+
+""".format(**common_args))
+
+add_docstr(torch.igammac,
+           r"""
+igammac(input, other, *, out=None) -> Tensor
+
+Computes the regularized upper incomplete gamma function:
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_{\text{other}_i}^{\infty} t^{\text{input}_i-1} e^{-t} dt
+
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
+
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
+
+See :func:`torch.igamma` and :func:`torch.lgamma` for related functions.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
+
+.. note::
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
+
+""" + r"""
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([3.0, 4.0, 5.0])
+    >>> a = torch.igammac(a1, a2)
+    tensor([0.6472, 0.4335, 0.2650])
+    >>> b = torch.igamma(a1, a2) + torch.igammac(a1, a2)
+    tensor([1., 1., 1.])
 
 """.format(**common_args))
 
@@ -3487,6 +3572,8 @@ Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batch
 of 2D square tensors, in which case this function would return a tensor composed of
 individual inverses.
 
+Supports real and complex input.
+
 .. note::
 
     Irrespective of the original strides, the returned tensors will be
@@ -3499,7 +3586,7 @@ Args:
 Keyword args:
     {out}
 
-Example::
+Examples::
 
     >>> x = torch.rand(4, 4)
     >>> y = torch.inverse(x)
@@ -3511,12 +3598,29 @@ Example::
             [ 0.0000, -0.0000, -0.0000,  1.0000]])
     >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
     tensor(1.1921e-07)
+
     >>> # Batched inverse example
     >>> x = torch.randn(2, 3, 4, 4)
     >>> y = torch.inverse(x)
     >>> z = torch.matmul(x, y)
     >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
     tensor(1.9073e-06)
+
+    >>> x = torch.rand(4, 4, dtype=torch.cdouble)
+    >>> y = torch.inverse(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
+            5.5511e-17-1.1102e-16j,  0.0000e+00-1.6653e-16j],
+            [ 5.5511e-16-1.6653e-16j,  1.0000e+00+6.9389e-17j,
+            2.2204e-16-1.1102e-16j, -2.2204e-16+1.1102e-16j],
+            [ 3.8858e-16-1.2490e-16j,  2.7756e-17+3.4694e-17j,
+            1.0000e+00+0.0000e+00j, -4.4409e-16+5.5511e-17j],
+            [ 4.4409e-16+5.5511e-16j, -3.8858e-16+1.8041e-16j,
+            2.2204e-16+0.0000e+00j,  1.0000e+00-3.4694e-16j]],
+        dtype=torch.complex128)
+    >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
+    tensor(7.5107e-16, dtype=torch.float64)
 """.format(**common_args))
 
 add_docstr(torch.isinf, r"""
@@ -3843,6 +3947,35 @@ Example::
     >>> c = torch.tensor([3])
     >>> torch.lcm(a, c)
     tensor([15, 30, 15])
+""".format(**common_args))
+
+add_docstr(torch.ldexp, r"""
+ldexp(input, other, *, out=None) -> Tensor
+
+Multiplies :attr:`input` by 2**:attr:`other`.
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i * 2^\text{{other}}_i
+""" + r"""
+
+Typically this function is used to construct floating point numbers by multiplying
+mantissas in :attr:`input` with integral powers of two created from the exponents
+in :attr:'other'.
+
+Args:
+    {input}
+    other (Tensor): a tensor of exponents, typically integers.
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.ldexp(torch.tensor([1.]), torch.tensor([1]))
+    tensor([2.])
+    >>> torch.ldexp(torch.tensor([1.0]), torch.tensor([1, 2, 3, 4]))
+    tensor([ 2.,  4.,  8., 16.])
+
+
 """.format(**common_args))
 
 add_docstr(torch.le, r"""
@@ -5614,6 +5747,66 @@ Examples::
             [[-0.8437,  0.1727, -0.1398]]])
 """.format(**common_args))
 
+add_docstr(torch.swapdims, r"""
+swapdims(input, dim0, dim1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapdims(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
+add_docstr(torch.swapaxes, r"""
+swapaxes(input, axis0, axis1) -> Tensor
+
+Alias for :func:`torch.transpose`.
+
+This function is equivalent to NumPy's swapaxes function.
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapaxes(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor
@@ -6172,6 +6365,46 @@ Example::
     >>> base = 2
     >>> torch.pow(base, exp)
     tensor([  2.,   4.,   8.,  16.])
+""".format(**common_args))
+
+add_docstr(torch.float_power,
+           r"""
+float_power(input, exponent, *, out=None) -> Tensor
+
+Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision. 
+If neither input is complex returns a ``torch.float64`` tensor, 
+and if one or more inputs is complex returns a ``torch.complex128`` tensor.
+
+.. note:: 
+    This function always computes in double precision, unlike :func:`torch.pow`, 
+    which implements more typical :ref:`type promotion <type-promotion-doc>`.
+    This is useful when the computation needs to be performed in a wider or more precise dtype, 
+    or the results of the computation may contain fractional values not representable in the input dtypes, 
+    like when an integer base is raised to a negative integer exponent.
+
+Args:
+    input (Tensor or Number): the base value(s)
+    exponent (Tensor or Number): the exponent value(s)
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randint(10, (4,))
+    >>> a
+    tensor([6, 4, 7, 1])
+    >>> torch.float_power(a, 2)
+    tensor([36., 16., 49.,  1.], dtype=torch.float64)
+
+    >>> a = torch.arange(1, 5)
+    >>> a
+    tensor([ 1,  2,  3,  4])
+    >>> exp = torch.tensor([2, -3, 4, -5])
+    >>> exp
+    tensor([ 2, -3,  4, -5])
+    >>> torch.float_power(a, exp)
+    tensor([1.0000e+00, 1.2500e-01, 8.1000e+01, 9.7656e-04], dtype=torch.float64)
 """.format(**common_args))
 
 add_docstr(torch.prod,
@@ -6753,6 +6986,10 @@ numbers. The remainder has the same sign as the divisor :attr:`other`.
 
 When :attr:`other` is a tensor, the shapes of :attr:`input` and
 :attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+
+Note:
+    Complex inputs are not supported. In some cases, it is not mathematically
+    possible to satisfy the definition of a modulo operation with complex numbers.
 
 Args:
     input (Tensor): the dividend
@@ -7632,9 +7869,11 @@ This function returns a namedtuple ``(U, S, V)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^T`.
 
-If :attr:`some` is ``True`` (default), the method returns the reduced singular value decomposition
-i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the returned
-`U` and `V` matrices will contain only :math:`min(n, m)` orthonormal columns.
+If :attr:`some` is ``True`` (default), the method returns the reduced
+singular value decomposition i.e., if the last two dimensions of
+:attr:`input` are ``m`` and ``n``, then the returned `U` matrix will
+contain only :math:`min(n, m)` orthonormal columns and the size of `V`
+will be :math:`(*, n, n)`.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
@@ -8103,7 +8342,7 @@ transpose(input, dim0, dim1) -> Tensor
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
 
-The resulting :attr:`out` tensor shares it's underlying storage with the
+The resulting :attr:`out` tensor shares its underlying storage with the
 :attr:`input` tensor, so changing the content of one would change the content
 of the other.
 
@@ -8137,6 +8376,8 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
+
+Supports real-valued and complex-valued inputs.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
@@ -9798,6 +10039,45 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `1` appears `n2` times, `2` appears `n3` times, etc.
 """.format(**common_args))
 
+add_docstr(torch.tile, r"""
+tile(input, reps) -> Tensor
+
+Constructs a tensor by repeating the elements of :attr:`input`. 
+The :attr:`reps` argument specifies the number of repetitions
+in each dimension.
+
+If :attr:`reps` specifies fewer dimensions than :attr:`input` has, then
+ones are prepended to :attr:`reps` until all dimensions are specified.
+For example, if :attr:`input` has shape (8, 6, 4, 2) and :attr:`reps`
+is (2, 2), then :attr:`reps` is treated as (1, 1, 2, 2). 
+
+Analogously, if :attr:`input` has fewer dimensions than :attr:`reps` 
+specifies, then :attr:`input` is treated as if it were unsqueezed at 
+dimension zero until it has as many dimensions as :attr:`reps` specifies. 
+For example, if :attr:`input` has shape (4, 2) and :attr:`reps`
+is (3, 3, 2, 2), then :attr:`input` is treated as if it had the 
+shape (1, 1, 4, 2). 
+
+.. note::
+
+    This function is similar to NumPy's tile function.
+
+Args:
+    input (Tensor): the tensor whose elements to repeat.
+    reps (tuple): the number of repetitions per dimension.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> x.tile((2,))
+    tensor([1, 2, 3, 1, 2, 3])
+    >>> y = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.tile(y, (2, 2))
+    tensor([[1, 2, 1, 2],
+            [3, 4, 3, 4],
+            [1, 2, 1, 2],
+            [3, 4, 3, 4]])
+""")
 
 add_docstr(torch.quantize_per_tensor,
            r"""
