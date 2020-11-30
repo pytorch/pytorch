@@ -1370,10 +1370,10 @@ class TestBinaryUfuncs(TestCase):
             # Issue #47779: https://github.com/pytorch/pytorch/issues/47779
             if torch.is_tensor(mod):
                 np_mod = mod.cpu().numpy()
-            if not torch.is_tensor(mod):
+            else:
                 np_mod = mod
                 # Non XLA platform needs to cast to int
-                if dtype in torch.testing.get_all_int_dtypes() and device in ['cpu', 'cuda']:
+                if dtype in torch.testing.get_all_int_dtypes() and self.device_type in ['cpu', 'cuda']:
                     np_mod = int(np_mod)
             exp = np.fmod(np_x, np_mod)
             exp = torch.from_numpy(exp)
