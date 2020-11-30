@@ -384,8 +384,8 @@ class TestCuda(TestCase):
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device='cuda')
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 80.00 GiB"):
-            torch.empty(1024 * 1024 * 1024 * 80, dtype=torch.int8, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 8000000000.00 GiB"):
+            torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
@@ -1781,8 +1781,11 @@ class TestCuda(TestCase):
                 # bwd ops don't sync with bwd_ambient_stream before consuming grad.
                 torch.autograd.backward(tensors=c, grad_tensors=grad)
 
+                # See https://github.com/pytorch/pytorch/issues/47028
                 # assertEquals below run on bwd_ambient_stream, so this test may also fail
                 # if backward() fails to sync with bwd_ambient_stream at the end.
+                # Synchronizing here works around the issue until a proper fix can be made.
+                torch.cuda.synchronize()
                 with torch.no_grad():
                     self.assertEqual(a.grad, grad * b)
                     self.assertEqual(b.grad, grad * a)

@@ -1,15 +1,23 @@
 #pragma once
 
-#include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
-#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
+#include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
 // Walk the Statment looking for Half size loads/stores.
-class CudaHalfChecker : public IRVisitor {
+class HalfChecker : public IRVisitor {
  public:
+  HalfChecker(const std::vector<CodeGen::BufferArg>& args) {
+    for (const auto& BA : args) {
+      hasHalf_ |= BA.dtype().scalar_type() == ScalarType::Half;
+    }
+  }
+
   bool hasHalf() {
     return hasHalf_;
   }
@@ -37,7 +45,7 @@ class CudaHalfChecker : public IRVisitor {
   bool hasHalf_{false};
 };
 
-class CudaHalfRewriter : public IRMutator {
+class HalfRewriter : public IRMutator {
   const Expr* mutate(const Load* v) override {
     const Expr* child = IRMutator::mutate(v);
     if (child->dtype().scalar_type() != ScalarType::Half) {
