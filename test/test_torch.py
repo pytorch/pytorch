@@ -3266,33 +3266,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 6, warning.lineno)
             self.assertEqual(len(w), 1)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
-    def test_msort(self, device, dtype):
-        def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
-            if tensor.size() != torch.Size([]):
-                expected = torch.from_numpy(np.msort(tensor.cpu().numpy()))
-            else:
-                expected = tensor  # numpy.msort() does not support empty shapes tensor
-
-            result = torch.msort(tensor)
-            self.assertEqual(result, expected)
-
-            out = torch.empty_like(result)
-            torch.msort(tensor, out=out)
-            self.assertEqual(out, expected)
-
-        shapes = (
-            [],
-            [0, ],
-            [20, ],
-            [1, 20],
-            [30, 30],
-            [10, 20, 30]
-        )
-        for shape in shapes:
-            test(shape)
-
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64

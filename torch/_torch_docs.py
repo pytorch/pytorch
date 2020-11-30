@@ -7563,7 +7563,7 @@ msort(input, *, out=None) -> Tensor
 Sorts the elements of the :attr:`input` tensor along its first dimension
 in ascending order by value.
 
-.. note:: `torch.msort(a)` is equivalent to `torch.sort(t, dim=0)[0]`.
+.. note:: `torch.msort(t)` is equivalent to `torch.sort(t, dim=0)[0]`.
           See also :func:`torch.sort`.
 
 Args:

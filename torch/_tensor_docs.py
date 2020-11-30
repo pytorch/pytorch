@@ -3384,7 +3384,7 @@ See :func:`torch.sort`
 
 add_docstr_all('msort',
                r"""
-sort() -> Tensor
+msort() -> Tensor
 
 See :func:`torch.msort`
 """)
