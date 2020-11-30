@@ -72,8 +72,8 @@ def broadcast_tensors(*tensors):
     return _VF.broadcast_tensors(tensors)  # type: ignore
 
 
-def broadcast_shape(*shapes):
-    r"""
+def broadcast_shapes(*shapes):
+    r"""broadcast_shapes(*shapes) -> Size
 
     Similar to :func:`broadcast_tensors` but for shapes.
 
@@ -85,18 +85,8 @@ def broadcast_shape(*shapes):
 
     Example::
 
-        >>> scalar = torch.randn(30)      # a batched scalar
-        >>> vector = torch.eye(20, 1, 3)  # a batched vector of length 3
-        >>> batch_shape = torch.broadcast_shape(scalar.shape,
-        ...                                     vector.shape[:-1])
-        >>> batch_shape
-        torch.Size([20, 30])
-        >>> s = scalar.expand(batch_shape)
-        >>> v = vector.expand(batch_shape + (-1,))
-        >>> s.shape
-        torch.Size([20, 30])
-        >>> v.shape
-        torch.Size([20, 30, 3])
+        >>> torch.broadcast_shapes((2,), (3, 1), (1, 1, 1))
+        torch.Size([1, 3, 2])
 
     Args:
         \*shapes (torch.Size): Shapes of tensors.
@@ -107,17 +97,11 @@ def broadcast_shape(*shapes):
     Raises:
         RuntimeError: If shapes are incompatible.
     """
-    result = [1] * max(map(len, shapes))
-    for shape in shapes:
-        for i in range(-1, -1 - len(shape), -1):
-            if shape[i] == 1 or shape[i] == result[i]:
-                continue
-            if result[i] != 1:
-                raise RuntimeError("The size of shape a ({}) must match the "
-                                   "size of shape b ({}) at non-singleton dimension {}"
-                                   .format(result[i], shape[i], i))
-            result[i] = shape[i]
-    return torch.Size(result)
+    # TODO Consider moving this to C++ once the jit has better support for torch.Size.
+    scalar = torch.zeros((), device="cpu")
+    tensors = [scalar.expand(shape) for shape in shapes]
+    tensors = torch.broadcast_all(*tensors)
+    return tensors[0].shape
 
 
 def split(tensor, split_size_or_sections, dim=0):

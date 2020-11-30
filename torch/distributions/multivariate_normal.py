@@ -126,19 +126,19 @@ class MultivariateNormal(Distribution):
             if scale_tril.dim() < 2:
                 raise ValueError("scale_tril matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            batch_shape = torch.broadcast_shape(scale_tril.shape[:-2], loc.shape[:-1])
+            batch_shape = torch.broadcast_shapes(scale_tril.shape[:-2], loc.shape[:-1])
             self.scale_tril = scale_tril.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
                 raise ValueError("covariance_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            batch_shape = torch.broadcast_shape(covariance_matrix.shape[:-2], loc.shape[:-1])
+            batch_shape = torch.broadcast_shapes(covariance_matrix.shape[:-2], loc.shape[:-1])
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         else:
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            batch_shape = torch.broadcast_shape(precision_matrix.shape[:-2], loc.shape[:-1])
+            batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], loc.shape[:-1])
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
         self.loc = loc.expand(batch_shape + (-1,))
 
