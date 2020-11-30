@@ -274,6 +274,18 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   return ret_ptr;
 }
 
+template
+c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightsQnnp<
+    2>::
+    prepack(
+        at::Tensor weight,
+        c10::optional<at::Tensor> bias_in,
+        torch::List<int64_t> stride,
+        torch::List<int64_t> padding,
+        torch::List<int64_t> output_padding,
+        torch::List<int64_t> dilation,
+        int64_t groups,
+        bool transpose);
 #endif // USE_PYTORCH_QNNPACK
 
 namespace at {

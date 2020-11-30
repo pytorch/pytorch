@@ -967,7 +967,8 @@ class TestTensorExprFuser(BaseTestClass):
         self.assertLastGraphAllFused()
 
     def test_double_intrinsics(self):
-        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+        # TODO: add "cpu" device once `pow` is supported there
+        devices = ["cuda"] if torch.cuda.is_available() else []
 
         def do_pow(x):
             return torch.pow(x, 7)
@@ -1261,6 +1262,13 @@ class TestTensorExprFuser(BaseTestClass):
             d = F.softmax(y, dim=1, dtype=torch.float32)
             return a + b + c + d
 
+        def test_softmax_neg_index(x, y):
+            a = F.softmax(x, dim=-2, dtype=torch.float32)
+            b = F.softmax(y, dim=-2, dtype=torch.float32)
+            c = F.softmax(x, dim=-1, dtype=torch.float32)
+            d = F.softmax(y, dim=-1, dtype=torch.float32)
+            return a + b + c + d
+
         def test_log_softmax(x, y):
             a = F.log_softmax(x, dim=0, dtype=torch.float32)
             b = F.log_softmax(y, dim=0, dtype=torch.float32)
@@ -1268,7 +1276,7 @@ class TestTensorExprFuser(BaseTestClass):
             d = F.log_softmax(y, dim=1, dtype=torch.float32)
             return a + b + c + d
 
-        for test in (test_softmax, test_log_softmax):
+        for test in (test_softmax, test_log_softmax, test_softmax_neg_index):
             old = torch._C._jit_set_texpr_reductions_enabled(True)
             traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
             inp = torch.randn(2, 3, device=device)
