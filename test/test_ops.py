@@ -36,7 +36,7 @@ class TestOpInfo(TestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
         with self.assertRaises(RuntimeError):
-            op(sample.input, *sample.args, **sample.kwargs)
+            op(*sample.input, *sample.args, **sample.kwargs)
 
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
@@ -51,7 +51,7 @@ class TestOpInfo(TestCase):
 
         # NOTE: only tests on first sample
         sample = samples[0]
-        op(sample.input, *sample.args, **sample.kwargs)
+        op(*sample.input, *sample.args, **sample.kwargs)
 
 
 class TestGradients(TestCase):
@@ -76,13 +76,13 @@ class TestGradients(TestCase):
         for sample in samples:
             partial_fn = partial(variant, **sample.kwargs)
             if check == 'gradcheck':
-                self.assertTrue(gradcheck(partial_fn, (sample.input,) + sample.args,
+                self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args, 
                                               gen_non_contig_grad_outputs=False,
                                               check_grad_dtypes=True))
-                self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=True,
                                               check_grad_dtypes=True))
             else:
@@ -174,8 +174,8 @@ class TestCommon(JitCommonTestCase):
             variants = (v for v in (method, inplace) if v is not None)
             # Computes expected forward
 
-            # below calls op's function variant 
-            expected_forward = op(sample.input, *sample.args, **sample.kwargs)
+            # below calls op's function variant
+            expected_forward = op(*sample.input, *sample.args, **sample.kwargs)
 
             # Computes expected backward
             # NOTE: backward may fail for some dtypes
@@ -195,13 +195,12 @@ class TestCommon(JitCommonTestCase):
                 if (variant is inplace and op.promotes_integers_to_float and
                         dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
                     try:
-                        variant_forward = variant(sample.input.clone(), *sample.args, **sample.kwargs)
+                        variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
                     except Exception as e:
                         continue
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
-
                 # Compares variant's forward
-                variant_forward = variant(sample.input.clone(), *sample.args, **sample.kwargs)
+                variant_forward = variant(*(input.clone() for input in sample.input), *sample.args, **sample.kwargs)
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
@@ -260,10 +259,11 @@ class TestCommon(JitCommonTestCase):
 
                     # Check scripted forward, grad, and grad grad
                     script_fn = create_script_fn(self, name, func_type, op.output_func)
+
                     check_against_reference(self, 
                                             script_fn,
                                             fn, 
-                                            (sample.input,) + sample.args, 
+                                            (*sample.input,) + sample.args, 
                                             sample.kwargs, 
                                             no_grad=(dtype not in dtypes_to_grad_check))
 
@@ -272,7 +272,7 @@ class TestCommon(JitCommonTestCase):
                     check_against_reference(self, 
                                             traced_fn,
                                             fn, 
-                                            (sample.input,) + sample.args, 
+                                            (*sample.input,) + sample.args, 
                                             sample.kwargs, 
                                             no_grad=(dtype not in dtypes_to_grad_check))
 
@@ -281,7 +281,7 @@ class TestCommon(JitCommonTestCase):
                     # Note: only runs in float32 and int64 because schema isn't affected by dtype, 
                     #   so running it on all dtypes is would be excessive
                     if dtype in [torch.float32, torch.int32]:
-                        check_alias_annotation(name, (sample.input,) + sample.args, sample.kwargs)
+                        check_alias_annotation(name, (*sample.input,) + sample.args, sample.kwargs)
 
                     # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample 
                     if dtype is torch.float32:
@@ -310,11 +310,11 @@ class TestCommon(JitCommonTestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
         # call it normally to get the expected result
-        expected = op(sample.input, *sample.args, **sample.kwargs)
+        expected = op(*sample.input, *sample.args, **sample.kwargs)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
         out_kwargs['out'] = out = torch.empty_like(expected)
-        op(sample.input, *sample.args, **out_kwargs)
+        op(*sample.input, *sample.args, **out_kwargs)
         self.assertEqual(expected, out)
 
 
