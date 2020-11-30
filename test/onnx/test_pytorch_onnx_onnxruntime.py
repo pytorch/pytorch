@@ -1803,7 +1803,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
-    #@disableScriptTest()
     def test_groupnorm_noaffine(self):
         model = torch.nn.GroupNorm(4, 8, 0.002, affine=False)
         x = torch.randn(3, 8, 224, 224)
@@ -3913,7 +3912,6 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
 
-    #@disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipIfUnsupportedOpsetVersion([12])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_1d_per_sample_weights(self):
@@ -4440,7 +4438,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(EinsumModelTranspose(), input=(x,))
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    #@disableScriptTest()  # shape/type inference
     def test_crossentropyloss(self):
         for ignore_index in [-100, 1]:
             x = torch.randn(3, 5)
@@ -4606,7 +4603,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(KLDivLossMiniBatchMean(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    #@disableScriptTest()  # shape/type inference
     def test_nllloss(self):
         class NLLModel(torch.nn.Module):
             def __init__(self):
