@@ -10,13 +10,13 @@ namespace {
 
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
-  static std::atomic<uint64_t> unique_cb_id {0};
-  return CallbackHandle(++unique_cb_id);
+  static std::atomic<uint64_t> unique_cb_id {1};
+  return CallbackHandle(unique_cb_id++);
 }
 
 RecordFunctionHandle next_unique_record_function_handle() {
-  static std::atomic<uint64_t> unique_rf_id {0};
-  return RecordFunctionHandle(++unique_rf_id);
+  static std::atomic<uint64_t> unique_rf_id {1};
+  return RecordFunctionHandle(unique_rf_id++);
 }
 
 thread_local RecordFunctionTLS rf_tls_;
