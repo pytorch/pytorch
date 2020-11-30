@@ -57,9 +57,6 @@ def getattr_qualified(obj, qname, default=None):
     e.g. getattr(torch, 'fft.rfft')
     """
     path = qname.split('.')
-    if len(path) > 1 and path[0] == 'fft':
-        import torch.fft  # noqa: F401
-
     for name in path:
         obj = getattr(obj, name, _END_SENTINEL)
         if obj is _END_SENTINEL:

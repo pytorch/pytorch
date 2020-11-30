@@ -23,8 +23,6 @@ if TEST_NUMPY:
 if TEST_LIBROSA:
     import librosa
 
-import torch.fft
-
 
 def _complex_stft(x, *args, **kwargs):
     # Transform real and imaginary components separably

@@ -3,9 +3,6 @@
 #include <torch/torch.h>
 #include <test/cpp/api/support.h>
 
-// Clobbers torch::fft the function with torch::fft the namespace
-#include <torch/fft.h>
-
 
 // Naive DFT of a 1 dimensional tensor
 torch::Tensor naive_dft(torch::Tensor x, bool forward=true) {
