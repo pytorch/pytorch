@@ -42,6 +42,7 @@ from tools.codegen.api.types import *
 from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, parse_native_yaml, with_native_function, FileManager
 from tools.codegen.model import *
+from tools.codegen.utils import *
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -108,7 +109,7 @@ def should_generate_py_binding(f: NativeFunction) -> bool:
 
     return True
 
-def get_pycname(name: str) -> str:
+def get_pycname(name: BaseOperatorName) -> str:
     return f'THPVariable_{name}'
 
 def is_noarg(overloads: Sequence[PythonSignatureNativeFunctionPair]) -> bool:
@@ -169,12 +170,12 @@ def create_python_bindings(
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
 
-    grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
     for pair in pairs:
         if pred(pair.function):
-            grouped[str(pair.function.func.name.name)].append(pair)
+            grouped[pair.function.func.name.name].append(pair)
 
-    for name in sorted(grouped.keys()):
+    for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
         py_methods.append(method_impl(name, module, overloads, method=method))
         py_method_defs.append(method_def(name, module, overloads, method=method))
@@ -243,14 +244,6 @@ def load_deprecated_signatures(
         # a literal Scalar
         rearranged_types = ', '.join(types.get(arg, 'Scalar') for arg in call_args)
         return f'{opname}({rearranged_types})'
-
-    # TODO: Use a real parser here; this will get bamboozled
-    def split_name_params(schema: str) -> Tuple[str, List[str]]:
-        m = re.match(r'(\w+)(\.\w+)?\((.*)\)', schema)
-        if m is None:
-            raise RuntimeError(f'Unsupported function schema: {schema}')
-        name, _, params = m.groups()
-        return name, params.split(', ')
 
     # group the original ATen signatures by type-only signature
     grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
@@ -469,7 +462,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 """)
 
 def method_impl(
-    name: str,
+    name: BaseOperatorName,
     module: Optional[str],
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
@@ -530,7 +523,7 @@ def method_impl(
     )
 
 def gen_has_torch_function_check(
-    name: str, module: Optional[str], *, noarg: bool, method: bool
+    name: BaseOperatorName, module: Optional[str], *, noarg: bool, method: bool
 ) -> str:
     if noarg:
         if method:
@@ -596,7 +589,7 @@ def emit_dispatch_case(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 def forward_decls(
-    name: str,
+    name: BaseOperatorName,
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
     method: bool
@@ -620,30 +613,8 @@ static PyObject * {pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-# Python binary operator dunder methods
-BINARY_OP_NAMES = [
-    '__lt__', '__le__',
-    '__gt__', '__ge__',
-    '__eq__', '__ne__',
-
-    '__add__', '__radd__', '__iadd__',
-    '__sub__', '__rsub__', '__isub__',
-    '__mul__', '__rmul__', '__imul__',
-    '__matmul__', '__rmatmul__', '__imatmul__',
-    '__truediv__', '__rtruediv__', '__itruediv__',
-    '__floordiv__', '__rfloordiv__', '__ifloordiv__',
-    '__mod__', '__rmod__', '__imod__',
-    '__divmod__', '__rdivmod__', '__idivmod__',
-    '__pow__', '__rpow__', '__ipow__',
-    '__lshift__', '__rlshift__', '__ilshift__',
-    '__rshift__', '__rrshift__', '__irshift__',
-    '__and__', '__rand__', '__iand__',
-    '__xor__', '__rxor__', '__ixor__',
-    '__or__', '__ror__', '__ior__',
-]
-
 def method_def(
-    name: str,
+    name: BaseOperatorName,
     module: Optional[str],
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
@@ -664,7 +635,7 @@ def method_def(
     if module == "torch":
         flags += ' | METH_STATIC'
 
-    if name in BINARY_OP_NAMES:
+    if name.dunder_method:
         # PyMethodDef entry for binary op, throws not implemented error
         return f"""\
 {{"{name}", {pyfunc_cast}(TypeError_to_NotImplemented_<{pycname}>), {flags}, NULL}},"""
