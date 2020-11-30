@@ -6,7 +6,8 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
-                                       lazy_property)
+                                       lazy_property, tril_matrix_to_vec,
+                                       vec_to_tril_matrix)
 from torch.nn.functional import pad
 from torch.nn.functional import softplus
 from typing import List
@@ -92,6 +93,14 @@ class Transform(object):
         else:
             raise ValueError('cache_size must be 0 or 1')
         super(Transform, self).__init__()
+
+    @property
+    def input_event_dim(self):
+        return self.event_dim
+
+    @property
+    def output_event_dim(self):
+        return self.event_dim
 
     @property
     def inv(self):
@@ -195,6 +204,14 @@ class _InverseTransform(Transform):
     def codomain(self):
         assert self._inv is not None
         return self._inv.domain
+
+    @property
+    def input_event_dim(self):
+        return self._inv.output_event_dim
+
+    @property
+    def output_event_dim(self):
+        return self._inv.input_event_dim
 
     @property
     def bijective(self):
@@ -545,39 +562,35 @@ class CorrCholeskyTransform(Transform):
 
         1. First we convert x into a lower triangular matrix in row order.
         2. For each row :math:`X_i` of the lower triangular part, we apply a *signed* version of
-        class :class:`StickBreakingTransform` to transform :math:`X_i` into a
-        unit Euclidean length vector using the following steps:
-            a. Scales into the interval :math:`(-1, 1)` domain: :math:`r_i = \tanh(X_i)`.
-            b. Transforms into an unsigned domain: :math:`z_i = r_i^2`.
-            c. Applies :math:`s_i = StickBreakingTransform(z_i)`.
-            d. Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
+           class :class:`StickBreakingTransform` to transform :math:`X_i` into a
+           unit Euclidean length vector using the following steps:
+            - Scales into the interval :math:`(-1, 1)` domain: :math:`r_i = \tanh(X_i)`.
+            - Transforms into an unsigned domain: :math:`z_i = r_i^2`.
+            - Applies :math:`s_i = StickBreakingTransform(z_i)`.
+            - Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
     """
     domain = constraints.real_vector
     codomain = constraints.corr_cholesky
+    input_event_dim = 1
+    output_event_dim = 2
     bijective = True
-    # Note that since we add a dim in _call this should actually be 2 for the inverse transform.
-    event_dim = 1
+
+    @property
+    def event_dim(self):
+        raise ValueError("Please use .input_event_dim or .output_event_dim instead")
 
     def _call(self, x):
         x = torch.tanh(x)
         eps = torch.finfo(x.dtype).eps
         x = x.clamp(min=-1 + eps, max=1 - eps)
-        n = (1 + torch.sqrt(1 + x.new_full((), 8 * x.shape[-1]))) / 2
-        if not torch._C._get_tracing_state() and (torch.round(n) - n > eps):
-            raise ValueError(f'The size of last dimension is {x.shape[-1]} which cannot be expressed as ' +
-                             '(D * (D-1)) / 2, i.e. the lower triangular part of a square D x D matrix.')
-        n = torch.round(n).long()
-        r = x.new_zeros(x.shape[:-1] + torch.Size((n, n)))
-        arange = torch.arange(n)
-        tril_mask = arange < arange.view(-1, 1)
-        r[..., tril_mask] = x
+        r = vec_to_tril_matrix(x, diag=-1)
         # apply stick-breaking on the squared values
         # Note that y = sign(r) * sqrt(z * z1m_cumprod)
         #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
         z = r ** 2
         z1m_cumprod_sqrt = (1 - z).cumprod(-1).sqrt()
         # Diagonal elements must be 1.
-        r.diagonal(dim1=-1).copy_(r.new_ones(r.shape[:-2] + (n,)))
+        r = r + torch.eye(r.shape[-1], dtype=r.dtype, device=r.device)
         y = r * pad(z1m_cumprod_sqrt[..., :-1], [1, 0], value=1)
         return y
 
@@ -586,11 +599,8 @@ class CorrCholeskyTransform(Transform):
         # See: https://mc-stan.org/docs/2_18/reference-manual/cholesky-factors-of-correlation-matrices-1.html
         y_cumsum = 1 - torch.cumsum(y * y, dim=-1)
         y_cumsum_shifted = pad(y_cumsum[..., :-1], [1, 0], value=1)
-        n = y.shape[-1]
-        arange = torch.arange(n)
-        tril_mask = arange < arange.view(-1, 1)
-        y_vec = y[..., tril_mask]
-        y_cumsum_vec = y_cumsum_shifted[..., tril_mask]
+        y_vec = tril_matrix_to_vec(y, diag=-1)
+        y_cumsum_vec = tril_matrix_to_vec(y_cumsum_shifted, diag=-1)
         t = y_vec / (y_cumsum_vec).sqrt()
         # inverse of tanh
         x = ((1 + t) / (1 - t)).log() / 2
@@ -605,10 +615,7 @@ class CorrCholeskyTransform(Transform):
         y1m_cumsum = 1 - (y * y).cumsum(dim=-1)
         # by taking diagonal=-2, we don't need to shift z_cumprod to the right
         # also works for 2 x 2 matrix
-        n = y.shape[-1]
-        arange = torch.arange(n)
-        tril_mask = arange < arange.view(-1, 1)
-        y1m_cumsum_tril = y1m_cumsum[..., tril_mask]
+        y1m_cumsum_tril = tril_matrix_to_vec(y1m_cumsum, diag=-2)
         stick_breaking_logdet = 0.5 * (y1m_cumsum_tril).log().sum(-1)
         tanh_logdet = -2 * (x + softplus(-2 * x) - math.log(2.)).sum(dim=-1)
         return stick_breaking_logdet + tanh_logdet

@@ -1,8 +1,12 @@
+from numbers import Number
+
 import pytest
 
 import torch
 from torch.autograd import grad
+from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Normal, TransformedDistribution, constraints
+from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
                                             CorrCholeskyTransform, ExpTransform,
                                             LowerCholeskyTransform, PowerTransform,
@@ -57,6 +61,27 @@ def get_transforms(cache_size):
     ]
     transforms += [t.inv for t in transforms]
     return transforms
+
+
+def reshape_transform(transform, shape):
+    # Needed to squash batch dims for testing jacobian
+    if isinstance(transform, AffineTransform):
+        if isinstance(transform.loc, Number):
+            return transform
+        try:
+            return AffineTransform(transform.loc.expand(shape), transform.scale.expand(shape), cache_size=transform._cache_size)
+        except RuntimeError:
+            return AffineTransform(transform.loc.reshape(shape), transform.scale.reshape(shape), cache_size=transform._cache_size)
+    if isinstance(transform, ComposeTransform):
+        reshaped_parts = []
+        for p in transform.parts:
+            reshaped_parts.append(reshape_transform(p, shape))
+        return ComposeTransform(reshaped_parts, cache_size=transform._cache_size)
+    if isinstance(transform.inv, AffineTransform):
+        return reshape_transform(transform.inv, shape).inv
+    if isinstance(transform.inv, ComposeTransform):
+        return reshape_transform(transform.inv, shape).inv
+    return transform
 
 
 # Generate pytest ids
@@ -209,25 +234,6 @@ def test_univariate_inverse_jacobian(transform):
     ])
 
 
-@pytest.mark.parametrize('transform', ALL_TRANSFORMS, ids=transform_id)
-def test_jacobian_shape(transform):
-    x = generate_data(transform)
-    try:
-        y = transform(x)
-        actual = transform.log_abs_det_jacobian(x, y)
-    except NotImplementedError:
-        pytest.skip('Not implemented.')
-    # This is to handle issue in CorrCholeskyTransform
-    # where the forward transform adds an additional dimension,
-    # and event_dim is defined w.r.t. the shape of the tensor passed
-    # to the forward transform.
-    if isinstance(transform, _InverseTransform):
-        target_shape = y.shape[:y.dim() - transform.event_dim]
-    else:
-        target_shape = x.shape[:x.dim() - transform.event_dim]
-    assert actual.shape == target_shape
-
-
 def test_compose_transform_shapes():
     transform0 = ExpTransform()
     transform1 = SoftmaxTransform()
@@ -286,7 +292,7 @@ def test_transformed_distribution_shapes(batch_shape, event_shape, dist):
         pytest.skip('Not implemented.')
 
 
-@pytest.mark.parametrize('transform', TRANSFORMS_CACHE_INACTIVE)
+@pytest.mark.parametrize('transform', TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
 def test_jit_fwd(transform):
     x = generate_data(transform).requires_grad_()
 
@@ -303,7 +309,7 @@ def test_jit_fwd(transform):
     assert torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True)
 
 
-@pytest.mark.parametrize('transform', TRANSFORMS_CACHE_INACTIVE)
+@pytest.mark.parametrize('transform', TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
 def test_jit_inv(transform):
     y = generate_data(transform.inv).requires_grad_()
 
@@ -320,7 +326,7 @@ def test_jit_inv(transform):
     assert torch.allclose(f(y), traced_f(y), atol=1e-5, equal_nan=True)
 
 
-@pytest.mark.parametrize('transform', TRANSFORMS_CACHE_INACTIVE)
+@pytest.mark.parametrize('transform', TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
 def test_jit_jacobian(transform):
     x = generate_data(transform).requires_grad_()
 
@@ -336,6 +342,58 @@ def test_jit_jacobian(transform):
     # check on different inputs
     x = generate_data(transform).requires_grad_()
     assert torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True)
+
+
+@pytest.mark.parametrize('transform', ALL_TRANSFORMS, ids=transform_id)
+def test_jacobian(transform):
+    x = generate_data(transform)
+    try:
+        y = transform(x)
+        actual = transform.log_abs_det_jacobian(x, y)
+    except NotImplementedError:
+        pytest.skip('Not implemented.')
+    # Test shape
+    target_shape = x.shape[:x.dim() - transform.input_event_dim]
+    assert actual.shape == target_shape
+
+    # Expand if required
+    transform = reshape_transform(transform, x.shape)
+    ndims = len(x.shape)
+    event_dim = ndims - transform.input_event_dim
+    x_ = x.view((-1,) + x.shape[event_dim:])
+    n = x_.shape[0]
+    # Reshape to squash batch dims to a single batch dim
+    transform = reshape_transform(transform, x_.shape)
+
+    # 1. Transforms with 0 off-diagonal elements
+    if transform.input_event_dim == 0:
+        jac = jacobian(transform, x_)
+        expected = jac.diagonal().abs().log().reshape(x.shape)
+    # 2. Transforms with non-0 off-diagonal elements
+    else:
+        if isinstance(transform, CorrCholeskyTransform):
+            jac = jacobian(lambda x: tril_matrix_to_vec(transform(x), diag=-1), x_)
+        elif isinstance(transform.inv, CorrCholeskyTransform):
+            jac = jacobian(lambda x: transform(vec_to_tril_matrix(x, diag=-1)),
+                           tril_matrix_to_vec(x_, diag=-1))
+        elif isinstance(transform, StickBreakingTransform):
+            jac = jacobian(lambda x: transform(x)[..., :-1], x_)
+        else:
+            jac = jacobian(transform, x_)
+
+        # Note that jacobian will have shape (batch_dims, y_event_dims, batch_dims, x_event_dims)
+        # However, batches are independent so this can be converted into a (batch_dims, event_dims, event_dims)
+        # after reshaping the event dims (see above) to give a batched square matrix whose determinant
+        # can be computed.
+        gather_idx_shape = list(jac.shape)
+        gather_idx_shape[-2] = 1
+        gather_idxs = torch.arange(n).reshape((n,) + (1,) * (len(jac.shape) - 1)).expand(gather_idx_shape)
+        jac = jac.gather(-2, gather_idxs).squeeze(-2)
+        out_ndims = jac.shape[-2]
+        jac = jac[..., :out_ndims]  # Remove extra zero-valued dims (for inverse stick-breaking).
+        expected = torch.slogdet(jac).logabsdet
+
+    assert torch.allclose(actual, expected, atol=1e-5)
 
 
 if __name__ == '__main__':
