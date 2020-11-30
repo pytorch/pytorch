@@ -111,18 +111,24 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
 }
 
-Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
+Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
+  TORCH_CHECK(result.scalar_type() == ScalarType::Long,
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", ScalarType::Long);
+
   // Matrices or batch of matrices are allowed
   TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
+
+  // matrix_rank assigns a scalar value for each matrix in the batch so
+  // result's shape is equal to self.shape[0:self.ndim-2]
+  // for single matrix result_shape = {}
+  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
+  at::native::resize_output(result, result_shape);
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
   if (self.numel() == 0) {
-    // matrix_rank assigns a scalar value for each matrix in the batch so
-    // result's shape is equal to self.shape[0:self.ndim-2]
-    // for single matrix result_shape = {}
-    auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-    return at::zeros(result_shape, self.options().dtype(ScalarType::Long));
+    result.fill_(0);
+    return result;
   }
 
   // We compute matrix rank as the number of singular or absolute eigen values above 'tol' threshold
@@ -138,23 +144,19 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
 
   if (tol.has_value()) {
     double tol_value = tol.value();
-    return (S > tol_value).sum(/*dim=*/-1);
+    at::sum_out(result, S > tol_value, /*dim=*/-1);
   } else {
     ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
     double tol_value = _get_epsilon(real_dtype) * std::max(self.size(-1), self.size(-2));
     Tensor max_S = S.amax(/*dim=*/-1);
-    return (S > max_S.mul_(tol_value).unsqueeze_(-1)).sum(/*dim=*/-1);
+    at::sum_out(result, S > max_S.mul_(tol_value).unsqueeze_(-1), /*dim=*/-1);
   }
+  return result;
 }
 
-// TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
-  TORCH_CHECK(result.scalar_type() == ScalarType::Long,
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", ScalarType::Long);
-
-  Tensor result_tmp = at::linalg_matrix_rank(self, tol, hermitian);
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
+Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
+  Tensor result = at::empty({0}, self.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_out(result, self, tol, hermitian);
   return result;
 }
 
