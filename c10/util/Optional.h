@@ -363,6 +363,31 @@ struct trivially_copyable_optimization_optional_base {
   constexpr trivially_copyable_optimization_optional_base() noexcept
   : init_(false), storage_(trivial_init) {}
 
+// CUDA 9.2 and below doesn't compile default move constructor correctly
+// see https://github.com/pytorch/csprng/issues/84
+//#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#else 
+  explicit constexpr trivially_copyable_optimization_optional_base(const trivially_copyable_optimization_optional_base<T>& v)
+    : init_(v.init_), storage_(trivial_init) {
+    if (init_) {
+      ::new (dataptr()) T(v.storage_.value_);
+    }
+  }
+
+  explicit constexpr trivially_copyable_optimization_optional_base(trivially_copyable_optimization_optional_base<T>&& v) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : init_(v.init_), storage_(trivial_init) {
+    if (init_) {
+      ::new (dataptr()) T(std::move(v.storage_.value_));
+    }
+  }
+
+  constexpr const T* dataptr() const {
+    return detail_::static_addressof(storage_.value_);
+  }
+#endif
+
   explicit constexpr trivially_copyable_optimization_optional_base(const T& v)
       : init_(true), storage_(v) {}
 
@@ -476,7 +501,20 @@ class optional : private OptionalBase<T> {
 
   optional(const optional& rhs) = default;
 
+// CUDA 9.2 and below doesn't compile default move constructor correctly
+// see https://github.com/pytorch/csprng/issues/84
+//#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
+#if (!defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   optional(optional&& rhs) = default;
+#else
+  optional(optional&& rhs) noexcept(
+      std::is_nothrow_move_constructible<T>::value) {
+    if (rhs.initialized()) {
+      ::new (static_cast<void*>(dataptr())) T(std::move(*rhs));
+      OptionalBase<T>::init_ = true;
+    }
+  }
+#endif
 
   // see https://github.com/akrzemi1/Optional/issues/16
   // and https://en.cppreference.com/w/cpp/utility/optional/optional,
