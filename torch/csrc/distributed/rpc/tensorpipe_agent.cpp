@@ -5,7 +5,6 @@
 #include <limits>
 
 #include <fmt/format.h>
-#include <tensorpipe/tensorpipe.h>
 
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -179,7 +178,7 @@ C10_REGISTER_CREATOR(
     mpt_uv,
     makeMultiplexedUvChannel);
 
-#ifdef USE_CUDA
+#if TENSORPIPE_USE_CUDA_IPC_CHANNEL
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
   auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
@@ -332,7 +331,7 @@ void TensorPipeAgent::startImpl() {
         priority, std::move(key), std::move(reg->channel));
   }
 
-#ifdef USE_CUDA
+#if TENSORPIPE_USE_CUDA_IPC_CHANNEL
 
   for (auto& key : TensorPipeCudaChannelRegistry()->Keys()) {
     std::unique_ptr<CudaChannelRegistration> reg =
