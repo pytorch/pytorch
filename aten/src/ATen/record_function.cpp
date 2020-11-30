@@ -472,11 +472,17 @@ void unsetRecordAllFunctions() {
 }
 
 bool shouldRunRecordFunction(bool& pre_sampled) {
+  auto* rf_tls_ptr = &rf_tls_;
+  if (!rf_tls_ptr->tls_record_function_enabled_) {
+    pre_sampled = false;
+    return false;
+  }
+
   if (global_record_all_functions_.load(std::memory_order_relaxed) > 0) {
     pre_sampled = false;
     return true;
   }
-  auto* rf_tls_ptr = &rf_tls_;
+
   pre_sampled = true;
 
   if (rf_tls_ptr->tries_left_ == 0) {
