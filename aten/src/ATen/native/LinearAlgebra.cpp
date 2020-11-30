@@ -121,9 +121,7 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
     // matrix_rank assigns a scalar value for each matrix in the batch so
     // result's shape is equal to self.shape[0:self.ndim-2]
     // for single matrix result_shape = {}
-    auto result_shape = self.sizes().vec();
-    result_shape.pop_back();
-    result_shape.pop_back();
+    auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
     return at::zeros(result_shape, self.options().dtype(ScalarType::Long));
   }
 
@@ -146,7 +144,7 @@ Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermiti
   } else {
     ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
     double tol_value = _get_epsilon(real_dtype) * std::max(self.size(-1), self.size(-2));
-    Tensor max_S = std::get<0>(S.max(/*dim=*/-1));
+    Tensor max_S = S.amax(/*dim=*/-1);
     return (S > max_S.mul_(tol_value).unsqueeze_(-1)).sum(/*dim=*/-1);
   }
 }
