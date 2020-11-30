@@ -1944,7 +1944,7 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
 
 // Tests the case with two loops fused into a common parent, which is not bound
 // to any block or thread dimension - however it's two inner loops are bound to
-// the first thread dimenions. This should work just like the MaskThreadDim test
+// the first thread dimensions. This should work just like the MaskThreadDim test
 // where the bigger loop is unmasked but the smaller is masked.
 TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   KernelScope kernel_scope;
