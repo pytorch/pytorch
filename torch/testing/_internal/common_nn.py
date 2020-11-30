@@ -643,7 +643,7 @@ def nllloss_no_reduce_test():
     return dict(
         fullname='NLLLoss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),  # type: ignore[arg-type]
+            lambda i: F.nll_loss(i, t.type_as(i).long(), reduction=kwargs['reduction'])),
         cpp_function_call='''F::nll_loss(
             i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(15, 10).log(),
@@ -655,11 +655,11 @@ def nllloss_no_reduce_test():
 
 def nllloss_no_reduce_ignore_index_test():
     t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
-    kwargs = {'ignore_index': 2, 'reduction': 'none'}
+    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),  # type: ignore[arg-type]
+            lambda i: F.nll_loss(i, t.type_as(i).long(), ignore_index=int(kwargs['ignore_index']), reduction=str(kwargs['reduction']))),
         cpp_function_call='''F::nll_loss(
             i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(2).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(15, 10).log(),
@@ -740,7 +740,7 @@ def nllloss2d_no_reduce_test():
     return dict(
         fullname='NLLLoss2d_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),  # type: ignore[arg-type]
+            lambda i: F.nll_loss(i, t.type_as(i).long(), reduction=kwargs['reduction'])),
         cpp_function_call='''F::nll_loss(
             i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
@@ -752,11 +752,11 @@ def nllloss2d_no_reduce_test():
 
 def nllloss2d_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
-    kwargs = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),  # type: ignore[arg-type]
+            lambda i: F.nll_loss(i, t.type_as(i).long(), ignore_index=int(kwargs['ignore_index']), reduction=str(kwargs['reduction']))),
         cpp_function_call='''F::nll_loss(
             i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(1).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
@@ -793,7 +793,7 @@ def nlllossNd_no_reduce_test():
     return dict(
         fullname='NLLLossNd_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),  # type: ignore[arg-type]
+            lambda i: F.nll_loss(i, t.type_as(i).long(), reduction=kwargs['reduction'])),
         cpp_function_call='''F::nll_loss(
             i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5, 2, 2).log(),
@@ -805,11 +805,11 @@ def nlllossNd_no_reduce_test():
 
 def nlllossNd_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    kwargs = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: Dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),  # type: ignore[arg-type]
+            lambda i: F.nll_loss(i, t.type_as(i).long(), ignore_index=int(kwargs['ignore_index']), reduction=str(kwargs['reduction']))),
         cpp_function_call='''F::nll_loss(
             i, t.to(i.options()).to(torch::kLong), F::NLLLossFuncOptions().ignore_index(1).reduction(torch::kNone))''',
         input_fn=lambda: torch.rand(2, 3, 5, 5, 2, 2).log(),
@@ -4634,7 +4634,7 @@ criterion_tests = [
 
 class NNTestCase(TestCase):
 
-    # _forward is defined in classes inheriting from TestCase
+    # _forward is defined in classes inheriting from NNTestCase
     @abstractmethod
     def _forward(self, *args, **kwargs):
         raise NotImplementedError
@@ -4747,7 +4747,7 @@ class NNTestCase(TestCase):
                 differences.append(a.add(n, alpha=-1).abs().max())
             # TODO: compare structure (ensure analytic jacobian has correct shape)
         if len(differences) > 0:
-            self.assertLessEqual(max(differences), PRECISION)
+            self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
 class TestBase(object):
