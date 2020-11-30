@@ -79,11 +79,12 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
-    'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
-    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
-    'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
-    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
+    'bmm', 'diagonal', 'diag', 'diagflat', 'alias', 'atan', 'log', 'log10', 'log1p',
+    'log2', 'reciprocal', 'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh',
+    'acosh', 'take', 'fill_', 'exp', 'nonzero', 'mean', 'inverse', 'solve',
+    'linalg_cholesky', 'addcmul', 'addcdiv', 'matrix_exp', 'linalg_eigh',
+    'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c', 'linalg_solve',
+    'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
     'l1_loss_backward'
 }
 

@@ -5022,10 +5022,10 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
-                'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
-                'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
-                'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile'] + separate_complex_tests
+                'bmm', 'mv', 'ger', 'diag', 'diagflat', 'diagonal', 'atan', 'angle', 'tanh',
+                'fill_', 'sub', 'exp', 'mean', 'inverse', 'triangular_solve', 'solve',
+                'addcmul', 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr', 'narrow',
+                'swapaxes', 'swapdims', 'tensor_split', 'tile'] + separate_complex_tests
 
 def add_test(
         name,
