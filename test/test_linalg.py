@@ -1055,6 +1055,12 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "linalg_cond does not support yet"):
                 torch.linalg.cond(a, p)
 
+        # check invalid norm type
+        a = torch.ones(3, 3, dtype=dtype, device=device)
+        for p in ['wrong_norm', 5]:
+            with self.assertRaisesRegex(RuntimeError, f"linalg_cond got an invalid norm type: {p}"):
+                torch.linalg.cond(a, p)
+
     # Test autograd and jit functionality for linalg functions.
     # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,
     #       the `test_cases` entries below should be moved there. These entries are in a similar format,
