@@ -2218,7 +2218,7 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, result)
 
         shapes = (3, 13)
-        batches = ((), (4, ), (3, 5, ))
+        batches = ((), (0, ), (4, ), (3, 5, ))
         for (shape0, shape1), batch in zip(itertools.product(shapes, reversed(shapes)), batches):
             run_test(shape0, shape1, batch)
 
