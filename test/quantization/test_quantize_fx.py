@@ -2043,10 +2043,12 @@ class TestQuantizeFxModels(QuantizationTestCase):
             'Reslut of original graph module and script module does not match')
 
         # set to train just before quantization
+        prepare_fx_fn = prepare_fx
         if mode != 'static':
             model.train()
+            prepare_fx_fn = prepare_qat_fx
 
-        prepared = prepare_fx(model, qconfig_dict)
+        prepared = prepare_fx_fn(model, qconfig_dict)
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
@@ -2127,7 +2129,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    @unittest.skip("skip for now since tbb failed")
     def test_torchvision(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
@@ -2192,7 +2193,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skip_if_not_multigpu
     @skipIfNoFBGEMM
-    @unittest.skip('TODO: not working yet due to https://github.com/pytorch/pytorch/issues/43513')
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
