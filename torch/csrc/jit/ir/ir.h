@@ -72,6 +72,9 @@ using namespace ::c10::attr;
 namespace aten {
 using namespace ::c10::aten;
 }
+namespace cuda {
+using namespace ::c10::cuda;
+}
 
 struct Function;
 struct MatchedSchema;

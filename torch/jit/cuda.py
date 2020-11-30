@@ -90,19 +90,24 @@ class StreamContext(object):
         if self.idx == -1:
             return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
+        # If the stream is not on the current device, then change the device
+        # and set the current stream on the device
         if self.idx != self.cur_stream.device_index():
             with device(self.cur_stream.device()):
-                self.dst_prev_stream = torch.cuda.current_stream(self.idx)
+                self.dst_prev_stream = torch.cuda.current_stream(self.cur_stream.device_index())
             torch.cuda._cuda_setDevice(self.cur_stream.device_index())
         torch.cuda._cuda_setStream(self.cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
+        # If the stream was not on the current device, restore the previous stream on
+        # the destination device and also reset the current device to the previous device.
+        # Set the current stream on the device to the src_prev_stream
         if self.src_prev_stream.device_index() != self.cur_stream.device_index():
             torch.cuda._cuda_setStream(self.dst_prev_stream)
             torch.cuda._cuda_setDevice(self.idx)
         torch.cuda._cuda_setStream(self.src_prev_stream)
 
-def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.cuda.jit.StreamContext':
+def stream(stream: 'torch.classes.cuda.Stream') -> 'torch.jit.cuda.StreamContext':
     r"""Wrapper around the Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected

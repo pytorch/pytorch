@@ -431,7 +431,11 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, torch::GradMode::is_enabled()); },
         aliasAnalysisConservative()),
     Operator(
-        "aten::current_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
+        "aten::set_grad_enabled(bool val) -> ()",
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
+        aliasAnalysisConservative()),
+    Operator(
+        "cuda::current_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
           auto idx = uint16_t(pop(stack).toInt());
           auto v = make_custom_class<torch::jit::CUDAStream>(idx);
@@ -441,7 +445,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::default_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
+        "cuda::default_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
           auto idx = uint16_t(pop(stack).toInt());
           auto v = make_custom_class<torch::jit::CUDAStream>(idx);
@@ -458,7 +462,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::_cuda_setDevice(int64_t val) -> ()",
+        "cuda::_cuda_setDevice(int64_t val) -> ()",
         [](Stack* stack) {
           int64_t idx = -1;
           pop(stack, idx);
@@ -466,7 +470,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::_cuda_getDeviceIndex(Device device) -> int",
+        "cuda::_cuda_getDeviceIndex(Device device) -> int",
         [](Stack* stack) {
           auto device = pop(stack);
           auto idx = device.toDevice().index();
@@ -474,11 +478,11 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::_cuda_getDeviceCount() -> int",
+        "cuda::_cuda_getDeviceCount() -> int",
         [](Stack* stack) { push(stack, at::cuda::device_count()); },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::_cuda_setStream(__torch__.torch.classes.cuda.Stream stream) -> ()",
+        "cuda::_cuda_setStream(__torch__.torch.classes.cuda.Stream stream) -> ()",
         [](Stack* stack) {
           auto v = pop(stack);
           auto s = v.toCustomClass<torch::jit::CUDAStream>();

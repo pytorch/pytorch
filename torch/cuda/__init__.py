@@ -18,7 +18,6 @@ from typing import List, Optional, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
 from .. import device as _device
-from .jit import stream
 import torch._C
 
 try:
@@ -308,7 +307,7 @@ def stream(stream):
     stream.
 
     Arguments:
-        stream(Stream): selected stream. This manager is a no-op if it's
+        stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
     .. note:: Streams are per-device. If the selected stream is not on the

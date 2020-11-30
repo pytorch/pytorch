@@ -1076,8 +1076,8 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-    case aten::_cuda_setStream:
-    case aten::_cuda_setDevice:
+    case cuda::_cuda_setStream:
+    case cuda::_cuda_setDevice:
     case aten::current_device:
     case prim::Enter:
     case prim::Exit:
@@ -1094,7 +1094,7 @@ bool Node::hasSideEffects() const {
     return false;
   }
 
-  if (kind_.is_prim() || kind_.is_aten()) {
+  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA,
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
