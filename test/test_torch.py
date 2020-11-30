@@ -2540,15 +2540,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # TODO: this is not a sustainable way of testing meta functions,
             # but I want some quick scaffolding first before a more
             # integrated testing strategy
-            x = torch.empty_meta(2 * 10 ** 10, 3, 2 * 10 ** 10)
+            # NB: Can't make the exponent too big, or it will overflow
+            # signed 64-bit integer
+            x = torch.empty_meta(2 * 10 ** 8, 3, 2 * 10 ** 8)
             z = torch.nn.functional.interpolate(x, scale_factor=2)
-            self.assertEqual(z.size(), (2 * 10 ** 10, 3, 4 * 10 ** 10))
+            self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
 
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
             z = torch.empty_meta(0)
-            torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 10,), 2, out=z)
-            self.assertEqual(z.size(), (2 * 10 ** 10, 3, 4 * 10 ** 10))
+            torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
+            self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
 
         def test_normal_shape(self):
             warned = False
