@@ -6367,6 +6367,46 @@ Example::
     tensor([  2.,   4.,   8.,  16.])
 """.format(**common_args))
 
+add_docstr(torch.float_power,
+           r"""
+float_power(input, exponent, *, out=None) -> Tensor
+
+Raises :attr:`input` to the power of :attr:`exponent`, elementwise, in double precision. 
+If neither input is complex returns a ``torch.float64`` tensor, 
+and if one or more inputs is complex returns a ``torch.complex128`` tensor.
+
+.. note:: 
+    This function always computes in double precision, unlike :func:`torch.pow`, 
+    which implements more typical :ref:`type promotion <type-promotion-doc>`.
+    This is useful when the computation needs to be performed in a wider or more precise dtype, 
+    or the results of the computation may contain fractional values not representable in the input dtypes, 
+    like when an integer base is raised to a negative integer exponent.
+
+Args:
+    input (Tensor or Number): the base value(s)
+    exponent (Tensor or Number): the exponent value(s)
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randint(10, (4,))
+    >>> a
+    tensor([6, 4, 7, 1])
+    >>> torch.float_power(a, 2)
+    tensor([36., 16., 49.,  1.], dtype=torch.float64)
+
+    >>> a = torch.arange(1, 5)
+    >>> a
+    tensor([ 1,  2,  3,  4])
+    >>> exp = torch.tensor([2, -3, 4, -5])
+    >>> exp
+    tensor([ 2, -3,  4, -5])
+    >>> torch.float_power(a, exp)
+    tensor([1.0000e+00, 1.2500e-01, 8.1000e+01, 9.7656e-04], dtype=torch.float64)
+""".format(**common_args))
+
 add_docstr(torch.prod,
            r"""
 prod(input, *, dtype=None) -> Tensor
