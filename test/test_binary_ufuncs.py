@@ -158,19 +158,21 @@ class TestBinaryUfuncs(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_comparison_ops_check_for_scalar_overflow(self, device):
+        s = 1 << 20
+        t = torch.tensor([1 << 5], dtype=torch.uint8)
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
-            torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)   # noqa: B015
-            (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) <= (1 << 20)  # noqa: B015
-            (1 << 20) <= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) > (1 << 20)   # noqa: B015
-            (1 << 20) > torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) >= (1 << 20)  # noqa: B015
-            (1 << 20) >= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) == (1 << 20)  # noqa: B015
-            (1 << 20) == torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) != (1 << 20)  # noqa: B015
-            (1 << 20) != torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
+            t < s   # noqa: B015
+            s < t   # noqa: B015
+            t <= s  # noqa: B015
+            s <= t  # noqa: B015
+            t > s   # noqa: B015
+            s > t   # noqa: B015
+            t >= s  # noqa: B015
+            s >= t  # noqa: B015
+            t == s  # noqa: B015
+            s == t  # noqa: B015
+            t != s  # noqa: B015
+            s != t  # noqa: B015
 
     # TODO: update to work on CUDA, too
     @onlyCPU
