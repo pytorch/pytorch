@@ -194,7 +194,7 @@ class JitCommonTestCase(TestCase):
                 nodes_in_diff_graph.append(node)
             else: 
                 nodes_not_in_diff_graph.append(node)
-            if any(g.findNode(none) is not None for g in fusion_subgraphs):
+            if any(g.findNode(node) is not None for g in fusion_subgraphs):
                 non_fusible_nodes_being_fused.append(node)
         found_all_nonfusible_nodes = len(nodes_in_diff_graph) == len(nonfusible_nodes)
 
