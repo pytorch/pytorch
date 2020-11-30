@@ -2312,6 +2312,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # We can't usefully test the output; just make sure this doesn't crash
             torch.__config__.show()
 
+        @unittest.skipIf(IS_SANDCASTLE, "CXX_FLAGS is only for OSS build.")
         def test_cxx_flags(self):
             torch.__config__._cxx_flags()
 
