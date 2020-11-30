@@ -186,6 +186,9 @@ std::string show_config() {
 }
 
 std::string get_cxx_flags() {
+  #if defined(FBCODE_CAFFE2)
+  TORCH_CHECK(false, "CXX_FLAGS is only for OSS build.");
+  #endif
   return caffe2::GetBuildOptions().at("CXX_FLAGS");
 }
 
