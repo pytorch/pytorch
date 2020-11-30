@@ -89,6 +89,8 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        if type(self) is Tensor:
+            return self._reduce_ex_internal(proto)
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
