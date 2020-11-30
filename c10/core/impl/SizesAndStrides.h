@@ -38,7 +38,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  SizesAndStrides(const SizesAndStrides& rhs) noexcept : size_(rhs.size_) {
+  SizesAndStrides(const SizesAndStrides& rhs) : size_(rhs.size_) {
     if (C10_LIKELY(rhs.isInline())) {
       copyDataInline(rhs);
     } else {
@@ -47,7 +47,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  SizesAndStrides& operator=(const SizesAndStrides& rhs) noexcept {
+  SizesAndStrides& operator=(const SizesAndStrides& rhs) {
     if (this == &rhs) {
       return *this;
     }
@@ -81,7 +81,7 @@ class C10_API SizesAndStrides {
   }
 
   // Move from rhs. rhs.size() == 0 afterwards.
-  SizesAndStrides& operator=(SizesAndStrides&& rhs) noexcept {
+  SizesAndStrides& operator=(SizesAndStrides&& rhs) {
     if (this == &rhs) {
       return *this;
     }
@@ -144,7 +144,7 @@ class C10_API SizesAndStrides {
     return IntArrayRef{sizes_data(), size()};
   }
 
-  void set_sizes(IntArrayRef newSizes) noexcept {
+  void set_sizes(IntArrayRef newSizes) {
     resize(newSizes.size());
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
@@ -231,7 +231,7 @@ class C10_API SizesAndStrides {
     return strides_data()[idx];
   }
 
-  void resize(size_t newSize) noexcept;
+  void resize(size_t newSize);
 
  private:
   bool isInline() const noexcept {

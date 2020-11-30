@@ -3,7 +3,7 @@
 namespace c10 {
 namespace impl {
 
-void SizesAndStrides::resize(const size_t newSize) noexcept {
+void SizesAndStrides::resize(const size_t newSize) {
   const auto oldSize = size();
   if (newSize == oldSize) {
     return;
