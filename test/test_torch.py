@@ -4413,7 +4413,13 @@ class TestTorchDeviceType(TestCase):
             else:
                 actual = torch.histogram(tensor, weights=weights, range=range, density=density)
                 expected = np.histogram(nparr, range=range, weights=npweights, density=density)
-            self.assertEqual(actual[0], torch.from_numpy(expected[0]), atol=atol, rtol=rtol)
+            if density:
+                if weights is None or not weights.is_floating_point():
+                    self.assertEqual(actual[0], torch.from_numpy(expected[0]).to(torch.get_default_dtype()), rtol=rtol, atol=atol)
+                else:
+                    self.assertEqual(actual[0], torch.from_numpy(expected[0]).to(weights.dtype), rtol=rtol, atol=atol)
+            else:
+                self.assertEqual(actual[0], torch.from_numpy(expected[0]), rtol=rtol, atol=atol)
             if torch.is_floating_point(tensor):
                 self.assertEqual(actual[1], torch.from_numpy(expected[1]))
             else:

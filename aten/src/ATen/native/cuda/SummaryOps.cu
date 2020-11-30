@@ -5,6 +5,8 @@
 #include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 
+#include <ATen/native/SummaryOpsUtils.h>
+
 #include <tuple>
 
 namespace at {
@@ -431,13 +433,6 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
 
   }
 
-  if (density) { // Compute the density
-    hist = hist.to(ScalarType::Double);
-    double bin_volume = (static_cast<double>(maxvalue) - static_cast<double>(minvalue)) /
-        static_cast<double>(nbins);
-    hist /= bin_volume * hist.sum();
-  }
-
   Tensor edges;
   if (c10::isFloatingType(self.scalar_type())) {
     edges = at::linspace(
@@ -451,6 +446,10 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
         static_cast<double> (maxvalue),
         nbins + 1,
         self.options().dtype(c10::get_default_dtype()));
+  }
+    
+  if (density) { // Compute the density
+    hist = at::native::_histogram_normalize_density(hist, edges, true);
   }
 
   return std::make_tuple(hist, edges);

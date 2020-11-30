@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/native/SummaryOpsUtils.h>
 
 #include <tuple>
 
@@ -126,6 +127,7 @@ std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
     // This does the actual work of computing the histogram.
     // This is single threaded, as other similar operators are single-threaded
     // in PyTorch today, and a multi-threaded one would be tricky to implement.
+    // TODO: Implement a multithreaded version.
     for (int64_t i = 0; i < self_size; i++) {
       if (self_p[i] >= min && self_p[i] <= max) {
         output_p[getbin(self_p[i], min, max, nbins)] += weights_p[i];
@@ -141,19 +143,16 @@ std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
     }
   }
 
-  if (density) { // Compute the density
-    hist = hist.to(ScalarType::Double);
-    double bin_volume = (static_cast<double>(max) - static_cast<double>(min)) /
-        static_cast<double>(nbins);
-    hist /= bin_volume * hist.sum();
-  }
-
   Tensor edges;
   if (c10::isFloatingType(self.scalar_type())) {
     edges = at::linspace(min, max, nbins + 1, self.options());
   } else {
     edges = at::linspace(
         min, max, nbins + 1, self.options().dtype(c10::get_default_dtype()));
+  }
+  
+  if (density) { // Compute the density
+    hist = _histogram_normalize_density(hist, edges, true);
   }
 
   return std::make_tuple(hist, edges);
@@ -299,17 +298,12 @@ std::tuple<Tensor, Tensor> histogram(
   // Remove the overflow bins
   hist = hist.slice(0, 1, -1);
 
-  if (density) { // Compute the density
-    if (!weights.defined() || isIntegralType(weights.scalar_type())) {
-      hist = hist.to(c10::get_default_dtype());
-      hist /= hist.sum() *
-          (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1))
-              .to(c10::get_default_dtype());
-    } else {
-      hist /= hist.sum() *
-          (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1))
-              .to(weights.scalar_type());
-    }
+  // Compute the density
+  if (density) { 
+    // Hack for float32 default dtype and integral weights because bincount promotes to double
+    if (weights.defined())
+      hist = hist.to(weights.scalar_type());
+    hist = _histogram_normalize_density(hist, bins, false);
   } else {
     // This is a hack for integral types of weights, as bincount casts them to double when computing the histogram
     // and disabling that would be a bc-breaking change
