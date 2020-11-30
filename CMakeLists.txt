@@ -244,17 +244,17 @@ if(WIN32)
     find_library(
       libuv_tmp_LIBRARY
       NAMES uv libuv
-      HINTS $ENV{CONDA_PREFIX}\\Library
+      HINTS $ENV{CONDA_PREFIX}\\Library $ENV{PREFIX}\\Library
       PATH_SUFFIXES lib
-      REQUIRED
       NO_DEFAULT_PATH)
-    if(NOT EXISTS ${libuv_tmp_LIBRARY})
+    if(NOT libuv_tmp_LIBRARY)
       set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
-        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF.")
+        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+        "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv.")
     else()
-      set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
+      set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
     endif()
   endif()
 endif()
