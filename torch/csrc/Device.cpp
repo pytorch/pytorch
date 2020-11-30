@@ -10,7 +10,6 @@
 #include <ATen/Device.h>
 #include <c10/util/Exception.h>
 
-#include <array>
 #include <cstring>
 #include <limits>
 #include <structmember.h>
@@ -166,18 +165,18 @@ typedef PyObject *(*getter)(PyObject *, void *);
 
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
 
-static const std::array<PyGetSetDef, 3> THPDevice_properties = {
+static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
-static const std::array<PyMethodDef, 2> THPDevice_methods = {
+static PyMethodDef THPDevice_methods[] = {
   {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */
 };
 
-const PyTypeObject THPDeviceType = {
+PyTypeObject THPDeviceType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.device",                        /* tp_name */
   sizeof(THPDevice),                     /* tp_basicsize */
