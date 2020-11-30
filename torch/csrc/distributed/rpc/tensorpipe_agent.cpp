@@ -179,7 +179,7 @@ C10_REGISTER_CREATOR(
     mpt_uv,
     makeMultiplexedUvChannel);
 
-#if USE_CUDA
+#ifdef USE_CUDA
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
   auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
@@ -311,8 +311,8 @@ void TensorPipeAgent::startImpl() {
   }
 
   auto registerChannel = [this](
-      const std::vector<std::string>& keys,
-      std::function<void(int64_t, const std::string&)> cb) {
+      std::vector<std::string>&& keys,
+      const std::function<void(int64_t, std::string&&)>& cb) {
     for (auto& key : keys) {
       int64_t priority = -1;
       if (opts_.channels.has_value()) {
@@ -325,13 +325,13 @@ void TensorPipeAgent::startImpl() {
         // a channel that comes before another receives a higher priority.
         priority = opts_.channels->size() - 1 - (iter - opts_.channels->begin());
       }
-      cb(priority, key);
+      cb(priority, std::move(key));
     }
   };
 
   registerChannel(
       TensorPipeCpuChannelRegistry()->Keys(),
-      [this](int64_t priority, const std::string& key) {
+      [this](int64_t priority, std::string&& key) {
         std::unique_ptr<CpuChannelRegistration> reg =
             TensorPipeCpuChannelRegistry()->Create(key);
         if (priority == -1) {
@@ -342,11 +342,11 @@ void TensorPipeAgent::startImpl() {
       }
   );
 
-#if USE_CUDA
+#ifdef USE_CUDA
 
   registerChannel(
       TensorPipeCudaChannelRegistry()->Keys(),
-      [this](int64_t priority, const std::string& key) {
+      [this](int64_t priority, std::string&& key) {
         std::unique_ptr<CudaChannelRegistration> reg =
             TensorPipeCudaChannelRegistry()->Create(key);
         if (priority == -1) {

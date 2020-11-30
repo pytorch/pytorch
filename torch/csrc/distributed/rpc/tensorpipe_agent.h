@@ -19,7 +19,7 @@ namespace tensorpipe {
 
 class CpuBuffer;
 
-#if USE_CUDA
+#ifdef USE_CUDA
 class CudaBuffer;
 #endif
 
@@ -41,7 +41,7 @@ template <typename TBuffer>
 class Context;
 using CpuContext = Context<CpuBuffer>;
 
-#if USE_CUDA
+#ifdef USE_CUDA
 using CudaContext = Context<CudaBuffer>;
 #endif
 
@@ -76,7 +76,7 @@ struct CpuChannelRegistration {
 C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
 struct CudaChannelRegistration {
-#if USE_CUDA
+#ifdef USE_CUDA
   std::shared_ptr<tensorpipe::channel::CudaContext> channel;
   int64_t priority;
 #endif
