@@ -138,7 +138,7 @@ cmake_dependent_option(
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
 option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks (need gbenchmark)" OFF)
-option(BUILD_MOBILE_BENCHMARKS "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
+option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
 option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in development)" OFF)
@@ -244,17 +244,17 @@ if(WIN32)
     find_library(
       libuv_tmp_LIBRARY
       NAMES uv libuv
-      HINTS $ENV{CONDA_PREFIX}\\Library
+      HINTS $ENV{CONDA_PREFIX}\\Library $ENV{PREFIX}\\Library
       PATH_SUFFIXES lib
-      REQUIRED
       NO_DEFAULT_PATH)
-    if(NOT EXISTS ${libuv_tmp_LIBRARY})
+    if(NOT libuv_tmp_LIBRARY)
       set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
-        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF.")
+        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+        "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv.")
     else()
-      set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
+      set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
     endif()
   endif()
 endif()
