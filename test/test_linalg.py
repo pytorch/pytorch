@@ -3481,7 +3481,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
-    @precisionOverride({torch.half: 0.005, torch.bfloat16: 0.05})
+    @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @skipCUDAIf(torch.version.cuda == "10.1", "flaky on CUDA 10.1")
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
@@ -3526,7 +3526,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                    float(torch.version.cuda) < 11)
             if bug:
                 return
-            for z1, z2, z3, z4 in product((True, False), repeat=4):
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
                 b1 = torch.randn(shape1, dtype=dtype, device=device)
@@ -3713,7 +3713,7 @@ else:
                 out_tensor = torch.zeros_like(ref)
                 yield b1, b2, ref, out_tensor
             # zero-sized tensors
-            for z1, z2, z3, z4 in product((True, False), repeat=4):
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
                 b1 = make_tensor(shape1, device, dtype, low=-1, high=1)
@@ -3779,7 +3779,7 @@ else:
                    float(torch.version.cuda) < 11)
             if bug:
                 return
-            for z1, z2, z3, z4 in product((True, False), repeat=4):
+            for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
                 b1 = make_tensor(shape1, device, dtype, low=-2, high=2)
