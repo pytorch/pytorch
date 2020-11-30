@@ -3,7 +3,6 @@ from numbers import Number
 import pytest
 
 import torch
-from torch.autograd import grad
 from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Normal, TransformedDistribution, constraints
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
