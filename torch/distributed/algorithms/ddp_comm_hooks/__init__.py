@@ -15,6 +15,17 @@ def _ddp_comm_hook_wrapper(comm_hook, model, state):
     model.register_comm_hook(state, comm_hook)
 
 
+def _powerSGD_comm_hook_wrapper(comm_hook, model, state, matrix_approximation_rank):
+    """
+    To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
+    which will be wrapped up with other state info.
+    """
+    powerSGD_state = powerSGD.PowerSGDState(
+        process_group=state, matrix_approximation_rank=matrix_approximation_rank
+    )
+    model.register_comm_hook(powerSGD_state, comm_hook)
+
+
 class DDPCommHookType(Enum):
     """
     DDPCommHookType enumerates the hooks of ``torch.distributed.algorithms.ddp_comm_hooks``
@@ -33,12 +44,17 @@ class DDPCommHookType(Enum):
     QUANTIZE_PER_CHANNEL = partial(
         _ddp_comm_hook_wrapper, comm_hook=quantization.quantization_perchannel_hook
     )
-    POWER_SGD = partial(_ddp_comm_hook_wrapper, comm_hook=powerSGD.powerSGD_hook)
+    POWER_SGD = partial(
+        _powerSGD_comm_hook_wrapper,
+        comm_hook=powerSGD.powerSGD_hook,
+        matrix_approximation_rank=1,
+    )
     # Rank-2 PowerSGD can give a higher accuracy than the default rank-1 version,
     # but it runs slower and consumes more memory.
     POWER_SGD_RANK2 = partial(
-        _ddp_comm_hook_wrapper,
-        comm_hook=partial(powerSGD.powerSGD_hook, matrix_approximation_rank=2),
+        _powerSGD_comm_hook_wrapper,
+        comm_hook=powerSGD.powerSGD_hook,
+        matrix_approximation_rank=2,
     )
 
 
