@@ -247,18 +247,18 @@ class C10_API SizesAndStrides {
     return size * 2 * sizeof(int64_t);
   }
 
-  void allocateOutOfLineStorage(size_t size) noexcept {
+  void allocateOutOfLineStorage(size_t size) {
     outOfLineStorage_ = static_cast<int64_t *>(malloc(storageBytes(size)));
     TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!");
   }
 
-  void resizeOutOfLineStorage(size_t newSize) noexcept {
+  void resizeOutOfLineStorage(size_t newSize) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     outOfLineStorage_ = static_cast<int64_t *>(realloc(outOfLineStorage_, storageBytes(newSize)));
     TORCH_CHECK(outOfLineStorage_, "Could not allocate memory for Tensor SizesAndStrides!");
   }
 
-  void freeOutOfLineStorage() noexcept {
+  void freeOutOfLineStorage() {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
     free(outOfLineStorage_);
   }
