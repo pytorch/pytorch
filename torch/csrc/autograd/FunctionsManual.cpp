@@ -1974,32 +1974,29 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   auto glambda = grads[0];
   auto gv = grads[1];
 
-  auto vt = v.transpose(-2, -1);
+  auto vh = v.conj().transpose(-2, -1);
 
   Tensor result;
   if (gv.defined()) {
       Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
       F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
       F.pow_(-1);
-      if (inplace_is_vmap_compatible(F, gv)) {
-        F.mul_(at::matmul(vt, gv));
-      } else {
-        F = F.mul(at::matmul(vt, gv));
-      }
-      result = at::matmul(v, at::matmul(F, vt));
+      result = at::matmul(v, at::matmul(F * at::matmul(vh, gv), vh));
   } else {
       result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (glambda.defined()) {
-      auto tmp = at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt);
-      if (inplace_is_vmap_compatible(result, tmp)) {
-        result.add_(tmp);
-      } else {
-        result = result + tmp;
-      }
+    glambda = glambda.to(self.dtype());
+    // computes v @ diag(glambda) @ vh
+    Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
+    if (inplace_is_vmap_compatible(result, glambda_term)) {
+      result.add_(glambda_term);
+    } else {
+      result = result + glambda_term;
+    }
   }
-  return result.add(result.transpose(-2, -1)).mul_(0.5);
+  return result.add(result.conj().transpose(-2, -1)).mul_(0.5);
 }
 
 Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
