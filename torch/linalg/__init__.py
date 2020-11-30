@@ -349,9 +349,11 @@ The condition number is defined as the matrix norm of
 
 This function supports ``float``, ``double``, and only on CPU, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
 
-.. note:: For `p = {None, 2, -2}` :attr:`input` can be non-square. For other norm types :attr:`input` must be
-          a square matrix or a batch of square matrices. If :attr:`input` does not satisfy this requirement
-          then a RuntimeError will be thrown.
+.. note:: For `p = {None, 2, -2}` there is a relation between singular value decomposition and matrix norm.
+          For this case :func:`torch.linalg.svd` is used for computing the condition number as the ratio of
+          the largest and smallest singular values. Since :func:`torch.linalg.svd` is used :attr:`input` can be non-square.
+          For other norm types :attr:`input` must be a square matrix or a batch of square matrices.
+          If :attr:`input` does not satisfy this requirement then a RuntimeError will be thrown.
 
 .. note:: If :attr:`input` is a non-invertible matrix then a tensor containing infinity will be returned.
           If :attr:`input` is a batch of matrices and one or more of them is not invertible
