@@ -1,6 +1,6 @@
 import torch
 import copy
-from torch.fx import GraphModule
+from torch.fx import GraphModule  # type: ignore
 
 class ObservedGraphModule(GraphModule):
 
