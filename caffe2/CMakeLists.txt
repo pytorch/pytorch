@@ -830,6 +830,11 @@ endif()
   target_include_directories(torch_cpu PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
+  if(USE_KINETO)
+    target_include_directories(torch_cpu PRIVATE
+      ${TORCH_ROOT}/third_party/kineto/libkineto/include
+      ${TORCH_ROOT}/third_party/kineto/libkineto/src)
+  endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
