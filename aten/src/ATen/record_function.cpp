@@ -10,13 +10,13 @@ namespace {
 
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
-  static std::atomic<uint64_t> unique_cb_id {0};
-  return CallbackHandle(++unique_cb_id);
+  static std::atomic<uint64_t> unique_cb_id {1};
+  return CallbackHandle(unique_cb_id++);
 }
 
 RecordFunctionHandle next_unique_record_function_handle() {
-  static std::atomic<uint64_t> unique_rf_id {0};
-  return RecordFunctionHandle(++unique_rf_id);
+  static std::atomic<uint64_t> unique_rf_id {1};
+  return RecordFunctionHandle(unique_rf_id++);
 }
 
 thread_local RecordFunctionTLS rf_tls_;
@@ -29,11 +29,9 @@ std::atomic<int64_t> defaultNodeId(-1);
 std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
-thread_local bool tls_record_function_enabled_ = true;
-
 // Low probability constant
 const double kLowProb = 0.001;
-thread_local int tries_left_ = 0;
+const double kEps = 10e-9;
 
 int sample_geometric() {
   static thread_local auto gen =
@@ -66,12 +64,20 @@ class CallbackManager {
     // sorted_tls_callbacks_ sorted
     auto handle = next_unique_callback_handle();
     rf_tls_.sorted_tls_callbacks_.emplace_back(std::move(cb), handle);
+    if (cb.samplingProb() > kLowProb) {
+      // pre-sampling of RecordFunction with prob. kLowProb cannot be used
+      at::setRecordAllFunctions();
+    }
     return handle;
   }
 
   CallbackHandle addGlobalCallback(RecordFunctionCallback cb) {
     auto handle = next_unique_callback_handle();
     sorted_global_callbacks_.emplace_back(std::move(cb), handle);
+    if (cb.samplingProb() > kLowProb) {
+      // pre-sampling of RecordFunction with prob. kLowProb cannot be used
+      at::setRecordAllFunctions();
+    }
     return handle;
   }
 
@@ -86,6 +92,10 @@ class CallbackManager {
           return el.second == handle;
         });
       if (it != cbs.end()) {
+        if (it->first.samplingProb() > kLowProb) {
+          // try to restore pre-sampling of RecordFunction
+          at::unsetRecordAllFunctions();
+        }
         // keeps it sorted
         cbs.erase(it);
         return true;
@@ -122,17 +132,18 @@ class CallbackManager {
   // to be executed and whether any of them need inputs
   inline void init(RecordFunction& rec_fn) {
     auto scope = rec_fn.scope();
+    bool pre_sampled = rec_fn.preSampled();
     bool found_active_cb = false;
     bool found_needs_inputs = false;
     bool found_needs_ids = false;
     auto init_handles = [
-        scope, &found_active_cb, &found_needs_inputs, &found_needs_ids](
+        scope, pre_sampled, &found_active_cb, &found_needs_inputs, &found_needs_ids](
           CallbackHandles& handles, RecordFunctionCallbacks& cbs, ObserverContextList& ctx_list) {
       handles.clear();
 
       size_t num_callbacks = 0;
       for (const auto& cb : cbs) {
-        if (cb.first.shouldRun(scope)) {
+        if (cb.first.shouldRun(scope, pre_sampled)) {
           handles.push_back(cb.second);
           ++num_callbacks;
           found_active_cb = true;
@@ -255,7 +266,16 @@ namespace {
   }
 } // namespace
 
-bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
+bool RecordFunctionCallback::shouldRun(RecordScope scope, bool pre_sampled) const {
+  if (pre_sampled) {
+    // RecordFunction is already pre-sampled with prob. kLowProb
+    if (sampling_prob_ > (kLowProb + kEps)) {
+      TORCH_CHECK(
+        false,
+        "Incorrect usage of a pre-sampled RecordFunction with a high-frequency "
+        " or non-sampled callback");
+    }
+  }
   // first check whether this callback is interested in
   // the given scope type
   if (!checkScope(scope)) {
@@ -265,23 +285,31 @@ bool RecordFunctionCallback::shouldRun(RecordScope scope) const {
   if (should_run_) {
     return should_run_(*this);
   }
-  // otherwise potentially do the uniform sampling
-  if (sampling_prob_ != 1.0) {
+
+  // otherwise potentially do the sampling
+  double sampling_prob = sampling_prob_;
+  if (pre_sampled) {
+    // adjust the sampling rate to account for kLowProb pre-sampling of
+    // the RecordFunction
+    sampling_prob /= kLowProb;
+  }
+  if (sampling_prob < (1.0 - kEps)) {
     // model the low probability events as events happening
     // with prob. kLowProb followed by another sampling with
-    // prob. (sampling_prob_ / kLowProb), then replace the coin
+    // prob. (sampling_prob / kLowProb), then replace the coin
     // flip for kLowProb with a thread local number of tries tries_left_
     // sampled from the geometric distribution
-    if (sampling_prob_ < kLowProb) {
-      if (tries_left_ == 0) {
-        tries_left_ = sample_geometric();
-        return (sample_zero_one() < sampling_prob_ / kLowProb);
+    auto* rf_tls_ptr = &rf_tls_;
+    if (sampling_prob < kLowProb) {
+      if (rf_tls_ptr->tries_left_ == 0) {
+        rf_tls_ptr->tries_left_ = sample_geometric();
+        return (sample_zero_one() < sampling_prob / kLowProb);
       } else {
-        --tries_left_;
+        --rf_tls_ptr->tries_left_;
         return false;
       }
     } else {
-      return (sample_zero_one() < sampling_prob_);
+      return (sample_zero_one() < sampling_prob);
     }
   }
   return true;
@@ -352,7 +380,8 @@ void enableRecordFunction(bool enable) {
   rf_tls_.tls_record_function_enabled_ = enable;
 }
 
-RecordFunction::RecordFunction(RecordScope scope) : scope_(scope) {
+RecordFunction::RecordFunction(RecordScope scope, bool pre_sampled)
+    : scope_(scope), pre_sampled_(pre_sampled) {
   auto* rf_tls_ptr = &rf_tls_;
   auto& m = manager();
   if (rf_tls_ptr->tls_record_function_enabled_ &&
@@ -428,54 +457,34 @@ void RecordFunction::end() {
   active_ = false;
 }
 
-//
+// RecordFunction pre-sampling
 namespace {
+// Whether to try to create RecordFunction on each call (>0) or
+// use pre-sampling (=0)
 std::atomic<int> global_record_all_functions_ {0};
-thread_local int tls_record_all_functions_ = 0;
-thread_local int dispatch_tries_left_ = 0;
-double extra_sampling_prob_ = kLowProb;
 }
-void setRecordAllFunctionsGlobal() {
+
+void setRecordAllFunctions() {
   ++global_record_all_functions_;
 }
-void unsetRecordAllFunctionsGlobal() {
+void unsetRecordAllFunctions() {
   TORCH_CHECK(--global_record_all_functions_ >= 0);
 }
-void setRecordAllFunctionsLocal() {
-  ++tls_record_all_functions_;
-}
-void unsetRecordAllFunctionsLocal() {
-  TORCH_CHECK(--tls_record_all_functions_ >= 0);
-}
 
-void setExtraSamplingProbability(double sampling_prob) {
-  TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob <= 1.0,
-          "Invalid sampling probability");
-  extra_sampling_prob_ = sampling_prob;
-}
-
-bool shouldRunRecordFunction() {
-  if (global_record_all_functions_ > 0) {
+bool shouldRunRecordFunction(bool& pre_sampled) {
+  if (global_record_all_functions_.load(std::memory_order_relaxed) > 0) {
+    pre_sampled = false;
     return true;
   }
-  if (tls_record_all_functions_ > 0) {
-    return true;
-  }
+  auto* rf_tls_ptr = &rf_tls_;
+  pre_sampled = true;
 
-  if (extra_sampling_prob_ <= kLowProb) {
-    if (dispatch_tries_left_ == 0) {
-      dispatch_tries_left_ = sample_geometric();
-      if (extra_sampling_prob_ < kLowProb) {
-        return (sample_zero_one() < extra_sampling_prob_ / kLowProb);
-      } else {
-        return true;
-      }
-    } else {
-      --dispatch_tries_left_;
-      return false;
-    }
+  if (rf_tls_ptr->tries_left_ == 0) {
+    rf_tls_ptr->tries_left_ = sample_geometric();
+    return true;
   } else {
-    return (sample_zero_one() < extra_sampling_prob_);
+    --rf_tls_ptr->tries_left_;
+    return false;
   }
 }
 
