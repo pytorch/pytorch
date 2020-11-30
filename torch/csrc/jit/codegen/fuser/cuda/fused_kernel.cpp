@@ -63,12 +63,7 @@ static void getMajorMinor(
       minor = 0;
   } else if (
       nvrtc_major == 11 && nvrtc_minor == 0 &&
-      prop->major >= 7) { // 11.0 supports 3.5-7.5
-    major = 7;
-    minor = 5;
-  } else if (
-      nvrtc_major == 11 && nvrtc_minor == 1 &&
-      prop->major >= 8) { // 11.0 supports 3.5-7.5
+      prop->major >= 8) { // 11.0 supports 3.5-8.0
     major = 8;
     minor = 0;
   }

@@ -260,26 +260,29 @@ NvrtcFunction nvrtcCompile(
   int minor = prop->minor;
   nvrtcProgram program;
 
-  if (nvrtc_major < 10 ||
-      (nvrtc_major == 10 &&
-       nvrtc_minor == 0)) { // clamp at sm_72 for CUDA < 10.1
-    if (major > 7 || (major == 7 && minor > 2)) {
-      major = 7;
-      minor = 2;
-    }
-  } else if (
-      nvrtc_major < 11 ||
-      (nvrtc_major == 11 &&
-       nvrtc_minor == 0)) { // clamp at sm_75 for CUDA < 11.1
-    if (major > 7 || (major == 7 && minor > 5)) {
-      major = 7;
-      minor = 5;
-    }
-  } else if (nvrtc_major == 11 && nvrtc_minor == 1) {
-    if (major > 8 || (major == 8 && minor > 0)) {
-      major = 8;
+  if (nvrtc_major <= 7 && prop->major > 5) { // 7 supports 2-5.x
+    major = 5;
+    minor = 0;
+  } else if (nvrtc_major <= 8 && prop->major > 6) { // 8 supports 2-6.x
+    major = 6;
+    minor = 0;
+  } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
+    major = 7;
+    if (prop->major == 7 && prop->minor <= 2)
+      minor = prop->minor;
+    else
       minor = 0;
-    }
+  } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
+    major = 7;
+    if (prop->major == 7 && prop->minor <= 5)
+      minor = prop->minor;
+    else
+      minor = 0;
+  } else if (
+      nvrtc_major == 11 && nvrtc_minor == 0 &&
+      prop->major >= 8) { // 11.0 supports 3.5-8.0
+    major = 8;
+    minor = 0;
   }
 
   {
