@@ -68,7 +68,6 @@ constexpr size_t kSmallBuffer = 2097152;    // "small" allocations are packed in
 constexpr size_t kLargeBuffer = 20971520;   // "large" allocations may be packed in 20 MiB blocks
 constexpr size_t kMinLargeAlloc = 10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152;     // round up large allocs to 2 MiB
-constexpr size_t kLargeSize = 209715200;    // largest "large" alloc, "oversize" is not splitable
 
 typedef std::bitset<static_cast<size_t>(StatType::NUM_TYPES)> StatTypes;
 
@@ -186,6 +185,43 @@ struct AllocParams {
 
 } // namespace
 
+
+class CachingAllocatorConfig {
+public:
+  size_t max_split_size;  // largest "large" alloc, "oversize" is not splitable
+
+  CachingAllocatorConfig()
+  : max_split_size(SIZE_MAX)
+  {
+    const char *val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+    if (val != NULL) {
+      std::string config(val);
+      size_t pos = 0;
+
+      while (pos < config.length()) {
+        size_t start = pos;
+        size_t end = config.find(',', start);
+        std::string line = config.substr(start, end - start);
+        size_t seperator = config.find(':', start);
+        if (seperator < end) {
+          std::string key = config.substr(start, seperator - start);
+          std::string value = config.substr(seperator+1, end - seperator - 1);
+          // Handle each config option
+          if (key.compare("max_split_size_mb") == 0) {
+              int val = stoi(value);
+              val = val < 20 ? 20 : val;
+              val = val > (size_t(SIZE_MAX) / (1024*1024)) ? (size_t(SIZE_MAX) / (1024*1024)) : val;
+              max_split_size = val * 1024 * 1024;
+          }
+        }
+        pos = end + ((end != std::string::npos) ? 1 : 0);
+      }
+    }
+  }
+};
+static const CachingAllocatorConfig s_config;
+
+
 class DeviceCachingAllocator {
 
  private:
@@ -212,7 +248,10 @@ class DeviceCachingAllocator {
 
   DeviceCachingAllocator() :
       large_blocks(BlockComparator),
-      small_blocks(BlockComparator) {}
+      small_blocks(BlockComparator)
+  {
+    stats.max_split_size = s_config.max_split_size;
+  }
 
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
@@ -277,7 +316,10 @@ class DeviceCachingAllocator {
           " already allocated; ",
           format_size(device_free), " free; ",
           format_size(stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current),
-          " reserved in total by PyTorch)");
+          " reserved in total by PyTorch)",
+          " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
+          " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
+          "");
       } else {
         C10_CUDA_CHECK(params.err);
       }
@@ -328,6 +370,8 @@ class DeviceCachingAllocator {
     update_stat_array(stats.allocated_bytes, block->size, params.stat_types);
     update_stat_array(stats.active, 1, params.stat_types);
     update_stat_array(stats.active_bytes, block->size, params.stat_types);
+    if (block->size >= s_config.max_split_size)
+      update_stat(stats.oversize_allocations, 1);
 
     return block;
   }
@@ -346,6 +390,8 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
     update_stat_array(stats.allocation, -1, {stat_types});
     update_stat_array(stats.allocated_bytes, -block->size, {stat_types});
+    if (block->size >= s_config.max_split_size)
+      update_stat(stats.oversize_allocations, -1);
 
     if (!block->stream_uses.empty()) {
       insert_events(block);
@@ -423,6 +469,8 @@ class DeviceCachingAllocator {
 
     stats.num_alloc_retries = 0;
     stats.num_ooms = 0;
+    reset_accumulated_stat(stats.oversize_allocations);
+    reset_accumulated_stat(stats.oversize_segments);
   }
 
   /** Resets the historical peak stats for the device **/
@@ -439,6 +487,8 @@ class DeviceCachingAllocator {
       reset_peak_stat(stats.active_bytes[statType]);
       reset_peak_stat(stats.inactive_split_bytes[statType]);
     }
+    reset_peak_stat(stats.oversize_allocations);
+    reset_peak_stat(stats.oversize_segments);
   }
 
   /** Dump a complete snapshot of the memory held by the allocator. Potentially VERY expensive. **/
@@ -596,7 +646,7 @@ class DeviceCachingAllocator {
     if (block->pool == &small_blocks) {
       return remaining >= kMinBlockSize;
     } else if (block->pool == &large_blocks) {
-      return (size < kLargeSize) && (remaining > kSmallSize);
+      return (size < s_config.max_split_size) && (remaining > kSmallSize);
     } else {
       AT_ERROR("should_split: invalid pool");
     }
@@ -618,10 +668,10 @@ class DeviceCachingAllocator {
     if (it == pool.end() || (*it)->stream != p.stream())
       return false;
     // Do not return an oversized block for a large request
-    if ((p.size() < kLargeSize) && ((*it)->size >= kLargeSize))
+    if ((p.size() < s_config.max_split_size) && ((*it)->size >= s_config.max_split_size))
       return false;
     // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= kLargeSize) && ((*it)->size >= p.size() + kLargeBuffer))
+    if ((p.size() >= s_config.max_split_size) && ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
     pool.erase(it);
@@ -655,6 +705,8 @@ class DeviceCachingAllocator {
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     update_stat_array(stats.segment, 1, p.stat_types);
     update_stat_array(stats.reserved_bytes, size, p.stat_types);
+    if (size >= s_config.max_split_size)
+      update_stat(stats.oversize_segments, 1);
 
     return (p.block != nullptr);
   }
@@ -664,7 +716,7 @@ class DeviceCachingAllocator {
   {
     BlockPool& pool = *p.pool;
     Block key = p.search_key;
-    key.size = (key.size < kLargeSize) ? kLargeSize : key.size;
+    key.size = (key.size < s_config.max_split_size) ? s_config.max_split_size : key.size;
     auto it = pool.lower_bound(&key);
     if (it == pool.end() || (*it)->stream != p.stream()) {
       // No single block is large enough; free multiple oversize blocks, starting with the largest
@@ -672,7 +724,7 @@ class DeviceCachingAllocator {
         return false;
       size_t totalReleased = 0;
       --it;  // Back up one item.  Now on the largest block for the correct stream
-      while ((totalReleased < key.size) && ((*it)->size >= kLargeSize)
+      while ((totalReleased < key.size) && ((*it)->size >= s_config.max_split_size)
               && ((*it)->stream == p.stream()) && (it != pool.begin())) {
           auto cur = it;
           totalReleased += (*it)->size;
@@ -709,6 +761,8 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
     update_stat_array(stats.segment, -1, stat_types);
     update_stat_array(stats.reserved_bytes, -block->size, stat_types);
+    if (block->size >= s_config.max_split_size)
+      update_stat(stats.oversize_segments, -1);
 
     block->pool->erase(block);
     delete block;
