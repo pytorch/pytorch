@@ -11,18 +11,15 @@
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-#include <tensorpipe/tensorpipe.h>
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
 namespace tensorpipe {
 
-#define TENSORPIPE_USE_CUDA_IPC_CHANNEL TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA)
-
 class CpuBuffer;
 
-#if TENSORPIPE_USE_CUDA_IPC_CHANNEL
+#if USE_CUDA
 class CudaBuffer;
 #endif
 
@@ -44,7 +41,7 @@ template <typename TBuffer>
 class Context;
 using CpuContext = Context<CpuBuffer>;
 
-#if TENSORPIPE_USE_CUDA_IPC_CHANNEL
+#if USE_CUDA
 using CudaContext = Context<CudaBuffer>;
 #endif
 
@@ -79,7 +76,7 @@ struct CpuChannelRegistration {
 C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 
 struct CudaChannelRegistration {
-#if TENSORPIPE_USE_CUDA_IPC_CHANNEL
+#if USE_CUDA
   std::shared_ptr<tensorpipe::channel::CudaContext> channel;
   int64_t priority;
 #endif
