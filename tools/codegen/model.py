@@ -527,7 +527,6 @@ class FunctionSchema:
         else:
             return SchemaKind.functional
 
-    # WARNING: This method is not currently tested in any meaningful way
     def signature(self) -> 'FunctionSchema':
         """
         Certain schemas are 'related', in that they are simply
@@ -543,9 +542,6 @@ class FunctionSchema:
         - Out arguments are stripped
         - Mutability annotations are stripped  (this is sound
           because you cannot overload on mutability annotation)
-
-        This function is based off of get_signature in
-        tools.autograd.load_derivatives
         """
 
         # dataclasses.replace could be used here, but it is less

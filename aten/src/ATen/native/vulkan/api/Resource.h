@@ -12,7 +12,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-
 struct Resource final {
   class Pool;
 
@@ -47,6 +46,7 @@ struct Resource final {
       typedef uint8_t Flags;
 
       enum Type : Flags {
+        None = 0u << 0u,
         Read = 1u << 0u,
         Write = 1u << 1u,
       };
@@ -334,17 +334,17 @@ class Resource::Memory::Scope final {
 
 template<typename, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
-  void* map(const Memory& memory);
+  void* map(const Memory& memory, Access::Flags);
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
+    reinterpret_cast<Pointer>(map(*this, Access::Read)),
     Scope(allocator, allocation, Access::Read),
   };
 }
 
 template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
-  void* map(const Memory& memory);
+  void* map(const Memory& memory, Access::Flags);
 
   static_assert(
       (kAccess == Access::Read) ||
@@ -353,7 +353,7 @@ inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
       "Invalid memory access!");
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this)),
+    reinterpret_cast<Pointer>(map(*this, kAccess)),
     Scope(allocator, allocation, kAccess),
   };
 }

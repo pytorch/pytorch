@@ -37,7 +37,7 @@ def basichandlers(key, data):
     if extension in "pyd pickle".split():
         return pickle.loads(data)
 
-    if extension in "pth".split():
+    if extension in "pt".split():
         import io
         import torch
         stream = io.BytesIO(data)
