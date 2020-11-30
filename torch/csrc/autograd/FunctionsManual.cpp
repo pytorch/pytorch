@@ -9,7 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
-#include <ATen/DimVector.h>
+#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 
@@ -1022,13 +1022,58 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+// See NOTE: [vmap-incompatible in-place operations] for what it means for an
+// in-place operation to be incompatible with vmap.
+//
+// If an in-place operation used in a backward formula is vmap-incompatible,
+// then as developers we have the following options:
+//
+// - If the in-place operation directly followed the creation of a tensor with
+//   a factory function like at::zeros(...), we should replace the factory with a
+//   corresponding grad.new_zeros(...) call. The grad.new_zeros(...) call
+//   propagates the batch dims to the resulting tensor.
+//   For example:
+//     Before: at::zeros(input.sizes(), grad.options()).copy_(grad)
+//     After:  grad.new_zeros(input.sizes()).copy_(grad)
+//
+// - If the in-place operation followed some sequence of operations, if the
+//   we want to be able to vmap over the backward formula as-is (this is
+//   usually the case for simple (<15loc) backward formulas), then use
+//   inplace_is_vmap_compatible to guard the operation. For example:
+//             c = a * b
+//     Before: c.mul_(grad)
+//     After:  c = inplace_is_vmap_compatible(c, grad) ? c.mul_(grad) : c * grad
+//
+// - If we don't want to vmap directly over the backward formula (e.g., if the
+//   backward formula is too complicated or has a lot of vmap-incompatible
+//   operations, then register the backward formula as an operator and eventually
+//   write a batching rule for it.
+static bool inplace_is_vmap_compatible(const Tensor& self, const Tensor& other) {
+  const auto* other_batched = at::maybeGetBatchedImpl(other);
+  if (!other_batched) {
+    return true;
+  }
+  const auto* self_batched = at::maybeGetBatchedImpl(self);
+  if (!self_batched) {
+    // self is not batched but other is batched
+    return false;
+  }
+  auto self_levels = at::createVmapLevelsBitset(self_batched->bdims());
+  auto other_levels = at::createVmapLevelsBitset(other_batched->bdims());
+  return self_levels == (self_levels | other_levels);
+}
+
 Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const c10::optional<Tensor>& weight, int64_t reduction) {
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  gI *= (grad * grad_output);
+  if (inplace_is_vmap_compatible(gI, grad)) {
+    gI *= (grad * grad_output);
+  } else {
+    gI = gI * (grad * grad_output);
+  }
 
   if (isDefined(weight)) {
     gI *= *weight;
@@ -1045,7 +1090,11 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  ggO *= grad;
+  if (inplace_is_vmap_compatible(ggO, grad)) {
+    ggO *= grad;
+  } else {
+    ggO = ggO * grad;
+  }
 
   if (isDefined(weight)) {
     ggO *= *weight;
@@ -1925,23 +1974,29 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   auto glambda = grads[0];
   auto gv = grads[1];
 
-  auto vt = v.transpose(-2, -1);
+  auto vh = v.conj().transpose(-2, -1);
 
   Tensor result;
   if (gv.defined()) {
       Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
       F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
       F.pow_(-1);
-      F.mul_(at::matmul(vt, gv));
-      result = at::matmul(v, at::matmul(F, vt));
+      result = at::matmul(v, at::matmul(F * at::matmul(vh, gv), vh));
   } else {
       result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (glambda.defined()) {
-      result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
+    glambda = glambda.to(self.dtype());
+    // computes v @ diag(glambda) @ vh
+    Tensor glambda_term = at::matmul(v * glambda.unsqueeze(-2), vh);
+    if (inplace_is_vmap_compatible(result, glambda_term)) {
+      result.add_(glambda_term);
+    } else {
+      result = result + glambda_term;
+    }
   }
-  return result.add(result.transpose(-2, -1)).mul_(0.5);
+  return result.add(result.conj().transpose(-2, -1)).mul_(0.5);
 }
 
 Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,

@@ -1684,7 +1684,7 @@ protected:
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_ = false;
     is_channels_last_3d_contiguous_ = false;
-    is_non_overlapping_and_dense_ = false;
+    is_non_overlapping_and_dense_ = true;
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;

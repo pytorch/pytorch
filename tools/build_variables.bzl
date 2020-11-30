@@ -74,7 +74,8 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
-    "torch/csrc/autograd/profiler.cpp",
+    "torch/csrc/autograd/profiler_legacy.cpp",
+    "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
@@ -111,7 +112,7 @@ core_trainer_sources = [
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
 
-core_sources_full = [
+core_sources_full_mobile = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -216,8 +217,6 @@ core_sources_full = [
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
-    "torch/csrc/jit/runtime/static/impl.cpp",
-    "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
     "torch/csrc/jit/serialization/import_source.cpp",
@@ -251,6 +250,11 @@ core_sources_full = [
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
+]
+
+core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/jit/runtime/static/impl.cpp",
+    "torch/csrc/jit/runtime/static/ops.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
@@ -550,6 +554,7 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/comm.cpp",
     "torch/lib/c10d/default_comm_hooks.cpp",
+    "torch/lib/c10d/frontend.cpp",
     "torch/lib/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
