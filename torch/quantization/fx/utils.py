@@ -99,7 +99,7 @@ def get_quantize_op_and_qparams(activation_post_process):
         scale = float(scale)
         zero_point = int(zero_point)
         qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_tensor
+        quantize_op = torch.quantize_per_tensor  # type: ignore
     return quantize_op, qparams
 
 def quantize_node(root_module, graph, node, activation_post_process):
