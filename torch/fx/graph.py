@@ -487,6 +487,30 @@ class Graph:
                     type_repr(sub_type)
             return typename
 
+        # Set to keep track of all processed nodes for the purpose of use
+        # tracking and deleting values.
+        seen_nodes : Set[Node] = set()
+
+        def delete_unused_values(node : Node):
+            """
+            Delete values after their last use. This ensures that values that are
+            not used in the remainder of the code are freed and the memory usage
+            of the code is optimal.
+            """
+            seen_nodes.add(node)
+
+            nodes_to_delete : set[Node] = set()
+
+            def find_nodes_to_delete(n : Node):
+                if set(n.users.keys()).issubset(seen_nodes):
+                    nodes_to_delete.add(n)
+
+            map_arg(node.args, find_nodes_to_delete)
+            map_arg(node.kwargs, find_nodes_to_delete)
+
+            for to_delete in nodes_to_delete:
+                body.append(f'del {to_delete.name}\n')
+
         for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
@@ -502,6 +526,7 @@ class Graph:
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})\n')
+                delete_unused_values(node)
                 continue
             elif node.op == 'call_function':
                 assert callable(node.target)
@@ -520,14 +545,17 @@ class Graph:
                     body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
                     continue
                 body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})\n')
+                delete_unused_values(node)
                 continue
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
+                delete_unused_values(node)
                 continue
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
+                delete_unused_values(node)
                 continue
             elif node.op == 'output':
                 if node.type is not None:
