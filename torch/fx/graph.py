@@ -487,22 +487,32 @@ class Graph:
                     type_repr(sub_type)
             return typename
 
-        # Set to keep track of all processed nodes for the purpose of use
-        # tracking and deleting values.
-        seen_nodes : Set[Node] = set()
 
-        def delete_unused_values(node : Node):
+        # Run through reverse nodes and record the first instance of a use
+        # of a given node. This represents the *last* use of the node in the
+        # execution order of the program, which we will use to free unused
+        # values
+        node_to_last_use : Dict[Node, Node] = {}
+
+        def register_last_uses(n : Node, user : Node):
+            if n not in node_to_last_use:
+                node_to_last_use[n] = user
+
+        for node in reversed(self.nodes):
+            map_arg(node.args, lambda n: register_last_uses(n, node))
+            map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+
+        def delete_unused_values(user : Node):
             """
             Delete values after their last use. This ensures that values that are
             not used in the remainder of the code are freed and the memory usage
             of the code is optimal.
             """
-            seen_nodes.add(node)
-
             nodes_to_delete : Set[Node] = set()
 
             def find_nodes_to_delete(n : Node):
-                if set(n.users.keys()).issubset(seen_nodes):
+                last_use : Optional[Node] = node_to_last_use.get(n)
+                if last_use and last_use == user:
                     nodes_to_delete.add(n)
 
             map_arg(node.args, find_nodes_to_delete)
