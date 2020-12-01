@@ -499,7 +499,7 @@ class Graph:
             """
             seen_nodes.add(node)
 
-            nodes_to_delete : set[Node] = set()
+            nodes_to_delete : Set[Node] = set()
 
             def find_nodes_to_delete(n : Node):
                 if set(n.users.keys()).issubset(seen_nodes):
