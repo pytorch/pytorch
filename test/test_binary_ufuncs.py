@@ -158,36 +158,64 @@ class TestBinaryUfuncs(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_comparison_ops_check_for_scalar_overflow(self, device):
+        s = 1 << 20
+        t = torch.tensor([1 << 5], dtype=torch.uint8)
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
-            torch.tensor([1 << 5], dtype=torch.uint8) < (1 << 20)   # noqa: B015
-            (1 << 20) < torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) <= (1 << 20)  # noqa: B015
-            (1 << 20) <= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) > (1 << 20)   # noqa: B015
-            (1 << 20) > torch.tensor([1 << 5], dtype=torch.uint8)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) >= (1 << 20)  # noqa: B015
-            (1 << 20) >= torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) == (1 << 20)  # noqa: B015
-            (1 << 20) == torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) != (1 << 20)  # noqa: B015
-            (1 << 20) != torch.tensor([1 << 5], dtype=torch.uint8)  # noqa: B015
+            self.assertTrue(t < s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s < t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t <= s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s <= t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t > s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s > t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t >= s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s >= t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t == s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s == t)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t != s)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(s != t)
 
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_comparison_ops_check_for_zerodim_tensor_overflow(self, device):
+        t1 = torch.tensor([1 << 5], dtype=torch.uint8)
+        t2 = torch.tensor([1 << 30], dtype=torch.int32)
+        ts1 = torch.tensor(1 << 20, dtype=torch.int32)
+        ts2 = torch.tensor(1 << 40, dtype=torch.int64)
         with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
-            torch.tensor([1 << 5], dtype=torch.uint8) < torch.tensor(1 << 20, dtype=torch.int32)    # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) < torch.tensor([1 << 30], dtype=torch.int32)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) <= torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) <= torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) > torch.tensor(1 << 20, dtype=torch.int32)    # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) > torch.tensor([1 << 30], dtype=torch.int32)   # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) >= torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) >= torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) == torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) == torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
-            torch.tensor([1 << 5], dtype=torch.uint8) != torch.tensor(1 << 20, dtype=torch.int32)   # noqa: B015
-            torch.tensor(1 << 40, dtype=torch.int64) != torch.tensor([1 << 30], dtype=torch.int32)  # noqa: B015
+            self.assertTrue(t1 < ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 < t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 <= ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 <= t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 > ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 > t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 >= ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 >= t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 == ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 == t2)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(t1 != ts1)
+        with self.assertRaisesRegex(RuntimeError, 'value cannot be converted to type'):
+            self.assertTrue(ts2 != t2)
 
     # TODO: update to work on CUDA, too
     @onlyCPU
