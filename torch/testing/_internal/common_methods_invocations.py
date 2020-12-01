@@ -44,12 +44,14 @@ class SkipInfo(object):
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    __slots__ = ['input', 'args', 'kwargs']
+    # output_process_fn_grad is a function that modifies the output of op compatible with input
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None):
+    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
         self.input = input
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
+        self.output_process_fn_grad = output_process_fn_grad
 
 
 # Classes and methods for the operator database
@@ -89,7 +91,10 @@ class OpInfo(object):
         self.op = op if op else getattr(torch, self.name)
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
-        self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+        try:
+            self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+        except AttributeError:
+            self.inplace_variant = None
 
         self.test_inplace_grad = test_inplace_grad
         self.supports_tensor_out = supports_tensor_out
@@ -219,7 +224,82 @@ class UnaryUfuncInfo(OpInfo):
                                         low=low, high=high,
                                         requires_grad=requires_grad)),)
 
+class SvdInfo(OpInfo):
+    """Operator information for 'torch.svd'
+    """
 
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        test_cases1 = ( # some=True (default)
+            # loss functions for complex-valued svd have to be "gauge invariant",
+            # i.e. loss functions shouldn't change when sigh of the singular vectors change.
+            # the simplest choice to satisfy this requirement is to apply 'abs'.
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+             lambda usv: usv[1]), # 'check_grad_s'
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+             lambda usv: abs(usv[0])), # 'check_grad_u'
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+             lambda usv: abs(usv[2])), # 'check_grad_v'
+            # TODO: replace lambda usv: usv[0][0, 0] * usv[2][0, 0] with lambda usv: usv[0][0, 0] * usv[2][0, 0].conj()
+            # once https://github.com/pytorch/pytorch/issues/45821 is resolved
+            # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
+            # and when the loss function depends both on 'u' and 'v'
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
+             lambda usv: usv[0][0, 0] * usv[2][0, 0]), # 'check_grad_uv'
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))), # 'wide'
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'tall'
+            (random_fullrank_matrix_distinct_singular_value(M, dtype=dtype).to(device),
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'large'
+            (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'batched'
+            (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :(S - 2), :],
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'wide_batched'
+            (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'tall_batched'
+        )
+        test_cases2 = ( # some=False
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][:, :(S - 2)]))), # 'wide_all'
+            (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
+             lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))), # 'tall_all'
+            (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :(S - 2), :],
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))), # 'wide_all_batched'
+            (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
+             lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))), # 'tall_all_batched'
+        )
+
+        out = []
+        for a, out_fn in test_cases1:
+            a.requires_grad = requires_grad
+            out.append(SampleInput(a, output_process_fn_grad=out_fn))
+
+        for a, out_fn in test_cases2:
+            a.requires_grad = requires_grad
+            kwargs = {'some': False}
+            out.append(SampleInput(a, kwargs=kwargs, output_process_fn_grad=out_fn))
+
+        return out
+
+class PinverseInfo(OpInfo):
+    """Operator information for 'torch.pinverse'
+    """
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        test_cases = (
+            random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device), # pinverse
+            random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device), # pinverse 'batched'
+        )
+
+        out = []
+        for a in test_cases:
+            a.requires_grad = requires_grad
+            out.append(SampleInput(a))
+        return out
 
 # Operator database (sorted alphabetically)
 op_db = [
@@ -490,6 +570,16 @@ op_db = [
                                 dtypes=[torch.cdouble]),),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
+	    SvdInfo('svd',
+                dtypes=floating_and_complex_types(),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+	    PinverseInfo('pinverse',
+                dtypes=floating_and_complex_types(),
+                test_inplace_grad=False,
+                supports_tensor_out=False,
+                decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
 ]
 
 if TEST_SCIPY:
