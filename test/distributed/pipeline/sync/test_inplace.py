@@ -8,7 +8,7 @@ import pytest
 import torch
 from torch import nn
 
-from torch.distributed._pipeline.sync import Pipe
+from torch.distributed.pipeline.sync import Pipe
 
 
 def test_inplace_on_requires_grad(setup_rpc):

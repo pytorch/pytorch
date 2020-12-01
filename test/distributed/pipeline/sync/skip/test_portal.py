@@ -7,9 +7,9 @@
 import pytest
 import torch
 
-from torch.distributed._pipeline.sync.dependency import fork, join
-from torch.distributed._pipeline.sync.skip.portal import Portal
-from torch.distributed._pipeline.sync.stream import default_stream
+from torch.distributed.pipeline.sync.dependency import fork, join
+from torch.distributed.pipeline.sync._skip.portal import Portal
+from torch.distributed.pipeline.sync.stream import default_stream
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")

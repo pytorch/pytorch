@@ -9,7 +9,7 @@ import weakref
 import pytest
 import torch
 
-from torch.distributed._pipeline.sync.dependency import Fork, Join, fork, join
+from torch.distributed.pipeline.sync.dependency import Fork, Join, fork, join
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")

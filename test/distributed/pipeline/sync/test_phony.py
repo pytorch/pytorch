@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 import torch
 
-from torch.distributed._pipeline.sync.phony import get_phony
+from torch.distributed.pipeline.sync.phony import get_phony
 
 
 def test_phony_size():

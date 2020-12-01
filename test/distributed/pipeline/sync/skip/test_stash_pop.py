@@ -8,8 +8,8 @@ import pytest
 import torch
 from torch import nn
 
-from torch.distributed._pipeline.sync.skip import pop, skippable, stash
-from torch.distributed._pipeline.sync.skip.tracker import SkipTracker, use_skip_tracker
+from torch.distributed.pipeline.sync._skip import pop, skippable, stash
+from torch.distributed.pipeline.sync._skip.tracker import SkipTracker, use_skip_tracker
 
 
 @pytest.fixture(autouse=True)

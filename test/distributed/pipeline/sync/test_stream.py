@@ -7,7 +7,7 @@
 import pytest
 import torch
 
-from torch.distributed._pipeline.sync.stream import (
+from torch.distributed.pipeline.sync.stream import (
     CPUStream,
     current_stream,
     default_stream,

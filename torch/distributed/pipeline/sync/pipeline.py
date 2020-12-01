@@ -17,8 +17,8 @@ from .checkpoint import Checkpointing
 from .copy import Copy, Wait
 from .dependency import fork, join
 from .microbatch import Batch
-from .skip.layout import SkipLayout
-from .skip.tracker import SkipTrackerThroughPotals, use_skip_tracker
+from ._skip.layout import SkipLayout
+from ._skip.tracker import SkipTrackerThroughPotals, use_skip_tracker
 from .stream import AbstractStream, current_stream, use_device
 from .worker import Task, create_workers, join_workers
 
@@ -40,24 +40,24 @@ else:
     OutQueue = Queue
 
 
-def depend(fork_from: Batch, join_to: Batch) -> None:
+def _depend(fork_from: Batch, join_to: Batch) -> None:
     fork_from[0], phony = fork(fork_from[0])
     join_to[0] = join(join_to[0], phony)
 
 
-def copy(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
+def _copy(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
     batch[:] = Copy.apply(prev_stream, next_stream, *batch)
     # Gradients are only supported for float Tensors.
     batch[:] = tuple([x if x.is_floating_point() else x.detach() for x in batch])
 
 
-def wait(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
+def _wait(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
     batch[:] = Wait.apply(prev_stream, next_stream, *batch)
     # Gradients are only supported for float Tensors.
     batch[:] = tuple([x if x.is_floating_point() else x.detach() for x in batch])
 
 
-def clock_cycles(m: int, n: int) -> Iterable[List[Tuple[int, int]]]:
+def _clock_cycles(m: int, n: int) -> Iterable[List[Tuple[int, int]]]:
     """Generates schedules for each clock cycle."""
     # m: number of micro-batches
     # n: number of partitions
@@ -112,7 +112,7 @@ class Pipeline:
 
         skip_trackers = [SkipTrackerThroughPotals(skip_layout) for _ in batches]
 
-        for schedule in clock_cycles(m, n):
+        for schedule in _clock_cycles(m, n):
             self.fence(batches, schedule, skip_trackers)
             self.compute(batches, schedule, skip_trackers)
 
@@ -129,7 +129,7 @@ class Pipeline:
             # Ensure that batches[i-1] is executed after batches[i] in
             # backpropagation by an explicit dependency.
             if i != 0 and j != 0:
-                depend(batches[i - 1], batches[i])
+                _depend(batches[i - 1], batches[i])
 
             next_stream = copy_streams[j][i]
 
@@ -139,7 +139,7 @@ class Pipeline:
 
             if j != 0:
                 prev_stream = copy_streams[j - 1][i]
-                copy(batches[i], prev_stream, next_stream)
+                _copy(batches[i], prev_stream, next_stream)
 
     def compute(
         self, batches: List[Batch], schedule: List[Tuple[int, int]], skip_trackers: List[SkipTrackerThroughPotals],
@@ -189,7 +189,7 @@ class Pipeline:
 
             # Synchronize with the copied input. ([1] in the diagram)
             if j != 0:
-                wait(batch, copy_streams[j][i], streams[j])
+                _wait(batch, copy_streams[j][i], streams[j])
 
             # Determine whether checkpointing or not.
             checkpoint = i < checkpoint_stop
@@ -242,7 +242,7 @@ class Pipeline:
             # The copy stream synchronizes to copy the output. ([3] in the
             # diagram)
             if j != n - 1:
-                wait(batch, streams[j], copy_streams[j][i])
+                _wait(batch, streams[j], copy_streams[j][i])
 
             # Finalize tasks. If checkpointing is enabled, here the
             # recomputation is scheduled at backpropagation. ([4] in the

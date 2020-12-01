@@ -8,7 +8,7 @@ import copy
 
 from torch import nn
 
-from torch.distributed._pipeline.sync.skip import Namespace, skippable, stash
+from torch.distributed.pipeline.sync._skip import Namespace, skippable, stash
 
 
 def test_namespace_difference():

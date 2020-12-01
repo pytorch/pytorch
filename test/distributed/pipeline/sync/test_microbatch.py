@@ -8,7 +8,7 @@ import pytest
 import torch
 import torch.cuda
 
-from torch.distributed._pipeline.sync.microbatch import Batch, check, gather, scatter
+from torch.distributed.pipeline.sync.microbatch import Batch, check, gather, scatter
 
 
 def test_batch_atomic():

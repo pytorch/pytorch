@@ -8,9 +8,9 @@ import pytest
 import torch
 from torch import nn
 
-from torch.distributed._pipeline.sync import Pipe, is_checkpointing, is_recomputing
-from torch.distributed._pipeline.sync.skip import pop, skippable, stash
-from torch.distributed._pipeline.sync.skip.tracker import current_skip_tracker
+from torch.distributed.pipeline.sync import Pipe, is_checkpointing, is_recomputing
+from torch.distributed.pipeline.sync._skip import pop, skippable, stash
+from torch.distributed.pipeline.sync._skip.tracker import current_skip_tracker
 
 
 @skippable(stash=["skip"])
@@ -110,7 +110,7 @@ def test_no_portal_without_pipe(train, monkeypatch, setup_rpc):
     def deny(*args, **kwargs):
         raise AssertionError("tried to create Portal without Pipe")
 
-    monkeypatch.setattr("torch.distributed._pipeline.sync.skip.portal.Portal.__init__", deny)
+    monkeypatch.setattr("torch.distributed.pipeline.sync._skip.portal.Portal.__init__", deny)
 
     model = nn.Sequential(Stash(), Pop())
 

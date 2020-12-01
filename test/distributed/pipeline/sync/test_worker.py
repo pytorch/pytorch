@@ -10,9 +10,9 @@ import time
 import pytest
 import torch
 
-from torch.distributed._pipeline.sync.microbatch import Batch
-from torch.distributed._pipeline.sync.stream import CPUStream
-from torch.distributed._pipeline.sync.worker import Task, spawn_workers
+from torch.distributed.pipeline.sync.microbatch import Batch
+from torch.distributed.pipeline.sync.stream import CPUStream
+from torch.distributed.pipeline.sync.worker import Task, spawn_workers
 from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 

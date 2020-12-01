@@ -7,7 +7,7 @@
 import pytest
 from torch import nn
 
-from torch.distributed._pipeline.sync.skip import Namespace, skippable, verify_skippables
+from torch.distributed.pipeline.sync._skip import Namespace, skippable, verify_skippables
 
 
 def test_matching():

@@ -8,9 +8,9 @@ import pytest
 import torch
 from torch import nn
 
-from torch.distributed._pipeline.sync import Pipe
-from torch.distributed._pipeline.sync.skip import pop, skippable, stash
-from torch.distributed._pipeline.sync.skip.portal import PortalBlue, PortalCopy, PortalOrange
+from torch.distributed.pipeline.sync import Pipe
+from torch.distributed.pipeline.sync._skip import pop, skippable, stash
+from torch.distributed.pipeline.sync._skip.portal import PortalBlue, PortalCopy, PortalOrange
 from torch.testing._internal.distributed.pipeline.utils import convert_to_balance
 
 

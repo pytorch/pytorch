@@ -6,8 +6,8 @@
 # LICENSE file in the root directory of this source tree.
 from torch import nn
 
-from torch.distributed._pipeline.sync.skip import Namespace, pop, skippable, stash
-from torch.distributed._pipeline.sync.skip.layout import inspect_skip_layout
+from torch.distributed.pipeline.sync._skip import Namespace, pop, skippable, stash
+from torch.distributed.pipeline.sync._skip.layout import inspect_skip_layout
 
 
 class Pass(nn.Module):
