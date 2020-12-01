@@ -15,13 +15,21 @@ namespace at {
 namespace native {
 
 void sigmoid_backward_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_backward_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sigmoid_backward_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a * (scalar_t(1.) - b) * b;
+  if(isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cuda", [&]() {
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return a * std::conj((scalar_t{1.} - b) * b);
       });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_backward_cuda", [&]() {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "sigmoid_backward_cuda", [&] {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return a * (scalar_t(1.) - b) * b;
+        });
+      });
+    });
+  }
 }
 
 void logit_backward_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
