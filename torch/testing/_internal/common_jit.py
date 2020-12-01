@@ -143,18 +143,18 @@ class JitCommonTestCase(TestCase):
             torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
-    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):	
-        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')	
-        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]	
+    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
+        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
+        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
 
-        # For any non-fusible node, it must show up in one of the DifferentiableGraph.	
+        # For any non-fusible nde, it must show up in one of the DifferentiableGraph.
         found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0) \
-            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])	
+            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
 
-        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.	
-        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))	
-        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]	
+        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
+        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
+        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
         found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0) \
-            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])	
+            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
 
-        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)    
+        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)
