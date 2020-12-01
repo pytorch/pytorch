@@ -65,6 +65,12 @@ Convolution Layers
     nn.ConvTranspose1d
     nn.ConvTranspose2d
     nn.ConvTranspose3d
+    nn.LazyConv1d
+    nn.LazyConv2d
+    nn.LazyConv3d
+    nn.LazyConvTranspose1d
+    nn.LazyConvTranspose2d
+    nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
 
