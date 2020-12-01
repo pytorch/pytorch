@@ -27,15 +27,13 @@ void setupBenchmarkCallbacks() {
   at::clearCallbacks();
   // non-sampled callback
   at::addGlobalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) { return nullptr; },
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext>{ return nullptr; },
       [](const at::RecordFunction&, at::ObserverContext*) {})
     .needsInputs(true));
 
   // sampled
   for (auto idx = 0; idx < kNumSampledCb; ++idx) {
-    at::addGlobalCallback(at::RecordFunctionCallback(
-        [](const at::RecordFunction& fn) { return nullptr; },
-        [](const at::RecordFunction&, at::ObserverContext*) {})
+    at::addGlobalCallback(at::RecordFunctionCallback(nullptr)
       .needsInputs(true)
       .samplingProb(kSampingProb)
     );
@@ -85,6 +83,13 @@ void runBenchmark() {
               << " us." << std::endl;
 }
 
+static int cb_count = 0;
+
+static std::unique_ptr<at::ObserverContext> countingCallback(const at::RecordFunction&) {
+  ++cb_count;
+  return nullptr;
+}
+
 int main(int argc, char** argv) {
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
     std::cout << "Failed to parse command line flags" << std::endl;
@@ -103,13 +108,8 @@ int main(int argc, char** argv) {
   runBenchmark();
 
   std::cout << "Running sampled observer benchmark" << std::endl;
-  int cb_count = 0;
-  at::addGlobalCallback(at::RecordFunctionCallback(
-      [&](const at::RecordFunction& fn) {
-        ++cb_count;
-        return nullptr;
-      },
-      [](const at::RecordFunction&, at::ObserverContext*) {})
+
+  at::addGlobalCallback(at::RecordFunctionCallback(countingCallback)
     .needsInputs(true)
     .samplingProb(kLowSamplingProb)
   );
