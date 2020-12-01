@@ -177,6 +177,12 @@ allow_list = [
     ("aten::_foreach_floor_", datetime.date(2020, 11, 15)),
     ("aten::_foreach_log1p", datetime.date(2020, 11, 15)),
     ("aten::_foreach_neg", datetime.date(2020, 11, 15)),
+    ("__caffe2::RoIAlign", datetime.date(2020, 11, 30)),
+    ("__caffe2::HeatmapMaxKeypoint", datetime.date(2020, 11, 30)),
+    ("__caffe2::BoxWithNMSLimit", datetime.date(2020, 11, 30)),
+    ("__caffe2::BBoxTransform", datetime.date(2020, 11, 30)),
+    ("__caffe2::GenerateProposals", datetime.date(2020, 11, 30)),
+    ("__caffe2::RoIAlignRotated", datetime.date(2020, 11, 30)),
 ]
 
 def allow_listed(schema, allow_list):

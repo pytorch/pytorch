@@ -1224,6 +1224,10 @@ struct to_ir {
         if (expr_out->node()->kind() == aten::is_scripting) {
           static_if = true;
         }
+        // MetaCompile on boolean literals and constants
+        if (auto maybe_ivalue = toIValue(expr_out)) {
+          static_if = maybe_ivalue->toBool();
+        }
         return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
     }

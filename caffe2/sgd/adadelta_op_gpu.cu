@@ -47,6 +47,7 @@ void AdadeltaUpdate<CUDAContext>(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(N, w, g, h, d, epsilon, decay, lr, nw, nh, nd);
+  TORCH_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace
@@ -154,6 +155,7 @@ class CUDASparseAdadeltaOp final : public Operator<Context> {
             paramOut,
             momentOut,
             momentDeltaOut);
+    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
     return true;
   }
 
