@@ -577,7 +577,7 @@ class CorrCholeskyTransform(Transform):
 
     @property
     def event_dim(self):
-        raise ValueError("Please use .input_event_dim or .output_event_dim instead")
+        raise ValueError("Please use `.input_event_dim` or `.output_event_dim` instead.")
 
     def _call(self, x):
         x = torch.tanh(x)
