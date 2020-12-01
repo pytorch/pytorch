@@ -395,8 +395,7 @@ protected:
 };
 
 struct CAFFE2_API TensorIterator final : public TensorIteratorBase {
-  using TensorIteratorBase::TensorIteratorBase;
-
+  TensorIterator() : TensorIteratorBase() {}
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
 

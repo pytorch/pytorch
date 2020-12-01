@@ -403,8 +403,19 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     if (common_device == kCPU) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
       if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
+        TORCH_INTERNAL_ASSERT(op.tensor.defined());
         op.original_tensor = op.tensor;
-        // NB: do NOT use set_output here, as the temporary is NOT a true output
+        // NB: do NOT use set_output here, as the temporary is NOT a true output;
+        // op.tensor is the true output and it was pre-provided for us.
+        // TODO: When we extend this to work with meta tensors, we'll need to
+        // skip this temporary allocation in that case (because it's
+        // unnecessary)
+        // TODO: The logic for cast_outputs will need to be handled by the
+        // structured kernels implementation.  What probably should happen
+        // is that we pass in the inferred dtype into the out kernel, and
+        // then after calling the out kernel, do the conversion (which
+        // is cast_outputs here), but integrating this with existing
+        // TensorIterator will take a little doing
         op.tensor = at::empty_like(op.tensor,
                                    op.tensor.options().dtype(common_dtype_),
                                    LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -477,7 +488,9 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         set_output(i, tensor_shape, tensor_stride, op.options(), names_);
       }
       op.current_dtype = op.target_dtype;
-    } else if (!names_.empty()) {
+    } else if (op.tensor.defined() && !names_.empty()) {
+      // Even if we don't resize, we may still propagate names, esp
+      // if we were doing an inplace operation
       namedinference::propagate_names(op.tensor, names_);
     }
   }
