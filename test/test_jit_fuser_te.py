@@ -1311,13 +1311,11 @@ class TestTEFuser(JitTestCase):
             lambda x, y: torch.lerp(x, y, 0.5),
             torch.atan2,
             torch.div,
-
-            # FIXME: comparison ops yield different results when fused
-            # torch.eq,
-            # torch.ne,
-            # torch.ge,
-            # torch.gt,
-            # torch.lt,
+            torch.eq,
+            torch.ne,
+            torch.ge,
+            torch.gt,
+            torch.lt,
 
             # FIXME: fails on CPU backend with int8
             # torch.fmod,
