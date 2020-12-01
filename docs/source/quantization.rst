@@ -45,8 +45,8 @@ The corresponding implementation is chosen automatically based on the PyTorch bu
 
 .. note::
 
-  PyTorch 1.3 doesn't provide quantized operator implementations on CUDA yet -
-  this is direction of future work.  Move the model to CPU in order to test the
+  At the moment PyTorch doesn't provide quantized operator implementations on CUDA -
+  this is the direction for future work. Move the model to CPU in order to test the
   quantized functionality.
 
   Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`)

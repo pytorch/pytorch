@@ -637,9 +637,29 @@ class TestHipify(TestCase):
 class TestAssert(TestCase):
     def test_assert_true(self):
         # verify assertions work as expected
-        torch.Assert(True, "foo")
+        # bool argument
+        torch._assert(True, "foo")
         with self.assertRaisesRegex(AssertionError, "bar"):
-            torch.Assert(False, "bar")
+            torch._assert(False, "bar")
+        # tensor argument
+        torch._assert(torch.tensor([True], dtype=torch.bool), "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch._assert(torch.tensor([False], dtype=torch.bool), "bar")
+
+    def test_assert_scriptable(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._assert(x.sum() > 0, "foo")
+                return x
+
+        m = M()
+        # scriptable
+        ms = torch.jit.script(m)
+        # data can be passed without errors
+        x = torch.randn(4, 4).fill_(1.0)
+        ms(x)
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
+            ms(torch.tensor([False], dtype=torch.bool))
 
 
 if __name__ == '__main__':

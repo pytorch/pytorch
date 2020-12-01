@@ -258,9 +258,9 @@ class _ObserverBase(ObserverBase):
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
         max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
-        scale = torch.ones(min_val_neg.size(), dtype=torch.float32)
-        zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64)
-        device = 'cuda' if min_val_neg.is_cuda else 'cpu'
+        device = min_val_neg.device
+        scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
+        zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
             max_val_pos = torch.max(-min_val_neg, max_val_pos)
@@ -296,7 +296,6 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype, device=device)
             if self.qscheme == torch.per_channel_affine_float_qparams:
                 zero_point = torch.tensor([float(zero_point)], dtype=zero_point.dtype, device=device)
-
 
         return scale, zero_point
 
@@ -990,7 +989,7 @@ class PlaceholderObserver(ObserverBase):
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
     """
-    def __init__(self, dtype=torch.float16, custom_op_name="", compute_dtype=None):
+    def __init__(self, dtype=torch.float32, custom_op_name="", compute_dtype=None):
         super(PlaceholderObserver, self).__init__(dtype=dtype)
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
@@ -1127,6 +1126,7 @@ def load_observer_state_dict(mod, obs_dict):
 
 # Restrict activations to be in the range (0,127)
 default_observer = MinMaxObserver.with_args(reduce_range=True)
+default_placeholder_observer = PlaceholderObserver
 default_debug_observer = RecordingObserver
 default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
 default_histogram_observer = HistogramObserver.with_args(reduce_range=True)

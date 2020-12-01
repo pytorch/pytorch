@@ -7,6 +7,7 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 from torch.jit._recursive import wrap_cpp_module
+from typing import Any
 
 import io
 
@@ -1034,10 +1035,78 @@ class TestFreezing(JitTestCase):
 
         model = torch.jit.script(Net())
         model.train()
-
-        with self.assertRaisesRegex(RuntimeError, 'Freezing module in training mode is not yet supported'):
-            mTrain_freezed = torch._C._freeze_module(model._c)
-
+        mTrain_freezed = torch._C._freeze_module(model._c)
+        # verify mTrain_freezed looks exactly as:
+        # module {
+        #   attributes {
+        #     conv1 = ...
+        #     conv2 = ...
+        #     dropout1 = ...
+        #     dropout2 = ...
+        #     fc1 = ...
+        #     fc2 = ...
+        #   }
+        #   ...
+        #   submodules {
+        #     module conv1 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        #     module conv2 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        #     module dropout1 {
+        #       attributes {
+        #          training = ...
+        #       }
+        #       ...
+        #     }
+        #     module dropout2 {
+        #       attributes {
+        #          training = ...
+        #       }
+        #       ...
+        #     }
+        #     module fc1 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        #     module fc2 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        self.assertFalse(mTrain_freezed.hasattr('training'))
+        self.assertTrue(mTrain_freezed.hasattr('conv1'))
+        self.assertFalse(mTrain_freezed.conv1.hasattr('training'))
+        self.assertTrue(mTrain_freezed.conv1.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.conv1.hasattr('bias'))
+        self.assertTrue(mTrain_freezed.hasattr('conv2'))
+        self.assertFalse(mTrain_freezed.conv2.hasattr('training'))
+        self.assertTrue(mTrain_freezed.conv2.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.conv2.hasattr('bias'))
+        self.assertTrue(mTrain_freezed.hasattr('dropout1'))
+        self.assertTrue(mTrain_freezed.dropout1.hasattr('training'))
+        self.assertTrue(mTrain_freezed.hasattr('dropout2'))
+        self.assertTrue(mTrain_freezed.dropout2.hasattr('training'))
+        self.assertTrue(mTrain_freezed.hasattr('fc1'))
+        self.assertTrue(mTrain_freezed.fc1.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.fc1.hasattr('bias'))
+        self.assertTrue(mTrain_freezed.hasattr('fc2'))
+        self.assertTrue(mTrain_freezed.fc2.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.fc2.hasattr('bias'))
         model.eval()
         mEval_freezed = torch._C._freeze_module(model._c)
         self.assertFalse(mEval_freezed.hasattr('conv1'))
@@ -1055,6 +1124,14 @@ class TestFreezing(JitTestCase):
         m = torch.jit.load(buffer)
         FileCheck().check_not('GetAttr[name=') \
                    .run(m._c._get_method('forward').graph)
+        m2 = torch._C._freeze_module(model._c, preserveParameters=True)
+        self.assertTrue(m2.hasattr('conv1'))
+        self.assertTrue(m2.hasattr('conv2'))
+        self.assertFalse(m2.hasattr('dropout1'))
+        self.assertFalse(m2.hasattr('training'))
+        self.assertTrue(m2.hasattr('fc1'))
+        self.assertFalse(m2.hasattr('dropout2'))
+        self.assertTrue(m2.hasattr('fc2'))
 
     def test_freeze_module_detach_gradient(self):
         mod = nn.Conv2d(8, 3, 4, 2, 1)
@@ -1222,3 +1299,35 @@ class TestFreezing(JitTestCase):
         mod_eager = Mod()
         self.assertEqual(mod_eager(True), frozen_mod(True))
         self.assertEqual(mod_eager(False), frozen_mod(False))
+
+    def test_freeze_module_with_non_static_module_dict_index(self):
+        """
+        Test that a Module contained a non-static ModuleDict index
+        cannot be frozen.
+        """
+        @torch.jit.interface
+        class ModuleInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                pass
+
+        class ImplementsInterface(torch.nn.Module):
+            def forward(self, inp: Any) -> Any:
+                if isinstance(inp, torch.Tensor):
+                    return torch.max(inp, dim=0)
+
+                return inp
+
+        # Test annotation of submodule.
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                value: ModuleInterface = self.d[key]
+                return value.forward(x)
+
+        m = torch.jit.script(Mod())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
+            mf = torch._C._freeze_module(m._c)

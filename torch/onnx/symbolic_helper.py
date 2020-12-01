@@ -229,6 +229,8 @@ def _is_fp(value):
             return (type == 'torch.float32') or (type == 'torch.float64') or (type == 'torch.float16')
         else:
             type = value.type().scalarType()
+            if type is None:
+                warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
             return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
@@ -356,6 +358,14 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     else:
         return _unimplemented("Both size and scales are None in __interpolate")
     return scale_factor, mode
+
+
+def _unbind_helper(g, self, dim, _outputs):
+    if _export_onnx_opset_version <= 9:
+        from torch.onnx.symbolic_opset9 import unbind
+    else:
+        from torch.onnx.symbolic_opset11 import unbind
+    return unbind(g, self, dim, _outputs)
 
 
 def _scatter_helper(g, self, dim, index, src):

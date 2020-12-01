@@ -287,7 +287,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::MMBatchSide,
       prim::BroadcastSizes,
       prim::ChunkSizes,
-      prim::Function,
+      prim::Closure,
       prim::TupleUnpack,
       prim::TupleIndex,
       prim::TupleSlice,
