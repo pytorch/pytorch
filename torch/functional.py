@@ -79,7 +79,7 @@ def broadcast_shapes(*shapes):
     Similar to :func:`broadcast_tensors` but for shapes.
 
     This is equivalent to
-    `torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape`
+    ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
     but avoids the need create to intermediate tensors. This is useful for
     broadcasting tensors of common batch shape but different rightmost shape,
     e.g. to broadcast mean vectors with covariance matrices.
@@ -102,7 +102,7 @@ def broadcast_shapes(*shapes):
     with torch.no_grad():
         scalar = torch.zeros((), device="cpu")
         tensors = [scalar.expand(shape) for shape in shapes]
-        tensors = torch.broadcast_tensors(*tensors)
+        tensors = broadcast_tensors(*tensors)
         return tensors[0].shape
 
 
