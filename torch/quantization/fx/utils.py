@@ -1,6 +1,6 @@
 import re
 import torch
-from ..quant_type import QuantType, quant_type_to_str
+from ..utils import is_per_tensor, is_per_channel
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -76,15 +76,6 @@ def graph_pretty_str(g, shorten=True) -> str:
         res_str += "*obs_{n} = activation_post_process_{n}\n"
     return res_str
 
-def is_per_tensor(qscheme):
-    return qscheme == torch.per_tensor_affine or \
-        qscheme == torch.per_tensor_symmetric
-
-def is_per_channel(qscheme):
-    return qscheme in [torch.per_channel_affine,
-                       torch.per_channel_affine_float_qparams,
-                       torch.per_channel_symmetric]
-
 def get_per_tensor_qparams(activation_post_process):
     assert is_per_tensor(activation_post_process.qscheme), 'Only per tensor quantization is supported'
     scale, zero_point = activation_post_process.calculate_qparams()
@@ -108,7 +99,7 @@ def get_quantize_op_and_qparams(activation_post_process):
         scale = float(scale)
         zero_point = int(zero_point)
         qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_tensor
+        quantize_op = torch.quantize_per_tensor  # type: ignore
     return quantize_op, qparams
 
 def quantize_node(root_module, graph, node, activation_post_process):
@@ -170,73 +161,6 @@ def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
         quant_mode_custom_module_classes = set(quant_mode_custom_module_config.keys())
         float_custom_module_classes |= quant_mode_custom_module_classes
     return list(float_custom_module_classes)
-
-def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
-    """ Get the observed/quantized custom module class that we need
-    to swap `custom_module` to
-    Input:
-        custom_module: input, can be an instance of either a float or observed custom module
-        custom_module_class_mapping: the float to observed or observed to quantized custom module class mapping
-        qconfig: qconfig configured for the custom module
-
-    Output:
-        corresponding observed/quantized custom module class for input custom module instance
-    """
-    quant_type = get_quant_type(qconfig)
-    quant_type_str = quant_type_to_str(quant_type)
-    class_mapping = custom_module_class_mapping.get(quant_type_str, {})
-    assert type(custom_module) in class_mapping, "did not found corresponding observed " \
-        "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
-    return class_mapping[type(custom_module)]
-
-def activation_is_statically_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    statically quantized or not
-    """
-    assert qconfig is not None
-    activation = qconfig.activation()
-    return activation.dtype in [torch.quint8, torch.qint8]
-
-def weight_dtype(qconfig):
-    assert qconfig is not None
-    weight = qconfig.weight()
-    return weight.dtype
-
-def weight_is_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    quantized or not
-    """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
-
-def get_qconfig_dtypes(qconfig):
-    r""" returns the qconfig tuple for qconfig:
-    (activation_dtype, weight_dtype, activation_compute_dtype)
-    """
-    assert qconfig is not None
-    activation = qconfig.activation()
-    weight = qconfig.weight()
-    compute_dtype = activation.compute_dtype if hasattr(activation, 'compute_dtype') else None
-    return (activation.dtype, weight.dtype, compute_dtype)
-
-def get_quant_type(qconfig):
-    assert qconfig is not None
-    activation = qconfig.activation()
-    weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8]
-    if weight.dtype in static_dtypes:
-        if activation.dtype in static_dtypes:
-            return QuantType.STATIC
-        elif hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
-            return QuantType.DYNAMIC
-        else:
-            return QuantType.WEIGHT_ONLY
-
-    if weight.dtype == torch.float16:
-        if activation.dtype == torch.float:
-            return QuantType.WEIGHT_ONLY
-
-    raise Exception("Unrecognized dtype combination in get_quant_type: activation({}),"
-                    "weight({})".format(activation.dtype, weight.dtype))
 
 def get_linear_prepack_op_for_dtype(dtype):
     if dtype == torch.float16:

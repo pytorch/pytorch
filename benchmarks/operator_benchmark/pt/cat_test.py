@@ -1,6 +1,7 @@
 import operator_benchmark as op_bench
 import torch
 import random
+from typing import List
 
 
 """Microbenchmarks for Cat operator"""
@@ -78,16 +79,19 @@ cat_configs_manyinputs = op_bench.config_list(
 class CatBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, sizes, N, dim, device):
         random.seed(42)
-        self.inputs = []
+        inputs = []
         for i in range(N):
             current_sizes = [old_size() if callable(old_size) else old_size
                              for old_size in sizes]
-            self.inputs.append(torch.rand(current_sizes, device=device))
-        self.dim = dim
+            inputs.append(torch.rand(current_sizes, device=device))
+        self.inputs = {
+            "inputs": inputs,
+            "dim": dim
+        }
         self.set_module_name('cat')
 
-    def forward(self):
-        return torch.cat(self.inputs, dim=self.dim)
+    def forward(self, inputs: List[torch.Tensor], dim: int):
+        return torch.cat(inputs, dim=dim)
 
 
 op_bench.generate_pt_test(cat_configs_short +
