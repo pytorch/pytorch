@@ -1048,20 +1048,31 @@ class TestBinaryUfuncs(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
                 torch_op(torch.ones(1, device=device, dtype=dtypes[1]),
                          torch.ones(1, device=device, dtype=dtypes[0]))
+
     @onlyCUDA
-    def test_maximum_minimum_device_mismatch(self, device):
-       a = torch.tensor((1, 2, -1))
-       b = torch.tensor((3, 0, 4), device=device)
-       ops = (torch.maximum, torch.maximum)
+    def test_maximum_minimum_cross_device(self, device):
+        a = torch.tensor((1, 2, -1))
+        b = torch.tensor((3, 0, 4), device=device)
+        ops = (torch.maximum, torch.minimum)
 
-       for torch_op in ops:
-           with self.assertRaisesRegex(RuntimeError, 
-                                       "Expected all tensors to be on the same device"):
-               torch_op(a, b)
+        for torch_op in ops:
+            with self.assertRaisesRegex(RuntimeError, 
+                                        "Expected all tensors to be on the same device"):
+                torch_op(a, b)
 
-           with self.assertRaisesRegex(RuntimeError, 
-                                       "Expected all tensors to be on the same device"):
-               torch_op(b, a)
+            with self.assertRaisesRegex(RuntimeError, 
+                                        "Expected all tensors to be on the same device"):
+                torch_op(b, a) 
+
+        # test cuda tensor and cpu scalar
+        a = torch.tensor(1)
+        b = torch.tensor((3, 0, 4), device=device)
+
+        self.assertEqual(b, torch.maximum(a, b))
+        self.assertEqual(b, torch.maximum(b, a))
+
+        self.assertEqual(a, torch.minimum(a, b))
+        self.assertEqual(a, torch.minimum(b, a))
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
