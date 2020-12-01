@@ -75,7 +75,7 @@ jobs:
       - name: Run flake8
         run: |
           set -eux
-          pip install flake8==3.8.2 flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
+          pip install flake8==3.8.2 flake8-bugbear==20.1.4 flake8-comprehensions==3.3.0 flake8-executable==2.0.4 flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
           flake8 --version
           flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations

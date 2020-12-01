@@ -13,7 +13,7 @@ from torch.distributed._pipeline.sync import Pipe
 
 def test_inplace_on_requires_grad():
     model = nn.Sequential(nn.Linear(1, 1), nn.ReLU(inplace=True))
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"], checkpoint="always")
+    model = Pipe(model, checkpoint="always")
 
     x = torch.rand(1)
     y = model(x)

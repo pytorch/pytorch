@@ -9,7 +9,7 @@
 
 /* stuff for mapped files */
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 #if defined(HAVE_MMAP)
@@ -333,7 +333,7 @@ typedef struct{
   HANDLE handle;
   HANDLE wait;
 } ReleaseContext;
-static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
+static void CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
 {
   if (lpParam) {
     ReleaseContext *ctx = (ReleaseContext *)lpParam;

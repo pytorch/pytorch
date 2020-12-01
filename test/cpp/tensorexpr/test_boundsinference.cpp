@@ -1,8 +1,9 @@
-#include <test/cpp/tensorexpr/test_base.h>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+
+#include <gtest/gtest.h>
 
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -39,7 +40,7 @@ static void verifyConstBounds(
   }
 }
 
-void testBoundsInference_1() {
+TEST(BoundsInference, _1) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
   //   b[i] = a[i]
@@ -64,7 +65,7 @@ void testBoundsInference_1() {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
-void testBoundsInference_2() {
+TEST(BoundsInference, _2) {
   // Verify that bounds inference works for the following example:
   // for i in 0..n:
   //   b[i] = a[i]
@@ -89,7 +90,7 @@ void testBoundsInference_2() {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, -1}});
 }
 
-void testBoundsInference_3() {
+TEST(BoundsInference, _3) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
   //   b[i] = a[i] * a[i+10]
@@ -115,7 +116,7 @@ void testBoundsInference_3() {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
-void testBoundsInference_4() {
+TEST(BoundsInference, _4) {
   // Verify that bounds inference works for the following example:
   //
   // for y in 0..200:
@@ -192,7 +193,7 @@ void testBoundsInference_4() {
   }
 }
 
-void testBoundsInference_5() {
+TEST(BoundsInference, _5) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
   //   b[i] = a[i]
@@ -245,7 +246,7 @@ void testBoundsInference_5() {
   }
 }
 
-void testBoundsInference_6() {
+TEST(BoundsInference, _6) {
   // Verify that bounds inference works for the following example:
   //
   // for y in 0..200:
@@ -324,7 +325,7 @@ void testBoundsInference_6() {
   }
 }
 
-void testBoundsInferenceAdjacent() {
+TEST(BoundsInference, Adjacent) {
   KernelScope kernel_scope;
   ExprHandle H(6);
   Placeholder a(BufHandle("a", {20}, kFloat));
@@ -384,7 +385,7 @@ void testBoundsInferenceAdjacent() {
   }
 }
 
-void testBoundsInferenceMultipleTopLoopLoad() {
+TEST(BoundsInference, MultipleTopLoopLoad) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {100}, kFloat));
   Tensor* b =
@@ -440,7 +441,7 @@ void testBoundsInferenceMultipleTopLoopLoad() {
   }
 }
 
-void testBoundsInferenceMultipleTopLoopStore() {
+TEST(BoundsInference, MultipleTopLoopStore) {
   KernelScope kernel_scope;
   BufHandle a("a", {100}, kFloat);
   BufHandle b("b", {100}, kFloat);
@@ -500,7 +501,7 @@ void testBoundsInferenceMultipleTopLoopStore() {
   }
 }
 
-void testBoundsInferenceCacheReads() {
+TEST(BoundsInference, CacheReads) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -566,7 +567,7 @@ void testBoundsInferenceCacheReads() {
   }
 }
 
-void testBoundsInferenceFlattened() {
+TEST(BoundsInference, Flattened) {
   KernelScope kernel_scope;
   Tensor* b = Compute(
       "b",
