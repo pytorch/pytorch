@@ -408,7 +408,6 @@ void ONNXShapeTypeInference(Block* b, int opset_version) {
   }
 }
 
-
 } // namespace
 
 void ONNXShapeTypeInference(Node* n, int opset_version) {
