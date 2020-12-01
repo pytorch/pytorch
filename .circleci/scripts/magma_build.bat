@@ -71,7 +71,7 @@ cmake .. -DGPU_TARGET="%GPU_TARGET%" ^
              -DCMAKE_CXX_FLAGS="/FS /Zf" ^
              -DCMAKE_BUILD_TYPE=%CONFIG% ^
              -DCMAKE_GENERATOR=Ninja ^
-             -DCMAKE_INSTALL_PREFIX=..\install\
+             -DCMAKE_INSTALL_PREFIX=..\install\ ^
              -DCUDA_ARCH_LIST="%CUDA_ARCH_LIST%"
 if errorlevel 1 exit /b 1
                                 
