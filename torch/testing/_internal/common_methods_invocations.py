@@ -67,7 +67,7 @@ class OpInfo(object):
                  default_test_dtypes=None,  # dtypes to test with by default. Gets intersected
                                             # with the dtypes support on the tested device
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
-                 skip_bfloat16_grad=False, # whether to skip grad and gradgradcheck for bfloat16 dtype 
+                 skip_bfloat16_grad=False,  # whether to skip grad and gradgradcheck for bfloat16 dtype 
                  assert_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
                  autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a 
                                                   # DifferentiableGraph when autodiffed. Ex: ['aten::add', 'aten::mm'], 
@@ -283,7 +283,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
-                   test_inplace_grad=False),
+                   test_inplace_grad=False,
+                   skips=(
+                       # RuntimeError: "rsqrt_cuda" not implemented for 'BFloat16'
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                device_type='cuda', dtypes=[torch.bfloat16]),
+                   )),
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
@@ -309,7 +314,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
-                   test_inplace_grad=False),
+                   test_inplace_grad=False,
+                   skips=(
+                       # RuntimeError: "rsqrt_cuda" not implemented for 'BFloat16'
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                device_type='cuda', dtypes=[torch.bfloat16]),
+                   )),
     UnaryUfuncInfo('atan',
                    ref=np.arctan,
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -334,7 +344,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   test_inplace_grad=False),
+                   test_inplace_grad=False,
+                   skips=(
+                       # RuntimeError: "isfinite" not implemented for 'BFloat16'
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                device_type='cuda', dtypes=[torch.bfloat16]),
+                   )),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -362,6 +377,8 @@ op_db = [
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                device_type='cuda', dtypes=[torch.float16]),
                    )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -460,6 +477,8 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                device_type='cuda', dtypes=[torch.float16]),
                    )),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
