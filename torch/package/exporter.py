@@ -13,6 +13,7 @@ from pathlib import Path
 import linecache
 import sys
 from urllib.parse import quote
+import re
 
 class PackageExporter:
     """ Exporters allow you to write packages of code, pickled python data, and
@@ -70,6 +71,7 @@ class PackageExporter:
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
         self.importers = [importlib.import_module]
+        self.patterns : List[Tuple[re.Pattern, Callable[[str], None]]] = []
         self.debug_deps : List[Tuple[str, str]] = []
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
@@ -208,6 +210,11 @@ node [shape=box];
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
 
+        for pattern, action in self.patterns:
+            if pattern.fullmatch(module_name):
+                action(module_name)
+                return
+
         root_name = module_name.split('.', maxsplit=1)[0]
         if self._can_implicitly_extern(root_name):
             if self.verbose:
@@ -303,8 +310,12 @@ node [shape=box];
         Code for extern modules must also exist in the process loading the package.
 
         Args:
-            module_name (str): e.g. "my_package.my_subpackage" the name of the external module
+            module_name (str): e.g. "my_package.my_subpackage" the name of the external module.
+                This can also be a glob-style pattern, as described in :meth:`mock_module`
         """
+        if self._add_if_pattern(module_name, self.extern_module):
+            return
+
         if module_name not in self.external:
             self.external.append(module_name)
 
@@ -326,7 +337,15 @@ node [shape=box];
 
         Args:
             module_name (str): e.g. "my_package.my_subpackage" the name of the module to be mocked out.
+                The module_name can also be a glob-style pattern string that may match multiple modules.
+                Any required dependencies that match this pattern string will be mocked out automatically.
+                Examples:
+                  'torch.**' -- matches all submodules of torch, e.g. 'torch.nn' and torch.nn.functional'
+                  'torch.*' -- matches 'torch.nn' or 'torch.functional', but not 'torch.nn.functional'
         """
+        if self._add_if_pattern(module_name, self.mock_module):
+            return
+
         if '_mock' not in self.provided:
             self.save_source_file('_mock', str(Path(__file__).parent / '_mock.py'), dependencies=False)
         is_package = hasattr(self._import_module(module_name), '__path__')
@@ -341,6 +360,12 @@ node [shape=box];
         """
         for module_name in module_names:
             self.mock_module(module_name)
+
+    def _add_if_pattern(self, potential_pattern: str, action: Callable[[str], None]):
+        if '*' in potential_pattern or '?' in potential_pattern:
+            self.patterns.append((_module_glob_to_re(potential_pattern), action))
+            return True
+        return False
 
     def _module_is_already_provided(self, qualified_name: str) -> bool:
         for mod in self.external:
@@ -445,3 +470,9 @@ def _read_file(filename: str) -> str:
     with open(filename, 'rb') as f:
         b = f.read()
         return b.decode('utf-8')
+
+_glob_re_filter = {'**': '.*', '*': '[^.]*', '?': '.', '.': '\\.'}
+_glob_split = re.compile(f'({"|".join(re.escape(x) for x in _glob_re_filter.keys())})')
+def _module_glob_to_re(module_name):
+    pattern = ''.join(_glob_re_filter.get(x, x) for x in _glob_split.split(module_name))
+    return re.compile(pattern)
