@@ -371,12 +371,16 @@ mean = _reduce_with_dtype('ReduceMean', 'mean')
 prod = _reduce_with_dtype('ReduceProd', 'prod', allow_multi_dim_support=False)  # torch.prod does not support multidimensional 'dim'
 
 
-@parse_args('v', 'i', 'none')
-def cumsum(g, input, dim, dtype):
+@parse_args('v', 'i', 'none', 'b')
+def cumsum(g, input, dim, dtype, exclusive=False):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         if dtype.node().kind() != 'prim::Constant':
             return _unimplemented(name, "dtype")
-        return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
+        csum = g.op("ATen", input, operator_s="cumsum", dim_i=dim)
+        if exclusive:
+            return torch.cat((torch.zeros(1), csum), dim=dim)
+        else:
+            return csum
     else:
         sym_help._onnx_opset_unsupported('cumsum', 9, 11)
 

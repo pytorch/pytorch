@@ -100,21 +100,21 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %28 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %29 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %15 : None = prim::Constant()
-        #   %16 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = 
+        #   %16 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
         #               aten::to(%8, %26, %27, %11, %12, %28, %29, %15)
         #   %18 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
         #   %30 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %22 : int[] = prim::Constant[value=[-1]]()
         #   %23 : Tensor = aten::view(%16, %22)
         #   %24 : Tensor?[] = prim::ListConstruct(%23)
-        #   %25 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = 
+        #   %25 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
         #                aten::index_put(%mask, %24, %18, %30)
         #   return (%25)
         #
         # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
         #       %some_const : Float(requires_grad=0, device=cpu)):
         #   %3 : Tensor = onnx::Equal(%0, %some_const)
-        #   %4 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%3) 
+        #   %4 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%3)
         #   %12 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%4)
         #   %19 : Tensor = onnx::Cast[to=9](%12)
         #   %20 : Tensor = onnx::Constant[value={1}]()
@@ -140,7 +140,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %37 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %22 : None = prim::Constant()
         #   %23 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
-        #                = aten::to(%15, %34, %35, %18, %19, %36, %37, %22) 
+        #                = aten::to(%15, %34, %35, %18, %19, %36, %37, %22)
         #   %38 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %30 : int[] = prim::Constant[value=[-1]]()
         #   %31 : Tensor = aten::view(%23, %30)
@@ -151,7 +151,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #
         # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
         #       %some_const : Float(requires_grad=0, device=cpu)):
-        #   %3 : Float(8, strides=[1], requires_grad=0, device=cpu) 
+        #   %3 : Float(8, strides=[1], requires_grad=0, device=cpu)
         #               = onnx::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
         #   %4 : Tensor = onnx::Equal(%0, %some_const)
         #   %5 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%4)
@@ -171,7 +171,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %32 : Tensor = onnx::Constant[value={0}]()
         #   %33 : Tensor = onnx::Unsqueeze[axes=[0]](%32)
         #   %34 : Tensor = onnx::Slice(%24, %30, %31, %33)
-        #   %35 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) 
+        #   %35 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
         #               = onnx::ScatterND(%0, %22, %34)
         #   return (%35)
 
@@ -340,8 +340,8 @@ def scatter(g, self, dim, index, src):
         return g.op("ScatterElements", self, index, expand_as(g, src, index), axis_i=dim)
 
 
-@parse_args('v', 'i', 'none')
-def cumsum(g, self, dim, dtype=None):
+@parse_args('v', 'i', 'none', 'b')
+def cumsum(g, self, dim, dtype=None, exclusive=False):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
     if dtype and dtype.node().kind() != 'prim::Constant':
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
@@ -349,6 +349,8 @@ def cumsum(g, self, dim, dtype=None):
     else:
         cast = self
     csum = g.op("CumSum", cast, dim_tensor)
+    if exclusive:
+        return torch.cat((torch.zeros(1), csum), dim=dim)
     return csum
 
 
