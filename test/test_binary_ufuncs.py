@@ -1065,14 +1065,20 @@ class TestBinaryUfuncs(TestCase):
                 torch_op(b, a) 
 
         # test cuda tensor and cpu scalar
-        a = torch.tensor(1)
-        b = torch.tensor((3, 0, 4), device=device)
+        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
+        a_np = np.array(1)
+        b_np = np.array([3, 0, 4])
 
-        self.assertEqual(b, torch.maximum(a, b))
-        self.assertEqual(b, torch.maximum(b, a))
+        for torch_op, numpy_op in ops:
+            a_tensor = torch.from_numpy(a_np)
+            b_tensor = torch.from_numpy(b_np).to(device=device)
+            tensor_result_1 = torch_op(a_tensor, b_tensor)
+            numpy_result_1 = numpy_op(a_np, b_np)
+            tensor_result_2 = torch_op(b_tensor, a_tensor)
+            numpy_result_2 = numpy_op(b_np, a_np)
 
-        self.assertEqual(a, torch.minimum(a, b))
-        self.assertEqual(a, torch.minimum(b, a))
+            self.assertEqual(tensor_result_1, numpy_result_1)
+            self.assertEqual(tensor_result_2, numpy_result_2)
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
