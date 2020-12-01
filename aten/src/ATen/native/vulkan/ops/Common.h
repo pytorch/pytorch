@@ -35,6 +35,10 @@ struct Layout final {
   };
 };
 
+struct Experimentation {
+  static constexpr bool kUseConv2dOldApi = true;
+};
+
 struct ConvPrepackLimits final {
   static constexpr int64_t maxStackDepth = 2048*4;
 };
