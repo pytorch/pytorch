@@ -17,17 +17,21 @@ tensor_conversion_long_configs = op_bench.cross_product_configs(
 
 class FloatToHalfTensorConversionBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, device):
-        self.input = torch.rand(M, N, device=device, requires_grad=False, dtype=torch.float)
+        self.inputs = {
+            "input": torch.rand(M, N, device=device, requires_grad=False, dtype=torch.float)
+        }
 
-    def forward(self):
-        return self.input.to(torch.half)
+    def forward(self, input):
+        return input.to(torch.half)
 
 class HalfToFloatTensorConversionBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, device):
-        self.input = torch.rand(M, N, device=device, requires_grad=False, dtype=torch.half)
+        self.inputs = {
+            "input": torch.rand(M, N, device=device, requires_grad=False, dtype=torch.half)
+        }
 
-    def forward(self):
-        return self.input.to(torch.float)
+    def forward(self, input):
+        return input.to(torch.float)
 
 
 op_bench.generate_pt_test(tensor_conversion_short_configs, FloatToHalfTensorConversionBenchmark)

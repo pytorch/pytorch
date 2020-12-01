@@ -1,7 +1,7 @@
 [submodule "third_party/pybind11"]
     ignore = dirty
     path = third_party/pybind11
-    url = https://github.com/pybind/pybind11.git
+    url = https://github.com/seemethere/pybind11.git
 [submodule "third_party/cub"]
     ignore = dirty
     path = third_party/cub
@@ -133,3 +133,6 @@
 [submodule "third_party/cudnn_frontend"]
 	path = third_party/cudnn_frontend
 	url = ssh://git@gitlab-master.nvidia.com:12051/cudnn/cudnn_frontend.git
+[submodule "third_party/kineto"]
+	path = third_party/kineto
+	url = https://github.com/pytorch/kineto
