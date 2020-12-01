@@ -26,21 +26,16 @@ IS_WINDOWS = sys.platform == 'win32'
 
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
-def _nt_quote_args(args: List) -> List:
+def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
     """Quote command-line arguments for DOS/Windows conventions.
 
     Just wraps every argument which contains blanks in double quotes, and
     returns a new argument list.
     """
-    # XXX this doesn't seem very robust to me -- but if the Windows guys
-    # say it'll work, I guess I'll have to accept it.  (What if an arg
-    # contains quotes?  What other magic characters, other than spaces,
-    # have to be escaped?  Is there an escaping mechanism other than
-    # quoting?)
-    for i, arg in enumerate(args):
-        if ' ' in arg:
-            args[i] = '"%s"' % arg
-    return args
+    # Cover None-type
+    if not args:
+        return []
+    return [f'"{arg}"' if ' ' in arg else arg for arg in args]
 
 def _find_cuda_home() -> Optional[str]:
     r'''Finds the CUDA install path.'''
