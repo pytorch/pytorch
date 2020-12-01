@@ -8,9 +8,14 @@ namespace cuda {
 
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
-  : capture_stream_(at::cuda::getCurrentCUDAStream()) {}
+  : capture_stream_(at::cuda::getCurrentCUDAStream()) {
+#if CUDA_VERSION < 11000
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#endif
+}
 
 void CUDAGraph::capture_begin() {
+#if CUDA_VERSION >= 11000
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -38,9 +43,13 @@ void CUDAGraph::capture_begin() {
   cudaStreamCaptureStatus status;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#endif
 }
 
 void CUDAGraph::capture_end() {
+#if CUDA_VERSION >= 11000
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(stream == capture_stream_,
@@ -49,8 +58,8 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
   has_graph_ = true;
 
-  // Trailing NULL, NULL, 0 arguments recommended by Cuda driver people.
-  // They prefer not to report error message through these arguments moving forward
+  // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
+  // who prefer not to report error message through these arguments moving forward
   // (they prefer return value, or errors on api calls internal to the capture)
   AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
   has_graph_exec_ = true;
@@ -64,9 +73,13 @@ void CUDAGraph::capture_end() {
   // we don't need graph_ anymore.
   AT_CUDA_CHECK(cudaGraphDestroy(graph_));
   has_graph_ = false;
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#endif
 }
 
 void CUDAGraph::replay() {
+#if CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
 
@@ -85,6 +98,9 @@ void CUDAGraph::replay() {
 
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#endif
 }
 
 // This can throw, but my only alternative idea is to have a Python-side
@@ -94,6 +110,7 @@ void CUDAGraph::replay() {
 // }
 // Stackoverflow appears to hate __del__ as much as throwing in destructors.
 CUDAGraph::~CUDAGraph() {
+#if CUDA_VERSION >= 11000
   // these checks reduce (but can't eliminate) the chance of throwing an exception.
   if (has_graph_) {
     AT_CUDA_CHECK(cudaGraphDestroy(graph_));
@@ -101,10 +118,15 @@ CUDAGraph::~CUDAGraph() {
   if (has_graph_exec_) {
     AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_));
   }
+#endif
 }
 
 at::Tensor CUDAGraph::generator_callback(DeviceIndex) {
-  return {};
+#if CUDA_VERSION >= 11000
+    return {};
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#endif
 }
 
 } // namespace cuda

@@ -3232,5 +3232,153 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
+    def test_graph_capture_simple(self):
+        s1 = torch.cuda.Stream()
+
+        with torch.cuda.stream(s1):
+            a = torch.zeros((1000,), device="cuda")
+            a += 1
+            g = torch.cuda.Graph()
+            g.capture_begin()
+            a += 1
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s1)
+
+        g.replay()
+        g.replay()
+
+        self.assertTrue(a.sum().item() == 3000.)
+
+    # TODO:  Uncomment when the caching allocator is capturable.
+    # There's no way to safely test these ops without changes to make the caching allocator graph-safe.
+    # Stashing references to inputs and outputs isn't enough: ops may also use internal temporaries.
+    def test_graph_rng_functional(self):
+        size = 10000
+        a = torch.randn((size,), device="cuda", dtype=torch.float)
+
+        ops_with_kwargs = (("dropout", {"p": 0.1}),
+                           ("rrelu", {"training": True}),)
+
+        def run(op, kwargs):
+            def op_4x(input):
+                x = getattr(torch.nn.functional, op)(input, **kwargs)
+                x = getattr(torch.nn.functional, op)(x, **kwargs)
+                x = getattr(torch.nn.functional, op)(x, **kwargs)
+                return getattr(torch.nn.functional, op)(x, **kwargs)
+
+            torch.cuda.manual_seed(5)
+
+            # Control
+            out_hoststate = op_4x(a)
+
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                # warms up allocator so no mallocs occur in capture
+                _ = op_4x(a)
+                del _
+
+                torch.cuda.manual_seed(5)
+
+                g = torch.cuda.Graph()
+                g.capture_begin()
+                out_devstate = op_4x(a)
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(stream)
+
+            try:
+                self.assertNotEqual(out_hoststate, out_devstate)
+            except Exception as e:
+                raise RuntimeError("Failed on torch.nn.functional." + op) from e
+
+            # Replays graph on default stream
+            g.replay()
+
+            try:
+                self.assertEqual(out_hoststate, out_devstate)
+            except Exception as e:
+                raise RuntimeError("Failed on torch.nn.functional." + op) from e
+
+        for op, kwargs in ops_with_kwargs:
+            run(op, kwargs)
+
+    # def test_graph_rng_distributions(self):
+    #     size = 10000
+    #     input = torch.rand((size,), device="cuda", dtype=torch.float)
+    #     alloc = torch.empty((size,), device="cuda", dtype=torch.float)
+
+    #     # Torch ops to test with sample args (tuple) and kwargs (dict)
+    #     torch_with_args = (("bernoulli", (input.clone(),), {}),
+    #                        ("multinomial", (input.clone(), size, True), {}),
+    #                        ("multinomial", (input.clone(), size // 2, False), {}),
+    #                        ("normal", (input.clone() + 1, input.clone()), {}),
+    #                        ("poisson", (input.clone(),), {}),
+    #                        ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
+    #                        ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
+    #                        ("randn", (size,), {"device": "cuda", "dtype": torch.float}),)
+
+    #     # Tensor methods to test with sample args (tuple)
+    #     tensor_with_args = (("bernoulli_", (input.clone(),)),
+    #                         ("cauchy_", ()),
+    #                         ("exponential_", ()),
+    #                         ("geometric_", (0.3,)),
+    #                         ("log_normal_", ()),
+    #                         ("normal_", ()),
+    #                         ("random_", ()),
+    #                         ("uniform_", ()),)
+
+    #     def run(module, op, args, kwargs):
+    #         stream = torch.cuda.Stream()
+
+    #         if (module == "torch"):
+    #             control1 = getattr(torch, op)(*args, **kwargs)
+    #             control2 = getattr(torch, op)(*args, **kwargs)
+    #         else:
+    #             control1 = alloc.clone()
+    #             control2 = alloc.clone()
+    #             getattr(control1, op)(*args)
+    #             getattr(control2, op)(*args)
+
+    #         stream.wait_stream(torch.cuda.current_stream())
+    #         with torch.cuda.stream(stream):
+    #             g = torch.cuda.Graph()
+    #             if (module == "torch"):
+    #                 g.capture_begin()
+    #                 t1 = getattr(torch, op)(*args, **kwargs)
+    #                 t2 = getattr(torch, op)(*args, **kwargs)
+    #                 g.capture_end()
+    #             else:
+    #                 t1 = alloc.clone()
+    #                 t2 = alloc.clone()
+    #                 g.capture_begin()
+    #                 getattr(t1, op)(*args)
+    #                 getattr(t2, op)(*args)
+    #                 g.capture_end()
+    #         torch.cuda.current_stream().wait_stream(stream)
+
+    #         try:
+    #             self.assertNotEqual(control1, t1)
+    #             self.assertNotEqual(control2, t2)
+    #         except Exception as e:
+    #             raise RuntimeError("Failed on " + module + "." + op) from e
+
+    #         g.replay()
+
+    #         try:
+    #             self.assertEqual(control1, t1)
+    #             self.assertEqual(control2, t2)
+    #         except Exception as e:
+    #             raise RuntimeError("Failed on " + module + "." + op) from e
+
+    #         torch.cuda.synchronize()
+
+    #     for op_with_args in torch_with_args:
+    #         run("torch", *op_with_args)
+
+    #     # Adds an empty dict for kwargs, which none of the Tensor methods use
+    #     for meth_with_args in tensor_with_args:
+    #         run("Tensor", *(meth_with_args + {}))
+
+
 if __name__ == '__main__':
     run_tests()

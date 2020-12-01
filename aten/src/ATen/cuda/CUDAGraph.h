@@ -15,8 +15,10 @@ struct TORCH_CUDA_API CUDAGraph {
   at::Tensor generator_callback(DeviceIndex);
 
   protected:
+  #if CUDA_VERSION >= 11000
   cudaGraph_t graph_ = NULL;
   cudaGraphExec_t graph_exec_ = NULL;
+  #endif
   bool has_graph_ = false;
   bool has_graph_exec_ = false;
   std::vector<std::tuple<DeviceIndex, at::Tensor>> used_rng_;
