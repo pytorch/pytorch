@@ -249,10 +249,10 @@ NvrtcFunction nvrtcCompile(
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
-  int major, minor;
+  int major = 0, minor = 0;
   getMajorMinor(prop, major, minor);
 
-  nvrtcProgram program;
+  nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
     FUSER_PERF_SCOPE("nvrtcCreateProgram");
