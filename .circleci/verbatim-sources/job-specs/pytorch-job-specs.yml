@@ -336,9 +336,6 @@ jobs:
               if [[ "${CUDA_VERSION}" != "10" || "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
                 .circleci/scripts/windows_cuda_install.sh
               fi
-              if [[ "${CUDA_VERSION}" != "10" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
-                .circleci/scripts/driver_update.bat
-              fi
             fi
       - run:
           name: Install Cudnn

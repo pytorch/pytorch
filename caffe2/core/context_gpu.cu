@@ -527,7 +527,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+        return {ptr, ptr, &Delete, at::Device(Device::Unchecked::UNCHECKED, CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
         if (nbytes != 0) {
           CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
@@ -538,7 +538,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+        return {ptr, ptr, &Delete, at::Device(Device::Unchecked::UNCHECKED, CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::THC:
         {
           // The reason we have this stream guard here is to preserve
@@ -563,7 +563,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           cuda::CUDAStreamGuard g(
             Stream(
               Stream::DEFAULT,
-              Device::cuda_unchecked(CaffeCudaGetDevice())
+              Device(Device::Unchecked::UNCHECKED, kCUDA, CaffeCudaGetDevice())
             ));
           ptr = cuda::CUDACachingAllocator::raw_alloc(nbytes);
         }
@@ -571,9 +571,9 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+        return {ptr, ptr, &Delete, at::Device(Device::Unchecked::UNCHECKED, CUDA, CaffeCudaGetDevice())};
     }
-    return {nullptr, nullptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
+    return {nullptr, nullptr, &Delete, at::Device(Device::Unchecked::UNCHECKED, CUDA, CaffeCudaGetDevice())};
   }
 
   at::DeleterFnPtr raw_deleter() const override {

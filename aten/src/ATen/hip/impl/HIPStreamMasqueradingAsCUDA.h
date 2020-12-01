@@ -25,7 +25,7 @@ public:
         HIPStream(
           Stream(
             Stream::UNSAFE,
-            Device::hip_unchecked(stream.device_index()),
+            Device(Device::Unchecked::UNCHECKED, DeviceType::HIP, stream.device_index()),
             stream.id())
         )
       ) {}
@@ -52,7 +52,7 @@ public:
 
   Device device() const {
     // Unsafely coerce HIP device into CUDA device
-    return Device::cuda_unchecked(stream_.device_index());
+    return Device(Device::Unchecked::UNCHECKED, kCUDA, stream_.device_index());
   }
 
   StreamId id() const        { return stream_.id(); }

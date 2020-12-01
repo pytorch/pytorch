@@ -10,7 +10,7 @@ inline bool check_device(ArrayRef<Tensor> ts) {
   if (ts.empty()) {
     return true;
   }
-  Device curDevice = Device::cuda_unchecked(current_device());
+  Device curDevice = Device(Device::Unchecked::UNCHECKED, kCUDA, current_device());
   for (const Tensor& t : ts) {
     if (t.device() != curDevice) return false;
   }

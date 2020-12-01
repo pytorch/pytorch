@@ -15,7 +15,7 @@ namespace c10 {
 /// A DeviceIndex is not independently meaningful without knowing
 /// the DeviceType it is associated; try to use Device rather than
 /// DeviceIndex directly.
-using DeviceIndex = int16_t;
+using DeviceIndex = int8_t;
 
 /// Represents a a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
@@ -30,6 +30,8 @@ using DeviceIndex = int16_t;
 struct C10_API Device final {
   using Type = DeviceType;
 
+  enum Unchecked { UNCHECKED };
+
   /// Constructs a new `Device` from a `DeviceType` and a device
   /// index.
   /// Also performs validation
@@ -38,24 +40,17 @@ struct C10_API Device final {
     validate();
   }
 
-  /// Note: no validation is required in this constructor, since the DeviceIndex
-  /// is set to -1.
-  /* implicit */ Device(DeviceType type) : type_(type), index_(-1) {}
-
-  /// Device specific constructors
-  /// They don't require validating the corresponding DeviceType/DeviceIndex
-  /// combination and are therefore slightly faster.
-
-  static Device hip_unchecked(DeviceIndex index) {
-    Device device(kHIP);
-    device.index_ = index;
-    return device;
+  /// Does not perform validation
+  /// This is useful because the Device constructor is called very frequently
+  /// and we usually know beforehand that the device is already valid
+  /* implicit */ Device(Unchecked, DeviceType type, DeviceIndex index)
+      : type_(type), index_(index) {
   }
 
-  static Device cuda_unchecked(DeviceIndex index) {
-    Device device(kCUDA);
-    device.index_ = index;
-    return device;
+  /// Does not perform validation
+  /// This is useful for Devices that do not use a DeviceIndex (e.g. cpu)
+  /* implicit */ Device(DeviceType type)
+      : type_(type), index_(-1) {
   }
 
   /// Constructs a `Device` from a string description, for convenience.
@@ -115,9 +110,9 @@ struct C10_API Device final {
   DeviceIndex index_;
   void validate() {
     TORCH_CHECK(index_ == -1 || index_ >= 0,
-        "Device index must be -1 or non-negative, got ", index_);
+        "Device index must be -1 or non-negative, got ", (int)index_);
     TORCH_CHECK(!is_cpu() || index_ <= 0,
-        "CPU device index must be -1 or zero, got ", index_);
+        "CPU device index must be -1 or zero, got ", (int)index_);
   }
 };
 
@@ -133,8 +128,8 @@ struct hash<c10::Device> {
   size_t operator()(c10::Device d) const noexcept {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(c10::DeviceType) == 2, "DeviceType is not 16-bit");
-    static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+    static_assert(sizeof(c10::DeviceType) == 1, "DeviceType is not 8-bit");
+    static_assert(sizeof(c10::DeviceIndex) == 1, "DeviceIndex is not 8-bit");
     // Note [Hazard when concatenating signed integers]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // We must first convert to a same-sized unsigned type, before promoting to
@@ -145,8 +140,8 @@ struct hash<c10::Device> {
     // Technically, by C/C++ integer promotion rules, we only need one of the
     // uint32_t casts to the result type, but we put in both for explicitness's sake.
     uint32_t bits =
-        static_cast<uint32_t>(static_cast<uint16_t>(d.type())) << 16
-      | static_cast<uint32_t>(static_cast<uint16_t>(d.index()));
+        static_cast<uint32_t>(static_cast<uint8_t>(d.type())) << 16
+      | static_cast<uint32_t>(static_cast<uint8_t>(d.index()));
     return std::hash<uint32_t>{}(bits);
   }
 };

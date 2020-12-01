@@ -101,12 +101,14 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, const int64_t squash_dim) {
+TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims) {
   declare_static_shape(shape);
   if (!static_shape_->size()) return *this;
-  TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
-              "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
-  (*static_shape_)[squash_dim] = 1;
+  for (const auto& squash_dim : squash_dims) {
+    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
+                "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
+    (*static_shape_)[squash_dim] = 1;
+  }
   return *this;
 }
 

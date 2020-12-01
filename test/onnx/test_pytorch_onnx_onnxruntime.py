@@ -123,7 +123,7 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     use_new_jit_passes = False  # For testing main code-path
-    onnx_shape_inference = False
+    onnx_shape_inference = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -930,6 +930,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
+    @unittest.skip("If operator rank mismatch between outputs of two branches.")
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
@@ -2349,6 +2350,22 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(GatherModel(), input=(input, indices))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_gather_float_index(self):
+        class GatherFloatIndexModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, mask):
+                seq_length, batch_size = mask.shape
+                result = input[0][0][0]
+                for i in torch.arange(2, seq_length):
+                    result = input[0][i][0]
+                return result
+
+        model = GatherFloatIndexModel()
+        x = torch.randint(0, 5, (8, 8, 17), dtype=torch.long)
+        y = torch.ones(8, 1, dtype=torch.uint8)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
             def forward(self, input):
@@ -3103,6 +3120,16 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_nonzero(self):
+        class NonzeroModel(torch.nn.Module):
+            def forward(self, x):
+                return x.nonzero(), x.nonzero(as_tuple=True)
+
+        x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
+        self.run_test(NonzeroModel(), (x,))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
@@ -3456,6 +3483,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(List(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
     def test_list_pass(self):
         class Slice(torch.nn.Module):
             def forward(self, x, y):
@@ -3665,7 +3693,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
-                return x.size(0) * 2 * x
+                return x.size(0) * 2 * x, 2 - x
 
         x = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ArithmeticModel(), x)

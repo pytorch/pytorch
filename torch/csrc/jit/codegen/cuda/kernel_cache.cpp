@@ -378,7 +378,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
         // This means we have not found a previously generated kernel that's
         // compatible with the new reduction params. We need to finish codegen.
         CompileOptions options;
-        options.device = c10::Device::cuda_unchecked(device_index);
+        options.device = c10::Device(c10::Device::Unchecked::UNCHECKED, c10::kCUDA, device_index);
         fusion_executor->compileFusion(&fusion, options);
       }
       // record new short cut to `FusionExecutor`
@@ -390,7 +390,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
         pw_fusion_executor_cache_[device_index] =
             std::make_unique<FusionExecutor>();
         CompileOptions options;
-        options.device = c10::Device::cuda_unchecked(device_index);
+        options.device = c10::Device(c10::Device::Unchecked::UNCHECKED, c10::kCUDA, device_index);
         // no need to copy fusion_, as we are not generating more than 1 kernel
         // for PW.
         scheduleFusion(fusion_.get(), inputs);
@@ -553,7 +553,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
         // TODO: I think merge cannot handle broadcast - Go verify it later;
         // TODO: Since we are only handling permutation here, we should just
         //       merge the stride_index_;
-        acc_type = acc_type->merge(input_type);
+        acc_type = acc_type->merge(*input_type);
       } else {
         acc_type = input_type;
       }

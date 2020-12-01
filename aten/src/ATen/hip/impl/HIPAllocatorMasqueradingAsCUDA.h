@@ -17,7 +17,7 @@ public:
     : allocator_(allocator) {}
   DataPtr allocate(size_t size) const override {
     DataPtr r = allocator_->allocate(size);
-    r.unsafe_set_device(Device::cuda_unchecked(r.device().index()));
+    r.unsafe_set_device(Device(Device::Unchecked::UNCHECKED, kCUDA, r.device().index()));
     return r;
   }
   DeleterFnPtr raw_deleter() const override {
