@@ -1825,7 +1825,7 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, out)
             self.assertEqual(x, out)
 
-        batches = [(), (3, ), (2, 3)]
+        batches = [(), (0, ), (3, ), (2, 3)]
         ns = [0, 5, 32]
         nrhs = [(), (1, ), (5, )]
         for n, batch, rhs in itertools.product(ns, batches, nrhs):
@@ -1896,7 +1896,7 @@ class TestLinalg(TestCase):
     def test_solve_autograd(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        batches = [(), (2, )]
+        batches = [(), (0, ), (2, )]
         ns = [0, 5]
         nrhs = [(), (1, ), (3, )]
         for n, batch, rhs in itertools.product(ns, batches, nrhs):

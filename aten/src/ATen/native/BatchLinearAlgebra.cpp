@@ -371,9 +371,9 @@ static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
-  auto lda = std::max(int64_t{1}, n);
+  auto lda = std::max<int64_t>(1, n);
 
-  auto ipiv = at::empty({n}, b.options().dtype(kInt));
+  auto ipiv = at::empty({lda}, b.options().dtype(kInt));
   auto ipiv_data = ipiv.data_ptr<int>();
   auto infos_data = infos.data_ptr<int>();
 
@@ -475,7 +475,11 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
 
   result.copy_(other_broadcasted);
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
-  at::native::resize_output(infos, {batchCount(input_broadcasted)});
+  at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input_broadcasted))});
+  // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
+  if (input.numel() == 0) {
+    infos.fill_(0);
+  }
   result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
 
   // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
