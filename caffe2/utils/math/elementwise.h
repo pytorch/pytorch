@@ -12,6 +12,8 @@ CAFFE2_API void Exp(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
 CAFFE2_API void Log(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
+CAFFE2_API void Log1p(int N, const T* X, T* Y, Context* context);
+template <typename T, class Context>
 CAFFE2_API void Sin(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
 CAFFE2_API void Asin(int N, const T* X, T* Y, Context* context);
