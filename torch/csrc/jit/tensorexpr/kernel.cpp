@@ -50,6 +50,15 @@ bool fallbackEnforced() {
   return false;
 }
 
+bool dontUseLLVMFlag() {
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
+  if (!enable_c_str) {
+    return false;
+  }
+  return std::string(enable_c_str) == "1";
+}
+
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
 }
@@ -1535,7 +1544,7 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
     backendType = kBlockCodeGen;
   } else if (device.type() == at::kCPU) {
 #ifdef TORCH_ENABLE_LLVM
-    backendType = kLLVMCodeGen;
+    backendType = dontUseLLVMFlag() ? kSimpleIREval : kLLVMCodeGen;
 #else
     backendType = kSimpleIREval;
 #endif
