@@ -149,13 +149,8 @@ Tensor _cudnn_convolution_v8(
       .setOperationGraph(opGraph)
       .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
       .build();
-  // auto fallback = cudnn_frontend::EngineFallbackListBuilder()
-  //     .setOperationGraph(opGraph)
-  //     .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-  //     .build();
 
   auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-  // auto &fallback_list = fallback.getFallbackList();
 
   std::vector<cudnnBackendDescriptor_t> filtered_configs;
   filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
