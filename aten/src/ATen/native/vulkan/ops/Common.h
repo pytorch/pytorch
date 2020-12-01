@@ -35,6 +35,10 @@ struct Layout final {
   };
 };
 
+struct ConvPrepackLimits final {
+  static constexpr int64_t maxStackDepth = 2048*4;
+};
+
 } // namespace ops
 } // namespace vulkan
 } // namespace native

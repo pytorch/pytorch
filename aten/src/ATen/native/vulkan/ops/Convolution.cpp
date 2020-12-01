@@ -71,7 +71,7 @@ vTensor pack_weights(
   const int64_t stack_depth =
       4 * api::utils::align_up(src_filter[Layout::Filter::input], INT64_C(4));
   const int64_t max_stacks_per_tower =
-      at::native::vulkan::api::MAX_STACK_DEPTH / stack_depth;
+      ConvPrepackLimits::maxStackDepth / stack_depth;
   const int64_t num_towers = div_up(num_stacks, max_stacks_per_tower);
   int64_t stacks_per_tower = num_stacks;
   if (num_towers > 1) {
@@ -108,37 +108,33 @@ vTensor pack_weights(
   const int64_t dst_block_sz =
       dst_kernel_sz * dst_filter[Layout::Filter::input];
 
+  TORCH_INTERNAL_ASSERT(src_kernel_sz*num_towers == dst_kernel_sz, "Internal error!");
+
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t i_tower = 0; i_tower < num_towers; ++i_tower) {
-    const float* const src_tower_ptr =
-        src_weight_ptr + (i_tower * stacks_per_tower * 4) * src_block_sz;
-    for (int64_t src_oc = 0; src_oc < (stacks_per_tower * 4); ++src_oc) {
-      if (src_oc + (i_tower*stacks_per_tower*4) >= src_filter[Layout::Filter::output]) {
-        break;
-      }
-      /* Source */
-      const float* const src_weight_oc_ptr =
-          src_tower_ptr + src_oc * src_block_sz;
+  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+    const int64_t i_tower = src_oc / (stacks_per_tower * 4);
+    /* Source */
+    const float* const src_weight_oc_ptr =
+        src_weight_ptr + src_oc * src_block_sz;
 
-      /* Destination */
-      const int64_t dst_oc = src_oc / 4;
-      const int64_t dst_oc_offset = src_oc % 4;
+    /* Destination */
+    const int64_t local_oc = src_oc % (stacks_per_tower * 4);
+    const int64_t dst_oc = local_oc / 4;
+    const int64_t dst_oc_offset = local_oc % 4;
 
-      float* const dst_weight_oc_ptr = dst_weight_ptr + dst_oc * dst_block_sz +
-          dst_oc_offset * dst_kernel_sz;
+    float* const dst_weight_oc_ptr = dst_weight_ptr + dst_oc * dst_block_sz +
+        dst_oc_offset * dst_kernel_sz;
 
-      for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input];
-           ++src_ic) {
-        const int64_t dst_ic = 4 * src_ic;
+    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+      const int64_t dst_ic = 4 * src_ic;
 
-        memcpy(
-            dst_weight_oc_ptr + dst_ic * dst_kernel_sz +
-                (i_tower * src_kernel_sz),
-            src_weight_oc_ptr + src_ic * src_kernel_sz,
-            sizeof(float) * src_kernel_sz);
-      }
+      memcpy(
+          dst_weight_oc_ptr + dst_ic * dst_kernel_sz +
+              (i_tower * src_kernel_sz),
+          src_weight_oc_ptr + src_ic * src_kernel_sz,
+          sizeof(float) * src_kernel_sz);
     }
   }
 
