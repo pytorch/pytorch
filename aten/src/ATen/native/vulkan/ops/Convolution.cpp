@@ -107,7 +107,6 @@ vTensor pack_weights(
   const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
   const int64_t dst_block_sz =
       dst_kernel_sz * dst_filter[Layout::Filter::input];
-  // TORCH_INTERNAL_ASSERT(src_kernel_sz == dst_kernel_sz, "Internal error!");
 
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
@@ -116,6 +115,9 @@ vTensor pack_weights(
     const float* const src_tower_ptr =
         src_weight_ptr + (i_tower * stacks_per_tower * 4) * src_block_sz;
     for (int64_t src_oc = 0; src_oc < (stacks_per_tower * 4); ++src_oc) {
+      if (src_oc + (i_tower*stacks_per_tower*4) >= src_filter[Layout::Filter::output]) {
+        break;
+      }
       /* Source */
       const float* const src_weight_oc_ptr =
           src_tower_ptr + src_oc * src_block_sz;
