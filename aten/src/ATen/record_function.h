@@ -321,8 +321,8 @@ class TORCH_API RecordFunctionCallback {
   }
 
   RecordFunctionCallback& setShouldRun(
-      std::function<bool(const RecordFunctionCallback&)> should_run) {
-    should_run_ = std::move(should_run);
+      bool(*should_run)(const RecordFunctionCallback&)) {
+    should_run_ = should_run;
     return *this;
   }
 
@@ -356,7 +356,7 @@ class TORCH_API RecordFunctionCallback {
  private:
   std::function<std::unique_ptr<ObserverContext>(const RecordFunction&)> start_;
   std::function<void(const RecordFunction&, ObserverContext*)> end_;
-  std::function<bool(const RecordFunctionCallback&)> should_run_;
+  bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
   bool needs_inputs_ = false;
   bool needs_ids_ = false;
   double sampling_prob_ = 1.0;
