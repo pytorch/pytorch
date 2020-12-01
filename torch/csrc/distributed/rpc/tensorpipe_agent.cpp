@@ -79,6 +79,10 @@ constexpr int64_t kMultiplexedUvChannelPriority = 100;
 // The basic channel reuses a transport as a channel, and is thus our fallback.
 constexpr int64_t kBasicChannelPriority = 0;
 
+#if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
+constexpr int64_t kCudaIpcChannelPriority = 300;
+#endif
+
 std::unique_ptr<TransportRegistration> makeUvTransport() {
   auto context = std::make_shared<tensorpipe::transport::uv::Context>();
   std::string address = TensorPipeAgent::guessUvAddress(*context);
@@ -179,8 +183,6 @@ C10_REGISTER_CREATOR(
     makeMultiplexedUvChannel);
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-
-constexpr int64_t kCudaIpcChannelPriority = 300;
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
   auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
@@ -311,10 +313,10 @@ void TensorPipeAgent::startImpl() {
         priority, std::move(key), std::move(reg->transport));
   }
 
-  auto registerChannel = [this](
-      std::vector<std::string>&& keys,
-      const std::function<void(int64_t, std::string&&)>& cb) {
-    for (auto& key : keys) {
+  auto registerChannel = [this](const auto& registry) {
+    // The registry argument is either TensorPipeCpuChannelRegistry or
+    // TensorPipeCudaChannelRegistry.
+    for (auto& key : registry->Keys()) {
       int64_t priority = -1;
       if (opts_.channels.has_value()) {
         auto iter =
@@ -326,37 +328,24 @@ void TensorPipeAgent::startImpl() {
         // a channel that comes before another receives a higher priority.
         priority = opts_.channels->size() - 1 - (iter - opts_.channels->begin());
       }
-      cb(priority, std::move(key));
+
+      // The reg var is either a std::unique_ptr<CpuChannelRegistration> or a
+      // std::unique_ptr<CudaChannelRegistration>, depending on the type of the
+      // registry.
+      auto reg = registry->Create(key);
+      if (priority == -1) {
+        priority = reg->priority;
+      }
+      context_->registerChannel(
+        priority, std::move(key), std::move(reg->channel));
     }
   };
 
-  registerChannel(
-      TensorPipeCpuChannelRegistry()->Keys(),
-      [this](int64_t priority, std::string&& key) {
-        std::unique_ptr<CpuChannelRegistration> reg =
-            TensorPipeCpuChannelRegistry()->Create(key);
-        if (priority == -1) {
-          priority = reg->priority;
-        }
-        context_->registerChannel(
-            priority, std::move(key), std::move(reg->channel));
-      }
-  );
+  registerChannel(TensorPipeCpuChannelRegistry());
 
 #ifdef USE_CUDA_NOT_ROCM
 
-  registerChannel(
-      TensorPipeCudaChannelRegistry()->Keys(),
-      [this](int64_t priority, std::string&& key) {
-        std::unique_ptr<CudaChannelRegistration> reg =
-            TensorPipeCudaChannelRegistry()->Create(key);
-        if (priority == -1) {
-          priority = reg->priority;
-        }
-        context_->registerChannel(
-            priority, std::move(key), std::move(reg->channel));
-      }
-  );
+  registerChannel(TensorPipeCudaChannelRegistry());
 
 #endif
 

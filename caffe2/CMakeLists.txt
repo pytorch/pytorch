@@ -310,9 +310,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
       add_dependencies(tensorpipe_agent torch c10d)
       if(USE_TENSORPIPE)
-        if(USE_CUDA AND (NOT USE_ROCM))
-          target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA_NOT_ROCM)
+        if(USE_CUDA)
+          target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
         endif()
+
+        if(USE_ROCM)
+          target_compile_definitions(torch_hip PRIVATE
+            USE_ROCM
+            __HIP_PLATFORM_HCC__
+          )
+        endif()
+
         target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
         target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
         add_dependencies(tensorpipe_agent tensorpipe)
