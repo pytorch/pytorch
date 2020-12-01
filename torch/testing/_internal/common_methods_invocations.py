@@ -575,6 +575,7 @@ if TEST_SCIPY:
                        dtypes=all_types_and(torch.bool),
                        dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       assert_autodiffed=True,
                        promotes_integers_to_float=True),
         UnaryUfuncInfo('erfc',
                        ref=scipy.special.erfc,
@@ -583,6 +584,7 @@ if TEST_SCIPY:
                        dtypes=all_types_and(torch.bool),
                        dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       assert_autodiffed=True,
                        promotes_integers_to_float=True),
     ]
     op_db = op_db + op_db_scipy_reference
