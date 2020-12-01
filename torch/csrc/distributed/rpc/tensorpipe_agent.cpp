@@ -179,7 +179,7 @@ C10_REGISTER_CREATOR(
     mpt_uv,
     makeMultiplexedUvChannel);
 
-#ifdef TENSORPIPE_HAS_CUDA_IPC_CHANNEL
+#if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
   auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
