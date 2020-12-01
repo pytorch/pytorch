@@ -228,11 +228,11 @@ class {module_name}(torch.nn.Module):
         for module_name, module in self.named_children():
             module_str = _gen_model_repr(module_name, module)
             if module_str is None:
-                nl = '\n'
                 module_file = folder / f'{module_name}.pt'
                 torch.save(module, module_file)
                 blobified_modules.append(module_name)
-                module_str = f"torch.load('{module_file}') # {module.__repr__().replace(nl,' ')}"
+                module_repr = module.__repr__().replace('\r', ' ').replace('\n', ' ')
+                module_str = f"torch.load('{module_file}') # {module_repr}"
             model_str += f"{tab*2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in self._buffers.items():
