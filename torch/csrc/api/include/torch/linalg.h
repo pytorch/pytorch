@@ -141,7 +141,7 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string o
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// Computes a tensor `x` such that `dot(input, x) = other`.
+/// Computes a tensor `x` such that `matmul(input, x) = other`.
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
 inline Tensor solve(const Tensor& input, const Tensor& other) {
