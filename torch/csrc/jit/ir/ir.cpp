@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -1613,23 +1614,21 @@ Node* Graph::createTupleSlice(
     int64_t beg,
     int64_t end,
     int64_t step_size) {
-  auto n = create(prim::TupleSlice, {tup});
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->i_(attr::beg, beg);
-  n->i_(attr::end, end);
-  n->i_(attr::step_size, step_size);
-  std::vector<TypePtr> output_types;
+  //auto n = create(prim::TupleSlice, {tup});
+  auto unpacked_tuple = insertNode(createTupleUnpack(tup));
+  auto outputs = unpacked_tuple->outputs();
+  std::vector<Value*> newValues;
+
   if (step_size > 0) {
     for (auto i = beg; i < end; i += step_size) {
-      output_types.push_back(tuple_type->elements().at(i));
+      newValues.push_back(outputs[i]);
     }
   } else {
-    for (auto i = end; i > beg; i += step_size) {
-      output_types.push_back(tuple_type->elements().at(i));
+    for (auto i = beg; i > end; i += step_size) {
+      newValues.push_back(outputs[i]);
     }
   }
-  auto tt = TupleType::create(std::move(output_types));
-  n->output()->setType(tt);
+  auto n = createTuple(newValues);
   return n;
 }
 

@@ -3858,12 +3858,7 @@ struct to_ir {
       }
     }
 
-    if (step_size > 127 || step_size < -127) {
-      throw ErrorReport(loc)
-          << "tuple slicing step size can only be between [-127, 127]";
-    }
-
-    int64_t beg;
+    int64_t beg = 0;
     if (beg_val) {
       beg = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
@@ -3872,7 +3867,7 @@ struct to_ir {
       beg = step_size > 0 ? (int64_t)0 : tuple_len;
     }
 
-    int64_t end;
+    int64_t end = 0;
     if (end_val) {
       end = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
@@ -3887,7 +3882,7 @@ struct to_ir {
 
     return graph
         ->insertNode(graph->createTupleSlice(
-            tuple_val.value(*graph), beg, end, step_size))
+          tuple_val.value(*graph), beg, end, step_size))
         ->output();
   }
 
