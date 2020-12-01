@@ -1,15 +1,13 @@
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
 
-std::deque<std::string> names_;
-
-// findSubModuleAttr function chases getAttr chains to locate the submodules.
-// For example:
-// module M {
+// findSubModuleAttr function chases getAttr chains backwards to locate the
+// submodules. For example: module M {
 //   attributes {
 //     A = <SubModule at ...>
 //   }
@@ -20,23 +18,29 @@ std::deque<std::string> names_;
 //   ...
 //   %weight = prim::GetAttr[name="scale"](%B)
 //   ...
-void findSubModuleAttr(
+
+std::deque<std::string> findSubModuleAttr(
     Value* input,
     std::string& name,
     Module& attrModule,
     std::shared_ptr<Graph>& graph) {
   Node* node = input->node();
-  names_.clear();
-  while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
+  std::deque<std::string> moduleNames;
+
+  // Loop starts from inner submodule and follows the chain until reaches the
+  // top module.
+  while (node->outputs().at(0)->type() != graph->inputs().at(0)->type()) {
     if (node->kind() == prim::GetAttr) {
-      names_.push_front(node->s(attr::name));
+      moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
     }
   }
 
-  for (auto& moduleName : names_) {
+  // Assign the inner module to attrModule.
+  for (auto& moduleName : moduleNames) {
     attrModule = attrModule.attr(moduleName).toModule();
   }
+  return moduleNames;
 }
 
 Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
@@ -56,7 +60,7 @@ Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
 
 std::vector<IValue> getParamAttributes(
     std::shared_ptr<Graph>& graph,
-    Module module_,
+    const Module& module_,
     Function* function_) {
   std::vector<IValue> attrValues;
   auto isEval = !module_.hasattr("training") || !module_.is_training();
@@ -76,56 +80,78 @@ std::vector<IValue> getParamAttributes(
       for (Block* sub_block : n->blocks()) {
         blocks.emplace_back(sub_block);
       }
-      if (n->kind() == prim::SetAttr) {
-        if (!(n->outputs().size())) {
-          n->destroy();
-        }
+      if (n->kind() == prim::SetAttr &&
+          n->s(attr::name) == "num_batches_tracked") {
+        n->destroy();
       } else if (n->kind() == prim::GetAttr) {
+        for (auto use : n->output()->uses()) {
+          if (use.user->kind() == prim::PythonOp)
+            throw ErrorReport(n->sourceRange())
+                << "Couldn't export Python method.";
+        }
+
         auto name = n->s(attr::name);
         auto attrModule = module_;
         auto input = n->inputs()[0];
 
-        findSubModuleAttr(input, name, attrModule, graph);
-
-        TORCH_INTERNAL_ASSERT(attrModule.hasattr(name));
+        auto moduleNames = findSubModuleAttr(input, name, attrModule, graph);
+        if (!attrModule.hasattr(name)) {
+          continue;
+        }
         Value* paramConst = nullptr;
 
         auto attr = attrModule.attr(name);
 
-        std::string fullName("self_");
-        for (auto& name : names_) {
-          fullName += name + '_';
+        std::string fullName("");
+        for (auto& name : moduleNames) {
+          fullName += name + '.';
         }
         fullName += name;
 
         auto type = attrModule.type();
         auto slot = *type->findAttributeSlot(name);
 
-        if (type->is_parameter(slot) || type->is_buffer(slot)) {
-          if (type->is_parameter(slot) || type->is_buffer(slot)) {
-            if (attr.isTensor()) {
-              TORCH_INTERNAL_ASSERT(attr.isTensor());
-              auto tensor_ = attr.toTensor();
-              if (isEval && tensor_.requires_grad()) {
-                tensor_ = tensor_.detach();
-                tensor_.set_requires_grad(false);
-                attr = IValue(tensor_);
-              }
-              attrValues.push_back(attr.toTensor());
-              paramConst = addParamAsArgument(function_, fullName, attr);
-            } else if (attr.isNone()) {
-              auto attrVal = tryInsertConstant(*graph, attr);
-              paramConst = *attrVal;
+        if (type->is_parameter(slot) || type->is_buffer(slot) ||
+            (attr.isObject() && !attr.toObjectRef().type()->is_module()) ||
+            name == "training") {
+          if (attr.isTensor()) {
+            TORCH_INTERNAL_ASSERT(attr.isTensor());
+            auto tensor_ = attr.toTensor();
+            if (isEval && tensor_.requires_grad()) {
+              tensor_ = tensor_.detach();
+              tensor_.set_requires_grad(false);
+              attr = IValue(tensor_);
             }
-            n->output()->replaceAllUsesWith(paramConst);
-            n->removeAllInputs();
-
-            GRAPH_UPDATE(
-                "Folding GetAttr %",
-                n->outputs()[0]->debugName(),
-                " with ",
-                paramConst->debugName());
+            attrValues.emplace_back(attr.toTensor());
+            paramConst = addParamAsArgument(function_, fullName, attr);
+          } else if (
+              attr.isObject() && !attr.toObjectRef().type()->is_module()) {
+            // Only below registered torch classes are supported.
+            auto type = attr.type();
+            TORCH_CHECK(
+                (type ==
+                 getCustomClass(
+                     "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
+                    (type ==
+                     getCustomClass(
+                         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) ||
+                    (type ==
+                     getCustomClass(
+                         "__torch__.torch.classes.quantized.LinearPackedParamsBase")),
+                "Unknown type ",
+                type->repr_str(),
+                " encountered in handling model params. This type is not supported in ONNX export.");
+            attrValues.emplace_back(
+                script::Object(attr.toObject()).run_method("__getstate__"));
+            paramConst = addParamAsArgument(function_, fullName, attr);
+          } else if (attr.isNone() || name == "training") {
+            auto attrVal = tryInsertConstant(*graph, attr);
+            paramConst = *attrVal;
           }
+          n->output()->replaceAllUsesWith(paramConst);
+          n->removeAllInputs();
+
+          GRAPH_UPDATE("Folding GetAttr %", n->outputs()[0]->debugName());
         }
       }
     }
@@ -137,20 +163,21 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
     const Module& module) {
   Module moduleClone = module.clone(true);
   Method method = moduleClone.get_method("forward");
-  std::unordered_set<Function*> preservedMethods_;
-  preservedMethods_.insert(&method.function());
-
+  auto function = &method.function();
   std::vector<IValue> modelParams;
-  for (auto function : preservedMethods_) {
-    GRAPH_DEBUG("List attributes for function: " + function->name());
-    auto graph = function->graph();
-    auto attributes = getParamAttributes(graph, moduleClone, function);
-    for (auto attr_ : attributes) {
-      modelParams.push_back(attr_);
-    }
-    GRAPH_DEBUG("Cleaning up module");
-    EliminateDeadCode(graph->block());
+
+  GRAPH_DEBUG("List attributes for function: " + function->name());
+  auto graph = function->graph();
+  // Add model_parameters and model_buffers as model inputs. Order is based on
+  // the appearance in the graph.
+  auto attributes = getParamAttributes(graph, moduleClone, function);
+
+  modelParams.reserve(attributes.size());
+  for (auto& attr_ : attributes) {
+    modelParams.push_back(attr_);
   }
+  GRAPH_DEBUG("Cleaning up module");
+  EliminateDeadCode(graph->block());
 
   return std::make_pair(moduleClone, modelParams);
 }
