@@ -58,8 +58,6 @@ class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
 
   void handle(const Bool*) override;
   void handle(const Double*) override;
-  void handle(const Float*) override;
-  void handle(const Half*) override;
   void handle(const Int*) override;
   void handle(const NamedScalar*) override;
 

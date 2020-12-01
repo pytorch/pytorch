@@ -170,7 +170,7 @@ __device__ constexpr int alignBufferSize(const int buffer, const int size) {
 __device__ double clamp(const double x, const double minv, const double maxv) {
   return x < minv ? minv : (x > maxv ? maxv : x);
 }
-__device__ float clamp(const float x, const float minv, const float maxv) {
+__device__ float clamp(const float x, const double minv, const double maxv) {
   return x < minv ? minv : (x > maxv ? maxv : x);
 }
 __device__ double frac(const double x) {
@@ -216,7 +216,7 @@ __device__ float sigmoid(const float x) {
 __device__ double threshold(const double x, const double t, const double v) {
   return x <= t ? v : x;
 }
-__device__ float threshold(const float x, const float t, const float v) {
+__device__ float threshold(const float x, const double t, const double v) {
   return x <= t ? v : x;
 }
 __device__ double where(const bool c, const double a, const double b) {

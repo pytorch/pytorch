@@ -35,8 +35,6 @@ class Expr;
 class NamedScalar;
 class Bool;
 class Double;
-class Float;
-class Half;
 class Int;
 class IterDomain;
 class TensorDomain;
@@ -92,12 +90,6 @@ class TORCH_CUDA_API IrVisitor : public PolymorphicBase {
     unhandled(value);
   }
   virtual void visit(const Double* value) {
-    unhandled(value);
-  }
-  virtual void visit(const Float* value) {
-    unhandled(value);
-  }
-  virtual void visit(const Half* value) {
     unhandled(value);
   }
   virtual void visit(const Int* value) {
@@ -383,68 +375,6 @@ class TORCH_CUDA_API Double final : public Val {
 
  private:
   const c10::optional<ScalarType> maybe_value_;
-};
-
-class TORCH_CUDA_API Float final : public Val {
- public:
-  using ScalarType = double;
-
-  explicit Float(Passkey passkey, const c10::optional<ScalarType>& value)
-      : Val(passkey, DataType::Float), maybe_value_(value) {}
-
-  explicit Float(Passkey passkey, const fuser::cuda::Float* node)
-      : Val(passkey, DataType::Float), maybe_value_(node->value()) {
-    setName(node->name());
-  }
-
-  void accept(IrVisitor* visitor) const override {
-    visitor->visit(this);
-  }
-
-  bool isScalar() const override {
-    return true;
-  }
-
-  bool isConst() const override {
-    return maybe_value_.has_value();
-  }
-
-  c10::optional<ScalarType> value() const {
-    return maybe_value_;
-  }
-
- private:
-  const c10::optional<ScalarType> maybe_value_;
-};
-
-class TORCH_CUDA_API Half final : public Val {
- public:
-  explicit Half(Passkey passkey, const c10::optional<float>& value)
-      : Val(passkey, DataType::Half), maybe_value_(value) {}
-
-  explicit Half(Passkey passkey, const fuser::cuda::Half* node)
-      : Val(passkey, DataType::Half), maybe_value_(node->value()) {
-    setName(node->name());
-  }
-
-  void accept(IrVisitor* visitor) const override {
-    visitor->visit(this);
-  }
-
-  bool isScalar() const override {
-    return true;
-  }
-
-  bool isConst() const override {
-    return maybe_value_.has_value();
-  }
-
-  c10::optional<float> value() const {
-    return maybe_value_;
-  }
-
- private:
-  const c10::optional<float> maybe_value_;
 };
 
 class TORCH_CUDA_API Int final : public Val {

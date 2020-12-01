@@ -56,7 +56,7 @@ struct ArgAbstract {
 // Explicitly for philox seed, not a supported type by any other mechanism
 struct ULongArg : public ArgAbstract {
   uint64_t val_;
-  ULongArg(uint64_t _val) : val_(_val){};
+  explicit ULongArg(uint64_t _val) : val_(_val){};
   void* arg() {
     return &val_;
   }
@@ -64,7 +64,7 @@ struct ULongArg : public ArgAbstract {
 
 struct LongArg : public ArgAbstract {
   int64_t val_;
-  LongArg(int64_t _val) : val_(_val){};
+  explicit LongArg(int64_t _val) : val_(_val){};
   void* arg() {
     return &val_;
   }
@@ -72,7 +72,15 @@ struct LongArg : public ArgAbstract {
 
 struct DoubleArg : public ArgAbstract {
   double val_;
-  DoubleArg(double _val) : val_(_val){};
+  explicit DoubleArg(double _val) : val_(_val){};
+  void* arg() {
+    return &val_;
+  }
+};
+
+struct BoolArg : public ArgAbstract {
+  bool val_;
+  explicit BoolArg(bool _val) : val_(_val){};
   void* arg() {
     return &val_;
   }

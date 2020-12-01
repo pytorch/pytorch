@@ -70,14 +70,6 @@ void IrCloner::handle(const Double* d) {
   clone_ = new Double(d, this);
 }
 
-void IrCloner::handle(const Float* f) {
-  clone_ = new Float(f, this);
-}
-
-void IrCloner::handle(const Half* h) {
-  clone_ = new Half(h, this);
-}
-
 void IrCloner::handle(const Int* i) {
   clone_ = new Int(i, this);
 }

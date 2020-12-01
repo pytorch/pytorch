@@ -15,7 +15,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-static thread_local Fusion* ACTIVE_FUSION = nullptr;
+static thread_local Fusion* ACTIVE_FUSION = nullptr; // NOLINT
 
 FusionGuard::FusionGuard(Fusion* fusion) {
   prev_fusion = ACTIVE_FUSION;

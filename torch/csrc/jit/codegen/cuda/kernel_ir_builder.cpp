@@ -12,10 +12,6 @@ Val* IrBuilder::newResult(DataType dtype) {
       return create<Bool>(c10::nullopt);
     case DataType::Double:
       return create<Double>(c10::nullopt);
-    case DataType::Float:
-      return create<Float>(c10::nullopt);
-    case DataType::Half:
-      return create<Half>(c10::nullopt);
     case DataType::Int:
       return create<Int>(c10::nullopt);
     default:

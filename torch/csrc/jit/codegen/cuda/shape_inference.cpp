@@ -50,6 +50,7 @@ class NaiveTypePropagator {
       }
       // unary operations that forward meta info:
       case aten::neg:
+      case aten::bitwise_not:
       case aten::abs:
       case aten::log:
       case aten::log10:
@@ -117,7 +118,30 @@ class NaiveTypePropagator {
         node->output()->setType(promoted_type);
         break;
       }
-      // TODO: double check type casting logic for operations commented out.
+      // Type can be int or bool for "and" and "or", if both are bool should be
+      // bool, if both int should be int, otherwise would have errored
+      case aten::__and__:
+      case aten::__or__: {
+        const auto promoted_type = binary_broadcast_type(
+            node->input(0)->type()->cast<TensorType>(),
+            node->input(1)->type()->cast<TensorType>(),
+            node->input(0)->type()->cast<TensorType>()->scalarType() ==
+                    at::ScalarType::Bool
+                ? at::ScalarType::Bool
+                : at::ScalarType::Int);
+        break;
+      }
+      // Real int ops
+      case aten::__xor__:
+      case aten::__lshift__:
+      case aten::__rshift__: {
+        const auto promoted_type = binary_broadcast_type(
+            node->input(0)->type()->cast<TensorType>(),
+            node->input(1)->type()->cast<TensorType>(),
+            at::ScalarType::Int);
+        node->output()->setType(promoted_type);
+        break;
+      }
       case aten::lt:
       case aten::le:
       case aten::gt:

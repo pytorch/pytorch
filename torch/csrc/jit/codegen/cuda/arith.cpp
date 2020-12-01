@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <cfloat>
 
@@ -21,9 +22,8 @@ Val* newScalar(ValType vtype, DataType dtype) {
           return new Bool();
         case DataType::Double:
         case DataType::Float:
-          return new Float();
         case DataType::Half:
-          return new Half();
+          return new Double();
         case DataType::Int:
           return new Int();
         default:
@@ -35,10 +35,11 @@ Val* newScalar(ValType vtype, DataType dtype) {
 
   TORCH_CHECK(
       false,
-      "Was expecting a scalar type, but received ValType: ",
+      "Cannot handle ValType: ",
       vtype,
       " with DataType:",
-      dtype);
+      dtype,
+      " in newScalar.");
 }
 
 TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
@@ -124,31 +125,11 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
   return out_vals;
 }
 
-Val* newOutputVal(const std::vector<Val*>& vals) {
-  ValType out_vtype = vals[0]->getValType().value();
-  DataType out_dtype = vals[0]->getDataType().value();
-
-  for (auto val : vals) {
-    TORCH_CHECK(val->isVal(), "Invalid statement found during promotion.");
-    TORCH_CHECK(
-        val->getDataType().value() != DataType::Null,
-        "Invalid datatype found during prmotion.");
-    out_vtype = promote_type(out_vtype, val->getValType().value());
-    out_dtype = promote_type(out_dtype, val->getDataType().value());
-  }
-
-  if (out_vtype == ValType::TensorView)
-    return newOutputTV(vals, out_dtype);
-
-  return newScalar(out_vtype, out_dtype);
-}
-
 Val* newValLike(Val* val, DataType dtype) {
-  TORCH_CHECK(val->isVal(), "Invalid statement provided to create new value.");
   TORCH_CHECK(
       dtype != DataType::Null, "Invalid datatype provided for new value.");
 
-  ValType vtype = val->getValType().value();
+  const ValType vtype = val->getValType().value();
 
   if (vtype == ValType::TensorView)
     return newOutputTV({val}, dtype);
@@ -184,7 +165,7 @@ TensorView* castOp(DataType dtype, TensorView* v1) {
 // UNARY OPERATIONS
 
 Val* unaryOp(UnaryOpType type, Val* v1) {
-  Val* out = newOutputVal({v1});
+  Val* out = newValLike(v1, v1->getDataType().value());
   new UnaryOp(type, out, v1);
   return out;
 }
@@ -196,6 +177,7 @@ TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
 Val* neg(Val* v) {
   return unaryOp(UnaryOpType::Neg, v);
 }
+
 TensorView* neg(TensorView* v) {
   return unaryOp(UnaryOpType::Neg, v);
 }
@@ -209,11 +191,13 @@ TensorView* arithOpOverloads(Val* (*func)(Val*, Val*), T1* v1, T2* v2) {
   return func(v1->template as<Val>(), v2->template as<Val>())
       ->template as<TensorView>();
 }
+
 template <typename T1, typename T2>
 TensorView* arithOpOverloads(BinaryOpType type, T1* v1, T2* v2) {
   return binaryOp(type, v1->template as<Val>(), v2->template as<Val>())
       ->template as<TensorView>();
 }
+
 template <typename T1, typename T2, typename T3>
 TensorView* arithOpOverloads(
     Val* (*func)(Val*, Val*, Val*),
@@ -227,6 +211,7 @@ TensorView* arithOpOverloads(
              vals[2]->template as<Val>())
       ->template as<TensorView>();
 }
+
 template <typename T1, typename T2, typename T3, typename T4>
 TensorView* arithOpOverloads(
     Val* (*func)(Val*, Val*, Val*, Val*),
@@ -242,28 +227,81 @@ TensorView* arithOpOverloads(
              vals[3]->template as<Val>())
       ->template as<TensorView>();
 }
+
+// Type promotion logic for binary operators
+DataType getOutputType(BinaryOpType op_type, Val* v1, Val* v2) {
+  DataType v1_dtype = v1->getDataType().value();
+  DataType v2_dtype = v2->getDataType().value();
+
+  // If we have a tensor view in one argument but a scalar in the other, don't
+  // type promote, just use the tensorview type
+  if (v1->isA<TensorView>() && !v2->isA<TensorView>()) {
+    v2_dtype = v1_dtype;
+  }
+  if (v2->isA<TensorView>() && !v1->isA<TensorView>()) {
+    v1_dtype = v2_dtype;
+  }
+
+  const bool floating_input =
+      isFloatingPointType(v1_dtype) || isFloatingPointType(v2_dtype);
+
+  const bool integer_input =
+      isIntegralType(v1_dtype) || isIntegralType(v2_dtype);
+
+  const bool all_integer_input =
+      isIntegralType(v1_dtype) && isIntegralType(v2_dtype);
+
+  if (isIntegerOp(op_type) || (alsoBooleanOperator(op_type) && integer_input)) {
+    // If integer op or maybe bool op with integer inputs meaning binary op
+    if (integer_input && all_integer_input) {
+      return promote_type(v1_dtype, v2_dtype);
+    } else if (integer_input && !all_integer_input) {
+      return isIntegralType(v1_dtype) ? v1_dtype : v2_dtype;
+    } else {
+      return DataType::Int;
+    }
+  } else if (isLogicalOp(op_type)) {
+    // If boolean op
+    return DataType::Bool;
+  } else if (alsoBooleanOperator(op_type)) {
+    // If boolean op that can't have floating inputs (& or |)
+    TORCH_CHECK(
+        !floating_input,
+        "Operator ",
+        op_type,
+        " not supported with floating point inputs.");
+    return DataType::Bool;
+  } else {
+    // Otherwise do normal type promotion
+    return promote_type(v1_dtype, v2_dtype);
+  }
+}
+
 } // namespace
 
 TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
+  const auto out_dtype = getOutputType(type, v1, v2);
+  const auto out_vtype =
+      promote_type(v1->getValType().value(), v2->getValType().value());
   auto vals = maybeBroadcast({v1, v2});
-  Val* out = newOutputVal({vals[0], vals[1]});
-  if (is_logical_op(type)) {
-    if (out->getDataType().value() != DataType::Bool)
-      out = newValLike(out, DataType::Bool);
-  } else if (type >= BinaryOpType::Mod) {
-    if (out->getDataType().value() != DataType::Int)
-      out = newValLike(out, DataType::Int);
+  Val* out = nullptr;
+  if (out_vtype == ValType::TensorView) {
+    out = newOutputTV(vals, out_dtype);
+  } else {
+    out = newScalar(out_vtype, out_dtype);
   }
-
   new BinaryOp(type, out, vals[0], vals[1]);
   return out;
 }
+
 TensorView* binaryOp(BinaryOpType type, TensorView* v1, Val* v2) {
   return arithOpOverloads(type, v1, v2);
 }
+
 TensorView* binaryOp(BinaryOpType type, Val* v1, TensorView* v2) {
   return arithOpOverloads(type, v1, v2);
 }
+
 TensorView* binaryOp(BinaryOpType type, TensorView* v1, TensorView* v2) {
   return arithOpOverloads(type, v1, v2);
 }
@@ -281,6 +319,7 @@ TensorView* add(Val* v1, TensorView* v2) {
 TensorView* add(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(add, v1, v2);
 }
+
 // sub
 Val* sub(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Sub, v1, v2);
@@ -294,6 +333,7 @@ TensorView* sub(Val* v1, TensorView* v2) {
 TensorView* sub(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(sub, v1, v2);
 }
+
 // mul
 Val* mul(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mul, v1, v2);
@@ -307,6 +347,7 @@ TensorView* mul(Val* v1, TensorView* v2) {
 TensorView* mul(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(mul, v1, v2);
 }
+
 // div
 Val* div(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Div, v1, v2);
@@ -320,6 +361,7 @@ TensorView* div(Val* v1, TensorView* v2) {
 TensorView* div(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(div, v1, v2);
 }
+
 // mod
 Val* mod(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Mod, v1, v2);
@@ -333,6 +375,7 @@ TensorView* mod(Val* v1, TensorView* v2) {
 TensorView* mod(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(mod, v1, v2);
 }
+
 // lt
 Val* lt(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::LT, v1, v2);
@@ -346,6 +389,7 @@ TensorView* lt(Val* v1, TensorView* v2) {
 TensorView* lt(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(lt, v1, v2);
 }
+
 // eq
 Val* eq(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::Eq, v1, v2);
@@ -359,6 +403,7 @@ TensorView* eq(Val* v1, TensorView* v2) {
 TensorView* eq(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(eq, v1, v2);
 }
+
 // ceilDiv
 Val* ceilDiv(Val* v1, Val* v2) {
   return binaryOp(BinaryOpType::CeilDiv, v1, v2);
@@ -372,6 +417,7 @@ TensorView* ceilDiv(Val* v1, TensorView* v2) {
 TensorView* ceilDiv(TensorView* v1, TensorView* v2) {
   return arithOpOverloads(ceilDiv, v1, v2);
 }
+
 // andOp
 Val* andOp(Val* v1, Val* v2) {
   TORCH_CHECK(
@@ -477,8 +523,16 @@ TensorView* reductionOp(
   }
 
   TensorView* out = newForReduction(tv, uint_axes);
-  if (init->getDataType().value() != tv->getDataType().value())
-    init = castOp(tv->getDataType().value(), init);
+  const auto out_type = out->getDataType().value();
+  const auto init_type = init->getDataType().value();
+  TORCH_CHECK(
+      (isFloatingPointType(out_type) && isFloatingPointType(init_type)) ||
+          (isIntegralType(out_type) && isIntegralType(init_type)) ||
+          (out_type == DataType::Bool && init_type == DataType::Bool),
+      "Types should match for reduction ops but received: ",
+      out_type,
+      " and ",
+      init_type);
   new ReductionOp(reduction_op_type, init, out, tv);
 
   if (keep_dim) {
@@ -498,21 +552,16 @@ TensorView* sum(
     const std::vector<int>& axes,
     bool keep_dim /*=false*/) {
   Val* init = nullptr;
-  switch (v1->getDataType().value()) {
-    case (DataType::Double):
-      init = new Double(0.0);
-      break;
-    case (DataType::Float):
-      init = new Float(0.0);
-      break;
-    case (DataType::Int):
-      init = new Int(0);
-      break;
-    default:
-      TORCH_CHECK(
-          false,
-          "Could not generate a sum op for tensor with type: ",
-          v1->getDataType().value());
+  auto dtype = v1->getDataType().value();
+  if (isFloatingPointType(dtype)) {
+    init = new Double(0.0);
+  } else if (isIntegralType(dtype)) {
+    init = new Int(0);
+  } else {
+    TORCH_CHECK(
+        false,
+        "Could not generate a sum op for tensor with type: ",
+        v1->getDataType().value());
   }
 
   return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim);
@@ -528,7 +577,7 @@ TensorView* max(
       init = new Double(DBL_MIN);
       break;
     case (DataType::Float):
-      init = new Float(FLT_MIN);
+      init = new Double(FLT_MIN);
       break;
     case (DataType::Int):
       init = new Int(INT_MIN);
@@ -553,7 +602,7 @@ TensorView* min(
       init = new Double(DBL_MAX);
       break;
     case (DataType::Float):
-      init = new Float(FLT_MAX);
+      init = new Double(FLT_MAX);
       break;
     case (DataType::Int):
       init = new Int(INT_MAX);
@@ -723,18 +772,28 @@ TensorView* addcmul(TensorView* v1, TensorView* v2, TensorView* v3, Val* v4) {
 }
 
 // TERNARY OPERATIONS
-// where
+// where (c ? v1 : v2)
 Val* where(Val* c, Val* v1, Val* v2) {
   TORCH_CHECK(
       c->getDataType().value() == DataType::Bool,
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
+  // Not actually an add, but need to send a binary op to get output type
+  auto out_dtype = getOutputType(BinaryOpType::Add, v1, v2);
+  auto out_vtype =
+      promote_type(v1->getValType().value(), v2->getValType().value());
   auto vals = maybeBroadcast({c, v1, v2});
-  Val* out = newOutputVal({vals[1], vals[2]});
+  Val* out = nullptr;
+  if (out_vtype == ValType::TensorView) {
+    out = newOutputTV(vals, out_dtype);
+  } else {
+    out = newScalar(out_vtype, out_dtype);
+  }
   new TernaryOp(TernaryOpType::Where, out, vals[0], vals[1], vals[2]);
   return out;
 }
+
 TensorView* where(TensorView* v1, Val* v2, Val* v3) {
   return arithOpOverloads(where, v1, v2, v3);
 }
@@ -760,17 +819,36 @@ TensorView* where(TensorView* v1, TensorView* v2, TensorView* v3) {
 // TERNARY OPERATIONS
 
 Val* threshold(Val* in, Val* thresh, Val* value) {
+  const auto in_type = in->getDataType().value();
+  const auto thresh_type = thresh->getDataType().value();
+  const auto value_type = value->getDataType().value();
+  if (isFloatingPointType(in_type)) {
+    TORCH_CHECK(
+        isFloatingPointType(thresh_type) && isFloatingPointType(value_type),
+        "All input DataType values should match the input type ",
+        in_type,
+        " vs ",
+        thresh_type,
+        " and ",
+        value_type);
+  } else if (isIntegralType(in_type)) {
+    TORCH_CHECK(
+        isIntegralType(thresh_type) && isIntegralType(value_type),
+        "All input DataType values should match the input ",
+        in_type,
+        " vs ",
+        thresh_type,
+        " and ",
+        value_type);
+  }
   TORCH_CHECK(
-      in->getDataType().value() == thresh->getDataType().value() &&
-          in->getDataType().value() == value->getDataType().value(),
-      "All input DataType values should match the input ",
-      in->getDataType().value());
-  TORCH_CHECK(
-      thresh->getValType().value() == ValType::Scalar &&
-          value->getValType().value() == ValType::Scalar,
-      "Thresh and Value values should be Scalars");
+      (thresh->getValType().value() == ValType::Scalar ||
+       thresh->getValType().value() == ValType::NamedScalar) &&
+          (value->getValType().value() == ValType::Scalar ||
+           value->getValType().value() == ValType::NamedScalar),
+      "For Threshold operation: Thresh and Value values should be Scalars.");
 
-  Val* out = newOutputVal({in});
+  Val* out = newValLike(in, in_type);
 
   new TernaryOp(TernaryOpType::Threshold, out, in, thresh, value);
   return out;
@@ -781,17 +859,36 @@ TensorView* threshold(TensorView* in, Val* thresh, Val* value) {
 }
 
 Val* clamp(Val* in, Val* min_val, Val* max_val) {
+  const auto in_type = in->getDataType().value();
+  const auto min_type = min_val->getDataType().value();
+  const auto max_type = max_val->getDataType().value();
+  if (isFloatingPointType(in_type)) {
+    TORCH_CHECK(
+        isFloatingPointType(min_type) && isFloatingPointType(max_type),
+        "All input DataType values should match the input type ",
+        in_type,
+        " vs ",
+        min_type,
+        " and ",
+        max_type);
+  } else if (isIntegralType(in_type)) {
+    TORCH_CHECK(
+        isIntegralType(min_type) && isIntegralType(max_type),
+        "All input DataType values should match the input ",
+        in_type,
+        " vs ",
+        min_type,
+        " and ",
+        max_type);
+  }
   TORCH_CHECK(
-      in->getDataType().value() == min_val->getDataType().value() &&
-          in->getDataType().value() == max_val->getDataType().value(),
-      "All input DataType values should match the input ",
-      in->getDataType().value());
-  TORCH_CHECK(
-      min_val->getValType().value() == ValType::Scalar &&
-          max_val->getValType().value() == ValType::Scalar,
-      "Min and Max values should be Scalars");
+      (min_val->getValType().value() == ValType::Scalar ||
+       min_val->getValType().value() == ValType::NamedScalar) &&
+          (max_val->getValType().value() == ValType::Scalar ||
+           max_val->getValType().value() == ValType::NamedScalar),
+      "For Threshold operation: Thresh and Value values should be Scalars.");
 
-  Val* out = newOutputVal({in});
+  Val* out = newValLike(in, in_type);
 
   new TernaryOp(TernaryOpType::Clamp, out, in, min_val, max_val);
   return out;

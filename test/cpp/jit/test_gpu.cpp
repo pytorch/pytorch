@@ -108,10 +108,10 @@ TEST(NVFuserTest, IrGraphGenerator_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv2 = add(tv0, new Float(3.141));
+  TensorView* tv2 = add(tv0, new Double(3.141));
   TensorView* tv3 = broadcast(tv0, {false, true, false, true});
-  TensorView* tv4 = reductionOp(BinaryOpType::Add, {2}, new Float(0), tv3);
-  TensorView* tv5 = clamp(tv4, new Float(0.f), new Float(1.f));
+  TensorView* tv4 = reductionOp(BinaryOpType::Add, {2}, new Double(0), tv3);
+  TensorView* tv5 = clamp(tv4, new Double(0.f), new Double(1.f));
   TensorView* tv6 = add(tv2, tv2);
 
   // Another checkpoint before adding outputs
@@ -151,14 +151,14 @@ TEST(NVFuserTest, FusionDispatch_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Float* f = new Float{2.f};
+  Double* f = new Double{2.f};
   std::stringstream ss1, ss2, ss3;
   ss1 << f;
   ss2 << static_cast<Val*>(f);
   ss3 << static_cast<Statement*>(f);
   TORCH_CHECK(
       ss1.str().compare(ss2.str()) == 0 && ss1.str().compare(ss3.str()) == 0,
-      "Error with dispatch system where results differ by passing Float* vs Val* vs Statement*.");
+      "Error with dispatch system where results differ by passing Double* vs Val* vs Statement*.");
 }
 
 // Evaluate basic scalar operations with constant values
@@ -235,7 +235,7 @@ TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  TensorView* tv2 = add(tv1, new Float(2.0));
+  TensorView* tv2 = add(tv1, new Double(2.0));
   TensorView* tv3 = add(tv0, tv2);
 
   fusion.addOutput(tv3);
@@ -287,9 +287,9 @@ TEST(NVFuserTest, FusionExprEvalComplex_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(-1.0));
-  TensorView* tv2 = add(tv0, new Float(3.0));
-  TensorView* tv3 = mul(tv0, new Float(2.0));
+  TensorView* tv1 = mul(tv0, new Double(-1.0));
+  TensorView* tv2 = add(tv0, new Double(3.0));
+  TensorView* tv3 = mul(tv0, new Double(2.0));
   TensorView* tv4 = add(tv2, tv1);
   TensorView* tv5 = add(tv4, tv3);
   TensorView* tv6 = add(tv0, tv3);
@@ -343,7 +343,7 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  TensorView* tv2 = add(tv1, new Float(2.0));
+  TensorView* tv2 = add(tv1, new Double(2.0));
   TensorView* tv3 = add(tv0, tv2);
 
   fusion.addOutput(tv3);
@@ -467,7 +467,7 @@ TEST(NVFuserTest, FusionClear_CUDA) {
     fusion.addInput(tv0);
     fusion.addInput(tv1);
 
-    TensorView* tv2 = add(tv1, new Float(2.0));
+    TensorView* tv2 = add(tv1, new Double(2.0));
     TensorView* tv3 = add(tv0, tv2);
 
     fusion.addOutput(tv3);
@@ -498,7 +498,7 @@ TEST(NVFuserTest, FusionClear_CUDA) {
   {
     TensorView* tv0 = makeSymbolicTensor(3);
     TensorView* tv1 = makeSymbolicTensor(3);
-    TensorView* tv2 = add(tv1, new Float(2.0));
+    TensorView* tv2 = add(tv1, new Double(2.0));
     TensorView* tv3 = add(tv0, tv2);
 
     fusion.addInput(tv0);
@@ -541,7 +541,7 @@ TEST(NVFuserTest, FusionCopy_CUDA) {
 
     auto tv0 = makeSymbolicTensor(3);
     auto tv1 = makeSymbolicTensor(3);
-    auto tv2 = add(tv1, new Float(2.0));
+    auto tv2 = add(tv1, new Double(2.0));
     auto tv3 = sub(add(tv0, mul(tv2, tv2)), tv2);
 
     original_fusion.addInput(tv0);
@@ -615,7 +615,7 @@ TEST(NVFuserTest, FusionMove_CUDA) {
 
     auto tv0 = makeSymbolicTensor(3);
     auto tv1 = makeSymbolicTensor(3);
-    auto tv2 = add(tv1, new Float(2.0));
+    auto tv2 = add(tv1, new Double(2.0));
     auto tv3 = sub(add(tv0, mul(tv2, tv2)), tv2);
 
     fusion.addInput(tv0);
@@ -682,22 +682,22 @@ TEST(NVFuserTest, FusionSimpleArith_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Float* f1 = new Float(1.f);
-  Float* f2 = new Float{2.f};
-  Float* f3 = new Float();
+  Double* d1 = new Double(1.f);
+  Double* d2 = new Double{2.f};
+  Double* d3 = new Double();
 
   // Disrupt the fusion to make sure guard works well
   {
     Fusion fusion2;
     FusionGuard fg(&fusion2);
 
-    Float* f1 = new Float(1.f);
-    Float* f2 = new Float(2.f);
-    add(f1, f2);
+    Double* d1 = new Double(1.f);
+    Double* d2 = new Double(2.f);
+    add(d1, d2);
     ss2 << fusion2;
   }
 
-  new BinaryOp(BinaryOpType::Add, f3, f1, f2);
+  new BinaryOp(BinaryOpType::Add, d3, d1, d2);
   ss1 << fusion;
 
   TORCH_CHECK(
@@ -709,18 +709,18 @@ TEST(NVFuserTest, FusionSimpleTypePromote_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Float* f4 = new Float{4.f};
+  Double* d4 = new Double{4.f};
   Int* i1 = new Int{3};
-  auto f5 = add(f4, i1);
+  auto d5 = add(d4, i1);
 
-  TORCH_CHECK(f5->getDataType() == DataType::Float);
+  TORCH_CHECK(d5->getDataType() == DataType::Double);
 }
 
 class ZeroMutator : public OptOutMutator {
  public:
-  Statement* mutate(Float* f) {
+  Statement* mutate(Double* f) {
     if (f->isConst() && *(f->value()) == 1.0)
-      return new Float(0.0);
+      return new Double(0.0);
     return f;
   }
   void mutate(Fusion* f) {
@@ -732,25 +732,25 @@ TEST(NVFuserTest, FusionMutator_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Float* f4 = new Float{1.f};
+  Double* d4 = new Double{1.f};
   Int* i1 = new Int{3};
-  Val* f5 = add(f4, i1);
+  Val* d5 = add(d4, i1);
   ZeroMutator mutator;
   mutator.mutate(&fusion);
-  Val* lhs = static_cast<BinaryOp*>(fusion.origin(f5))->lhs();
+  Val* lhs = static_cast<BinaryOp*>(fusion.origin(d5))->lhs();
   TORCH_CHECK(
       lhs->getValType().value() == ValType::Scalar &&
-      lhs->getDataType().value() == DataType::Float);
-  Float* flhs = static_cast<Float*>(lhs);
+      lhs->getDataType().value() == DataType::Double);
+  Double* dlhs = static_cast<Double*>(lhs);
 
-  TORCH_CHECK(flhs->value().value() == 0.f);
+  TORCH_CHECK(dlhs->value().value() == 0.f);
 }
 
 TEST(NVFuserTest, FusionRegister_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
-  Float* v1 = new Float{1.f};
-  Float* v2 = new Float{2.f};
+  Double* v1 = new Double{1.f};
+  Double* v2 = new Double{2.f};
   Val* v3 = binaryOp(BinaryOpType::Add, v1, v2);
   Val* v4 = binaryOp(BinaryOpType::Add, v1, v2);
   TORCH_CHECK(v1->name() + 1 == v2->name());
@@ -785,13 +785,13 @@ TEST(NVFuserTest, FusionTopoSort_CUDA) {
   // e1: v4     =   add(v3, v2)
   // e2: v5     =   add(v2, v4)
   // e3: v6     =   add(v5, v5)
-  Float* v0 = new Float{1.f};
-  Float* v1 = new Float{2.f};
-  Float* v2 = new Float();
-  Float* v3 = new Float();
-  Float* v4 = new Float();
-  Float* v5 = new Float();
-  Float* v6 = new Float();
+  Double* v0 = new Double{1.f};
+  Double* v1 = new Double{2.f};
+  Double* v2 = new Double();
+  Double* v3 = new Double();
+  Double* v4 = new Double();
+  Double* v5 = new Double();
+  Double* v6 = new Double();
 
   Expr* e0 = new DummyExpr(v3, v2, v1, v0);
   Expr* e1 = new BinaryOp(BinaryOpType::Add, v4, v3, v2);
@@ -914,7 +914,7 @@ TEST(NVFuserTest, FusionFilterVals_CUDA) {
 
   auto tv0 = makeSymbolicTensor(1);
   auto tv1 = makeSymbolicTensor(1);
-  auto scalar0 = new Float(0);
+  auto scalar0 = new Double(0);
   auto scalar1 = new Int(0);
   auto scalar2 = new Int(1);
 
@@ -927,9 +927,9 @@ TEST(NVFuserTest, FusionFilterVals_CUDA) {
   TORCH_CHECK(tvs[0] == tv0);
   TORCH_CHECK(tvs[1] == tv1);
 
-  std::vector<Float*> floats(
-      ir_utils::filterByType<Float>(vals).begin(),
-      ir_utils::filterByType<Float>(vals).end());
+  std::vector<Double*> floats(
+      ir_utils::filterByType<Double>(vals).begin(),
+      ir_utils::filterByType<Double>(vals).end());
   TORCH_CHECK(floats.size() == 1);
   TORCH_CHECK(floats[0] == scalar0);
 
@@ -1041,15 +1041,15 @@ TEST(NVFuserTest, FusionEquality_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Float* fval1 = new Float();
-  Float* fval1_copy = fval1;
-  Float* fval2 = new Float();
-  Float* fone = new Float(1.0);
+  Double* fval1 = new Double();
+  Double* fval1_copy = fval1;
+  Double* fval2 = new Double();
+  Double* fone = new Double(1.0);
 
   TORCH_CHECK(fval1->sameAs(fval1_copy));
   TORCH_CHECK(!fval1->sameAs(fval2));
   TORCH_CHECK(!fone->sameAs(fval1));
-  TORCH_CHECK(fone->sameAs(new Float(1.0)));
+  TORCH_CHECK(fone->sameAs(new Double(1.0)));
 
   Int* ival1 = new Int();
   Int* ival1_copy = ival1;
@@ -1061,14 +1061,14 @@ TEST(NVFuserTest, FusionEquality_CUDA) {
   TORCH_CHECK(!ione->sameAs(ival1));
   TORCH_CHECK(ione->sameAs(new Int(1)));
 
-  BinaryOp* add1 = new BinaryOp(BinaryOpType::Add, new Float(), fval1, ival1);
+  BinaryOp* add1 = new BinaryOp(BinaryOpType::Add, new Double(), fval1, ival1);
   BinaryOp* add1_copy =
-      new BinaryOp(BinaryOpType::Add, new Float(), fval1, ival1);
-  BinaryOp* sub1 = new BinaryOp(BinaryOpType::Sub, new Float(), fval1, ival1);
+      new BinaryOp(BinaryOpType::Add, new Double(), fval1, ival1);
+  BinaryOp* sub1 = new BinaryOp(BinaryOpType::Sub, new Double(), fval1, ival1);
 
-  UnaryOp* neg1 = new UnaryOp(UnaryOpType::Neg, new Float(), fval1);
-  UnaryOp* neg2 = new UnaryOp(UnaryOpType::Neg, new Float(), fval2);
-  UnaryOp* neg1_copy = new UnaryOp(UnaryOpType::Neg, new Float(), fval1);
+  UnaryOp* neg1 = new UnaryOp(UnaryOpType::Neg, new Double(), fval1);
+  UnaryOp* neg2 = new UnaryOp(UnaryOpType::Neg, new Double(), fval2);
+  UnaryOp* neg1_copy = new UnaryOp(UnaryOpType::Neg, new Double(), fval1);
 
   TORCH_CHECK(add1->sameAs(add1_copy));
   TORCH_CHECK(!add1->sameAs(sub1));
@@ -1082,69 +1082,69 @@ TEST(NVFuserTest, FusionDependency_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Float* f0 = new Float(0.f);
-  Float* f1 = new Float(1.f);
-  auto f2 = add(f0, f1);
+  Double* d0 = new Double(0.f);
+  Double* d1 = new Double(1.f);
+  auto d2 = add(d0, d1);
 
-  auto f3 = add(f2, f2);
+  auto d3 = add(d2, d2);
 
-  Float* f4 = new Float(4.f);
-  Float* f5 = new Float(5.f);
-  auto f6 = add(f4, f5);
+  Double* d4 = new Double(4.f);
+  Double* d5 = new Double(5.f);
+  auto d6 = add(d4, d5);
 
-  Float* f7 = new Float(7.f);
-  Float* f8 = new Float(8.f);
-  auto f9 = add(f7, f8);
+  Double* d7 = new Double(7.f);
+  Double* d8 = new Double(8.f);
+  auto d9 = add(d7, d8);
 
-  auto f10 = add(f6, f9);
+  auto d10 = add(d6, d9);
 
-  auto f11 = add(f3, f10);
+  auto d11 = add(d3, d10);
 
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f0, f11));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f1, f11));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f11));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f3, f11));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f6, f11));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f9, f11));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f0, f2));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f3));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f4, f6));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f8, f10));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d0, d11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d1, d11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d2, d11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d3, d11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d6, d11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d9, d11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d0, d2));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d2, d3));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d4, d6));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(d8, d10));
 
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f0));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f1));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f2));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f3));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f4));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f5));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f2, f0));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f3, f2));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f4));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f10, f8));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d11, d0));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d11, d1));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d11, d2));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d11, d3));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d11, d4));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d11, d5));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d2, d0));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d3, d2));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d6, d4));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(d10, d8));
 
-  auto dep_chain = DependencyCheck::getSingleDependencyChain(f0, f11);
-  TORCH_CHECK(dep_chain.back() == f11);
+  auto dep_chain = DependencyCheck::getSingleDependencyChain(d0, d11);
+  TORCH_CHECK(dep_chain.back() == d11);
   dep_chain.pop_back();
-  TORCH_CHECK(dep_chain.back() == f3);
+  TORCH_CHECK(dep_chain.back() == d3);
   dep_chain.pop_back();
-  TORCH_CHECK(dep_chain.back() == f2);
-  dep_chain.pop_back();
-
-  dep_chain = DependencyCheck::getSingleDependencyChain(f6, f11);
-  TORCH_CHECK(dep_chain.back() == f11);
-  dep_chain.pop_back();
-  TORCH_CHECK(dep_chain.back() == f10);
+  TORCH_CHECK(dep_chain.back() == d2);
   dep_chain.pop_back();
 
-  dep_chain = DependencyCheck::getSingleDependencyChain(f4, f11);
-  TORCH_CHECK(dep_chain.back() == f11);
+  dep_chain = DependencyCheck::getSingleDependencyChain(d6, d11);
+  TORCH_CHECK(dep_chain.back() == d11);
   dep_chain.pop_back();
-  TORCH_CHECK(dep_chain.back() == f10);
-  dep_chain.pop_back();
-  TORCH_CHECK(dep_chain.back() == f6);
+  TORCH_CHECK(dep_chain.back() == d10);
   dep_chain.pop_back();
 
-  dep_chain = DependencyCheck::getSingleDependencyChain(f11, f2);
+  dep_chain = DependencyCheck::getSingleDependencyChain(d4, d11);
+  TORCH_CHECK(dep_chain.back() == d11);
+  dep_chain.pop_back();
+  TORCH_CHECK(dep_chain.back() == d10);
+  dep_chain.pop_back();
+  TORCH_CHECK(dep_chain.back() == d6);
+  dep_chain.pop_back();
+
+  dep_chain = DependencyCheck::getSingleDependencyChain(d11, d2);
   TORCH_CHECK(dep_chain.empty());
 }
 
@@ -1275,9 +1275,9 @@ TEST(NVFuserTest, FusionCodeGen_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(3);
 
-  new BinaryOp(BinaryOpType::Add, tv0, new Float(0.0), new Float(1.0));
-  TensorView* tv1 = add(tv0, new Float(2.0));
-  TensorView* tv2 = add(tv1, new Float(3.0));
+  new BinaryOp(BinaryOpType::Add, tv0, new Double(0.0), new Double(1.0));
+  TensorView* tv1 = add(tv0, new Double(2.0));
+  TensorView* tv2 = add(tv1, new Double(3.0));
   fusion.addOutput(tv2);
 
   //[I0, I1, I2]
@@ -1312,7 +1312,7 @@ TEST(NVFuserTest, FusionCodeGen2_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(3);
   TensorView* tv1 = makeSymbolicTensor(3);
-  TensorView* tv2 = add(tv1, new Float(2.0));
+  TensorView* tv2 = add(tv1, new Double(2.0));
   TensorView* tv3 = add(tv0, tv2);
 
   fusion.addInput(tv0);
@@ -1364,7 +1364,7 @@ TEST(NVFuserTest, FusionSimplePWise_CUDA) {
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
-  TensorView* tv2 = add(tv1, new Float(2.0));
+  TensorView* tv2 = add(tv1, new Double(2.0));
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
@@ -1419,7 +1419,7 @@ TEST(NVFuserTest, FusionExecKernel_CUDA) {
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
-  TensorView* tv2 = add(tv1, new Float(2.0));
+  TensorView* tv2 = add(tv1, new Double(2.0));
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
@@ -1474,10 +1474,10 @@ TEST(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(0.5));
-  TensorView* tv2 = mul(tv1, new Float(-1.0));
-  TensorView* tv3 = add(tv1, new Float(3.0));
-  TensorView* tv4 = mul(tv1, new Float(2.0));
+  TensorView* tv1 = mul(tv0, new Double(0.5));
+  TensorView* tv2 = mul(tv1, new Double(-1.0));
+  TensorView* tv3 = add(tv1, new Double(3.0));
+  TensorView* tv4 = mul(tv1, new Double(2.0));
   TensorView* tv5 = add(tv3, tv2);
 
   TensorView* tv6 = add(tv5, tv4);
@@ -1550,9 +1550,9 @@ TEST(NVFuserTest, FusionAdvancedComputeAt2_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(-1.0));
-  TensorView* tv2 = add(tv0, new Float(3.0));
-  TensorView* tv3 = mul(tv0, new Float(2.0));
+  TensorView* tv1 = mul(tv0, new Double(-1.0));
+  TensorView* tv2 = add(tv0, new Double(3.0));
+  TensorView* tv3 = mul(tv0, new Double(2.0));
   TensorView* tv4 = add(tv2, tv1);
 
   TensorView* tv5 = add(tv4, tv3);
@@ -1612,7 +1612,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt3_CUDA) {
   TensorView* tv1 = makeSymbolicTensor(4);
   fusion.addInput(tv1);
 
-  TensorView* tv2 = mul(tv1, new Float(.979361));
+  TensorView* tv2 = mul(tv1, new Double(.979361));
   TensorView* tv3 = mul(tv2, tv0);
 
   fusion.addOutput(tv3);
@@ -1738,7 +1738,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt5_CUDA) {
   fusion.addInput(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  TensorView* tv2 = add(tv0, new Float(2.0));
+  TensorView* tv2 = add(tv0, new Double(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
 
@@ -1774,7 +1774,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
   fusion.addInput(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  TensorView* tv2 = add(tv0, new Float(2.0));
+  TensorView* tv2 = add(tv0, new Double(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
 
@@ -1815,9 +1815,9 @@ TEST(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(0.5));
-  TensorView* tv2 = mul(tv1, new Float(-1.0));
-  TensorView* tv3 = mul(tv1, new Float(-2.0));
+  TensorView* tv1 = mul(tv0, new Double(0.5));
+  TensorView* tv2 = mul(tv1, new Double(-1.0));
+  TensorView* tv3 = mul(tv1, new Double(-2.0));
   fusion.addOutput(tv2);
   fusion.addOutput(tv3);
 
@@ -1880,11 +1880,11 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(0.5));
-  TensorView* tv2 = mul(tv1, new Float(-1.0));
-  TensorView* tv3 = mul(tv1, new Float(-2.0));
+  TensorView* tv1 = mul(tv0, new Double(0.5));
+  TensorView* tv2 = mul(tv1, new Double(-1.0));
+  TensorView* tv3 = mul(tv1, new Double(-2.0));
   TensorView* tv4 = add(tv2, tv3);
-  TensorView* tv5 = mul(tv4, new Float(5.0));
+  TensorView* tv5 = mul(tv4, new Double(5.0));
   fusion.addOutput(tv3);
   fusion.addOutput(tv4);
   fusion.addOutput(tv5);
@@ -1951,10 +1951,10 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer2_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(0.5));
-  TensorView* tv2 = mul(tv1, new Float(-1.0));
-  TensorView* tv3 = mul(tv2, new Float(-1.0));
-  TensorView* tv4 = add(tv1, new Float(4.0));
+  TensorView* tv1 = mul(tv0, new Double(0.5));
+  TensorView* tv2 = mul(tv1, new Double(-1.0));
+  TensorView* tv3 = mul(tv2, new Double(-1.0));
+  TensorView* tv4 = add(tv1, new Double(4.0));
   TensorView* tv5 = add(tv3, tv4);
 
   fusion.addOutput(tv5);
@@ -2040,12 +2040,12 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer3_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(0.5));
-  TensorView* tv2 = mul(tv1, new Float(-1.0));
-  TensorView* tv3 = mul(tv2, new Float(-1.0));
-  TensorView* tv4 = add(tv1, new Float(4.0));
+  TensorView* tv1 = mul(tv0, new Double(0.5));
+  TensorView* tv2 = mul(tv1, new Double(-1.0));
+  TensorView* tv3 = mul(tv2, new Double(-1.0));
+  TensorView* tv4 = add(tv1, new Double(4.0));
   TensorView* tv5 = add(tv3, tv4);
-  TensorView* tv6 = add(tv1, new Float(6.0));
+  TensorView* tv6 = add(tv1, new Double(6.0));
 
   fusion.addOutput(tv5);
   fusion.addOutput(tv6);
@@ -2139,13 +2139,13 @@ TEST(NVFuserTest, FusionComputeAtNoCommonConsumer_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(0.5));
-  TensorView* tv2 = mul(tv1, new Float(-1.0));
-  TensorView* tv3 = mul(tv1, new Float(-2.0));
+  TensorView* tv1 = mul(tv0, new Double(0.5));
+  TensorView* tv2 = mul(tv1, new Double(-1.0));
+  TensorView* tv3 = mul(tv1, new Double(-2.0));
   TensorView* tv4 = add(tv2, tv3);
-  TensorView* tv5 = mul(tv4, new Float(5.0));
+  TensorView* tv5 = mul(tv4, new Double(5.0));
   // Notice that tv6 is not a consumer of tv4.
-  TensorView* tv6 = mul(tv1, new Float(6.0));
+  TensorView* tv6 = mul(tv1, new Double(6.0));
   fusion.addOutput(tv3);
   fusion.addOutput(tv4);
   fusion.addOutput(tv5);
@@ -2708,7 +2708,7 @@ TEST(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
 
   auto tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
-  auto tv1 = add(tv0, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
   auto tv2 = broadcast(tv1, {true, false});
   auto tv3 = broadcast(tv1, {false, true});
   auto tv4 = add(tv2, tv3);
@@ -2727,19 +2727,19 @@ TEST(NVFuserTest, FusionScalarInputs_CUDA) {
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
 
-  Float* f0 = new Float();
-  fusion.addInput(f0);
-  Float* f1 = new Float();
-  fusion.addInput(f1);
-  Float* f2 = new Float();
-  fusion.addInput(f2);
-  Float* f3 = new Float();
-  fusion.addInput(f3);
-  Val* f4 = mul(f0, f1);
-  Val* f5 = sub(f2, f3);
+  Double* d0 = new Double();
+  fusion.addInput(d0);
+  Double* d1 = new Double();
+  fusion.addInput(d1);
+  Double* d2 = new Double();
+  fusion.addInput(d2);
+  Double* d3 = new Double();
+  fusion.addInput(d3);
+  Val* d4 = mul(d0, d1);
+  Val* d5 = sub(d2, d3);
 
-  TensorView* tv2 = sub(tv1, f4);
-  TensorView* tv3 = add(tv0, f5);
+  TensorView* tv2 = sub(tv1, d4);
+  TensorView* tv3 = add(tv0, d5);
   TensorView* tv4 = mul(tv3, tv2);
 
   fusion.addOutput(tv4);
@@ -2765,10 +2765,10 @@ TEST(NVFuserTest, FusionScalarInputs_CUDA) {
     }
   }
 
-  // f4 = f0 * f1
-  // f5 = f2 - f3
-  // t2 = t1 - f4
-  // t3 = t0 + f5
+  // d4 = d0 * d1
+  // d5 = d2 - d3
+  // t2 = t1 - d4
+  // t3 = t0 + d5
   // t4 = t3 * t2
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -2820,7 +2820,7 @@ TEST(NVFuserTest, FusionLoopUnroll_CUDA) {
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
-  TensorView* tv2 = add(tv1, new Float(2.0));
+  TensorView* tv2 = add(tv1, new Double(2.0));
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
@@ -2867,7 +2867,7 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
     return makeSymbolicTensor(2, desc.second);
   } else if (desc.first == ValType::Scalar) {
     if (desc.second == DataType::Float) {
-      return new Float();
+      return new Double();
     } else if (desc.second == DataType::Double) {
       return new Double();
     } else if (desc.second == DataType::Int) {
@@ -2899,6 +2899,17 @@ IValue gen_aten_operand(
       if (rand) {
         return IValue(at::rand({blocks, threads}, options));
       } else {
+        return IValue(at::empty({blocks, threads}, options));
+      }
+    } else if (desc.second == DataType::Int) {
+      if (rand) {
+        auto options =
+            at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+        return IValue(
+            at::randn({blocks, threads}, options).mul(5).to(at::kLong));
+      } else {
+        auto options =
+            at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
         return IValue(at::empty({blocks, threads}, options));
       }
     } else if (desc.second == DataType::Bool) {
@@ -3106,6 +3117,23 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
         /*Inputs Tuple*/
         std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
   }
+
+  dtypes = {DataType::Int, DataType::Bool};
+  for (auto dtype : dtypes) {
+    test_op(
+        /*blocks*/ 128,
+        /*threads*/ 64,
+        /*name*/ "bitwise_not",
+        /*Aten Func   */
+        [](std::array<IValue, 1>& vals) {
+          return at::bitwise_not(vals[0].toTensor());
+        },
+        /*JIT  Func   */
+        [](Val* in1) -> Val* { return unaryOp(UnaryOpType::Not, in1); },
+        /*Output      */ std::make_pair(ValType::TensorView, dtype),
+        /*Inputs Tuple*/
+        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+  }
 }
 
 TEST(NVFuserTest, FusionBinaryOps_CUDA) {
@@ -3192,6 +3220,7 @@ TEST(NVFuserTest, FusionBinaryOps_CUDA) {
             std::make_pair(ValType::TensorView, dtype),
             std::make_pair(ValType::TensorView, dtype),
             std::make_pair(ValType::Scalar, dtype)));
+
     test_op(
         /*blocks*/ 640,
         /*threads*/ 64,
@@ -3226,7 +3255,7 @@ TEST(NVFuserTest, FusionTernaryOps_CUDA) {
         /*JIT  Func   */
         [&](Val* in1) -> Val* {
           if (dtype == DataType::Float) {
-            return clamp(in1, new Float(0.f), new Float(1.f));
+            return clamp(in1, new Double(0.f), new Double(1.f));
           } else {
             return clamp(in1, new Double(0.f), new Double(1.f));
           }
@@ -3245,7 +3274,7 @@ TEST(NVFuserTest, FusionTernaryOps_CUDA) {
         /*JIT  Func   */
         [&](Val* in1) -> Val* {
           if (dtype == DataType::Float) {
-            return threshold(in1, new Float(0.f), new Float(1.f));
+            return threshold(in1, new Double(0.f), new Double(1.f));
           } else {
             return threshold(in1, new Double(0.f), new Double(1.f));
           }
@@ -3344,7 +3373,7 @@ TEST(NVFuserTest, FusionCastOps_CUDA) {
   fe.compileFusion(&fusion);
   auto outputs = fe.runFusion(input_ivalues);
 
-  ref_output = at::_cast_Half(at::_cast_Float(input1));
+  ref_output = at::_cast_Half(at::_cast_Double(input1));
 
   TORCH_CHECK(
       outputs[0].equal(ref_output),
@@ -3367,7 +3396,7 @@ TEST(NVFuserTest, FusionReduction1_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -3427,7 +3456,7 @@ TEST(NVFuserTest, FusionReduction2_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
 
   fusion.addOutput(tv1);
 
@@ -3497,7 +3526,7 @@ TEST(NVFuserTest, FusionReduction3_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
 
   fusion.addOutput(tv1);
 
@@ -3553,7 +3582,7 @@ TEST(NVFuserTest, FusionReduction4_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  TensorView* tv3 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv2);
+  TensorView* tv3 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv2);
   // tv3[I0, R1] = tv2[I0, I1]
 
   TensorView* tv4 = makeSymbolicTensor(1);
@@ -3615,7 +3644,7 @@ TEST(NVFuserTest, FusionReduction5_CUDA) {
 
   fusion.addInput(tv0);
 
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
 
   fusion.addOutput(tv1);
 
@@ -3668,7 +3697,7 @@ TEST(NVFuserTest, FusionReduction6_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1, R2] = tv0[I0, I1, I2]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1, 2}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1, 2}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -3726,7 +3755,7 @@ TEST(NVFuserTest, FusionReductionTFT_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
 
   fusion.addOutput(tv1);
 
@@ -3784,7 +3813,7 @@ TEST(NVFuserTest, FusionBranches_CUDA) {
   fusion.addInput(tv1);
   fusion.addInput(tv2);
 
-  auto tv3 = add(tv0, new Float(1.0));
+  auto tv3 = add(tv0, new Double(1.0));
   auto tv4 = add(tv3, tv1);
   auto tv5 = add(tv3, tv2);
   auto tv6 = add(tv4, tv5);
@@ -3839,7 +3868,7 @@ TEST(NVFuserTest, FusionSimpleBCast1_CUDA) {
   // Set up your input tensor views
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  TensorView* tv1 = add(tv0, new Float(1.5));
+  TensorView* tv1 = add(tv0, new Double(1.5));
 
   TensorView* tv2 = makeSymbolicTensor(2);
   fusion.addInput(tv2);
@@ -3906,7 +3935,7 @@ TEST(NVFuserTest, FusionSimpleBCast2_CUDA) {
   TensorView* tv4 = makeSymbolicTensor(2);
   fusion.addInput(tv4);
 
-  TensorView* tv5 = sub(tv4, new Float(0.1));
+  TensorView* tv5 = sub(tv4, new Double(0.1));
 
   TensorView* tv6 = broadcast(tv5, {true, false, false});
 
@@ -4116,7 +4145,7 @@ TEST(NVFuserTest, FusionComplexBCast1_CUDA) {
   int x = 2, y = 3, z = 4;
 
   auto tv0 = makeConcreteTensor({y});
-  auto tv1 = div(tv0, new Float(2.0));
+  auto tv1 = div(tv0, new Double(2.0));
   auto tv2 = broadcast(tv1, {false, true});
   auto tv3 = makeConcreteTensor({y, z});
   auto tv4 = mul(tv2, tv3);
@@ -4172,7 +4201,7 @@ TEST(NVFuserTest, FusionComplexBCast2_CUDA) {
   int x = 2, y = 3, z = 4;
 
   auto tv0 = makeConcreteTensor({y, z});
-  auto tv1 = div(tv0, new Float(2.0));
+  auto tv1 = div(tv0, new Double(2.0));
   auto tv2 = sum(tv1, {1});
   auto tv3 = broadcast(tv2, {true, false});
   auto tv4 = makeConcreteTensor({x, y});
@@ -4227,7 +4256,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing1_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  auto tv2 = add(tv0, new Float(1.0));
+  auto tv2 = add(tv0, new Double(1.0));
   auto tv3 = broadcast(tv2, {true, false, false, false});
   auto tv4 = add(tv3, tv1);
 
@@ -4281,7 +4310,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing2_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  auto tv2 = add(tv0, new Float(1.0));
+  auto tv2 = add(tv0, new Double(1.0));
   auto tv3 = broadcast(tv2, {true, false, false, false});
   auto tv4 = add(tv3, tv1);
 
@@ -4334,7 +4363,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing3_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  auto tv2 = add(tv0, new Float(1.0));
+  auto tv2 = add(tv0, new Double(1.0));
   auto tv3 = add(tv2, tv1);
   fusion.addOutput(tv3);
 
@@ -4367,7 +4396,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing4_CUDA) {
   TensorView* tv1 = makeConcreteTensor({10, 10, 20});
   fusion.addInput(tv1);
 
-  TensorView* tv2 = add(tv0, new Float(1));
+  TensorView* tv2 = add(tv0, new Double(1));
   TensorView* tv3 = broadcast(tv2, {true, false, false});
   TensorView* tv4 = add(tv3, tv1);
   fusion.addOutput(tv4);
@@ -4399,7 +4428,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing5_CUDA) {
   TensorView* tv1 = makeSymbolicTensor(3);
   fusion.addInput(tv1);
 
-  TensorView* tv2 = add(tv0, new Float(1));
+  TensorView* tv2 = add(tv0, new Double(1));
   TensorView* tv3 = broadcast(tv2, {true, false, true});
   TensorView* tv4 = add(tv3, tv1);
   fusion.addOutput(tv4);
@@ -4674,7 +4703,7 @@ TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
 
   // Normalize with the max value before computing exp.
   TensorView* max_val_tv1 =
-      reductionOp(BinaryOpType::Max, {-1}, new Float(0), input_tv0);
+      reductionOp(BinaryOpType::Max, {-1}, new Double(0), input_tv0);
   TensorView* bcast_max_tv2 = broadcast(max_val_tv1, {true});
   TensorView* sub_tv3 = sub(input_tv0, bcast_max_tv2);
   TensorView* exp_tv4 = unaryOp(UnaryOpType::Exp, sub_tv3);
@@ -4805,7 +4834,7 @@ TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
 
   // Normalize with the max value before computing exp.
   TensorView* max_val_tv1 =
-      reductionOp(BinaryOpType::Max, {-1}, new Float(0), input_tv0);
+      reductionOp(BinaryOpType::Max, {-1}, new Double(0), input_tv0);
   TensorView* bcast_max_tv2 = broadcast(max_val_tv1, {false, false, true});
   TensorView* sub_tv3 = sub(input_tv0, bcast_max_tv2);
   TensorView* exp_tv4 = unaryOp(UnaryOpType::Exp, sub_tv3);
@@ -4873,7 +4902,7 @@ TEST(NVFuserTest, FusionSoftmaxComputeAt_CUDA) {
   auto tv1 = sum(tv0, {1});
   auto tv2 = broadcast(tv1, {false, true});
 
-  auto tv3 = add(tv0, new Float(1.0));
+  auto tv3 = add(tv0, new Double(1.0));
 
   auto tv4 = mul(tv2, tv3);
 
@@ -4900,7 +4929,7 @@ TEST(NVFuserTest, FusionGridReduction1_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -4960,7 +4989,7 @@ TEST(NVFuserTest, FusionGridReduction2_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -5019,7 +5048,7 @@ TEST(NVFuserTest, FusionGridReduction3dim1_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -5078,7 +5107,7 @@ TEST(NVFuserTest, FusionGridReduction3dim0_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[R0, I1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {0}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {0}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -5131,7 +5160,7 @@ TEST(NVFuserTest, FusionGridReduction4_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -5196,7 +5225,7 @@ TEST(NVFuserTest, FusionGridReduction5_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -5244,7 +5273,7 @@ TEST(NVFuserTest, FusionGridReduction6_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1, R2] = tv0[I0, I1, I2]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1, 2}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1, 2}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(fusion.hasReduction(), "Could not detect reduction in fusion.");
@@ -5311,7 +5340,7 @@ TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
   fusion.addInput(tv0);
 
   TensorView* tv1 =
-      reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
+      reductionOp(BinaryOpType::Add, {red_dim}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   tv1->split(-1, tid_x);
@@ -5341,7 +5370,7 @@ TEST(NVFuserTest, FusionSplitBCast_CUDA) {
   fusion.addInput(input_tv1);
 
   TensorView* sum_tv2 =
-      reductionOp(BinaryOpType::Add, {2}, new Float(0), input_tv0);
+      reductionOp(BinaryOpType::Add, {2}, new Double(0), input_tv0);
   TensorView* bcast_tv3 = broadcast(sum_tv2, {false, false, true});
   TensorView* output_tv4 = div(input_tv1, bcast_tv3);
 
@@ -5414,8 +5443,8 @@ TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
   auto tv1 = unaryOp(UnaryOpType::Exp, tv0);
-  auto tv2 = reductionOp(BinaryOpType::Max, {-1}, new Float(0), tv1);
-  auto tv3 = reductionOp(BinaryOpType::Min, {-1}, new Float(0), tv1);
+  auto tv2 = reductionOp(BinaryOpType::Max, {-1}, new Double(0), tv1);
+  auto tv3 = reductionOp(BinaryOpType::Min, {-1}, new Double(0), tv1);
   auto tv4 = add(tv2, tv3);
   fusion.addOutput(tv4);
   tv1->computeAt(tv2, -1);
@@ -5434,8 +5463,8 @@ TEST(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
     TensorView* tv0 = makeSymbolicTensor(1);
     fusion.addInput(tv0);
 
-    auto tv1 = add(tv0, new Float(1));
-    auto tv2 = add(tv0, new Float(1));
+    auto tv1 = add(tv0, new Double(1));
+    auto tv2 = add(tv0, new Double(1));
     TensorView* tv3 = add(tv1, tv2);
     // Set outputs tv2 or tv1 and then tv3
     if (i == 0) {
@@ -5473,8 +5502,8 @@ TEST(NVFuserTest, FusionComputeAtExprOrder2_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  auto tv1 = add(tv0, new Float(1));
-  auto tv2 = add(tv0, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv0, new Double(1));
   TensorView* tv3 = add(tv1, tv2);
   fusion.addOutput(tv3);
 
@@ -5505,7 +5534,7 @@ TEST(NVFuserTest, FusionZeroDimComputeAt_CUDA) {
   fusion.addInput(tv0);
 
   auto tv1 = sum(tv0, {0});
-  auto tv2 = add(tv1, new Float(1));
+  auto tv2 = add(tv1, new Double(1));
   fusion.addOutput(tv2);
   TORCH_CHECK(tv2->nDims() == 0);
   tv1->computeAt(tv2, 0);
@@ -5714,7 +5743,7 @@ TEST(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
   fusion.addInput(tv0);
 
   TensorView* tv1 = reductionOp(
-      BinaryOpType::Add, {red_dim}, new Float(0), tv0, /*keep_dim=*/true);
+      BinaryOpType::Add, {red_dim}, new Double(0), tv0, /*keep_dim=*/true);
 
   TensorView* red_tv = fusion.origin(tv1)->inputs()[0]->as<TensorView>();
 
@@ -5815,7 +5844,7 @@ TEST(NVFuserTest, FusionSumToNoop_CUDA) {
   TensorView* tv1 = sum_to(tv0, sum_to_symb);
 
   // Dummy operator to avoid tv0 both input and output
-  TensorView* tv2 = add(tv1, new Float(0));
+  TensorView* tv2 = add(tv1, new Double(0));
   fusion.addOutput(tv2);
 
   const auto options =
@@ -5850,7 +5879,7 @@ TEST(NVFuserTest, FusionReductionScheduler_CUDA) {
   fusion.addInput(tv0);
 
   TensorView* tv1 =
-      reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
+      reductionOp(BinaryOpType::Add, {red_dim}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   const auto options =
@@ -5892,7 +5921,7 @@ TEST(NVFuserTest, FusionSymbolicReduction_CUDA) {
   fusion.addInput(tv0);
 
   // tv1[I0, R1] = tv0[I0, I1]
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   // Interface should just be a direct split with a Parallel type. We can
@@ -5955,7 +5984,8 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimNonFastest_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(tensor_dims_in.size());
   fusion.addInput(tv0);
 
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, red_dims, new Float(0), tv0);
+  TensorView* tv1 =
+      reductionOp(BinaryOpType::Add, red_dims, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   const auto options =
@@ -5999,7 +6029,8 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(tensor_dims_in.size());
   fusion.addInput(tv0);
 
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, red_dims, new Float(0), tv0);
+  TensorView* tv1 =
+      reductionOp(BinaryOpType::Add, red_dims, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   const auto options =
@@ -6182,8 +6213,8 @@ TEST(NVFuserTest, FusionCacheBefore_CUDA) {
   FusionGuard fg(&fusion);
 
   TensorView* tv0 = makeSymbolicTensor(2);
-  TensorView* tv1 = add(tv0, new Float(1.0));
-  TensorView* tv2 = mul(tv1, new Float(3.0));
+  TensorView* tv1 = add(tv0, new Double(1.0));
+  TensorView* tv2 = mul(tv1, new Double(3.0));
   fusion.addInput(tv0);
   fusion.addOutput(tv2);
   // Before: TV2 = TV1 * 3
@@ -6221,8 +6252,8 @@ TEST(NVFuserTest, FusionCacheAfter_CUDA) {
   FusionGuard fg(&fusion);
 
   TensorView* tv0 = makeSymbolicTensor(2);
-  TensorView* tv1 = add(tv0, new Float(1.0));
-  TensorView* tv2 = mul(tv1, new Float(3.0));
+  TensorView* tv1 = add(tv0, new Double(1.0));
+  TensorView* tv2 = mul(tv1, new Double(3.0));
   fusion.addInput(tv0);
   fusion.addOutput(tv2);
   // Before: TV1 = TV0 + 1
@@ -6367,10 +6398,10 @@ TEST(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
   FusionGuard fg(&fusion);
 
   TensorView* tv0 = makeSymbolicTensor(1);
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv1, new Float(2));
-  TensorView* tv3 = add(tv0, new Float(1));
-  TensorView* tv4 = add(tv3, new Float(2));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(2));
+  TensorView* tv3 = add(tv0, new Double(1));
+  TensorView* tv4 = add(tv3, new Double(2));
 
   fusion.addInput(tv0);
   fusion.addOutput(tv2);
@@ -6672,7 +6703,7 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   TensorView* x = makeSymbolicTensor(2);
   fusion.addInput(x);
   TensorView* max_val =
-      reductionOp(BinaryOpType::Max, {-1}, new Float(FLT_MIN), x); // (M)
+      reductionOp(BinaryOpType::Max, {-1}, new Double(FLT_MIN), x); // (M)
   TensorView* bcast_max = broadcast(max_val, {false, true}); // (M, B)
   TensorView* x_max_sub = sub(x, bcast_max); // (M, N)
   TensorView* exp = unaryOp(UnaryOpType::Exp, x_max_sub); // (M, N)
@@ -6830,7 +6861,7 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
   auto var_sum_bcast = broadcast(var_sum, broadcast_mask);
   // Point-wise
   auto var = div(var_sum_bcast, num_features);
-  auto var_eps = add(var, new Float(kEps));
+  auto var_eps = add(var, new Double(kEps));
   auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
   auto output = mul(x_mean_sub, rvar);
   fusion.addOutput(output);
@@ -6913,9 +6944,9 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   auto x_sum_bcast = broadcast(x_sum, broadcast_mask);
   auto x_mean = div(x_sum_bcast, num_features);
 
-  // auto current_mean_hat = mul(x_mean, new Float(kMomentum));
+  // auto current_mean_hat = mul(x_mean, new Double(kMomentum));
   // auto rmean_bcast = broadcast(running_mean, broadcast_mask);
-  // auto rmean_hat = mul(rmean_bcast, new Float(1.0 - kMomentum));
+  // auto rmean_hat = mul(rmean_bcast, new Double(1.0 - kMomentum));
   // auto new_running_mean = add(rmean_hat, current_mean_hat);
 
   auto x_mean_sub = sub(input, x_mean);
@@ -6924,12 +6955,12 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   auto var_sum_bcast = broadcast(var_sum, broadcast_mask);
   auto var = div(var_sum_bcast, num_features);
 
-  // auto current_var_hat = mul(var, new Float(kMomentum));
+  // auto current_var_hat = mul(var, new Double(kMomentum));
   // auto rvar_bcast = broadcast(running_var, broadcast_mask);
-  // auto rvar_hat = mul(rvar_bcast, new Float(1.0 - kMomentum));
+  // auto rvar_hat = mul(rvar_bcast, new Double(1.0 - kMomentum));
   // auto new_running_var = add(rvar_hat, current_var_hat);
 
-  auto var_eps = add(var, new Float(kEps));
+  auto var_eps = add(var, new Double(kEps));
   auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
   auto norm = mul(x_mean_sub, rvar);
 
@@ -7022,9 +7053,9 @@ TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   fusion.addInput(dx);
 
   TensorView* max_sx =
-      reductionOp(BinaryOpType::Max, {-1}, new Float(FLT_MIN), sx); // (M)
+      reductionOp(BinaryOpType::Max, {-1}, new Double(FLT_MIN), sx); // (M)
   TensorView* max_dx =
-      reductionOp(BinaryOpType::Max, {-1}, new Float(FLT_MIN), dx); // (M)
+      reductionOp(BinaryOpType::Max, {-1}, new Double(FLT_MIN), dx); // (M)
 
   // Reduction => merge local and shared memory TensorViews
   TensorView* max_val = binaryOp(BinaryOpType::Max, max_sx, max_dx);
@@ -7151,9 +7182,9 @@ TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
   fusion.addInput(sx);
   fusion.addInput(dx);
 
-  Float* gamma = new Float();
-  Float* beta = new Float();
-  Float* eps = new Float();
+  Double* gamma = new Double();
+  Double* beta = new Double();
+  Double* eps = new Double();
   Int* N = new Int();
   fusion.addInput(gamma);
   fusion.addInput(beta);
@@ -7324,9 +7355,9 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentNorm_CUDA) {
 
   // Set up your input tensor views
   auto x = makeSymbolicTensor(2);
-  Float* gamma = new Float();
-  Float* beta = new Float();
-  Float* eps = new Float();
+  Double* gamma = new Double();
+  Double* beta = new Double();
+  Double* eps = new Double();
   Int* N = new Int();
   fusion.addInput(x);
   fusion.addInput(gamma);
@@ -7432,7 +7463,7 @@ TEST(NVFuserTest, FusionSmemDynamicReductionSymbolic_CUDA) {
 
   // Set up your input tensor views
   TensorView* tv0 = makeSymbolicTensor(2);
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
   // tv1[I0, R1] = tv0[I0, I1]
@@ -7740,7 +7771,7 @@ TEST(NVFuserTest, FusionGlobalIntermediate_CUDA) {
 
   // Set up your input tensor views
   TensorView* tv0 = makeSymbolicTensor(2);
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
   // tv1[I0, R1] = tv0[I0, I1]
@@ -7853,8 +7884,8 @@ TEST(NVFuserTest, FusionUnrollWithAlloc_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(tensor_dims_in.size());
   fusion.addInput(tv0);
 
-  TensorView* tv1 = add(tv0, new Float(0));
-  TensorView* tv2 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv1);
+  TensorView* tv1 = add(tv0, new Double(0));
+  TensorView* tv2 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv1);
   fusion.addOutput(tv2);
 
   const auto options =
@@ -7923,12 +7954,12 @@ TEST(NVFuserTest, FusionComputeAtNonterminatingOutput_CUDA) {
   fusion.addInput(tv0);
 
   // Common intermediate tensor
-  auto tv1 = add(tv0, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
   // tv1 -> tv2
-  auto tv2 = add(tv1, new Float(2));
+  auto tv2 = add(tv1, new Double(2));
   // tv1 -> tv3 -> tv4
-  auto tv3 = add(tv1, new Float(3));
-  auto tv4 = add(tv3, new Float(4));
+  auto tv3 = add(tv1, new Double(3));
+  auto tv4 = add(tv3, new Double(4));
 
   // NOTE: This should no longer occur as of PR #201.
   // The order of adding outputs matters. If tv3 is added before tv4,
@@ -7972,10 +8003,10 @@ TEST(NVFuserTest, FusionTraversalOrder1_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv0, new Float(2));
-  TensorView* tv3 = add(tv1, new Float(3));
-  TensorView* tv4 = add(tv1, new Float(4));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv0, new Double(2));
+  TensorView* tv3 = add(tv1, new Double(3));
+  TensorView* tv4 = add(tv1, new Double(4));
 
   fusion.addOutput(tv2);
   fusion.addOutput(tv3);
@@ -8013,11 +8044,11 @@ TEST(NVFuserTest, FusionTraversalOrder2_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv1, new Float(2));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(2));
 
-  TensorView* tv3 = add(tv0, new Float(3));
-  TensorView* tv4 = add(tv3, new Float(4));
+  TensorView* tv3 = add(tv0, new Double(3));
+  TensorView* tv4 = add(tv3, new Double(4));
 
   TensorView* tv5 = add(tv1, tv3);
 
@@ -8060,11 +8091,11 @@ TEST(NVFuserTest, FusionTraversalOrder3_CUDA) {
     TensorView* tv0 = makeSymbolicTensor(1);
     fusion.addInput(tv0);
 
-    TensorView* tv1 = add(tv0, new Float(1));
-    TensorView* tv2 = add(tv1, new Float(2));
+    TensorView* tv1 = add(tv0, new Double(1));
+    TensorView* tv2 = add(tv1, new Double(2));
 
-    TensorView* tv3 = add(tv0, new Float(3));
-    TensorView* tv4 = add(tv3, new Float(4));
+    TensorView* tv3 = add(tv0, new Double(3));
+    TensorView* tv4 = add(tv3, new Double(4));
 
     TensorView* tv5 = add(tv1, tv3);
 
@@ -8120,18 +8151,18 @@ TEST(NVFuserTest, FusionTraversalOrder4_CUDA) {
   // First tree
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv1, new Float(2));
-  TensorView* tv3 = add(tv1, new Float(3));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(2));
+  TensorView* tv3 = add(tv1, new Double(3));
   fusion.addOutput(tv2);
   fusion.addOutput(tv3);
 
   // Second tree
   TensorView* tv4 = makeSymbolicTensor(1);
   fusion.addInput(tv4);
-  TensorView* tv5 = add(tv4, new Float(5));
-  TensorView* tv6 = add(tv5, new Float(6));
-  TensorView* tv7 = add(tv5, new Float(7));
+  TensorView* tv5 = add(tv4, new Double(5));
+  TensorView* tv6 = add(tv5, new Double(6));
+  TensorView* tv7 = add(tv5, new Double(7));
   fusion.addOutput(tv6);
   fusion.addOutput(tv7);
 
@@ -8170,10 +8201,10 @@ TEST(NVFuserTest, FusionTraversalOrder5_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv1, new Float(2));
-  TensorView* tv3 = add(tv0, new Float(3));
-  TensorView* tv4 = add(tv3, new Float(4));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(2));
+  TensorView* tv3 = add(tv0, new Double(3));
+  TensorView* tv4 = add(tv3, new Double(4));
   TensorView* tv5 = add(tv2, tv4);
 
   fusion.addOutput(tv1);
@@ -8212,10 +8243,10 @@ TEST(NVFuserTest, FusionTraversalOrder6_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv0, new Float(2));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv0, new Double(2));
   TensorView* tv3 = add(tv1, tv2);
-  TensorView* tv4 = add(tv3, new Float(4));
+  TensorView* tv4 = add(tv3, new Double(4));
 
   fusion.addOutput(tv4);
 
@@ -8253,10 +8284,10 @@ TEST(NVFuserTest, FusionTraversalOrder7_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv1, new Float(2));
-  TensorView* tv3 = add(tv0, new Float(3));
-  TensorView* tv4 = add(tv3, new Float(4));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(2));
+  TensorView* tv3 = add(tv0, new Double(3));
+  TensorView* tv4 = add(tv3, new Double(4));
   TensorView* tv5 = add(tv2, tv4);
 
   fusion.addOutput(tv5);
@@ -8305,9 +8336,9 @@ TEST(NVFuserTest, FusionThreadPredicate_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv0);
   TensorView* tv2 = unaryOp(UnaryOpType::Neg, tv1);
-  TensorView* tv3 = add(tv0, new Float(2));
+  TensorView* tv3 = add(tv0, new Double(2));
 
   fusion.addOutput(tv3);
   fusion.addOutput(tv2);
@@ -8443,7 +8474,7 @@ TEST(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
 
-  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv1 = mul(tv0, new Double(0.5));
   TensorView* tv2 = broadcast(tv1, {true, false});
   TensorView* tv3 = broadcast(tv1, {false, true});
   TensorView* tv4 = add(tv2, tv3);
@@ -8463,7 +8494,7 @@ TEST(NVFuserTest, FusionReductionHalf_CUDA) {
   fusion.addInput(tv0);
 
   auto tv1 = castOp(DataType::Float, tv0);
-  auto tv2 = add(tv1, new Float(1.0));
+  auto tv2 = add(tv1, new Double(1.0));
   auto tv3 = sum(tv2, {2});
   auto tv4 = castOp(DataType::Half, tv3);
 
@@ -8549,7 +8580,7 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast_CUDA) {
   fusion.addInput(tv0);
 
   TensorView* tv1 =
-      reductionOp(BinaryOpType::Add, {red_dim, 2}, new Float(0), tv0);
+      reductionOp(BinaryOpType::Add, {red_dim, 2}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   const auto options =
@@ -8591,10 +8622,10 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
   TensorView* tv0 = makeConcreteTensor({bid_x, tid_x, 1});
   fusion.addInput(tv0);
 
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {2}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {2}, new Double(0), tv0);
 
   TensorView* tv2 =
-      reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv1);
+      reductionOp(BinaryOpType::Add, {red_dim}, new Double(0), tv1);
   fusion.addOutput(tv2);
 
   const auto options =
@@ -8612,7 +8643,7 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
   fe.compileFusion(&fusion);
   // no broadcasting needed, omitting the last optional argument;
   auto cg_outputs = fe.runFusion({aten_input}, lparams);
-  auto aten_output = aten_input.to(at::kDouble).sum({red_dim, 2});
+  auto aten_output = aten_input.to(at::kDouble).sum({1, 2});
 
   testValidate(
       &fusion,
@@ -8638,9 +8669,9 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
   fusion.addInput(tv0);
 
   TensorView* tv1 =
-      reductionOp(BinaryOpType::Add, {red_dim}, new Float(0), tv0);
+      reductionOp(BinaryOpType::Add, {red_dim}, new Double(0), tv0);
 
-  TensorView* tv2 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv1);
+  TensorView* tv2 = reductionOp(BinaryOpType::Add, {1}, new Double(0), tv1);
   fusion.addOutput(tv2);
 
   const auto options =
@@ -8657,7 +8688,7 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
   fe.compileFusion(&fusion);
   // no broadcasting needed, omitting the last optional argument;
   auto cg_outputs = fe.runFusion({aten_input}, lparams);
-  auto aten_output = aten_input.to(at::kDouble).sum({red_dim, 2});
+  auto aten_output = aten_input.to(at::kDouble).sum({2, 1});
 
   testValidate(
       &fusion,
@@ -8677,7 +8708,7 @@ TEST(NVFuserTest, FusionTrivialReduction_CUDA) {
   // Set up your input tensor views
   TensorView* tv0 = makeConcreteTensor({10, 20, 1});
   fusion.addInput(tv0);
-  TensorView* tv1 = reductionOp(BinaryOpType::Add, {2}, new Float(0), tv0);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {2}, new Double(0), tv0);
   fusion.addOutput(tv1);
 
   TORCH_CHECK(!fusion.hasReduction(), "Trivial reduction picked up by fusion");
@@ -9041,14 +9072,14 @@ TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
   auto t3 = castOp(DataType::Float, t2);
   auto t4 = broadcast(t1, {true, true, false});
   auto t5 = add(t4, t3);
-  auto t6 = mul(t5, new Float(0.5));
-  auto t7 = mul(t5, new Float(k_079));
-  auto t8 = mul(t5, new Float(k_004));
+  auto t6 = mul(t5, new Double(0.5));
+  auto t7 = mul(t5, new Double(k_079));
+  auto t8 = mul(t5, new Double(k_004));
   auto t9 = mul(t8, t5);
   auto t10 = add(t9, new Int(1));
   auto t11 = mul(t7, t10);
   auto t12 = unaryOp(UnaryOpType::Tanh, t11);
-  auto t13 = add(t12, new Float(1));
+  auto t13 = add(t12, new Double(1));
   auto t14 = mul(t6, t13);
   auto t15 = castOp(DataType::Half, t14);
   fusion.addOutput(t15);
@@ -9101,23 +9132,23 @@ TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
   auto t5 = castOp(DataType::Float, t4);
   auto t6 = broadcast(t3, {true, true, false});
   auto t7 = add(t6, t5);
-  auto t8 = mul(t7, new Float(k_079));
-  auto t9 = mul(t7, new Float(k_004));
+  auto t8 = mul(t7, new Double(k_079));
+  auto t9 = mul(t7, new Double(k_004));
   auto t10 = mul(t9, t7);
   auto t11 = add(t10, new Int(1));
   auto t12 = mul(t8, t11);
   auto t13 = unaryOp(UnaryOpType::Tanh, t12);
-  auto t14 = mul(t7, new Float(0.5));
+  auto t14 = mul(t7, new Double(0.5));
   auto t15 = mul(t13, t13);
   auto t16 = unaryOp(UnaryOpType::Neg, t15);
   auto t17 = add(t16, new Int(1));
-  auto t18 = mul(t7, new Float(k_010));
+  auto t18 = mul(t7, new Double(k_010));
   auto t19 = mul(t18, t7);
-  auto t20 = add(t19, new Float(k_079));
+  auto t20 = add(t19, new Double(k_079));
   auto t21 = mul(t17, t20);
   auto t22 = mul(t14, t21);
   auto t23 = add(t13, new Int(1));
-  auto t24 = mul(t23, new Float(0.5));
+  auto t24 = mul(t23, new Double(0.5));
   auto t25 = add(t22, t24);
   auto t26 = mul(t25, t1);
   // Save float output for validation
@@ -9166,14 +9197,14 @@ TEST(NVFuserTest, FusionIssue459_CUDA) {
   auto tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
 
-  auto tv2 = add(tv0, new Float(1));
+  auto tv2 = add(tv0, new Double(1));
   auto tv3 = broadcast(tv2, {true, false});
   auto tv4 = add(tv1, tv3);
 
   // Create two outputs from the final arithmetic result
-  auto tv5 = add(tv4, new Float(1));
+  auto tv5 = add(tv4, new Double(1));
   fusion.addOutput(tv5);
-  auto tv6 = add(tv4, new Float(1));
+  auto tv6 = add(tv4, new Double(1));
   fusion.addOutput(tv6);
 
   // Scheduling
@@ -9219,9 +9250,9 @@ TEST(NVFuserTest, FusionSmemIndexingSimple_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = add(tv0, new Float(1));
-  auto tv2 = add(tv1, new Float(1));
-  auto tv3 = add(tv2, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  auto tv3 = add(tv2, new Double(1));
   fusion.addOutput(tv3);
 
   tv3->axis(0)->parallelize(ParallelType::BIDx);
@@ -9355,7 +9386,7 @@ TEST(NVFuserTest, FusionCacheBeforeReduction_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = add(tv0, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
   auto tv2 = sum(tv1, {1});
   fusion.addOutput(tv2);
 
@@ -9389,9 +9420,9 @@ TEST(NVFuserTest, FusionCacheBeforeReduction2_CUDA) {
 
   auto tv0 = makeSymbolicTensor(3);
   fusion.addInput(tv0);
-  auto tv1 = add(tv0, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
   auto tv2 = sum(tv1, {1});
-  auto tv3 = add(tv2, new Float(1));
+  auto tv3 = add(tv2, new Double(1));
   fusion.addOutput(tv2);
   fusion.addOutput(tv3);
 
@@ -9655,7 +9686,7 @@ TEST(NVFuserTest, FusionIssue484_CUDA) {
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
   auto tv1 = sum(tv0, {1});
-  auto tv2 = add(tv1, new Float(0));
+  auto tv2 = add(tv1, new Double(0));
   fusion.addOutput(tv2);
 
   tv1->setMemoryType(MemoryType::Global);
@@ -9682,7 +9713,7 @@ TEST(NVFuserTest, Issue329_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = add(tv0, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
   auto tv2 = sum(tv1, {1});
   fusion.addOutput(tv2);
   auto tv3 = sum(tv1, {1});
@@ -9714,7 +9745,7 @@ TEST(NVFuserTest, FusionIssue382_CUDA) {
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  auto tv1 = add(tv0, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
   auto tv2 = broadcast(tv1, {false, false, true});
   auto tv3 = makeSymbolicTensor(3);
   fusion.addInput(tv3);
@@ -9758,8 +9789,8 @@ TEST(NVFuserTest, Issue507_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = add(tv0, new Float(1));
-  auto tv2 = add(tv1, new Float(1));
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
   fusion.addOutput(tv2);
 
   tv1->setMemoryType(MemoryType::Shared);
@@ -9791,8 +9822,8 @@ TEST(NVFuserTest, FusionIssue532_CUDA) {
 
   // Algorithm
   TensorView* tv0 = makeSymbolicTensor(1);
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv1, new Float(1));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(1));
   fusion.addInput(tv0);
   fusion.addOutput(tv2);
 
@@ -9833,8 +9864,8 @@ TEST(NVFuserTest, FusionLoopUnswitch_CUDA) {
 
   // Algorithm
   TensorView* tv0 = makeSymbolicTensor(1);
-  TensorView* tv1 = add(tv0, new Float(1));
-  TensorView* tv2 = add(tv1, new Float(1));
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(1));
   fusion.addInput(tv0);
   fusion.addOutput(tv2);
 

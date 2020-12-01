@@ -80,6 +80,9 @@ bool validateKernelArgTensor(
     case at::ScalarType::Float:
       match = param_data_type == DataType::Float;
       break;
+    case at::ScalarType::Long:
+      match = param_data_type == DataType::Int;
+      break;
     case at::ScalarType::Bool:
       match = param_data_type == DataType::Bool;
       break;

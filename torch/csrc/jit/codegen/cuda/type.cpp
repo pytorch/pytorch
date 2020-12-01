@@ -8,6 +8,57 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+bool isFloatingPointType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Bool:
+      return false;
+    case DataType::Double:
+    case DataType::Float:
+    case DataType::Half:
+      return true;
+    case DataType::Int:
+      return false;
+    case DataType::Null:
+      TORCH_CHECK(
+          false, "Null type is not a valid argument to isFloatingPoint");
+    default:
+      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+  }
+}
+
+bool isIntegralType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Bool:
+    case DataType::Double:
+    case DataType::Float:
+    case DataType::Half:
+      return false;
+    case DataType::Int:
+      return true;
+    case DataType::Null:
+      TORCH_CHECK(
+          false, "Null type is not a valid argument to isFloatingPoint");
+    default:
+      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+  }
+}
+
+bool isIntegerOp(const BinaryOpType bopt) {
+  return bopt >= BinaryOpType::Mod && bopt <= BinaryOpType::Xor;
+}
+
+bool isLogicalOp(const BinaryOpType bopt) {
+  return bopt >= BinaryOpType::Eq && bopt <= BinaryOpType::NE;
+}
+
+bool alsoBooleanOperator(const BinaryOpType bopt) {
+  return bopt >= BinaryOpType::And && bopt <= BinaryOpType::Or;
+}
+
+bool alsoBooleanOperator(const UnaryOpType uopt) {
+  return uopt >= UnaryOpType::Not && uopt <= UnaryOpType::Not;
+}
+
 // Return highest on list (smallest enum val)
 DataType promote_type(const DataType& t1, const DataType& t2) {
   TORCH_CHECK(
@@ -21,15 +72,18 @@ DataType promote_type(const DataType& t1, const DataType& t2) {
 
 // Return highest on list (smallest enum val)
 ValType promote_type(const ValType& t1, const ValType& t2) {
-  TORCH_CHECK(
-      t1 >= ValType::TensorView && t2 >= ValType::TensorView,
-      "Expected promotable ValTypes but got: ",
-      t1,
-      " and ",
-      t2);
-  // Check that it's a promotable type (with dtype)
-  // static_assert??
-  return t1 < t2 ? t1 : t2;
+  if (t1 == ValType::TensorView || t2 == ValType::TensorView) {
+    return ValType::TensorView;
+  }
+  if (t1 == ValType::Scalar &&
+      (t2 == ValType::Scalar || t2 == ValType::NamedScalar)) {
+    return ValType::Scalar;
+  }
+  if (t2 == ValType::Scalar &&
+      (t1 == ValType::Scalar || t1 == ValType::NamedScalar)) {
+    return ValType::Scalar;
+  }
+  TORCH_CHECK(false, "Expected promotable ValTypes but got: ", t1, " and ", t2);
 }
 
 static const char* data_type2string(DataType t) {
@@ -154,6 +208,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "log2";
     case UnaryOpType::Neg:
       return "neg";
+    case UnaryOpType::Not:
+      return "not";
     case UnaryOpType::RandLike:
       return "randLike";
     case UnaryOpType::Reciprocal:
@@ -185,10 +241,18 @@ static const char* unary_op_type2string(UnaryOpType t) {
   }
 }
 
+std::string stringifyBooleanOp(const UnaryOpType uopt) {
+  TORCH_INTERNAL_ASSERT(
+      uopt == UnaryOpType::Not, uopt, " is not a boolean operator.");
+  return "!";
+}
+
 static const char* unary_op_type_inline_op2string(UnaryOpType t) {
   switch (t) {
     case UnaryOpType::Neg:
       return "-";
+    case UnaryOpType::Not:
+      return "~";
     case UnaryOpType::Set:
       return "";
     default:
@@ -264,16 +328,21 @@ static const char* binary_op_type_inline_op2string(BinaryOpType t) {
       return "+";
     case BinaryOpType::Div:
       return "/";
-    case BinaryOpType::Mod:
-      return "%";
     case BinaryOpType::Mul:
       return "*";
     case BinaryOpType::Sub:
       return "-";
 
+    // Integer ops
+    case BinaryOpType::Mod:
+      return "%";
+    case BinaryOpType::Lshift:
+      return "<<";
+    case BinaryOpType::Rshift:
+      return ">>";
+    case BinaryOpType::Xor:
+      return "^";
     // Logical Ops
-    case BinaryOpType::And:
-      return "&&";
     case BinaryOpType::Eq:
       return "==";
     case BinaryOpType::GE:
@@ -286,10 +355,26 @@ static const char* binary_op_type_inline_op2string(BinaryOpType t) {
       return "<";
     case BinaryOpType::NE:
       return "!=";
+    // Assume bitwise, otherwise use stringifyBooleanOp
+    case BinaryOpType::And:
+      return "&";
+    case BinaryOpType::Or:
+      return "|";
     default:
       break;
   }
   return nullptr;
+}
+
+std::string stringifyBooleanOp(const BinaryOpType bopt) {
+  switch (bopt) {
+    case BinaryOpType::And:
+      return "&&";
+    case BinaryOpType::Or:
+      return "||";
+    default:
+      TORCH_INTERNAL_ASSERT(false, bopt, " is not a boolean operator.")
+  }
 }
 
 static const char* ternary_op_type2string(TernaryOpType t) {
@@ -386,6 +471,10 @@ constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
 static const char* supported_casts2string(
     const std::pair<DataType, DataType>& t) {
   switch (supported_switch_pair(std::get<0>(t), std::get<1>(t))) {
+    case supported_switch_pair(DataType::Double, DataType::Float):
+      return "(float)";
+    case supported_switch_pair(DataType::Float, DataType::Double):
+      return "(double)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
     case supported_switch_pair(DataType::Half, DataType::Float):
@@ -394,21 +483,6 @@ static const char* supported_casts2string(
       return "float";
     default:
       return nullptr;
-  }
-}
-
-bool is_logical_op(const BinaryOpType& bot) {
-  switch (bot) {
-    case BinaryOpType::And:
-    case BinaryOpType::Eq:
-    case BinaryOpType::GE:
-    case BinaryOpType::GT:
-    case BinaryOpType::LE:
-    case BinaryOpType::LT:
-    case BinaryOpType::NE:
-      return true;
-    default:
-      return false;
   }
 }
 

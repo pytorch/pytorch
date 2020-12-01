@@ -20,8 +20,8 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto kNumUnaryOps = 31;
-constexpr auto kNumBinaryOps = 24;
+constexpr auto kNumUnaryOps = 32;
+constexpr auto kNumBinaryOps = 29;
 constexpr auto kNumBinaryOpsWithAlpha = 4;
 constexpr auto kNumLerpOps = 2;
 
@@ -226,6 +226,11 @@ class IrParser {
         "aten::pow(Scalar self, Tensor exponent) -> Tensor",
         "aten::remainder(Tensor self, Tensor other) -> Tensor",
         "aten::fmod(Tensor self, Tensor other) -> Tensor",
+        "aten::__and__(Tensor self, Tensor other) -> Tensor",
+        "aten::__or__(Tensor self, Tensor other) -> Tensor",
+        "aten::__xor__(Tensor self, Tensor other) -> Tensor",
+        "aten::__lshift__(Tensor self, Tensor other) -> Tensor",
+        "aten::__rshift__(Tensor self, Tensor other) -> Tensor",
         "aten::eq(Tensor self, Tensor other) -> Tensor",
         "aten::eq(Tensor self, Scalar other) -> Tensor",
         "aten::ne(Tensor self, Tensor other) -> Tensor",
@@ -260,7 +265,12 @@ class IrParser {
                  {aten::gt, BinaryOpType::GT},
                  {aten::ge, BinaryOpType::GE},
                  {aten::ne, BinaryOpType::NE},
-                 {aten::eq, BinaryOpType::Eq}});
+                 {aten::eq, BinaryOpType::Eq},
+                 {aten::__and__, BinaryOpType::And},
+                 {aten::__or__, BinaryOpType::Or},
+                 {aten::__xor__, BinaryOpType::Xor},
+                 {aten::__lshift__, BinaryOpType::Lshift},
+                 {aten::__rshift__, BinaryOpType::Rshift}});
             auto lhs = value_map[node->inputs()[0]->unique()];
             auto rhs = value_map[node->inputs()[1]->unique()];
 
@@ -297,6 +307,7 @@ class IrParser {
         "aten::floor(Tensor self) -> Tensor",
         "aten::round(Tensor self) -> Tensor",
         "aten::trunc(Tensor self) -> Tensor",
+        "aten::bitwise_not(Tensor self) -> Tensor",
         "aten::frac(Tensor self) -> Tensor",
         "aten::reciprocal(Tensor self) -> Tensor",
         "aten::relu(Tensor self) -> Tensor",
@@ -336,6 +347,7 @@ class IrParser {
                 {aten::floor, UnaryOpType::Floor},
                 {aten::round, UnaryOpType::Round},
                 {aten::trunc, UnaryOpType::Trunc},
+                {aten::bitwise_not, UnaryOpType::Not},
                 {aten::frac, UnaryOpType::Frac},
                 {aten::reciprocal, UnaryOpType::Reciprocal},
                 {aten::relu, UnaryOpType::Relu},
@@ -390,10 +402,10 @@ class IrParser {
             // TODO: we need to get a proper lower bound per dtype in operand.
             auto low = value_map.count(node->inputs()[1]->unique()) != 0
                 ? value_map[node->inputs()[1]->unique()]
-                : new Float(std::numeric_limits<float>::min());
+                : new Double(std::numeric_limits<float>::min());
             auto high = value_map.count(node->inputs()[2]->unique()) != 0
                 ? value_map[node->inputs()[2]->unique()]
-                : new Float(std::numeric_limits<float>::max());
+                : new Double(std::numeric_limits<float>::max());
 
             auto out = clamp(operand, low, high);
             value_map.emplace(node->output()->unique(), out);
@@ -531,9 +543,9 @@ class IrParser {
             auto x_sum_bcast = broadcast(x_sum, broadcast_mask);
             auto x_mean = div(x_sum_bcast, num_features);
 
-            // auto current_mean_hat = mul(x_mean, new Float(kMomentum));
+            // auto current_mean_hat = mul(x_mean, new Double(kMomentum));
             // auto rmean_bcast = broadcast(running_mean, broadcast_mask);
-            // auto mean_hat = mul(rmean_bcast, new Float(1.0 - kMomentum));
+            // auto mean_hat = mul(rmean_bcast, new Double(1.0 - kMomentum));
             // auto new_mean_hat = add(mean_hat, current_mean_hat);
 
             auto x_mean_sub = sub(input, x_mean);
@@ -544,12 +556,12 @@ class IrParser {
 
             // auto num_feature_decrement = sub(num_features, new Int(1));
             // auto unbiased_var = div(var_sum_bcast, num_feature_decrement);
-            // auto current_var_hat = mul(unbiased_var, new Float(kMomentum));
+            // auto current_var_hat = mul(unbiased_var, new Double(kMomentum));
             // auto rvar_bcast = broadcast(running_var, broadcast_mask);
-            // auto var_hat = mul(rvar_bcast, new Float(1.0 - kMomentum));
+            // auto var_hat = mul(rvar_bcast, new Double(1.0 - kMomentum));
             // auto new_var_hat = add(var_hat, current_var_hat);
 
-            auto var_eps = add(var, new Float(kEps));
+            auto var_eps = add(var, new Double(kEps));
             auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
             auto output = mul(x_mean_sub, rvar);
 
@@ -623,7 +635,7 @@ class IrParser {
             auto var_sum = sum(x_mean_sub_pow, reduction_axes);
             auto var_sum_bcast = broadcast(var_sum, broadcast_mask);
             auto var = div(var_sum_bcast, num_features);
-            auto var_eps = add(var, new Float(kEps));
+            auto var_eps = add(var, new Double(kEps));
             auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps);
             auto output = mul(x_mean_sub, rvar);
 
@@ -788,17 +800,17 @@ class IrParser {
   bool registerScalar(const JitValue* val) {
     if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
       CgValue cg_val;
-      if (auto ival = constant_as<float>(val)) {
-        cg_val = new Float(ival.value());
+      if (auto ival = constant_as<double>(val)) {
+        cg_val = new Double(ival.value());
       } else {
-        cg_val = new Float();
+        cg_val = new Double();
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(IntType::get()))) {
       CgValue cg_val;
-      if (auto ival = constant_as<int>(val)) {
+      if (auto ival = constant_as<int64_t>(val)) {
         cg_val = new Int(ival.value());
       } else {
         cg_val = new Int();
