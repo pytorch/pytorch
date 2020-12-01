@@ -182,6 +182,8 @@ class JitCommonTestCase(TestCase):
     def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
         diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
         diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
+
+        # Note: currently no tests have fusible_nodes
         fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
         fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
 
