@@ -422,8 +422,9 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
+                       # Reference: https://github.com/pytorch/pytorch/issues/48641
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cpu', dtypes=[torch.int8]),  # Reference: https://github.com/pytorch/pytorch/issues/48641
+                                device_type='cpu', dtypes=[torch.int8]),
                    )),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
