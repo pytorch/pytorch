@@ -241,7 +241,7 @@ class {module_name}(torch.nn.Module):
         for param_name, param in self._parameters.items():
             model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(buffer.shape)}))\n"
 
-        model_str += f"{tab*2}self.load_state_dict(torch.load('{folder}/state_dict.pt'))\n"
+        model_str += f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         model_str += f"{_addindent(self.code, 4)}\n"
 
         module_file = folder / 'module.py'
