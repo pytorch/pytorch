@@ -21,7 +21,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
   // public constructor for now...
   OpaqueTensorImpl(
       at::DispatchKeySet key_set,
-      const caffe2::TypeMeta& data_type,
+      const caffe2::TypeMeta data_type,
       c10::Device device,
       OpaqueHandle opaque_handle,
       c10::IntArrayRef sizes)

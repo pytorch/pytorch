@@ -157,14 +157,15 @@ public:
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
   void assertSignatureIsCorrect() {
-    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == *cpp_signature_),
-        "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
-        CppSignature::make<FuncType>().name(),
-        " but the operator was registered with ",
-        cpp_signature_->name(),
-        " (",
-        (schema_.has_value() ? schema_->debug : "unknown debug info"),
-        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
+    TORCH_CHECK(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == cpp_signature_->signature),
+        "\nTried to access or call an operator with a wrong signature.\n",
+        "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+        "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
+        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  accessed/called as: ", CppSignature::make<FuncType>().name(), "\n",
+        "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
+        "Please make sure that the function signature matches the signature in the operator registration call."
     );
   }
 
@@ -230,12 +231,18 @@ private:
   AnnotatedKernel missingKernel_;
   static const AnnotatedKernel ambiguousAutogradOtherKernel_;
 
-  // signature_hash_ is set to the hash of the function signature if any of
+  // cpp_signature_ stores function signature if any of
   // the kernels was created in a way that allowed us to know the function
   // signature (i.e. by supplying an unboxed C++ kernel function).
-  // If this is set, it will be used in unboxed function calls
+  // If this is set, it will be used to check that future kernel
+  // registrations match and it will be used in unboxed function calls
   // to verify their arguments against the known function signature.
-  c10::optional<CppSignature> cpp_signature_;
+  struct CppSignatureWithDebug {
+    CppSignature signature;
+    std::string debug;
+    c10::optional<DispatchKey> dispatch_key;
+  };
+  c10::optional<CppSignatureWithDebug> cpp_signature_;
 
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
