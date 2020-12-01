@@ -113,6 +113,8 @@ def tril_matrix_to_vec(mat, diag=0):
     which comprises of lower triangular elements from the matrix in row order.
     """
     n = mat.shape[-1]
+    if diag <= -n or diag >= n:
+        raise ValueError(f'diag ({diag}) provided is outside [{-n+1}, {n-1}].')
     arange = torch.arange(n, device=mat.device)
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)
     vec = mat[..., tril_mask]
@@ -124,8 +126,8 @@ def vec_to_tril_matrix(vec, diag=0):
     Convert a vector or a batch of vectors into a batched `D x D`
     lower triangular matrix containing elements from the vector in row order.
     """
-    # +ve root of D**2 + (1+2*diag)*D - diag * (diag+1) - 2*vec.shape[-1] = 0
-    n = (-(1 + 2 * diag) + ((1 + 2 * diag)**2 + 8 * vec.shape[-1] + 4 * diag * (diag + 1))**0.5) / 2
+    # +ve root of D**2 + (1+2*diag)*D - |diag| * (diag+1) - 2*vec.shape[-1] = 0
+    n = (-(1 + 2 * diag) + ((1 + 2 * diag)**2 + 8 * vec.shape[-1] + 4 * abs(diag) * (diag + 1))**0.5) / 2
     eps = torch.finfo(vec.dtype).eps
     if not torch._C._get_tracing_state() and (round(n) - n > eps):
         raise ValueError(f'The size of last dimension is {vec.shape[-1]} which cannot be expressed as ' +

@@ -283,7 +283,7 @@ class _CorrCholesky(Constraint):
     """
     def check(self, value):
         row_norm = torch.norm(value, dim=-1)
-        unit_row_norm = (row_norm <= 1. & row_norm >= 1e-6).all(dim=-1)
+        unit_row_norm = (row_norm <= 1. & row_norm >= (1 - 1e-6)).all(dim=-1)
         return _LowerCholesky().check(value) & unit_row_norm
 
 

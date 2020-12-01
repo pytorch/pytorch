@@ -153,6 +153,7 @@ USE_PYTEST_LIST = [
     'distributed/_pipeline/sync/test_worker',
     'distributions/test_constraints',
     'distributions/test_transforms',
+    'distributions/test_utils',
 ]
 
 WINDOWS_BLOCKLIST = [
