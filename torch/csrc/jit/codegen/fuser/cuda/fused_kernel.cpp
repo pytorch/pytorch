@@ -28,10 +28,7 @@ const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-static void getMajorMinor(
-    const cudaDeviceProp* const prop,
-    int& major,
-    int& minor) {
+void getMajorMinor(const cudaDeviceProp* const prop, int& major, int& minor) {
   int nvrtc_major, nvrtc_minor;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
@@ -51,16 +48,10 @@ static void getMajorMinor(
     minor = 0;
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     major = 7;
-    if (prop->major == 7 && prop->minor <= 2)
-      minor = prop->minor;
-    else
-      minor = 0;
+    minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
   } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
     major = 7;
-    if (prop->major == 7 && prop->minor <= 5)
-      minor = prop->minor;
-    else
-      minor = 0;
+    minor = (prop->major == 7 && prop->minor <= 5) ? prop->minor : 0;
   } else if (
       nvrtc_major == 11 && nvrtc_minor == 0 &&
       prop->major >= 8) { // 11.0 supports 3.5-8.0
