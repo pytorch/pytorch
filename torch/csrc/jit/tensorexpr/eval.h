@@ -120,6 +120,10 @@ inline bool div_value(bool lhs, bool rhs) {
   return false;
 }
 
+inline c10::Half div_value(c10::Half lhs, c10::Half rhs) {
+  return lhs / rhs;
+}
+
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
  public:
   template <typename... Ts>
