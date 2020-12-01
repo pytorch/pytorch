@@ -24,6 +24,7 @@ from caffe2.python.helpers.fc import *
 from caffe2.python.helpers.nonlinearity import *
 from caffe2.python.helpers.normalization import *
 from caffe2.python.helpers.pooling import *
+from caffe2.python.helpers.quantization import *
 from caffe2.python.helpers.tools import *
 from caffe2.python.helpers.train import *
 
@@ -72,6 +73,7 @@ class HelperWrapper(object):
         'cond' : cond,
         'loop' : loop,
         'db_input' : db_input,
+        'fused_8bit_rowwise_quantized_to_float' : fused_8bit_rowwise_quantized_to_float,
     }
 
     def __init__(self, wrapped):
