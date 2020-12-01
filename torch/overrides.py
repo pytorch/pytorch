@@ -359,8 +359,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.divide: lambda input, other, out=None: -1,
         torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
-        torch.dsmm: lambda input, mat2: -1,  # type: ignore[attr-defined]
-        torch.hsmm: lambda mat1, mat2: -1,  # type: ignore[attr-defined]
+        torch.dsmm: lambda input, mat2: -1,
+        torch.hsmm: lambda mat1, mat2: -1,
         torch.dstack: lambda tensors, out=None: -1,
         torch.eig: lambda input, eigenvectors=False, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
