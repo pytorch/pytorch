@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <fstream>
