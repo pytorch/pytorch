@@ -315,7 +315,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         endif()
 
         if(USE_ROCM)
-          target_compile_definitions(torch_hip PRIVATE
+          target_compile_definitions(tensorpipe_agent PRIVATE
             USE_ROCM
             __HIP_PLATFORM_HCC__
           )
