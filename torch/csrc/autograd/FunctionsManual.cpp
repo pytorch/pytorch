@@ -628,8 +628,9 @@ Tensor _sparse_matrix_mask(const Tensor& grad, const Tensor& mask){
   if (mask._nnz() == 0) {
     return output.zero_();
   }
-  auto mask_indices = mask._indices();
-  auto r_values = _sparse_matrix_mask_helper(mask._nnz(), grad, mask_indices);
+  Tensor mask_indices = at::empty_like(mask._indices());
+  mask_indices.copy_(mask._indices());
+  auto r_values = _sparse_matrix_mask_helper(mask._nnz(), grad, mask_indices.contiguous());
   at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(mask_indices, r_values);
   return output;
 }

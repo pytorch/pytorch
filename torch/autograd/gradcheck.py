@@ -197,6 +197,8 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, grad_out=1.0):
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
         if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() > nondet_tol:
+            print(jacobian_x.numel())
+            print( (jacobian_x - jacobian_reentrant_x).abs().max(),  nondet_tol)
             reentrant = False
 
     return jacobian, reentrant, correct_grad_sizes, correct_grad_types
@@ -423,7 +425,11 @@ def gradcheck(
                         return fail_test('grad is sparse tensor, but has incorrect dense_dim')
                 gi = gi.to_dense()
                 di = di.to_dense()
-            if not gi.eq(0).all():
+
+            if check_sparse_nnz:
+                if not torch.allclose(gi, torch.zeros_like(gi)):
+                    return fail_test('backward not multiplied by grad_output')
+            elif not gi.eq(0).all():
                 return fail_test('backward not multiplied by grad_output')
             if gi.dtype != di.dtype or gi.device != di.device or gi.is_sparse != di.is_sparse:
                 return fail_test("grad is incorrect type")

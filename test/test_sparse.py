@@ -3012,7 +3012,7 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2])
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
-    @cpu_only
+    @skipIfRocm
     def test_sparse_matmul(self):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 
@@ -3080,16 +3080,16 @@ class TestSparse(TestCase):
                 return torch.sparse_coo_tensor(torch.tensor([i3, j3]), torch.tensor(values), (n, m))
 
         def grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b):
-            def test_grad_dense(a, b, g):
-                a = a.to_dense().detach()
-                b = b.to_dense().detach()
-                g = g.to_dense().detach()
+            def test_grad_dense(a_s, b_s, g_s):
+                a = a_s.to_dense().detach()
+                b = b_s.to_dense().detach()
+                g = g_s.to_dense().detach()
 
                 a.requires_grad_(True)
                 b.requires_grad_(True)
                 c = a @ b
                 c.backward(g)
-                return a.grad, b.grad
+                return a.grad.sparse_mask(a_s.coalesce()), b.grad.sparse_mask(b_s.coalesce())
 
             a, _, _ = self._gen_sparse(sparse_dims, nnz, shape_a)
             b, _, _ = self._gen_sparse(sparse_dims, nnz, shape_b)
@@ -3104,8 +3104,8 @@ class TestSparse(TestCase):
             c.backward(g)
 
             a_grad, b_grad = test_grad_dense(a, b, g)
-            self.assertEqual(a.grad.to_dense(), a_grad.sparse_mask(a.coalesce()).to_dense())
-            self.assertEqual(b.grad.to_dense(), b_grad.sparse_mask(b.coalesce()).to_dense())
+            self.assertEqual(a.grad, a_grad)
+            self.assertEqual(b.grad, b_grad)
 
         def test_sparse_matmul(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
@@ -3120,14 +3120,18 @@ class TestSparse(TestCase):
             r2 = torch.sparse.mm(a, b)
             self.assertEqual(r1, r2)
 
-            a.requires_grad_(True)
-            b.requires_grad_(True)
+            # with cuda only can be computed backward for nnz > 0. 
+            # Note: There is a CUDA runtime error: No valid pointers for nnz == 0 
+            if nnz > 0:
+                a.requires_grad_(True)
+                b.requires_grad_(True)
 
-            # check autograd support on sparse matmul
-            def fn(D1, D2):
-                return torch.sparse.mm(D1, D2).to_dense()
-            gradcheck(fn, (a, b), check_sparse_nnz=True)
-            grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
+                # check autograd support on sparse matmul
+                def fn(D1, D2):
+                    return torch.sparse.mm(D1, D2).to_dense()
+                # for cuda `nondet_tol=1e-5` because cuSparse returns sometimes values like 3.4585e-323 which is zero 
+                gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+                grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
             def fn(sparse_dims, nnz, shape_a, shape_b):
@@ -3156,7 +3160,6 @@ class TestSparse(TestCase):
 
         test_sparse_matmul(2, 0, [0, 0], [0, 0])
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
-
         test_error_cases()
 
 class TestUncoalescedSparse(TestSparse):

@@ -775,9 +775,11 @@ Tensor sparse_matrix_mask_helper_cuda(
   const SparseTensor& t,
   const LongTensor& mask_indices
 ) {
-  auto t_v = t._values();
-  Tensor r_values = at::zeros({r_nnz}, t_v.options());  
-  auto t_i = t._indices();
+  auto t_v = t._values().contiguous();
+
+  Tensor r_values = at::empty({r_nnz}, t_v.options());
+
+  auto t_i = t._indices().contiguous();
   auto t_indices_accessor = t_i.packed_accessor<int64_t, 2>();
   auto t_nnz = t._nnz();
 
@@ -785,7 +787,7 @@ Tensor sparse_matrix_mask_helper_cuda(
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
-  Tensor t_flatten_indices = at::zeros({t_nnz}, mask_indices.options()); 
+  Tensor t_flatten_indices = at::empty({t_nnz}, mask_indices.options());
   auto t_flatten_indices_accessor = t_flatten_indices.packed_accessor<int64_t, 1>();
   auto t_n_cols = t.size(1);
 
@@ -798,7 +800,7 @@ Tensor sparse_matrix_mask_helper_cuda(
       t_flatten_indices_accessor[i] = index; 
   });
 
-  Tensor mask_flatten_indices = at::zeros({r_nnz}, mask_indices.options()); 
+  Tensor mask_flatten_indices = at::empty({r_nnz}, mask_indices.options()); 
   auto mask_flatten_indices_accessor = mask_flatten_indices.packed_accessor<int64_t, 1>();
   auto mask_indices_accessor = mask_indices.packed_accessor<int64_t, 2>();
 
@@ -810,9 +812,8 @@ Tensor sparse_matrix_mask_helper_cuda(
       auto index = mask_indices_accessor[0][i] * t_n_cols + mask_indices_accessor[1][i];
       mask_flatten_indices_accessor[i] = index; 
   });
-  
   auto max_sz = std::max(r_nnz, t_nnz);
-  Tensor t_index_set = at::zeros({max_sz}, mask_indices.options()); 
+  Tensor t_index_set = at::empty({max_sz}, mask_indices.options()); 
 
   auto result_end = thrust::set_intersection_by_key(
     policy,
@@ -825,9 +826,7 @@ Tensor sparse_matrix_mask_helper_cuda(
     t_index_set.data_ptr<int64_t>());
 
   auto new_sz = thrust::distance(t_index_set.data_ptr<int64_t>(), result_end.second);
-
-  Tensor mask_index_set = at::zeros({max_sz}, mask_indices.options()); 
-
+  Tensor mask_index_set = at::empty({max_sz}, mask_indices.options()); 
   thrust::set_intersection_by_key(
       policy,
       mask_flatten_indices.data_ptr<int64_t>(), 
@@ -839,20 +838,21 @@ Tensor sparse_matrix_mask_helper_cuda(
       mask_index_set.data_ptr<int64_t>()); 
 
   AT_DISPATCH_FLOATING_TYPES(r_values.scalar_type(), "_sparse_matrix_mask", [&] {
-    scalar_t* r_values_accessor = r_values.data_ptr<scalar_t>();
-    scalar_t* t_values = t_v.data_ptr<scalar_t>(); 
-    int64_t* mask_index_set_ptr = mask_index_set.data_ptr<int64_t>();
-    int64_t* t_index_set_ptr = t_index_set.data_ptr<int64_t>();
-    
-    thrust::for_each(
-      policy,
-      thrust::make_counting_iterator(int64_t(0)),
-      thrust::make_counting_iterator(int64_t(new_sz)),
-      [r_values_accessor, t_values, t_index_set_ptr, mask_index_set_ptr] __device__ (int64_t i) mutable {
-        int64_t target = mask_index_set_ptr[i];
-        int64_t origin = t_index_set_ptr[i];     
-        r_values_accessor[target] = t_values[ origin ];
-    });
+    auto r_values_accessor = r_values.packed_accessor<scalar_t, 1>();
+    auto t_values = t_v.packed_accessor<scalar_t, 1>(); 
+    auto mask_index_set_ptr = mask_index_set.packed_accessor<int64_t, 1>();
+    auto t_index_set_ptr = t_index_set.packed_accessor<int64_t, 1>();
+    if (new_sz > 0) {
+      thrust::for_each(
+        policy,
+        thrust::make_counting_iterator(int64_t(0)),
+        thrust::make_counting_iterator(int64_t(new_sz)),
+        [r_values_accessor, t_values, t_index_set_ptr, mask_index_set_ptr, r_nnz] __device__ (int64_t i) mutable {
+          int64_t target = mask_index_set_ptr[i];
+          int64_t origin = t_index_set_ptr[i];
+          r_values_accessor[target] = t_values[origin];
+        });
+    }
   });
   return r_values;
 }
