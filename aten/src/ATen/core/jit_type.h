@@ -100,9 +100,9 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   // This additional information should only contain details that are not obvious
   // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
-  virtual bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const;
+  virtual bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
-  bool isSubtypeOf(const TypePtr rhs) const {
+  bool isSubtypeOf(const TypePtr& rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
   }
 
@@ -308,7 +308,7 @@ struct CAFFE2_API OptionalType
     return create(contained_types[0]);
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
@@ -465,7 +465,7 @@ struct CAFFE2_API SymbolicShape {
   }
 
   // Mix of known and unknown ranks
-  SymbolicShape(const std::vector<c10::optional<int64_t>> dims) {
+  SymbolicShape(const std::vector<c10::optional<int64_t>>& dims) {
     std::vector<ShapeSymbol> shape_symbols;
     shape_symbols.reserve(dims.size());
     for(c10::optional<int64_t> dim: dims) {
@@ -478,7 +478,7 @@ struct CAFFE2_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
-  SymbolicShape(const std::vector<ShapeSymbol> dims) : dims_(dims) {}
+  SymbolicShape(std::vector<ShapeSymbol> dims) : dims_(std::move(dims)) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
     std::vector<ShapeSymbol> shape_symbols;
@@ -674,7 +674,7 @@ struct CAFFE2_API TensorType : public Type {
   }
 
   bool operator==(const Type& rhs) const override;
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
 
   std::string str() const override;
 
@@ -729,7 +729,7 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr withSymbolicShapes(SymbolicShape ssizes) const {
     auto cloned = clone();
-    cloned->sizes_ = ssizes;
+    cloned->sizes_ = std::move(ssizes);
     return cloned;
   }
 
@@ -757,7 +757,7 @@ struct CAFFE2_API TensorType : public Type {
 
   const SymbolicShape& symbolic_sizes() const;
 
-  TensorTypePtr merge(TensorTypePtr other, bool merge_sizes = true) const;
+  TensorTypePtr merge(const TensorType& other, bool merge_sizes = true) const;
 
   bool matchTensor(const at::Tensor& t);
 
@@ -884,7 +884,7 @@ struct CAFFE2_API ListType
     return create(contained_types.at(0));
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
 
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
@@ -1006,7 +1006,7 @@ struct CAFFE2_API FutureType
     return create(contained_types.at(0));
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
@@ -1117,7 +1117,7 @@ struct CAFFE2_API TupleType : public NamedType {
   }
 
   bool operator==(const Type& rhs) const override;
-  bool isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const override;
 
   std::string str() const override;
   bool hasFreeVariables() const override {
@@ -1212,7 +1212,7 @@ struct CAFFE2_API EnumType : public NamedType {
     return false;
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
 
   std::shared_ptr<const ::torch::jit::CompilationUnit> compilation_unit() const {
     auto cu = cu_.lock();
@@ -1320,7 +1320,7 @@ struct CAFFE2_API FloatType : public NumberType {
   std::string str() const override {
     return "float";
   }
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
     return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::FloatType;
@@ -1347,7 +1347,7 @@ struct CAFFE2_API IntType : public NumberType {
   std::string str() const override {
     return "int";
   }
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
     return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
@@ -1451,7 +1451,7 @@ struct CAFFE2_API NoneType : public Type {
   std::string str() const override {
     return "None";
   }
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream *why_not) const override {
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override {
     if (rhs->kind() == OptionalType::Kind) {
       return true;
     }
@@ -2276,7 +2276,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
 
   static const TypeKind Kind = TypeKind::ClassType;
 
@@ -2352,7 +2352,7 @@ struct CAFFE2_API InterfaceType : public NamedType {
     return std::string("InterfaceType<") + name()->name() + ">";
   }
 
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override;
 
   // try to find a method of this interface,
   // returns nullptr if not found.
