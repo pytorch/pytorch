@@ -545,6 +545,7 @@ class Graph:
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
+                    delete_unused_values(node)
                     continue
                 qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
@@ -554,6 +555,7 @@ class Graph:
                    node.args[1].isidentifier():
                     # pretty print attribute access
                     body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
+                    delete_unused_values(node)
                     continue
                 body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})\n')
                 delete_unused_values(node)
