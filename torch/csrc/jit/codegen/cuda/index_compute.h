@@ -194,7 +194,7 @@ class Index {
       const std::vector<kir::ForLoop*>& loops,
       const std::vector<bool>& root_contiguity,
       const ComputeAtRootDomainMap& ca_root_map,
-      bool unroll = false);
+      bool unswitch = false);
 };
 
 } // namespace cuda

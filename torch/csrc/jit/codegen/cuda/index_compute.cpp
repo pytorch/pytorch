@@ -1347,7 +1347,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
     const std::vector<kir::ForLoop*>& loops,
     const std::vector<bool>& root_contiguity,
     const ComputeAtRootDomainMap& ca_root_map,
-    bool unroll) {
+    bool unswitch) {
   FUSER_PERF_SCOPE("Index::getConsumerRootPredIndices");
 
   const auto gpu_lower = GpuLower::current();
@@ -1364,15 +1364,16 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
       std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
       [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
 
-  if (unroll) {
-    bool within_unroll = false;
+  if (unswitch) {
+    bool within_unswitch = false;
     const auto one = ir_builder.create<kir::Int>(1);
     for (auto loop : loops) {
-      if (loop->iter_domain()->parallelType() == ParallelType::Unroll) {
-        within_unroll = true;
+      if (loop->iter_domain()->parallelType() == ParallelType::Unroll ||
+          loop->iter_domain()->parallelType() == ParallelType::Unswitch) {
+        within_unswitch = true;
       }
 
-      if (within_unroll && !loop->iter_domain()->isThread()) {
+      if (within_unswitch && !loop->iter_domain()->isThread()) {
         loop_to_ind_map[loop] =
             ir_builder.subExpr(loop->iter_domain()->extent(), one);
       }

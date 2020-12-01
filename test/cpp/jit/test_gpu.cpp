@@ -9827,6 +9827,39 @@ TEST(NVFuserTest, FusionIssue532_CUDA) {
       &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionLoopUnswitch_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Algorithm
+  TensorView* tv0 = makeSymbolicTensor(1);
+  TensorView* tv1 = add(tv0, new Float(1));
+  TensorView* tv2 = add(tv1, new Float(1));
+  fusion.addInput(tv0);
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 32);
+  tv1->computeAt(tv2, -1);
+
+  tv2->axis(1)->parallelize(ParallelType::Unswitch);
+
+  constexpr int M = 1000;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({M}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  at::Tensor aten_output = t0 + 1 + 1;
+
+  testValidate(
+      &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 

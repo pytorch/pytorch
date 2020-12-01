@@ -122,6 +122,7 @@ enum class ParallelType {
   TIDx,
   Vectorize,
   Unroll,
+  Unswitch,
   Serial
 };
 

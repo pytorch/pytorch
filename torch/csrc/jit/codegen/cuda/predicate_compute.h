@@ -50,7 +50,7 @@ class PredicateCompute {
       bool ignore_block_grid_reductions = true);
 };
 
-class TORCH_CUDA_API UnrollPredicate {
+class TORCH_CUDA_API UnswitchPredicate {
  public:
   static kir::Bool* get(
       const std::vector<kir::ForLoop*>& outer_loops,
@@ -59,7 +59,7 @@ class TORCH_CUDA_API UnrollPredicate {
       const ComputeAtRootDomainMap& ca_root_map);
 
  private:
-  UnrollPredicate(
+  UnswitchPredicate(
       std::vector<kir::ForLoop*> outer_loops,
       kir::ForLoop* unrolled_loop,
       const IterDomainMap& _p2c_root_map,

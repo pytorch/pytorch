@@ -195,16 +195,16 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   return cond->as<kir::Bool>();
 }
 
-kir::Bool* UnrollPredicate::get(
+kir::Bool* UnswitchPredicate::get(
     const std::vector<kir::ForLoop*>& outer_loops,
     kir::ForLoop* unrolled_loop,
     const IterDomainMap& p2c_root_map,
     const ComputeAtRootDomainMap& ca_root_map) {
-  FUSER_PERF_SCOPE("UnrollPredicate::get");
+  FUSER_PERF_SCOPE("UnswitchPredicate::get");
 
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
-  UnrollPredicate up(outer_loops, unrolled_loop, p2c_root_map, ca_root_map);
+  UnswitchPredicate up(outer_loops, unrolled_loop, p2c_root_map, ca_root_map);
 
   std::unordered_set<kir::Bool*> pred_set;
   for (auto entry : up.predicates_) {
@@ -227,8 +227,8 @@ kir::Bool* UnrollPredicate::get(
   return unroll_pred->as<kir::Bool>();
 }
 
-void UnrollPredicate::predicateOn(kir::Expr* tv_expr) {
-  FUSER_PERF_SCOPE("UnrollPredicate::predicateOn");
+void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
+  FUSER_PERF_SCOPE("UnswitchPredicate::predicateOn");
 
   if (for_loops_.empty()) {
     return;
@@ -278,8 +278,8 @@ void UnrollPredicate::predicateOn(kir::Expr* tv_expr) {
   }
 }
 
-void UnrollPredicate::openLoop(kir::ForLoop* fl) {
-  FUSER_PERF_SCOPE("UnrollPredicate::openLoop");
+void UnswitchPredicate::openLoop(kir::ForLoop* fl) {
+  FUSER_PERF_SCOPE("UnswitchPredicate::openLoop");
 
   for_loops_.push_back(fl);
 
@@ -294,7 +294,7 @@ void UnrollPredicate::openLoop(kir::ForLoop* fl) {
   for_loops_.pop_back();
 }
 
-UnrollPredicate::UnrollPredicate(
+UnswitchPredicate::UnswitchPredicate(
     std::vector<kir::ForLoop*> outer_loops,
     kir::ForLoop* unrolled_loop,
     const IterDomainMap& _p2c_root_map,

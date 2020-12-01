@@ -322,7 +322,9 @@ static const char* parallel_type2string(ParallelType t) {
     case ParallelType::Vectorize:
       return "V";
     case ParallelType::Unroll:
-      return "U";
+      return "UR";
+    case ParallelType::Unswitch:
+      return "US";
     case ParallelType::Serial:
       return "S";
     default:
