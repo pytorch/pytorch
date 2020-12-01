@@ -16,6 +16,7 @@ import torch
 import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import queue, string_classes
+from torch.autograd.profiler import record_function
 
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
@@ -515,7 +516,7 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError
 
     def __next__(self) -> Any:
-        with torch.autograd.profiler.record_function(self._profile_name):
+        with record_function(self._profile_name):
             if self._sampler_iter is None:
                 self._reset()
             data = self._next_data()

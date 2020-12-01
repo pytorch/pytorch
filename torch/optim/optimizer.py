@@ -2,6 +2,7 @@ from collections import defaultdict
 from torch._six import container_abcs
 
 import torch
+from torch.autograd.profiler import record_function
 from copy import deepcopy
 from itertools import chain
 import warnings
@@ -41,7 +42,7 @@ class Optimizer(object):
                 # The first argument is self, which we use it to get the actual class of the object.
                 obj, *_ = args
                 profile_name = "Optimizer.{}#{}.{}".format(func.__name__, obj.__class__.__name__, func.__name__)
-                with torch.autograd.profiler.record_function(profile_name):
+                with record_function(profile_name):
                     return func(*args, **kwargs)
 
             wrapper.profile_hooked = True
