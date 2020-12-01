@@ -231,44 +231,44 @@ class SvdInfo(OpInfo):
     def sample_inputs(self, device, dtype, requires_grad=False):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        test_cases1 = ( # some=True (default)
+        test_cases1 = (  # some=True (default)
             # loss functions for complex-valued svd have to be "gauge invariant",
             # i.e. loss functions shouldn't change when sigh of the singular vectors change.
             # the simplest choice to satisfy this requirement is to apply 'abs'.
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
-             lambda usv: usv[1]), # 'check_grad_s'
+             lambda usv: usv[1]),  # 'check_grad_s'
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
-             lambda usv: abs(usv[0])), # 'check_grad_u'
+             lambda usv: abs(usv[0])),  # 'check_grad_u'
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
-             lambda usv: abs(usv[2])), # 'check_grad_v'
+             lambda usv: abs(usv[2])),  # 'check_grad_v'
             # TODO: replace lambda usv: usv[0][0, 0] * usv[2][0, 0] with lambda usv: usv[0][0, 0] * usv[2][0, 0].conj()
             # once https://github.com/pytorch/pytorch/issues/45821 is resolved
             # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
             # and when the loss function depends both on 'u' and 'v'
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
-             lambda usv: usv[0][0, 0] * usv[2][0, 0]), # 'check_grad_uv'
+             lambda usv: usv[0][0, 0] * usv[2][0, 0]),  # 'check_grad_uv'
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))), # 'wide'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'tall'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall'
             (random_fullrank_matrix_distinct_singular_value(M, dtype=dtype).to(device),
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'large'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'large'
             (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'batched'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'batched'
             (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :(S - 2), :],
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'wide_batched'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'wide_batched'
             (random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))), # 'tall_batched'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2]))),  # 'tall_batched'
         )
-        test_cases2 = ( # some=False
+        test_cases2 = (  # some=False
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][:, :(S - 2)]))), # 'wide_all'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][:, :(S - 2)]))),  # 'wide_all'
             (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
-             lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))), # 'tall_all'
+             lambda usv: (abs(usv[0][:, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all'
             (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :(S - 2), :],
-             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))), # 'wide_all_batched'
+             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide_all_batched'
             (random_fullrank_matrix_distinct_singular_value(S, 3, 3, dtype=dtype).to(device)[..., :, :(S - 2)],
-             lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))), # 'tall_all_batched'
+             lambda usv: (abs(usv[0][..., :, :(S - 2)]), usv[1], abs(usv[2]))),  # 'tall_all_batched'
         )
 
         out = []
@@ -291,8 +291,8 @@ class PinverseInfo(OpInfo):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         test_cases = (
-            random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device), # pinverse
-            random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device), # pinverse 'batched'
+            random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),  # pinverse
+            random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),  # pinverse 'batched'
         )
 
         out = []
@@ -570,16 +570,16 @@ op_db = [
                                 dtypes=[torch.cdouble]),),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
-	    SvdInfo('svd',
-                dtypes=floating_and_complex_types(),
-                test_inplace_grad=False,
-                supports_tensor_out=False,
-                decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
-	    PinverseInfo('pinverse',
-                dtypes=floating_and_complex_types(),
-                test_inplace_grad=False,
-                supports_tensor_out=False,
-                decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    SvdInfo('svd',
+            dtypes=floating_and_complex_types(),
+            test_inplace_grad=False,
+            supports_tensor_out=False,
+            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    PinverseInfo('pinverse',
+                 dtypes=floating_and_complex_types(),
+                 test_inplace_grad=False,
+                 supports_tensor_out=False,
+                 decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
 ]
 
 if TEST_SCIPY:
