@@ -15,21 +15,6 @@ namespace at { namespace native{
 
 namespace {
 
-// cudnnConvolutionMode_t getMathMode(const Tensor &t, bool allow_tf32) {
-//   cudnnConvolutionMode_t mode;
-//   switch (t.scalar_type()) {
-//   case kHalf:
-//     return CUDNN_TENSOR_OP_MATH;
-//   case kFloat:
-//     return allow_tf32 ? CUDNN_DEFAULT_MATH : CUDNN_FMA_MATH;
-//   case kDouble:
-//     // TODO What should this be????
-//     return CUDNN_TENSOR_OP_MATH;
-//   default:
-//     TORCH_CHECK(false, "Illegal tensor data type: ", t.scalar_type());
-//   }
-// }
-
 cudnnDataType_t getDataType(const Tensor &t) {
   switch (t.scalar_type()) {
   case kHalf: 
@@ -52,8 +37,8 @@ int64_t getAlignment(const Tensor &t) {
 }
 
 cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id) {
-  auto shape = t.sizes().vec();  // TODO: auto shape = t.sizes();
-  auto strides = t.strides().vec();  // TODO: auto strides = t.strides();
+  auto shape = t.sizes();
+  auto strides = t.strides();
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())
@@ -73,7 +58,7 @@ void filterEngineConfigs(
       if (cudnn_frontend::isNonDeterministic(c)) return true;
     }
     if (scalar_type == kFloat || !allow_tf32) {
-      // if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
+      if (cudnn_frontend::isDownConvertingInputs(c)) return true;
       if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
     }
     return false;
@@ -108,7 +93,6 @@ Tensor _cudnn_convolution_v8(
                     conv_output_size(input.sizes(), weight.sizes(),
                                      padding, stride, dilation),
                     input.options(), layout);
-  // output.fill_(1.0);
 
   // See #4500
   Tensor weight_contig = weight.contiguous(layout);
@@ -126,10 +110,10 @@ Tensor _cudnn_convolution_v8(
       .setDataType(getDataType(input))
       .setMathMode(CUDNN_CROSS_CORRELATION)
       .setNDims(convDim)
-      .setStrides(convDim, stride.vec().data()) // TODO: remove the .vec()
-      .setPrePadding(convDim, padding.vec().data()) // TODO: remove the .vec()
-      .setPostPadding(convDim, padding.vec().data()) // TODO: remove the .vec()
-      .setDilation(convDim, dilation.vec().data()) // TODO: remove the .vec()
+      .setStrides(convDim, stride.data())
+      .setPrePadding(convDim, padding.data())
+      .setPostPadding(convDim, padding.data())
+      .setDilation(convDim, dilation.data())
       .build();
 
   // std::cout << getTensorDescriptor(input_contig, groups, 'x').describe() << std::endl;
