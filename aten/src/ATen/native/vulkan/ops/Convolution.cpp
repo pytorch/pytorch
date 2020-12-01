@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Convolution.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
@@ -8,6 +9,8 @@ namespace native {
 namespace vulkan {
 namespace ops {
 namespace {
+
+using namespace api::utils;
 
 inline bool is_depthwise(
     const IntArrayRef filter,
@@ -64,12 +67,11 @@ vTensor pack_weights(
   // General
   //
 
-  using namespace api::utils;
   if (Experimentation::kUseConv2dOldApi) {
     const uint32_t OC = src_filter[Layout::Filter::output];
-    const uint32_t OC_4 = div_up(OC, 4);
+    const uint32_t OC_4 = at::native::vulkan::api::utils::div_up(OC, 4u);
     const uint32_t C = src_filter[Layout::Filter::input];
-    const uint32_t C_4 = div_up(C, 4);
+    const uint32_t C_4 = at::native::vulkan::api::utils::div_up(C, 4u);
     const uint32_t KH = src_filter[Layout::Filter::height];
     const uint32_t KW = src_filter[Layout::Filter::width];
 
@@ -155,8 +157,8 @@ vTensor pack_weights(
     api::context(),
     &pool,
     {
-      div_up(src_filter[Layout::Filter::output], 4),
-      4 * align_up(src_filter[Layout::Filter::input], 4),
+      div_up(src_filter[Layout::Filter::output], INT64_C(4)),
+      4 * align_up(src_filter[Layout::Filter::input], INT64_C(4)),
       src_filter[Layout::Filter::height],
       src_filter[Layout::Filter::width],
     },
@@ -259,8 +261,8 @@ std::array<int64_t, 4> pack_filter(
   };
 
   return {
-    api::utils::align_up(filter[Layout::Filter::output], 4),
-    api::utils::align_up(filter[Layout::Filter::input], 4),
+    align_up(filter[Layout::Filter::output], INT64_C(4)),
+    align_up(filter[Layout::Filter::input], INT64_C(4)),
     effective(
         filter[Layout::Filter::height],
         dilation[Layout::Parameter::height]),
@@ -355,8 +357,6 @@ void conv2d_depthwise(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  using namespace api::utils;
-
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
       int32_t kernel_x, kernel_y;
@@ -390,16 +390,25 @@ void conv2d_depthwise(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight.image(command_buffer),
+        v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -421,10 +430,8 @@ void conv2d_pointwise(
     const IntArrayRef padding,
     const float output_min,
     const float output_max) {
-  using namespace api::utils;
-
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    
+
     vTensor v_weight_reshaped{
         context,
         {1,1, v_weight.sizes()[0], v_weight.sizes()[1]},
@@ -436,8 +443,13 @@ void conv2d_pointwise(
     temp_command_buffer.begin();
 
     temp_command_buffer.copy(
-        v_weight.buffer(temp_command_buffer),
-        v_weight_reshaped.buffer(temp_command_buffer, vTensor::Access::Write)
+        v_weight.buffer(
+            temp_command_buffer,
+            vTensor::Stage::Transfer),
+        v_weight_reshaped.buffer(
+            temp_command_buffer,
+            vTensor::Stage::Transfer,
+            vTensor::Access::Write)
     );
 
     temp_command_buffer.end();
@@ -474,16 +486,26 @@ void conv2d_pointwise(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight_reshaped.image(command_buffer, vTensor::Access::Read),
+        v_weight_reshaped.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Read),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -506,8 +528,6 @@ void conv2d(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  using namespace api::utils;
-
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
     const struct {
       int32_t kernel_x, kernel_y, kernel_ic, kernel_oc;
@@ -543,16 +563,25 @@ void conv2d(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight.image(command_buffer),
+        v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -698,14 +727,14 @@ void conv2d_old(
   using namespace api::utils;
 
   if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const int32_t W = v_input.extents().width;
-    const int32_t H = v_input.extents().height;
-    const int32_t C_4 = v_input.extents().depth;
+    const int32_t W = v_input.extents().data[0];
+    const int32_t H = v_input.extents().data[1];
+    const int32_t C_4 = v_input.extents().data[2];
     const int32_t C = 4 * C_4;
 
-    const int32_t OW = v_output.extents().width;
-    const int32_t OH = v_output.extents().height;
-    const int32_t OC_4 = v_output.extents().depth;
+    const int32_t OW = v_output.extents().data[0];
+    const int32_t OH = v_output.extents().data[1];
+    const int32_t OC_4 = v_output.extents().data[2];
     const int32_t OC = 4 * OC_4;
 
     const struct {
