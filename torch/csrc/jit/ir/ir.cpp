@@ -133,6 +133,9 @@ static void printAttribute(std::ostream& out, const IValue& ival) {
     } else if (input.isTensorList()) {
       ss << "[<Tensors>]";
       return true;
+    } else if (input.isObject() && !input.type()->is_module()) {
+      ss << "object(" << &input.toObjectRef() << ")";
+      return true;
     }
     return false;
   };

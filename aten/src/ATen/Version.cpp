@@ -172,7 +172,7 @@ std::string show_config() {
   }
 
   ss << "  - Build settings: ";
-  for (const std::pair<std::string, std::string>& pair : caffe2::GetBuildOptions()) {
+  for (const auto& pair : caffe2::GetBuildOptions()) {
     if (!pair.second.empty()) {
       ss << pair.first << "=" << pair.second << ", ";
     }
