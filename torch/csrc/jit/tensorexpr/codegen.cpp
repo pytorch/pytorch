@@ -51,8 +51,10 @@ std::unique_ptr<CodeGen> CreateCodeGen(
 const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
   if (v->op_type() == kSigmoid) {
     auto x = v->param(0)->accept_mutator(this);
-    auto one = ExprHandle(getImmediateByType(v->dtype(), 1.0));
-    auto zero = ExprHandle(getImmediateByType(v->dtype(), 0.0));
+    auto one = expr_to_vec(
+        ExprHandle(getImmediateByType(v->dtype(), 1.0)), v->dtype().lanes());
+    auto zero = expr_to_vec(
+        ExprHandle(getImmediateByType(v->dtype(), 0.0)), v->dtype().lanes());
     ExprHandle y = one / (one + exp(zero - ExprHandle(x)));
     return y.node();
   }
