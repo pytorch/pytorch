@@ -19,6 +19,7 @@ __all__ = [
     'atleast_2d',
     'atleast_3d',
     'align_tensors',
+    'broadcast_shapes',
     'broadcast_tensors',
     'cartesian_prod',
     'block_diag',
