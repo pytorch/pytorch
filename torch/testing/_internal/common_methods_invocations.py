@@ -541,7 +541,7 @@ if TEST_SCIPY:
                        skips=(
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.bfloat16])),
+                                    dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
         UnaryUfuncInfo('erfc',
@@ -554,7 +554,7 @@ if TEST_SCIPY:
                        skips=(
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.bfloat16])),
+                                    dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
                        promotes_integers_to_float=True),
     ]
