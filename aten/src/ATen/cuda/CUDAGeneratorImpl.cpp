@@ -151,11 +151,11 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
 }
 
 /**
- * Prepares this instance for a cuda graph capture region.
+ * Called by CUDAGraph to prepare this instance for a graph capture region.
  * offset_extragraph is the initial offset at the start of the graphed region.
  * offset_intragraph tracks the offset in the graphed region.
  */
-void CUDAGeneratorImpl::graph_prologue(int64_t* offset_extragraph) {
+void CUDAGeneratorImpl::capture_prologue(int64_t* offset_extragraph) {
   TORCH_CHECK((void*)this ==
               (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
               CAPTURE_DEFAULT_GENS_MSG);
@@ -164,9 +164,9 @@ void CUDAGeneratorImpl::graph_prologue(int64_t* offset_extragraph) {
 }
 
 /**
- * Finalizes a cuda graph capture region for this instance.
+ * Called by CUDAGraph to finalize a graph capture region for this instance.
  */
-uint64_t CUDAGeneratorImpl::graph_epilogue() {
+uint64_t CUDAGeneratorImpl::capture_epilogue() {
   TORCH_CHECK((void*)this ==
               (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
               CAPTURE_DEFAULT_GENS_MSG);
@@ -187,7 +187,7 @@ uint64_t CUDAGeneratorImpl::graph_epilogue() {
  * it intends to generate.
  *
  * Increment should be at least the number of curand() random numbers used in
- * each thread. It is the user's responsibility to make sure that the increment
+ * each thread. It is the user's responsibility to make sure the increment
  * for philox is never smaller than the number of curand() calls. Increment
  * value > the number of curand() calls won't harm but anything less would mean
  * that you would be reusing random values from previous calls.
@@ -196,6 +196,9 @@ uint64_t CUDAGeneratorImpl::graph_epilogue() {
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
   if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+    TORCH_CHECK(graph_expects_this_gen_,
+                "Unexpected CUDA generator used during capture. "
+                "This may)
     TORCH_CHECK((void*)this ==
                 (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
                 CAPTURE_DEFAULT_GENS_MSG);

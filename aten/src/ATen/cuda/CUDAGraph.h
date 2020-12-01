@@ -12,7 +12,6 @@ struct TORCH_CUDA_API CUDAGraph {
   void capture_begin();
   void capture_end();
   void replay();
-  at::Tensor generator_callback(DeviceIndex);
 
   protected:
   #if CUDA_VERSION >= 11000
@@ -21,9 +20,10 @@ struct TORCH_CUDA_API CUDAGraph {
   #endif
   bool has_graph_ = false;
   bool has_graph_exec_ = false;
-  std::vector<std::tuple<DeviceIndex, at::Tensor>> used_rng_;
   unsigned long long id_;
   at::cuda::CUDAStream capture_stream_;
+  at::Tensor offset_extragraph_;
+  uint64_t wholegraph_increment_;
 };
 
 } // namespace cuda

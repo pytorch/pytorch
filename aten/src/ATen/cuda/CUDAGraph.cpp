@@ -4,6 +4,12 @@
 #include <c10/cuda/CUDAFunctions.h>
 
 namespace at {
+
+// forward-declares empty
+namespace native {
+  Tensor empty(IntArrayRef size, const TensorOptions& options);
+}
+
 namespace cuda {
 
 CUDAGraph::CUDAGraph()
@@ -20,10 +26,17 @@ void CUDAGraph::capture_begin() {
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
 
-  for (DeviceIndex idx = 0; idx < c10::cuda::device_count(); idx++) {
-    const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(idx);
-    // gen.capture_prologue(this);
-  }
+  // For now, a CUDAGraph instance only accommodates the default generator on the device that's
+  // current when capture begins. If any op in the captured region uses a non-default generator,
+  // or a generator on another device, the offending generator will throw an error.
+  // These restrictions simplify CUDAGraph, but could be relaxed in the future:
+  // in principle, the underlying Cuda calls do permit cross-device ops to be captured.
+  const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(c10::cuda::current_device());
+
+  auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
+  offset_extragraph_ = at::native::empty({1}, options);
+
+  gen.capture_prologue(offset_extragraph_.data_ptr<int64_t>());
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -64,10 +77,8 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
   has_graph_exec_ = true;
 
-  for (DeviceIndex idx = 0; idx < c10::cuda::device_count(); idx++) {
-    const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(idx);
-    // gen.capture_epilogue(this);
-  }
+  const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(c10::cuda::current_device());
+  wholegraph_increment_ = gen.capture_epilogue();
 
   // Now that we've instantiated graph_ into graph_exec_,
   // we don't need graph_ anymore.
@@ -83,21 +94,20 @@ void CUDAGraph::replay() {
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::replay without a preceding successful capture.");
 
-  for (const auto& used : used_rng_) {
-    const auto& dev = std::get<0>(used);
-    auto& offset_tensor = std::get<1>(used);
-    const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(dev);
-    // // Just like any RNG consumer kernel!
-    // PhiloxCudaState rng_engine_inputs;
-    // {
-    //   std::lock_guard<std::mutex> lock(gen.mutex_);
-    //   rng_engine_inputs = gen.philox_cuda_state();
-    // }
-    // offset_storage.fill_(rng_engine_inputs.offset_.val);
-  }
+  {
+    c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
+    const auto& gen = at::cuda::detail::getDefaultCUDAGenerator(c10::cuda::current_device());
+    // Just like any RNG consumer kernel!
+    PhiloxCudaState rng_engine_inputs;
+    {
+      std::lock_guard<std::mutex> lock(gen.mutex_);
+      rng_engine_inputs = gen.philox_cuda_state(wholegraph_increment_);
+    }
+    offset_extragraph_.fill_(rng_engine_inputs.offset_.val);
 
-  // graph_exec_ may be replayed in any stream.
-  AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
+    // graph_exec_ may be replayed in any stream.
+    AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
+  }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif
@@ -118,14 +128,6 @@ CUDAGraph::~CUDAGraph() {
   if (has_graph_exec_) {
     AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_));
   }
-#endif
-}
-
-at::Tensor CUDAGraph::generator_callback(DeviceIndex) {
-#if CUDA_VERSION >= 11000
-    return {};
-#else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif
 }
 

@@ -40,9 +40,9 @@ void THCPGraph_init(PyObject *module) {
       //   AT_CUDA_CHECK(cudaGraphExecDestroy(graph_exec_);
       // }
       // I could call the following method in __del__ on the Python side.
-      // But stackoverflow appears to hate __del__ as much as throwing in destructors.
       // .def("drop_graph",
       //      &::at::cuda::CUDAGraph::drop_graph,
       //      py::call_guard<py::gil_scoped_release>(),
       //      R"(``drop_graph`` deletes the graph currently held by this instance.)");
+      // But stackoverflow appears to hate __del__ as much as throwing in destructors.
 }
