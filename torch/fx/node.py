@@ -136,6 +136,18 @@ class Node:
         """
         self._update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
 
+    @property
+    def all_input_nodes(self) -> List['Node']:
+        """
+        Return all Nodes that are inputs to this Node. This is equivalent to
+        iterating over `args` and `kwargs` and only collecting the values that
+        are Nodes
+        """
+        all_nodes : List['Node'] = []
+        map_arg(self.args, lambda n: all_nodes.append(n))
+        map_arg(self.kwargs, lambda n: all_nodes.append(n))
+        return all_nodes
+
     def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
         self._args = new_args
         self._kwargs = new_kwargs
