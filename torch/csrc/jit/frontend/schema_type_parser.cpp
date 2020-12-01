@@ -150,7 +150,6 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
 }
 
 c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
-  c10::optional<c10::Device> device;
   L.expect('=');
   const std::string& dev = L.expect(TK_IDENT).text();
 

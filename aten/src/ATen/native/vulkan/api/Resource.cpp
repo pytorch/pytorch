@@ -32,7 +32,7 @@ VmaAllocator create_allocator(
     nullptr,
     1u,
     nullptr,
-    nullptr, // TODO (Ashkan): VULKAN_WRAPPER
+    nullptr,
     nullptr,
     instance,
     VK_API_VERSION_1_0,
@@ -48,8 +48,9 @@ VmaAllocator create_allocator(
 VmaAllocationCreateInfo create_allocation_create_info(
     const Resource::Memory::Descriptor& descriptor) {
   return VmaAllocationCreateInfo{
-    0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
-        /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
+    VMA_ALLOCATION_CREATE_STRATEGY_MIN_MEMORY_BIT |
+        /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
+        0,
     descriptor.usage,
     descriptor.required,
     descriptor.preferred,
@@ -85,15 +86,19 @@ void release_image(const Resource::Image& image) {
 
 } // namespace
 
-void* map(const Resource::Memory& memory) {
-  // Call will be ignored by implementation if the memory type this allocation
-  // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
-  // we want.
-  VK_CHECK(vmaInvalidateAllocation(
-      memory.allocator, memory.allocation, 0u, VK_WHOLE_SIZE));
-
+void* map(
+    const Resource::Memory& memory,
+    const Resource::Memory::Access::Flags access) {
   void* data = nullptr;
   VK_CHECK(vmaMapMemory(memory.allocator, memory.allocation, &data));
+
+  if (access & Resource::Memory::Access::Read) {
+    // Call will be ignored by implementation if the memory type this allocation
+    // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
+    // we want.
+    VK_CHECK(vmaInvalidateAllocation(
+        memory.allocator, memory.allocation, 0u, VK_WHOLE_SIZE));
+  }
 
   return data;
 }
@@ -119,14 +124,14 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
     return;
   }
 
-  vmaUnmapMemory(allocator_, allocation_);
-
   if (access_ & Access::Write) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
     // we want.
     VK_CHECK(vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE));
   }
+
+  vmaUnmapMemory(allocator_, allocation_);
 }
 
 Resource::Image::Sampler::Factory::Factory(const GPU& gpu)
@@ -151,11 +156,11 @@ Resource::Image::Sampler::Factory::operator()(
     descriptor.address_mode,
     0.0f,
     VK_FALSE,
-    0.0f,
+    1.0f,
     VK_FALSE,
     VK_COMPARE_OP_NEVER,
     0.0f,
-    0.0f,
+    VK_LOD_CLAMP_NONE,
     descriptor.border,
     VK_FALSE,
   };
@@ -239,7 +244,9 @@ Resource::Pool::Pool(const GPU& gpu)
 
 Resource::Pool::~Pool() {
   try {
-    purge();
+    if (device_ && allocator_) {
+      purge();
+    }
   }
   catch (const std::exception& e) {
     LOG(WARNING)
@@ -387,9 +394,9 @@ Resource::Image Resource::Pool::image(
     {
       VK_IMAGE_ASPECT_COLOR_BIT,
       0u,
-      1u,
+      VK_REMAINING_MIP_LEVELS,
       0u,
-      1u,
+      VK_REMAINING_ARRAY_LAYERS,
     },
   };
 

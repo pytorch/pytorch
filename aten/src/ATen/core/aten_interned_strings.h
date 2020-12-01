@@ -531,6 +531,7 @@ _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
 _(aten, nonzero) \
+_(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \
 _(aten, normal) \
