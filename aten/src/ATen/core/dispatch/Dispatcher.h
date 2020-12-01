@@ -378,7 +378,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   // Note: for perf reasons we wouldn't want to pass arguments into
   // the function call or prematurely box them
   at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.active)) {
+  if (C10_UNLIKELY(guard.isActive())) {
     if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
       int64_t seq_num = -1;
       // Setting sequence number in the Autograd case to associate
@@ -387,7 +387,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
-        torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
+        torch::jit::Stack stack = impl::boxArgs(args...);
         guard.before(op, stack, seq_num);
       } else {
         guard.before(op, seq_num);
@@ -431,7 +431,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // using already existing stack to record function execution in observers
   at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.active)) {
+  if (C10_UNLIKELY(guard.isActive())) {
     if (shouldRecord(dispatchKey) && entry.isObserved()) {
       int64_t seq_num = -1;
       if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
