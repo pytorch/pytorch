@@ -52,9 +52,13 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   }
 #endif
 #if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 308
+  rocblas_atomics_mode rocblas_mode;
   if (at::globalContext().deterministic()) {
-    TORCH_CUDABLAS_CHECK(rocblas_set_atomics_mode(handle, rocblas_atomics_not_allowed));
+    rocblas_mode = rocblas_atomics_not_allowed;
+  } else {
+    rocblas_mode = rocblas_atomics_allowed;
   }
+  TORCH_CUDABLAS_CHECK(rocblas_set_atomics_mode(handle, rocblas_mode));
 #endif
   return handle;
 }
