@@ -1,13 +1,17 @@
 @setlocal
 
+set MAGMA_VERSION=2.5.4
+
 REM set CUVER_NODOT=%~1
 set CUVER=%CUVER_NODOT:~0,-1%.%CUVER_NODOT:~-1,1%
 
 REM set CONFIG=Debug
 
 set CONFIG_LOWERCASE=%CONFIG:D=d%
-set CONFIG_LOWERCASE=%CONFIG:R=r%
-set CONFIG_LOWERCASE=%CONFIG:M=m%
+set CONFIG_LOWERCASE=%CONFIG_LOWERCASE:R=r%
+set CONFIG_LOWERCASE=%CONFIG_LOWERCASE:M=m%
+
+echo Building for configuration: %CONFIG_LOWERCASE%, %CUVER%
 
 mkdir magma_cuda%CUVER_NODOT%
 cd magma_cuda%CUVER_NODOT%
@@ -83,7 +87,7 @@ if errorlevel 1 exit /b 1
 cd ..\..\..
 
 :: Create 
-7z a magma_2.5.2_cuda%CUVER_NODOT%_%CONFIG_LOWERCASE%.7z %cd%\magma_cuda%CUVER_NODOT%\magma\install\*
+7z a magma_%MAGMA_VERSION%_cuda%CUVER_NODOT%_%CONFIG_LOWERCASE%.7z %cd%\magma_cuda%CUVER_NODOT%\magma\install\*
 
 rmdir /S /Q magma_cuda%CUVER_NODOT%\
 @endlocal
