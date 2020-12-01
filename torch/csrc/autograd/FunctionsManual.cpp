@@ -2006,14 +2006,14 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
                                       const Tensor& A,
                                       const Tensor& Q,
                                       const Tensor& R) -> Tensor {
-    // References:
+    // For square and deep (tall) case we refer:
     // Matthias Seeger, Asmus Hetzel, Zhenwen Dai, Eric Meissner, Neil D. Lawrence (2018). Auto-Differentiating Linear Algebra.
-    // https://arxiv.org/abs/1710.08717 Section 4.3 LQ Decomposition
+    // https://arxiv.org/abs/1710.08717 Section 4.3 LQ Decomposition (Note that LQ decomposition is the transpose of QR decomposition)
     // Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang (2019). Differentiable Programming Tensor Networks.
     // https://arxiv.org/abs/1903.09650 Section 3. QR factorization
     // For derivations of complex-valued input case, see https://giggleliu.github.io/2019/04/02/einsumbp.html
 
-    // Compute R conj(grad_R)^{T}
+    // Compute R grad_R^H
     Tensor R_term;
     if (grad_R.defined()) {
       R_term = at::matmul(R, grad_R.conj().transpose(-2, -1));
@@ -2022,7 +2022,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
       R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
 
-    // Compute conj(grad_Q)^{T} Q
+    // Compute grad_Q^H Q
     Tensor Q_term;
     if (grad_Q.defined()) {
       Q_term = at::matmul(grad_Q.conj().transpose(-2, -1), Q);
@@ -2046,9 +2046,9 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     }
 
     // We want to compute: (rhs_term @ R^{-H})
-    // Note that (rhs_term @ R^{-H}) = (R^{-1} @ rhs_solve_1^{H})^{H}
+    // Note that (rhs_term @ R^{-H}) = (R^{-1} @ rhs_solve_1^H)^H
     // Since R is upper triangular, we can do this using
-    // triangular_solve(rhs_term^{H}, R)^{H}
+    // triangular_solve(rhs_term^H, R)^H
     Tensor grad_A;
     std::tie(grad_A, std::ignore) = at::triangular_solve(
         rhs_term.conj().transpose(-2, -1),
@@ -2078,7 +2078,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     // grad_R = [grad_U | grad_V] and grad_A = [grad_X | grad_Y].
     // To obtain grad_X we reuse the gradient formula from the square case.
     // Formulae: grad_X = square_case_grad(grad_Q_prime, grad_U, Q, U),
-    // where grad_Q_prime = grad_Q + Y @ grad_V.H
+    // where grad_Q_prime = grad_Q + Y @ grad_V^H
     // and grad_Y = Q @ grad_V.
     // Then concatenate grads to get grad_A = [grad_X | grad_Y].
 
@@ -2090,7 +2090,7 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
       grad_V = grad_R.narrow(-1, m, n - m);
       // reuse grad_R to store grad_U
       grad_R = grad_R.narrow(-1, 0, m);
-      // grad_Q_prime starts with the value of Y @ grad_V.H
+      // grad_Q_prime starts with the value of Y @ grad_V^H
       grad_Q_prime = at::matmul(Y, grad_V.conj().transpose(-2, -1));
     } else {
       // when grad_R is not defined then grad_V and grad_Q_prime
