@@ -61,19 +61,20 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
     if (int_idx >= 0 && static_cast<size_t>(int_idx) < len) {
       n->output()->replaceAllUsesWith(construct->inputs().at(int_idx));
     }
-  } else if (n->kind() == prim::TupleSlice) {
-    std::vector<Value*> values;
-    int64_t beg = n->i(attr::beg);
-    int64_t end = n->i(attr::end);
-    for (int64_t i = beg; i < end; i += 1) {
-      values.push_back(construct->inputs().at(i));
-    }
-    auto graph = n->owningGraph();
-    auto tuple_out = graph->createTuple(values);
-    WithInsertPoint insert(n);
-    graph->insertNode(tuple_out);
-    n->output()->replaceAllUsesWith(tuple_out->output());
   }
+  // else if (n->kind() == prim::TupleSlice) {
+  //   std::vector<Value*> values;
+  //   int64_t beg = n->i(attr::beg);
+  //   int64_t end = n->i(attr::end);
+  //   for (int64_t i = beg; i < end; i += 1) {
+  //     values.push_back(construct->inputs().at(i));
+  //   }
+  //   auto graph = n->owningGraph();
+  //   auto tuple_out = graph->createTuple(values);
+  //   WithInsertPoint insert(n);
+  //   graph->insertNode(tuple_out);
+  //   n->output()->replaceAllUsesWith(tuple_out->output());
+  // }
 }
 } // anonymous namespace
 

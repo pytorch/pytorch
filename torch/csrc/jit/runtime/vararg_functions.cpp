@@ -250,15 +250,15 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
   push(stack, false);
 }
 
-void tupleSlice(Stack& stack, size_t begin, size_t end) {
-  auto tuple = pop(stack).toTuple();
-  std::vector<IValue> output_elems;
-  output_elems.reserve(end - begin);
-  for (size_t i = begin; i < end; ++i) {
-    output_elems.emplace_back(tuple->elements()[i]);
-  }
-  push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
-}
+// void tupleSlice(Stack& stack, size_t begin, size_t end) {
+//   auto tuple = pop(stack).toTuple();
+//   std::vector<IValue> output_elems;
+//   output_elems.reserve(end - begin);
+//   for (size_t i = begin; i < end; ++i) {
+//     output_elems.emplace_back(tuple->elements()[i]);
+//   }
+//   push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
+// }
 
 void dequantize(Stack& stack) {
   auto iv = pop(stack);

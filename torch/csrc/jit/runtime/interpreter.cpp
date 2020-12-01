@@ -870,12 +870,12 @@ struct CodeImpl {
     insertInstruction(ISINSTANCE, types_start, types.size());
   }
 
-  void emitTupleSlice(Node* node) {
-    emitLoadInputs(node->inputs());
-    int64_t beg_ind = node->i(attr::beg);
-    int64_t end_ind = node->i(attr::end);
-    insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind);
-  }
+  // void emitTupleSlice(Node* node) {
+  //   emitLoadInputs(node->inputs());
+  //   int64_t beg_ind = node->i(attr::beg);
+  //   int64_t end_ind = node->i(attr::end);
+  //   insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind);
+  // }
 
   void emitFork(Node* node) {
     emitLoadInputs(node->inputs());
@@ -973,9 +973,9 @@ struct CodeImpl {
       case prim::isinstance:
         emitIsinstance(node);
         break;
-      case prim::TupleSlice:
-        emitTupleSlice(node);
-        break;
+      // case prim::TupleSlice:
+      //   emitTupleSlice(node);
+      //   break;
       case prim::fork:
         emitFork(node);
         break;
@@ -1478,10 +1478,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             tupleConstruct(stack, inst.X);
             ++frame.pc;
           } break;
-          case TUPLE_SLICE: {
-            tupleSlice(stack, inst.X, inst.X + inst.N);
-            ++frame.pc;
-          } break;
+          // case TUPLE_SLICE: {
+          //   tupleSlice(stack, inst.X, inst.X + inst.N);
+          //   ++frame.pc;
+          // } break;
           case NAMED_TUPLE_CONSTRUCT: {
             auto type =
                 frame.function->type_table_[inst.X]->expect<TupleType>();
