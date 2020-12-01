@@ -12,6 +12,10 @@ Common linear algebra operations.
 Functions
 ---------
 
+.. autofunction:: cholesky
 .. autofunction:: det
+.. autofunction:: eigh
+.. autofunction:: eigvalsh
 .. autofunction:: norm
+.. autofunction:: tensorinv
 .. autofunction:: tensorsolve
