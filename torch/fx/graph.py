@@ -508,8 +508,9 @@ class Graph:
             map_arg(node.args, find_nodes_to_delete)
             map_arg(node.kwargs, find_nodes_to_delete)
 
-            for to_delete in nodes_to_delete:
-                body.append(f'del {to_delete.name}\n')
+            if len(nodes_to_delete):
+                to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
+                body.append(f'{to_delete_str}\n')
 
         for node in self.nodes:
             if node.op == 'placeholder':
