@@ -1608,7 +1608,11 @@ Node* Graph::createTupleIndex(
   return n;
 }
 
-Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end, int64_t step_size) {
+Node* Graph::createTupleSlice(
+    Value* tup,
+    int64_t beg,
+    int64_t end,
+    int64_t step_size) {
   auto unpacked_tuple = insertNode(createTupleUnpack(tup));
   auto outputs = unpacked_tuple->outputs();
   std::vector<Value*> newValues;

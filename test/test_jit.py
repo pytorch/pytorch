@@ -12127,10 +12127,10 @@ dedent """
         scripted_fn = torch.jit.script(tuple_slice)
         self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
         tuple_graph = scripted_fn.graph
-        slices = tuple_graph.findAllNodes("prim::TupleSlice")
+        slices = tuple_graph.findAllNodes("prim::TupleConstruct")
         num_outputs = set(len(x.output().type().elements()) for x in slices)
-        # one tuple slice should have an output with 2 elements, other 4
-        self.assertTrue(num_outputs == {2, 4})
+        # there should be only one tupleSlice with length of 2
+        self.assertTrue(num_outputs == {2})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
 
@@ -12140,6 +12140,92 @@ dedent """
             return c[2:10]
 
         self.assertEqual(test_indexing_end_out_of_bounds(), ())
+
+    def test_stepped_tuple_slicing(self):
+
+        inp = torch.ones(1)
+
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2)
+
+            def forward(self, a):
+                a =  self.x[-3:3:2]
+                b = a[::1]
+                return b
+
+        self.checkModule(A(), inp)
+
+        class B(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[::1]
+
+        self.checkModule(B(), inp)
+
+        class C(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[::55]
+
+        self.checkModule(C(), inp)
+
+        class D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[1:4:2]
+
+        self.checkModule(D(), inp)
+
+        class E(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4)
+
+            def forward(self, a):
+                return self.x[1:4]
+
+        self.checkModule(E(), inp)
+
+        class F(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6)
+
+            def forward(self, a):
+                return self.x[5::-2]
+
+        self.checkModule(F(), inp)
+
+        class G(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
+
+            def forward(self, a):
+                return self.x[7:5:2]
+
+        self.checkModule(G(), inp)
+
+        class H(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
+
+            def forward(self, a):
+                return self.x[5:7:-2]
+
+        self.checkModule(H(), inp)
 
     def test_lower_nested_tuples(self):
         @torch.jit.script
@@ -15464,91 +15550,6 @@ dedent """
 
         inp = torch.ones(1)
         self.checkModule(MyModule(), inp)
-
-    def test_stepped_slicing_tuple(self):
-
-        inp = torch.ones(1)
-
-        class A(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2)
-
-            def forward(self, a):
-                return self.x[::2][1]
-
-        self.checkModule(A(), inp)
-
-        class B(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[::1]
-
-        self.checkModule(B(), inp)
-
-        class C(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[::55]
-
-        self.checkModule(C(), inp)
-
-        class D(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[1:4:2]
-
-        self.checkModule(D(), inp)
-
-        class E(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4)
-
-            def forward(self, a):
-                return self.x[1:4]
-
-        self.checkModule(E(), inp)
-
-        class F(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4, 5, 6)
-
-            def forward(self, a):
-                return self.x[5::-2]
-
-        self.checkModule(F(), inp)
-
-        class G(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
-
-            def forward(self, a):
-                return self.x[7:5:2]
-
-        self.checkModule(G(), inp)
-
-        class H(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.x = (0, 1, 2, 3, 4, 5, 6, 7)
-
-            def forward(self, a):
-                return self.x[5:7:-2]
-
-        self.checkModule(H(), inp)
-
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {

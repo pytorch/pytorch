@@ -991,7 +991,8 @@ struct PythonPrintImpl {
              << useOf(node->inputs().at(1)) << "]";
       } break;
       // case prim::TupleSlice: {
-      //   stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
+      //   stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) <<
+      //   ":"
       //        << node->i(attr::end) << "]";
       // } break;
       case prim::ListConstruct: {
