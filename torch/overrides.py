@@ -100,6 +100,7 @@ def get_ignored_functions() -> Set[Any]:
         torch.has_cuda,
         torch.has_cudnn,
         torch.has_lapack,
+        # torch.cpp is a module
         torch.cpp,  # type: ignore[attr-defined]
         torch.device,
         torch.dtype,
@@ -774,7 +775,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.sinh: lambda input, out=None: -1,
         torch.slogdet: lambda input: -1,
         torch.smm: lambda input, mat2: -1,
-        torch.spmm: lambda input, mat2: -1,  # type: ignore[attr-defined]
+        torch.spmm: lambda input, mat2: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
         torch.solve: lambda input, A, out=None: -1,
         torch.sort: lambda input, dim=-1, descending=False, out=None: -1,
