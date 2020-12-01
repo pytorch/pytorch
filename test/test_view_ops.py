@@ -1027,13 +1027,13 @@ class TestOldViewOps(TestCase):
         examples = [(), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)]
         for s0 in examples:
             x0 = torch.randn(s0)
-            expected = torch.broadcast_tensors(x0).shape
+            expected = torch.broadcast_tensors(x0)[0].shape
             actual = torch.broadcast_shapes(s0)
             self.assertEqual(expected, actual)
 
             for s1 in examples:
                 x1 = torch.randn(s1)
-                expected = torch.broadcast_tensors(x0, x1).shape
+                expected = torch.broadcast_tensors(x0, x1)[0].shape
                 actual = torch.broadcast_shapes(s0, s1)
                 self.assertEqual(expected, actual)
 
