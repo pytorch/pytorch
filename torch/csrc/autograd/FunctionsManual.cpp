@@ -321,19 +321,6 @@ Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
     return res;
 }
 
-Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
-    if (dims.size()==1) {
-      return grad.unsqueeze(dims[0]).expand(sizes);
-    } else {
-      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
-      return res.expand(sizes);
-    }
-  } else {
-    return grad.expand(sizes);
-  }
-}
-
 Tensor nansum_backward(const Tensor & grad, const Tensor & self, IntArrayRef dims, bool keepdim) {
   auto sizes = self.sizes();
   if (!keepdim && sizes.size() > 0) {
@@ -754,7 +741,7 @@ Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, Int
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
-  return sum_backward(grad, sizes, dim, keepdim) / _safe_size(sizes, dim);
+  return at::sum_backward(grad, sizes, dim, keepdim) / _safe_size(sizes, dim);
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int numel) {

@@ -28,7 +28,7 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
     new_grads: List[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, torch.Tensor):
-            if not out.shape == grad.shape:
+            if not torch.sizes_equal(out, grad):
                 raise RuntimeError("Mismatch in shape: grad_output["
                                    + str(grads.index(grad)) + "] has a shape of "
                                    + str(grad.shape) + " and output["

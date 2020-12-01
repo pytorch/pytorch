@@ -23,7 +23,7 @@ struct InputMetadata {
 
   InputMetadata(
       const at::TensorOptions options,
-      at::IntArrayRef shape,
+      c10::optional<std::vector<int64_t>> shape,
       at::Device device,
       bool is_nested_tensor,
       at::Tensor nested_size_tensor)
@@ -41,7 +41,9 @@ struct InputMetadata {
   InputMetadata(const at::Tensor& t)
       : InputMetadata(
             t.options(),
-            t.sizes(),
+            at::is_nested_tensor_impl(t) 
+              ? c10::nullopt
+              : c10::optional<std::vector<int64_t>>(t.sizes().vec()),
             t.device(),
             at::is_nested_tensor_impl(t),
             at::serialize_nested_size(t)) {}
@@ -52,7 +54,8 @@ struct InputMetadata {
 
   at::IntArrayRef shape() const {
     TORCH_CHECK(!is_nested_tensor(), "NestedTensor doesn't have a shape.");
-    return shape_;
+    TORCH_CHECK(shape_, "internal error: Expected non-NestedTensor to have shape.");
+    return at::IntArrayRef(*shape_);
   }
 
   at::IntArrayRef nested_size() const {
@@ -69,7 +72,8 @@ struct InputMetadata {
   }
 
   at::Tensor zeros_like() const {
-    return at::zeros(shape_, options_);
+    TORCH_CHECK(shape_, "zeros_like is only supported if not a NestedTensor.");
+    return at::zeros(*shape_, options_);
   }
 
   bool is_nested_tensor() const {
@@ -78,7 +82,7 @@ struct InputMetadata {
 
  private:
   const at::TensorOptions options_;
-  at::DimVector shape_;
+  c10::optional<std::vector<int64_t>> shape_;
   at::Device device_ = at::kCPU;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);
   bool is_nested_tensor_;

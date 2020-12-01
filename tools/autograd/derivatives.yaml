@@ -708,7 +708,7 @@
   self: grad.expand_as(self).to(self.scalar_type()) / self.numel()
 
 - name: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
+  self: at::mean_backward(grad, self, dim, keepdim).to(self.scalar_type())
 
 - name: median(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
@@ -1030,7 +1030,7 @@
   self: grad.expand_as(self)
 
 - name: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sizes(), dim, keepdim)
+  self: at::sum_backward(grad, self, dim, keepdim)
 
 - name: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand_as(self).to(self.scalar_type()) * self.isnan().logical_not()

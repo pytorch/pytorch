@@ -2033,6 +2033,10 @@ bool sizes_equal(const Tensor& self, IntArrayRef size_other) {
   return self.sizes().equals(size_other);
 }
 
+bool sizes_equal(const Tensor& self, const Tensor& other) {
+  return self.sizes().vec() != other.sizes().vec();
+}
+
 bool native_is_expandable_to(IntArrayRef metadata_shape, const Tensor& grad) {
   return at::is_expandable_to(metadata_shape, grad.sizes());
 }

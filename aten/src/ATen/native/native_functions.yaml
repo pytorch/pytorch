@@ -3753,6 +3753,8 @@
 
 - func: sizes_equal(Tensor size_self, int[1] size_other) -> bool
 
+- func: sizes_equal.tensor(Tensor self, Tensor other) -> bool
+
 - func: native_is_expandable_to(int[1] metadata_shape, Tensor grad) -> bool
 
 - func: expand_nt(Tensor(a) self, Tensor nested_size, *, bool implicit=False) -> Tensor(a)
@@ -4141,6 +4143,15 @@
   variants: function, method
 
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: sum_backward(Tensor grad, int[1] sizes, int[1] dims, bool keepdim) -> Tensor
+  use_c10_dispatcher: full
+
+- func: sum_backward.tensor(Tensor grad, Tensor self, int[1] dims, bool keepdim) -> Tensor
+  use_c10_dispatcher: full
+
+- func: mean_backward(Tensor grad, Tensor self, int[1] dims, bool keepdim) -> Tensor
+  use_c10_dispatcher: full
 
 - func: var_backward(Tensor grad, Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full

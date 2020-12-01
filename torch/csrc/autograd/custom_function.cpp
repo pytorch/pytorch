@@ -8,12 +8,15 @@ VariableInfo::VariableInfo(const Variable& var)
   : layout(var.layout())
   , device(var.device())
   , scalar_type(var.scalar_type())
-  , size(var.sizes().vec())
+  , sizes(is_nested_tensor_impl(var)
+      ? c10::nullopt
+      : c10::optional<std::vector<int64_t>>(var.sizes().vec()))
   , requires_grad(var.requires_grad()) {
 }
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  return at::zeros(size,
+  TORCH_CHECK(sizes, "internal error: expected sizes to be defined for zeros.");
+  return at::zeros(*sizes,
     at::TensorOptions(scalar_type).device(device).layout(layout));
 }
 
@@ -177,7 +180,7 @@ void check_variable_result(const Variable& original, const Variable& result, std
     throw std::runtime_error(ss.str());
   }
 
-  if (original.sizes().vec() != result.sizes().vec()) {
+  if (!sizes_equal(original, result)) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the size of value";
     throw std::runtime_error(ss.str());

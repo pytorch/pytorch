@@ -174,7 +174,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   , at::Tensor nested_size_tensor
   ) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(options, shape, device, is_nested_tensor, nested_size_tensor);
+    if (is_nested_tensor) {
+      input_metadata_.emplace_back(options, c10::nullopt, device, is_nested_tensor, nested_size_tensor);
+    } else {
+      input_metadata_.emplace_back(options, shape.vec(), device, is_nested_tensor, nested_size_tensor);
+    }
     return input_nr;
   }
 

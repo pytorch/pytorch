@@ -144,7 +144,7 @@ struct TORCH_API VariableInfo {
   at::Layout layout = at::Layout::Strided;
   at::Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
-  std::vector<int64_t> size;
+  c10::optional<std::vector<int64_t>> sizes;
   bool requires_grad;
 };
 
