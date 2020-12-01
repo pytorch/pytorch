@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <sstream>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 
 namespace torch {
 namespace jit {
@@ -55,20 +56,18 @@ TEST(TEFuserPass, FuserPass_1) {
 TEST(TEFuserPass, FuserPass_2) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
-    graph(%0 : Float(128, strides=[1], device=cpu),
-          %1 : Float(128, strides=[1], device=cpu)):
-      %12 : int = prim::Constant[value=1]()
-      %a : Float(128, strides=[1], device=cpu) = aten::mul(%0, %1)
-      %b : Float(128, strides=[1], device=cpu) = aten::add(%0, %1, %12)
-      %c : Float(128, strides=[1], device=cpu) = aten::add_(%b, %1, %12)
-      %d : Float(128, strides=[1], device=cpu) = aten::mul(%c, %a)
-      return (%d))IR";
+    graph(%0 : Float(1, strides=[1], device=cpu),
+          %1 : Float(1, strides=[1], device=cpu)):
+      %b : Float(128, strides=[1], device=cpu) = aten::add(%0, %1)
+      return (%b))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
 
   g->lint();
   FuseTensorExprs(g);
-
+  auto a = at::rand({1,});
+  for (size_t i = 0; i < 3; ++i) {
+  }
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
       .check("aten::add_")
@@ -126,18 +125,43 @@ TEST(TEFuserPass, FuserPass_0DimInput) {
 TEST(TEFuserPass, FuserPass_UnfusibleDevice) {
   WithCPUFuser cf(false);
   const auto graph_string = R"IR(
-    graph(%x : Float(10, strides=[1], device=cpu),
-          %y : Float(10, strides=[1], device=cpu)):
-      %a : Float(10, strides=[1], device=cpu) = aten::mul(%x, %y)
+    graph(%x : Float(1, strides=[1], device=cpu),
+          %y : Float(1, strides=[1], device=cpu)):
+      %a : Float(1, strides=[1], device=cpu) = aten::mul(%x, %y)
       return (%a))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
 
   g->lint();
-  FuseTensorExprs(g, /* min_group_size= */ 1);
+  GraphExecutor executor(g, "");
+  auto a = at::ones({1}, at::kFloat);
+  for (size_t i = 0; i < 4; i++) {
+      std::vector<IValue> stack = {a, a};
+      executor.run(stack);
+  }
+  auto begin = std::chrono::high_resolution_clock::now();
 
-  // Test that we're not starting fusion groups from nodes with unfusible device
-  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  // std::clock_t start;
+  // double duration;
+
+  std::vector<IValue> stack;
+  for (size_t i = 0; i < 500000; i++) {
+      stack.push_back(a);
+      stack.push_back(a);
+      executor.run(stack);
+      stack.pop_back();
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  // TODO TEST PERF?
+  std::cout << std::dec << "   "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   end - begin)
+                   .count()
+            << " ms" << std::endl;
+  // /* Your algorithm here */
+  // duration = ( std::clock() - start ) / (double) CLOCKS_PER_SEC;
+  // std::cout<<"printf: "<< duration <<'\n';
+
 }
 
 TEST(TEFuserPass, FuserPass_UnknownShapes) {
