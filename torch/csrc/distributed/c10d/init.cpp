@@ -1235,7 +1235,6 @@ Arguments:
 static const auto StoreTorchBind =
     torch::class_<::c10d::Store>("dist_c10d", "Store");
 
-#ifndef _WIN32
 static const auto TCPStoreTorchBind =
     torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
         .def(torch::init([](const std::string& host_name,
@@ -1245,7 +1244,6 @@ static const auto TCPStoreTorchBind =
           return c10::make_intrusive<::c10d::TCPStore>(
               host_name, port, world_size, is_master);
         }));
-#endif
 
 // Torchbind the ProcessGroup to make it available in TorchScript
 static const auto ProcessGroupWorkTorchBind =
