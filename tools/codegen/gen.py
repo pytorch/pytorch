@@ -845,12 +845,6 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
         and Variant.method not in f.variants
 
-    if f.structured_delegate:
-        # Structured functions MUST have a dispatch table
-        is_abstract = True
-    else:
-        is_abstract = f.dispatch.keys() != {'Math'}
-
     return OrderedDict([
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
@@ -869,22 +863,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('returns', returns),
         ('inplace', f.func.name.name.inplace),
         ('is_factory_method', is_factory_method),
-        # Note [Abstract ATen methods]
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # An abstract ATen method is one whose dispatch differs between
-        # types.  These are implemented in derived types (with a
-        # standard (throwing) definition in Type).  A concrete ATen
-        # method is one which has the same dispatch for all types;
-        # we just implement it in the base Type.  This is exposed
-        # in Declarations.yaml via a field named 'abstract'.
-        #
-        # Although this is what we have historically exposed, it is
-        # actually not all that useful for end users, who are also interested
-        # whether or not there is an explicit entry in derivatives.yaml
-        # for the entry or not (as this affects whether or not the operation is
-        # overrideable or not.)  Once this all gets cleaned up, this
-        # property will be obsolete.
-        ('abstract', is_abstract),
+        ('abstract', f.is_abstract),
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
