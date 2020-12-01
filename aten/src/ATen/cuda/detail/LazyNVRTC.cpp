@@ -94,6 +94,10 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
 NVRTC_STUB1(nvrtcDestroyProgram, nvrtcProgram *);
 NVRTC_STUB2(nvrtcGetPTXSize, nvrtcProgram, size_t *);
 NVRTC_STUB2(nvrtcGetPTX, nvrtcProgram, char *);
+#if CUDA_VERSION >= 11010
+NVRTC_STUB2(nvrtcGetCUBINSize, nvrtcProgram, size_t *);
+NVRTC_STUB2(nvrtcGetCUBIN, nvrtcProgram, char *);
+#endif
 NVRTC_STUB3(nvrtcCompileProgram, nvrtcProgram, int, const char * const *);
 _STUB_1(NVRTC, nvrtcGetErrorString, const char *, nvrtcResult);
 NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*);

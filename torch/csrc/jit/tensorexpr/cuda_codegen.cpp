@@ -1183,7 +1183,12 @@ void CudaCodeGen::CompileToNVRTC(
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {};
 #else
+#if CUDA_VERSION == 11020
+  // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
+  const std::string compute = "--gpu-architecture=sm_" +
+#else
   const std::string compute = "--gpu-architecture=compute_" +
+#endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
@@ -1206,10 +1211,18 @@ void CudaCodeGen::CompileToNVRTC(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size;
+#if CUDA_VERSION == 11020
+  // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetCUBINSize(program, &ptx_size));
+  std::vector<char> ptx;
+  ptx.resize(ptx_size);
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetCUBIN(program, ptx.data()));
+#else
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
   std::vector<char> ptx;
   ptx.resize(ptx_size);
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
+#endif
 
   CUmodule module;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));

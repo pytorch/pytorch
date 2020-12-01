@@ -281,7 +281,12 @@ NvrtcFunction nvrtcCompile(
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {"--std=c++14"};
 #else
+#if CUDA_VERSION == 11020
+  // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
+  const std::string compute = "--gpu-architecture=sm_" +
+#else
   const std::string compute = "--gpu-architecture=compute_" +
+#endif
       std::to_string(major) + std::to_string(minor);
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
@@ -344,11 +349,20 @@ NvrtcFunction nvrtcCompile(
 
   {
     FUSER_PERF_SCOPE("get PTX");
+#if CUDA_VERSION == 11020
+    // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
+    AT_CUDA_NVRTC_CHECK(
+        at::globalContext().getNVRTC().nvrtcGetCUBINSize(program, &ptx_size));
+    ptx.resize(ptx_size);
+    AT_CUDA_NVRTC_CHECK(
+        at::globalContext().getNVRTC().nvrtcGetCUBIN(program, ptx.data()));
+#else
     AT_CUDA_NVRTC_CHECK(
         at::globalContext().getNVRTC().nvrtcGetPTXSize(program, &ptx_size));
     ptx.resize(ptx_size);
     AT_CUDA_NVRTC_CHECK(
         at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
+#endif
   }
 
   NvrtcFunction compiled_kernel_;
@@ -358,6 +372,9 @@ NvrtcFunction nvrtcCompile(
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
 #ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
+#if CUDA_VERSION == 11020
+    TORCH_CHECK(false, "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
+#endif
     FUSER_PERF_SCOPE("load CUBIN");
 
     // Output ptx file
