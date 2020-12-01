@@ -2350,6 +2350,22 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(GatherModel(), input=(input, indices))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_gather_float_index(self):
+        class GatherFloatIndexModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, mask):
+                seq_length, batch_size = mask.shape
+                result = input[0][0][0]
+                for i in torch.arange(2, seq_length):
+                    result = input[0][i][0]
+                return result
+
+        model = GatherFloatIndexModel()
+        x = torch.randint(0, 5, (8, 8, 17), dtype=torch.long)
+        y = torch.ones(8, 1, dtype=torch.uint8)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
             def forward(self, input):
@@ -3103,6 +3119,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
+
+    @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_nonzero(self):
+        class NonzeroModel(torch.nn.Module):
+            def forward(self, x):
+                return x.nonzero(), x.nonzero(as_tuple=True)
+
+        x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
+        self.run_test(NonzeroModel(), (x,))
 
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
