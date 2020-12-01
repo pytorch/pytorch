@@ -363,10 +363,6 @@ def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
                 method_graph = freezed_m._get_method('forward').graph
                 method_graph.eraseInput(0)  # Remove 'self' from model inputs
 
-            graph_input_params = [param.debugName() for param in method_graph.inputs()]
-            assert all(item in graph_input_params for item in dict(model.named_parameters())), \
-                "Graph parameter names does not match model parameters."
-
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, False)
