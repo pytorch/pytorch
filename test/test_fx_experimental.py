@@ -458,6 +458,45 @@ class TestFXExperimental(JitTestCase):
             )
             assert cost == 208.
 
+        def test_aot_based_partition(self):
+            class TestModule(torch.nn.Module):
+                def __init__(self):
+                    super(TestModule, self).__init__()
+                    self.b = torch.rand(4)
+                    self.c = torch.rand(4)
+
+                def forward(self, a):
+                    add_1 = a + self.b
+                    add_2 = self.c + add_1
+                    return add_2
+            m = TestModule()
+            traced = symbolic_trace(m)
+            a = torch.rand(4)
+            node_to_partition_id = {}
+            partition_to_logical_devices = {}
+            count = 0
+            GraphManipulation.get_size_of_all_nodes(traced, [a])
+            for node in traced.graph.nodes:
+                if node.op not in {'placeholder', 'get_attr', 'output'}:
+                    node_to_partition_id[node] = count
+                    partition_to_logical_devices[count] = [0]
+                    count += 1
+            devices = [Device('dev_0', 200, 0)]
+            partitioner_config = PartitionerConfig(
+                devices=devices,
+                mode=PartitionMode.aot_based,
+                node_to_partition_mapping=node_to_partition_id,
+                partition_to_logical_device_mapping=partition_to_logical_devices
+            )
+            partitioner = Partitioner()
+            ret = partitioner.partition_graph(traced, m, partitioner_config)
+            module_with_submodules = ret.module_with_submodules
+            dag = ret.dag
+            self.assertEqual(module_with_submodules(a), traced(a))
+            for node in dag.nodes:
+                assert node.size_bytes == 48
+                assert node.logical_device_ids == [0]
+
         def test_replace_target_nodes_with(self):
             class testModule(torch.nn.Module):
                 def forward(self, a, b):
