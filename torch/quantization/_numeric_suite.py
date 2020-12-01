@@ -169,23 +169,16 @@ class ShadowLogger(Logger):
 
     def __init__(self):
         super(ShadowLogger, self).__init__()
-        self.stats["float"] = None
-        self.stats["quantized"] = None
+        self.stats["float"] = []
+        self.stats["quantized"] = []
 
     def forward(self, x, y):
         if len(x) > 1:
             x = x[0]
         if len(y) > 1:
             y = y[0]
-        if self.stats["quantized"] is None:
-            self.stats["quantized"] = x.detach()
-        else:
-            self.stats["quantized"] = torch.cat((self.stats["quantized"], x.detach()))
-
-        if self.stats["float"] is None:
-            self.stats["float"] = y.detach()
-        else:
-            self.stats["float"] = torch.cat((self.stats["float"], y.detach()))
+        self.stats["quantized"].append(x.detach())
+        self.stats["float"].append(y.detach())
 
 
 class OutputLogger(Logger):
@@ -194,13 +187,11 @@ class OutputLogger(Logger):
 
     def __init__(self):
         super(OutputLogger, self).__init__()
-        self.stats["tensor_val"] = None
+        self.stats["tensor_val"] = []
+
 
     def forward(self, x):
-        if self.stats["tensor_val"] is None:
-            self.stats["tensor_val"] = x
-        else:
-            self.stats["tensor_val"] = torch.cat((self.stats["tensor_val"], x))
+        self.stats["tensor_val"].append(x)
         return x
 
 
