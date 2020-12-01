@@ -814,6 +814,17 @@ class TestReductions(TestCase):
         torch.prod(x, 1, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_prod_bool(self, device):
+        tests = [
+            ([True, True], True),
+            ([True, False], False),
+            ([False, False], False)
+        ]
+
+        for val, exp in tests:
+            tensor = torch.tensor(val, device=device)
+            self.assertEqual(torch.prod(tensor, dtype=torch.bool), torch.tensor(exp, device=device))
+
     @onlyCPU
     def test_max_mixed_devices(self, device):
         a = torch.randn(10, device=device)
