@@ -207,10 +207,12 @@ class _InverseTransform(Transform):
 
     @property
     def input_event_dim(self):
+        assert self._inv is not None
         return self._inv.output_event_dim
 
     @property
     def output_event_dim(self):
+        assert self._inv is not None
         return self._inv.input_event_dim
 
     @property
@@ -564,10 +566,10 @@ class CorrCholeskyTransform(Transform):
         2. For each row :math:`X_i` of the lower triangular part, we apply a *signed* version of
            class :class:`StickBreakingTransform` to transform :math:`X_i` into a
            unit Euclidean length vector using the following steps:
-            - Scales into the interval :math:`(-1, 1)` domain: :math:`r_i = \tanh(X_i)`.
-            - Transforms into an unsigned domain: :math:`z_i = r_i^2`.
-            - Applies :math:`s_i = StickBreakingTransform(z_i)`.
-            - Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
+           - Scales into the interval :math:`(-1, 1)` domain: :math:`r_i = \tanh(X_i)`.
+           - Transforms into an unsigned domain: :math:`z_i = r_i^2`.
+           - Applies :math:`s_i = StickBreakingTransform(z_i)`.
+           - Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
     """
     domain = constraints.real_vector
     codomain = constraints.corr_cholesky

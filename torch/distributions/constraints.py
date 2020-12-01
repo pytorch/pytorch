@@ -282,8 +282,9 @@ class _CorrCholesky(Constraint):
     row vector being of unit length.
     """
     def check(self, value):
-        row_norm = torch.linalg.norm(value, dim=-1)
-        unit_row_norm = ((row_norm <= 1.) & (row_norm >= (1 - 1e-6))).all(dim=-1)
+        tol = torch.finfo(value.dtype).eps * value.size(-1) * 10  # 10 is an adjustable fudge factor
+        row_norm = torch.linalg.norm(value.detach(), dim=-1)
+        unit_row_norm = (row_norm - 1.).abs().le(tol).all(dim=-1)
         return _LowerCholesky().check(value) & unit_row_norm
 
 
