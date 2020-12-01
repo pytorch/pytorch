@@ -219,7 +219,16 @@ static inline std::tuple<std::vector<int64_t>,
 }
 
 // Function to generate empty tensors of required size, strides and dtype for the SVD operation
-static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv) {
+static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv,
+    const bool svd_use_cusolver=false) {
+
+  // NB 1: U, S, VT are empty tensors created on the CPU intentionally, because magma_(d/s)gesdd
+  // (which is the driver routine for the divide and conquer SVD operation)
+  // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
+  // moves the inputs between devices internally.
+  // NB 2: cusolver requires U, S, VT tensors on CUDA device
+  const auto usvt_device = svd_use_cusolver ? at::kCUDA : at::kCPU;
+
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
 
@@ -231,44 +240,18 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   strides[input.dim() - 1] = m;
   strides[input.dim() - 2] = 1;
 
-  Tensor U_empty;
-  if (!input.is_cuda()) {
-    U_empty = at::empty_strided(sizes, strides, input.options());
-  } else {
-    // NB: U_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation)
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally.
-    U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
-  }
+  Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
 
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
   // VT should be a row-major or a batch of row-major matrices
-  Tensor VT_empty;
-  if (!input.is_cuda()) {
-    VT_empty = at::empty(sizes, input.options());
-  } else {
-    // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation)
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally.
-    VT_empty = at::empty(sizes, input.options().device(at::kCPU));
-  }
+  Tensor VT_empty = at::empty(sizes, input.options().device(usvt_device));
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
-  Tensor S_empty;
   ScalarType dtype = toValueType(typeMetaToScalarType(input.dtype()));
-  if (!input.is_cuda()) {
-    S_empty = at::empty(sizes, input.options().dtype(dtype));
-  } else {
-    // NB: S_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation)
-    // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
-    S_empty = at::empty(sizes, input.options().dtype(dtype).device(at::kCPU));
-  }
+  Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
+
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
 }
 

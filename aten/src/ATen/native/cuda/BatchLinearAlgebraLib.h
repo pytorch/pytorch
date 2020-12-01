@@ -54,6 +54,8 @@ namespace native {
 
 Tensor _inverse_helper_cuda_lib(const Tensor& self);
 
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv);
+
 }}  // namespace at::native
 
 #endif  // USE_CUSOLVER

@@ -116,6 +116,50 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
   return self_inv_working_copy;
 }
 
+
+template<typename scalar_t>
+static void apply_svd_lib(Tensor& self, Tensor& U, Tensor& S, Tensor& VT, char jobchar, std::vector<int64_t>& infos) {
+
+}
+
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  int64_t m = self.size(-2), n = self.size(-1);
+  int64_t k = std::min(m, n);
+
+  char jobchar = compute_uv ? (some ? 'S' : 'A') : 'N';
+
+  Tensor U_working_copy, S_working_copy, VT_working_copy;
+  std::tie(U_working_copy, S_working_copy, VT_working_copy) = \
+    _create_U_S_VT(self, some, compute_uv, /* svd_use_cusolver = */ true);
+  // U, S, V working copies are already column majored now
+
+  if (self.numel() > 0) {
+    Tensor self_working_copy = cloneBatchedColumnMajor(self);
+
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda", [&] {
+      apply_svd_lib<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
+    });
+
+    if (self.dim() > 2) {
+      batchCheckErrors(infos, "svd_cuda");
+    } else {
+      singleCheckErrors(infos[0], "svd_cuda");
+    }
+
+    if (compute_uv) {
+      if (some) {
+        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+      }
+    } else {
+      VT_working_copy.zero_();
+      U_working_copy.zero_();
+    }
+  }
+
+  return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
+}
+
 }} // namespace at::native
 
 #endif  // USE_CUSOLVER
