@@ -76,7 +76,6 @@ constexpr int64_t kUvTransportPriority = 0;
 
 constexpr int64_t kCmaChannelPriority = 200;
 constexpr int64_t kMultiplexedUvChannelPriority = 100;
-constexpr int64_t kCudaIpcChannelPriority = 300;
 // The basic channel reuses a transport as a channel, and is thus our fallback.
 constexpr int64_t kBasicChannelPriority = 0;
 
@@ -180,6 +179,8 @@ C10_REGISTER_CREATOR(
     makeMultiplexedUvChannel);
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
+
+constexpr int64_t kCudaIpcChannelPriority = 300;
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
   auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
