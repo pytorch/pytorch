@@ -2,7 +2,7 @@ import os
 import contextlib
 import textwrap
 import itertools
-from typing import List, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, Union, Sequence
+from typing import List, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, Union, Sequence, Iterable
 import yaml
 from enum import Enum
 from collections import OrderedDict, defaultdict
@@ -18,6 +18,7 @@ from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
+import tools.codegen.api.meta as meta
 import tools.codegen.local as local
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
@@ -95,45 +96,55 @@ def parse_native_yaml(path: str) -> List[NativeFunction]:
 T = TypeVar('T')
 S = TypeVar('S')
 
-# Given a function that operates on NativeFunction, wrap it into a new function
-# that sets some appropriate context managers for that native function.
-# YOU MUST WRAP FUNCTIONS IN THIS for calls to api modules to be sound
-# (you will get an error if we try to access the local variables without having
-# set them).
-def with_native_function(func: Callable[[NativeFunction], T]) -> Callable[[NativeFunction], T]:
-    @functools.wraps(func)
-    def wrapper(f: NativeFunction) -> T:
-        with native_function_manager(f):
-            return func(f)
-    return wrapper
-
-def method_with_native_function(func: Callable[[S, NativeFunction], T]) -> Callable[[S, NativeFunction], T]:
-    @functools.wraps(func)
-    def wrapper(slf: S, f: NativeFunction) -> T:
-        with native_function_manager(f):
-            return func(slf, f)
-    return wrapper
+F = TypeVar('F', NativeFunction, StructuredNativeFunctions, Union[NativeFunction, StructuredNativeFunctions])
 
 @contextlib.contextmanager
-def native_function_manager(f: NativeFunction) -> Iterator[None]:
+def native_function_manager(g: Union[StructuredNativeFunctions, NativeFunction]) -> Iterator[None]:
+    if isinstance(g, StructuredNativeFunctions):
+        # By default, we associate all errors with structured native functions
+        # with the out variant.  In some cases, it might be better to have
+        # a more specific place to hang things; if so, use
+        # native_function_manager again on the inside
+        f = g.out
+    else:
+        f = g
     with context(f'in {f.loc}:\n  {f.func}'):
         with local.parametrize(
             use_c10_dispatcher=f.use_c10_dispatcher,
         ):
             yield
 
+# Given a function that operates on NativeFunction, wrap it into a new function
+# that sets some appropriate context managers for that native function.
+# YOU MUST WRAP FUNCTIONS IN THIS for calls to api modules to be sound
+# (you will get an error if we try to access the local variables without having
+# set them).
+def with_native_function(func: Callable[[F], T]) -> Callable[[F], T]:
+    @functools.wraps(func)
+    def wrapper(f: F) -> T:
+        with native_function_manager(f):
+            return func(f)
+    return wrapper
+
+def method_with_native_function(func: Callable[[S, F], T]) -> Callable[[S, F], T]:
+    @functools.wraps(func)
+    def wrapper(slf: S, f: F) -> T:
+        with native_function_manager(f):
+            return func(slf, f)
+    return wrapper
+
 # These two functions purposely return generators in analogy to map()
 # so that you don't mix up when you need to list() them
 
 # Map over function that may return None; omit Nones from output sequence
-def mapMaybe(func: Callable[[T], Optional[S]], xs: Sequence[T]) -> Iterator[S]:
+def mapMaybe(func: Callable[[T], Optional[S]], xs: Iterable[T]) -> Iterator[S]:
     for x in xs:
         r = func(x)
         if r is not None:
             yield r
 
 # Map over function that returns sequences and cat them all together
-def concatMap(func: Callable[[T], Sequence[S]], xs: Sequence[T]) -> Iterator[S]:
+def concatMap(func: Callable[[T], Sequence[S]], xs: Iterable[T]) -> Iterator[S]:
     for x in xs:
         for r in func(x):
             yield r
@@ -168,15 +179,31 @@ def cpp_string(s: str) -> str:
 # code we want.
 Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
-# Dispatch keywords in native_functions.yaml that support all backends.
-KEYWORD_ALL_BACKENDS = ('DefaultBackend', 'Math')
+# Dispatch keys that "support all backends".  These codegen slightly differently
+# then backend specific keys.
+def is_generic_dispatch_key(dk: str) -> bool:
+    return dk in {'DefaultBackend', 'Math'}
 
-# Generates {dispatch}Type.cpp (e.g., CPUType.cpp).  This function is also
-# reused to implement per-operator registration.  It also generates
-# TypeDefault.cpp when dispatch target is for all backends (dispatch is None or
-# dispatch in KEYWORD_ALL_BACKENDS).
+# CUDA specific dispatch keys
+def is_cuda_dispatch_key(dk: str) -> bool:
+    return 'CUDA' in dk
+
+# Generates RegisterSchema.cpp.  Depending on the selector, either
+# all schemas are registered, or only some are (in the case of
+# selective build)
+@dataclass(frozen=True)
+class RegisterSchema:
+    selector: SelectiveBuilder
+
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> Optional[str]:
+        op_name = f"aten::{f.func.name}"
+        if not self.selector.is_operator_selected(op_name):
+            return None
+        return f'm.def({cpp_string(str(f.func))});\n'
+
+# Generates Register{dispatch}.cpp (e.g., RegisterCPU.cpp).
 #
-# {dispatch}Type.cpp
 #   - The primary function of this file is to register all of the
 #     implementations for the given dispatch key to the dispatcher,
 #     so they are available for use in PyTorch.  If dispatch is
@@ -190,12 +217,9 @@ KEYWORD_ALL_BACKENDS = ('DefaultBackend', 'Math')
 #     API without having to disambiguate which overload you want
 #     (as would be the case if you directly registered native::
 #     functions).
-#
-# This function is also used for a secondary purpose: the registration
-# logic is also reused to implement per-operator registration.
 @dataclass(frozen=True)
-class ComputeTypeMethod:
-    dispatch: Optional[str]
+class RegisterDispatchKey:
+    dispatch_key: str
 
     # TODO: Give more precise type Union[Literal[Target.DEFINITION,
     # Target.REGISTRATION]]; requires Literal from typing_extensions
@@ -208,17 +232,113 @@ class ComputeTypeMethod:
 
     def __post_init__(self) -> None:
         assert self.target is not Target.DECLARATION
-        if self.dispatch is None:
-            assert self.target is Target.REGISTRATION
 
     @method_with_native_function
-    def __call__(self, f: NativeFunction) -> Optional[str]:
+    def __call__(self, f: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
+        if isinstance(f, StructuredNativeFunctions):
+            return self.gen_structured(f)
+        elif isinstance(f, NativeFunction):
+            r = self.gen_unstructured(f)
+            return [] if r is None else [r]
+        else:
+            assert_never(f)
+
+    def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
+        if self.dispatch_key not in g.out.dispatch:
+            return []
+
+        # Inner helper function to close over g
+        # TODO: This function has a lot of similarity with gen_unstructured.  If
+        # you edit this, you may need to also edit gen_unstructured.
+        @with_native_function
+        def gen_one(f: NativeFunction) -> Optional[str]:
+            assert self.target is not Target.DECLARATION
+
+            # TODO: put this into StructuredNativeFunctions itself
+            functional_func = g.out.func.signature()
+            functional_sig = DispatcherSignature.from_schema(functional_func)
+            meta_name = meta.name(functional_func)
+
+            # This is a little abusive; this assumes that the functionalization
+            # transformation ALWAYS refers to valid arguments in the original
+            # signature
+            functional_exprs = ', '.join(e.expr for e in functional_sig.exprs())
+
+            op_name = f"aten::{f.func.name}"
+            if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
+                return None
+
+            k = f.func.kind()
+            sig = NativeSignature.from_schema(f.func)
+
+            if self.target is Target.DEFINITION:
+                out_impl_name = f"at::native::{g.out.dispatch[self.dispatch_key]}"
+
+                # TODO: work a little harder to generate fresh names for 'result'
+                # TODO: less praying that I picked the right argument name for 'self'
+
+                if k is SchemaKind.functional:
+                    out_expr = "result"
+                    prologue = "auto result = tensor_from_meta(meta_result);"
+                elif k is SchemaKind.inplace:
+                    out_expr = "self"
+                    prologue = "// TODO: consistency check assert"
+                elif k is SchemaKind.out:
+                    # TODO: generalize this for multi-out
+                    assert len(f.func.out_arguments) == 1, "multi-out structured not supported yet"
+                    # TODO: properly get the expression as it was brought into
+                    # scope by sig
+                    out_expr = f.func.out_arguments[0].name
+                    prologue = f"""
+// TODO: add a consistency check for meta_result
+{out_expr}.resize_(meta_result.sizes);
+"""
+
+                device_guard = ""
+
+                if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
+                    # TODO: avoid copypasting the computation of self_args,
+                    # candidate_args and device_of
+                    self_args = (a for a in f.func.arguments if a.name == "self")
+                    candidate_args = itertools.chain(self_args, f.func.out_arguments, f.func.arguments)
+                    device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
+
+                    device_guard = ''
+                    if f.device_guard and device_of is not None:
+                        # TODO: Use OptionalCUDAGuard when possible
+                        device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
+                    # TODO: figure out what to do about structured kernels and
+                    # factory functions
+
+                # For an overview of what this template code looks like, see
+                # https://github.com/pytorch/rfcs/pull/9
+                return f"""\
+{sig.defn()} {{
+    {device_guard}
+    auto meta_result = meta::{meta_name}({functional_exprs});
+    {prologue}
+    {out_impl_name}({out_expr}, {functional_exprs});
+    return {out_expr};
+}}
+"""
+
+            elif self.target is Target.REGISTRATION:
+                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                    payload = f'TORCH_FN({sig.name()})'
+                else:
+                    payload = f'torch::CppFunction::makeUnboxedOnly({sig.name()})'
+                return f'm.impl("{f.func.name}", {payload});'
+            else:
+                assert_never(self.target)
+
+        return list(mapMaybe(gen_one, g.functions()))
+
+    def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
         # for mypy type refinement; would be fixed by TODO on target
         assert self.target is not Target.DECLARATION
 
-        if self.dispatch is not None:
-            if self.dispatch not in f.dispatch:
-                return None
+        if self.dispatch_key not in f.dispatch:
+            return None
 
         op_name = f"aten::{f.func.name}"
         if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
@@ -228,18 +348,16 @@ class ComputeTypeMethod:
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
         args_str = ', '.join(map(str, args))
-        dispatch_to_all_backends = self.dispatch is not None and self.dispatch in KEYWORD_ALL_BACKENDS
 
         if self.target is Target.DEFINITION:
-            assert self.dispatch is not None
-            impl_name = f"at::native::{f.dispatch[self.dispatch]}"
+            impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
             args_exprs_str = ', '.join(a.name for a in args)
 
             return_kw = "    return "
 
             cuda_guard = ""
-            if dispatch_to_all_backends or 'CUDA' in self.dispatch:
+            if is_generic_dispatch_key(self.dispatch_key) or is_cuda_dispatch_key(self.dispatch_key):
                 self_args = (a for a in f.func.arguments if a.name == "self")
 
                 # There is precedence for which argument we use to do
@@ -264,9 +382,9 @@ class ComputeTypeMethod:
 
                 # TODO: There is probably a simpler version of this that
                 # works just as well.
-                if f.device_guard and dispatch_to_all_backends and has_tensor_options:
+                if f.device_guard and is_generic_dispatch_key(self.dispatch_key) and has_tensor_options:
                     cuda_guard = cuda_guard_from_tensor_options
-                elif f.device_guard and self.dispatch is not None and 'CUDA' in self.dispatch and has_tensor_options:
+                elif f.device_guard and is_cuda_dispatch_key(self.dispatch_key) and has_tensor_options:
                     cuda_guard = f"""\
     globalContext().lazyInitCUDA();
     {cuda_guard_from_tensor_options}
@@ -287,40 +405,21 @@ class ComputeTypeMethod:
 """
 
         elif self.target is Target.REGISTRATION:
-            if self.dispatch is None:
-                return f'm.def({cpp_string(str(f.func))});\n'
-            elif f.manual_kernel_registration:
+            if f.manual_kernel_registration:
                 return None
             else:
-                if dispatch_to_all_backends:
-                    type_name = f'TypeDefault::{name}'
-                else:
-                    type_name = f'{self.dispatch}Type::{name}'
-
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
                 # Figure out which signature the function is
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f"TORCH_FN({type_name})"
+                    payload = f"TORCH_FN({name})"
                 elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                     payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
-                        f"{dispatcher_sig.type()}>(TORCH_FN({type_name}))"
+                        f"{dispatcher_sig.type()}>(TORCH_FN({name}))"
 
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                    payload = f"torch::CppFunction::makeUnboxedOnly(&{type_name})"
-
-                # Annotate it with dispatch information if necessary
-                #
-                # NB: In the ordinary, TypeDerived code generation work flow, specification
-                # of the backend is handled by the enclosing block, so the torch::dispatch
-                # invocation here is strictly unnecessary.  However, in the fbcode mobile
-                # only workflow using per-op registration, these registrations will get dumped
-                # in a TORCH_LIBRARY_FRAGMENT that does not have an ambient backend.  So
-                # the torch::dispatch specification here is important!  See
-                # Note [Redundancy in registration code is OK] for how we handle redundant info.
-                if self.dispatch is not None:
-                    payload = f"torch::dispatch(DispatchKey::{self.dispatch},\n{payload})\n"
+                    payload = f"torch::CppFunction::makeUnboxedOnly(&{name})"
 
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
@@ -456,7 +555,15 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
 
     return rs
 
-# Generates BackendSelectRegister.cpp, a series of kernels which provide
+def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
+    with native_function_manager(g.out):
+        sig = g.signature()
+        name = meta.name(sig)
+        returns_type = meta.returns_type(sig.returns)
+        args = meta.arguments(sig)
+        return f"CAFFE2_API {returns_type} {name}({', '.join(map(str, args))});"
+
+# Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
 # be easily done automatically using templating.
 @dataclass(frozen=True)
@@ -738,8 +845,6 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
         and Variant.method not in f.variants
 
-    is_abstract = f.dispatch.keys() != {'Math'}
-
     return OrderedDict([
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
@@ -758,22 +863,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('returns', returns),
         ('inplace', f.func.name.name.inplace),
         ('is_factory_method', is_factory_method),
-        # Note [Abstract ATen methods]
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # An abstract ATen method is one whose dispatch differs between
-        # types.  These are implemented in derived types (with a
-        # standard (throwing) definition in Type).  A concrete ATen
-        # method is one which has the same dispatch for all types;
-        # we just implement it in the base Type.  This is exposed
-        # in Declarations.yaml via a field named 'abstract'.
-        #
-        # Although this is what we have historically exposed, it is
-        # actually not all that useful for end users, who are also interested
-        # whether or not there is an explicit entry in derivatives.yaml
-        # for the entry or not (as this affects whether or not the operation is
-        # overrideable or not.)  Once this all gets cleaned up, this
-        # property will be obsolete.
-        ('abstract', is_abstract),
+        ('abstract', f.is_abstract),
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
@@ -790,7 +880,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
         'dispatch': str(f.dispatch.keys() != {'Math'}),
-        'default': str(any(k in f.dispatch for k in KEYWORD_ALL_BACKENDS))
+        'default': str(any(is_generic_dispatch_key(k) for k in f.dispatch))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
@@ -948,10 +1038,16 @@ def main() -> None:
         d = pre_grouped_native_functions[f.func.signature()]
         assert f.func.kind() not in d
         d[f.func.kind()] = f
-    grouped_native_functions = [NativeFunctionGroup.from_dict(v) for v in pre_grouped_native_functions.values()]
-    # NB: At the moment, grouped_native_functions isn't used by anything,
-    # this code lives here to help potential future consumers; for a live
-    # example see https://github.com/pytorch/pytorch/pull/45277
+
+    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, StructuredNativeFunctions]]:
+        r = StructuredNativeFunctions.from_dict(d)
+        if r is None:
+            return list(d.values())
+        else:
+            return [r]
+
+    # TODO: how come ValuesView isn't a Sequence lol
+    grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -985,7 +1081,9 @@ def main() -> None:
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
 
-    backends = [
+    # NB: substrings in these dispatch keys matter, we do tests to see if
+    # a key contains, e.g., CUDA to classify it as a CUDA backend
+    dispatch_keys = [
         "CPU",
         "SparseCPU",
         "MkldnnCPU",
@@ -993,61 +1091,56 @@ def main() -> None:
         "SparseCUDA",
         "QuantizedCPU",
         "QuantizedCUDA",
+        "Math",
+        "DefaultBackend",
     ]
     if options.backend_whitelist:
-        backends = [b for b in backends if b in options.backend_whitelist]
+        dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or k in options.backend_whitelist]
 
-    for dispatch in backends:
-        h_template = 'TypeDerived.h'
-        cpp_template = 'TypeDerived.cpp'
+    for dispatch_key in dispatch_keys:
+        cpp_template = 'RegisterDispatchKey.cpp'
 
-        fm = cuda_fm if 'CUDA' in dispatch else cpu_fm
+        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
-        fm.write_with_template(f'{dispatch}Type.cpp', cpp_template, lambda: {
-            'Type': f'{dispatch}Type',
-            'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',
+        fm.write_with_template(f'Register{dispatch_key}.cpp', cpp_template, lambda: {
+            'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch == "CPU" else
-                '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch == "CUDA" else
+                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == "CPU" else
+                '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == "CUDA" else
                 '',
-            'Backend': dispatch,
-            'type_derived_method_definitions': list(mapMaybe(
-                ComputeTypeMethod(dispatch, Target.DEFINITION, selector),
-                native_functions
+            'DispatchKey': dispatch_key,
+            'dispatch_definitions': list(concatMap(
+                RegisterDispatchKey(dispatch_key, Target.DEFINITION, selector),
+                grouped_native_functions
             )),
-            'function_registrations': list(mapMaybe(
-                ComputeTypeMethod(dispatch, Target.REGISTRATION, selector),
-                native_functions
+            'dispatch_registrations': list(concatMap(
+                RegisterDispatchKey(dispatch_key, Target.REGISTRATION, selector),
+                grouped_native_functions
             )),
         })
         del fm
 
+    # BackendSelect is generated specially
+    cpu_fm.write('RegisterBackendSelect.cpp', lambda: {
+        'backend_select_method_definitions':
+            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION), native_functions)),
+        'backend_select_function_registrations':
+            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION), native_functions)),
+    })
+
+    cpu_fm.write('MetaFunctions.h', lambda: {
+        'declarations':
+            list(mapMaybe(compute_meta_function_declaration,
+                          (g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)))),
+    })
+
     schema_selector = selector
     if options.force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
-
-    # TODO: split this file into separate files
-    cpu_fm.write('TypeDefault.cpp', lambda: {
-        'type_method_definitions':
-        list(mapMaybe(
-            ComputeTypeMethod('Math', Target.DEFINITION, selector),
-            native_functions)) +
-        list(mapMaybe(
-            ComputeTypeMethod('DefaultBackend', Target.DEFINITION, selector),
-            native_functions)),
-
-        'function_registrations': list(mapMaybe(
-            ComputeTypeMethod(None, Target.REGISTRATION, schema_selector),
-            native_functions)),
-
-        'math_function_registrations': list(mapMaybe(
-            ComputeTypeMethod('Math', Target.REGISTRATION, selector),
-            native_functions)),
-
-        'default_backend_function_registrations': list(mapMaybe(
-            ComputeTypeMethod('DefaultBackend', Target.REGISTRATION, selector),
-            native_functions)),
+    cpu_fm.write('RegisterSchema.cpp', lambda: {
+        'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
+
     cpu_fm.write('Functions.h', lambda: {
         'function_declarations': list(mapMaybe(ComputeFunction(Target.DECLARATION), native_functions)),
     })
@@ -1065,12 +1158,6 @@ def main() -> None:
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
         'native_function_declarations': list(concatMap(compute_native_function_declaration, native_functions)),
-    })
-    cpu_fm.write('BackendSelectRegister.cpp', lambda: {
-        'backend_select_method_definitions':
-            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION), native_functions)),
-        'backend_select_function_registrations':
-            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION), native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
