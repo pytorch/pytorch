@@ -551,12 +551,12 @@ class Quantizer:
                  input activaiton for functional linear node
             """
             if node.name not in observed_node_names_set and node.name in quants:
-                if is_standalone_module and node.name in graph_inputs:
-                    # we'll insert observer for input of standalone module
-                    # in parent graph
-                    standalone_module_observed_input_idxs.append(
-                        graph_inputs.index(node.name))
-                    return
+                # if is_standalone_module and node.name in graph_inputs:
+                #     # we'll insert observer for input of standalone module
+                #     # in parent graph
+                #     standalone_module_observed_input_idxs.append(
+                #         graph_inputs.index(node.name))
+                #     return
                 _, activation_post_process_ctr = quants[node.name]
                 if activation_post_process_ctr is not None:
                     insert_observer(node, activation_post_process_ctr())
@@ -581,8 +581,8 @@ class Quantizer:
                 if qconfig is not None:
                     standalone_module_input_idxs = \
                         insert_observer_for_special_module(obj)
-                    insert_observer_for_output_of_the_node(
-                        node, obj, qconfig, standalone_module_input_idxs)
+                    # insert_observer_for_output_of_the_node(
+                    #     node, obj, qconfig, standalone_module_input_idxs)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             insert_observer_for_input_arg_of_observed_node(node)
@@ -771,7 +771,7 @@ class Quantizer:
             assert self.modules is not None
             if node.op == 'call_module' and \
                     is_observed_standalone_module(self.modules[node.target]):
-                quantized = bool(self.modules[node.target]._output_is_observed)
+                quantized = False
             else:
                 quantized = True
 
@@ -833,10 +833,9 @@ class Quantizer:
             if node.op == 'output':
                 cur_output_node_idx = output_node_seen_cnt
                 output_node_seen_cnt += 1
-                if is_standalone_module or (cur_output_node_idx in output_quantized_idxs):
-                    # Result are kept quantized in the quantized standalone
-                    # module, or if the user specified the output_quantized_idxs
-                    # override.
+                if cur_output_node_idx in output_quantized_idxs:
+                    # Result are kept quantized if the user specified the
+                    # output_quantized_idxs override.
                     graph_output = map_arg(node.args[0], load_x)
                 else:
                     graph_output = map_arg(node.args[0], load_non_quantized)
@@ -851,10 +850,10 @@ class Quantizer:
                     quantized = False
                 else:
                     assert obj is not None
+                    quantized = is_output_quantized(node)
                     result = obj.convert(
                         self, node, load_arg, debug=debug,
                         convert_custom_config_dict=convert_custom_config_dict)
-                    quantized = is_output_quantized(node)
 
                 if quantized:
                     quant_env[node.name] = result
@@ -868,12 +867,12 @@ class Quantizer:
             if node.op == 'call_module' and \
                     is_activation_post_process(self.modules[node.target]):
                 insert_quantize_node(node)
-            elif (is_standalone_module and node.op == 'placeholder' and
-                  graph_inputs.index(node.name) in
-                  model._standalone_module_observed_input_idxs):
-                # the node is quantized in parent module
-                quant_env[node.name] = \
-                    self.quantized_graph.node_copy(node, load_non_quantized)
+            # elif (is_standalone_module and node.op == 'placeholder' and
+            #       graph_inputs.index(node.name) in
+            #       model._standalone_module_observed_input_idxs):
+            #     # the node is quantized in parent module
+            #     quant_env[node.name] = \
+            #         self.quantized_graph.node_copy(node, load_non_quantized)
             elif node.op == 'placeholder':
                 cur_placeholder_node_idx = placeholder_node_seen_cnt
                 placeholder_node_seen_cnt += 1
