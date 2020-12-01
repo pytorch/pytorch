@@ -69,6 +69,13 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const std::string& msg,
     const void* caller = nullptr);
 
+[[noreturn]] C10_API void ThrowInvalidDimension(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller = nullptr);
+
 [[noreturn]] C10_API void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
@@ -105,6 +112,14 @@ using EnforceNotMet = ::c10::Error;
           __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
     }                                                               \
   } while (false)
+
+#define CAFFE_ENFORCE_DIMENSION(condition, ...)                     \
+    do {                                                            \
+      if (C10_UNLIKELY(!(condition))) {                             \
+        ::c10::ThrowInvalidDimension(                               \
+          __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
+      }                                                             \
+    } while (false)
 
 #define CAFFE_ENFORCE_FINITE(condition, ...)                        \
     do {                                                            \

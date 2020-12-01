@@ -49,6 +49,16 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
+void ThrowInvalidDimension(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller) {
+  throw c10::InvalidDimensionError(
+      file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+}
+
 void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,

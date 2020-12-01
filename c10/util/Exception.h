@@ -175,14 +175,17 @@ class C10_API TypeError : public Error {
   using Error::Error;
 };
 
-// Used in ATen for non finite indices.  These turn into
-// ExitException when they cross to Python.
+// Used in ATen for invalid dimensions.
+class C10_API InvalidDimensionError : public Error {
+  using Error::Error;
+};
+
+// Used in ATen for non finite indices.
 class C10_API EnforceFiniteError : public Error {
   using Error::Error;
 };
 
-// Used in Onnxifi backend lowering.  These turn into
-// ExitException when they cross to Python.
+// Used in Onnxifi backend lowering.
 class C10_API OnnxfiBackendSystemError : public Error {
   using Error::Error;
 };
