@@ -410,7 +410,8 @@ void conv2d_pointwise(
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight.image(command_buffer,
+        v_weight.image(
+            command_buffer,
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
