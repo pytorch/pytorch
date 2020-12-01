@@ -342,18 +342,22 @@ Using the :attr:`dim` argument to compute matrix norms::
 solve = _add_docstr(_linalg.linalg_solve, r"""
 linalg.solve(input, other, *, out=None) -> Tensor
 
-Computes a tensor ``x`` such that ``matmul(input, x) = other``.
-The resulting tensor ``x`` has the same shape as broadcasted :attr:`other`.
+Computes the solution ``x`` to the matrix equation ``matmul(input, x) = other``
+with a square matrix, or batches of such matrices, :attr:`input` and multiple right-hand side vectors :attr:`other`.
+If :attr:`input` is batched and :attr:`other` is not, then :attr:`other` is broadcasted
+to have the same batch dimensions as :attr:`input`.
+The resulting tensor has the same shape as broadcasted :attr:`other`.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
 
-.. note:: If :attr:`input` is a non-invertible matrix or not a square matrix then a RuntimeError will be thrown.
+.. note:: If :attr:`input` is a non-invertible matrix or non-square matrix then a RuntimeError will be thrown.
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
 Args:
     input (Tensor): the square :math:`n \times n` matrix or the batch
                     of such matrices of size :math:`(*, n, n)` where ``*`` is one or more batch dimensions.
-    other (Tensor): "right-hand-side" tensor of shape :math:`(*, n)` or :math:`(*, n, k)`.
+    other (Tensor): right-hand side tensor of shape :math:`(*, n)` or :math:`(*, n, k)`,
+                    where :math:`k` is the number of right-hand side vectors.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
