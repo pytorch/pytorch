@@ -77,7 +77,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig)
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
 static inline void squareCheckInputs(const Tensor& self) {
   TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
   TORCH_CHECK(self.size(-1) == self.size(-2),
@@ -135,7 +135,7 @@ static inline void singleCheckErrors(int64_t info, const char* name, bool allow_
   } else if (info > 0) {
     if (strstr(name, "svd")) {
       AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-    } else if (strstr(name, "symeig")) {
+    } else if (strstr(name, "eig")) { // this catches both "eig" and "symeig"
       AT_ERROR(name, ": the algorithm failed to converge; ", info,
                " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
     } else if (!allow_singular) {
