@@ -18,7 +18,6 @@ from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
-from . import profiler
 from . import functional
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
@@ -258,3 +257,5 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
 if kineto_available():
     from torch._C._autograd import (ProfilerResult, KinetoEvent,
                                     _prepare_profiler, _enable_profiler, _disable_profiler)
+
+from . import profiler
