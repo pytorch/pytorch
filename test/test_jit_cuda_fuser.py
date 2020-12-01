@@ -1115,6 +1115,33 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_normalization_partition(self):
+        sizes = [8, 8, 8]
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(sizes, dtype=dtype, device=device)
+        y = torch.randn(sizes, dtype=dtype, device=device)
+        z = torch.randn(sizes, dtype=dtype, device=device)
+        r_m = torch.randn(8, dtype=dtype, device=device)
+        r_v = torch.randn(8, dtype=dtype, device=device)
+
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor, r_mean: torch.Tensor, r_var: torch.Tensor):
+            o = torch.add(x, y)
+            o = torch.nn.functional.softmax(o, dim=0)
+            o = torch.add(o, z)
+            o = torch.nn.functional.batch_norm(o, r_mean, r_var, training=True)
+            return o
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y, z, r_m, r_v)
+        jit_o = t_jit(x, y, z, r_m, r_v)
+        o = t(x, y, z, r_m, r_v)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x, y, z, r_m, r_v), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_sum_to_one(self):
         dtype = torch.float
         device = "cuda"

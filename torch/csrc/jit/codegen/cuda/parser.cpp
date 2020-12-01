@@ -35,33 +35,41 @@ typedef bool (*MergeQueryFuncPtr)(const Node*);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
+  enum class OperatorType { ElementWise, Reduction, Normalization };
+
   class RegistrationEntry {
    public:
-    RegistrationEntry(ParseFuncPtr parse_f, MergeQueryFuncPtr merge_f = nullptr)
-        : parse_f_(parse_f), merge_f_(merge_f) {}
+    RegistrationEntry(
+        ParseFuncPtr parse_f,
+        MergeQueryFuncPtr merge_f = nullptr,
+        OperatorType type = OperatorType::ElementWise)
+        : parse_f_(parse_f), merge_f_(merge_f), type_(type) {}
 
-    void parse(const Node* node, std::unordered_map<size_t, CgValue>& values) {
+    void parse(const Node* node, std::unordered_map<size_t, CgValue>& values)
+        const {
       parse_f_(node, values);
     }
 
-    bool is_compatible(const Node* node) {
+    bool isCompatible(const Node* node) const {
       if (merge_f_ == nullptr) {
         return true;
       }
       return merge_f_(node);
     }
 
+    bool isType(OperatorType type) const {
+      return type_ == type;
+    }
+
    private:
     ParseFuncPtr parse_f_;
     MergeQueryFuncPtr merge_f_;
+    OperatorType type_;
   };
 
  public:
   IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
-    if (init_registry_) {
-      registerJitOperator();
-      init_registry_ = false;
-    }
+    initRegistry();
   }
 
   std::unique_ptr<Fusion> parse() {
@@ -119,34 +127,71 @@ class IrParser {
     return fusion;
   }
 
-  static bool canParseNode(const Node* node) {
+  // return nullptr if entry does not exist
+  static const RegistrationEntry* lookupInRegistry(const Node* node) {
+    // we need to use maybeSchema for nodes like prim::Constant, which doesn't
+    // have a schema
+    auto schema_ptr = node->maybeSchema();
+    if (schema_ptr != nullptr) {
+      // search cached entry first
+      auto cache_it = cached_registry_lookup_.find(schema_ptr);
+      if (cache_it != cached_registry_lookup_.end()) {
+        return cache_it->second;
+      } else {
+        // match signature
+        auto schema_str = canonicalSchemaString(*schema_ptr);
+
+        auto iter = jit_operator_registry_.find(schema_str);
+        if (iter != jit_operator_registry_.end()) {
+          // update cache entry
+          cached_registry_lookup_.insert(cache_it, {schema_ptr, &iter->second});
+          return &iter->second;
+        }
+      }
+    }
+    return nullptr;
+  }
+
+  static void initRegistry() {
     if (init_registry_) {
       // TODO: mutex this guy;
       registerJitOperator();
       init_registry_ = false;
     }
+  }
+
+  static bool canParseNode(const Node* node) {
+    initRegistry();
 
     // match signature.
-    auto iter = jit_operator_registry_.find(node->kind());
-    if (iter == jit_operator_registry_.end()) {
+    auto schema_ptr = node->maybeSchema();
+    if (schema_ptr == nullptr) {
       return false;
     }
-    for (auto& pair_op_func : iter->second) {
-      if (node->matches(pair_op_func.first->schema())) {
-        return pair_op_func.second.is_compatible(node);
-      }
-    }
-    return false;
+    auto reg_entry = lookupInRegistry(node);
+    return reg_entry != nullptr && reg_entry->isCompatible(node);
   }
 
   static bool isReductionNode(const Node* node) {
-    if (init_registry_) {
-      // TODO: mutex this guy;
-      registerJitOperator();
-      init_registry_ = false;
-    }
+    initRegistry();
 
-    return jit_reduction_op_registry_.count(node->kind());
+    auto reg_entry = lookupInRegistry(node);
+    return reg_entry != nullptr && reg_entry->isType(OperatorType::Reduction);
+  }
+
+  static bool isNormalizationNode(const Node* node) {
+    initRegistry();
+
+    auto reg_entry = lookupInRegistry(node);
+    return reg_entry != nullptr &&
+        reg_entry->isType(OperatorType::Normalization);
+  }
+
+  static bool isElementWiseNode(const Node* node) {
+    initRegistry();
+
+    auto reg_entry = lookupInRegistry(node);
+    return reg_entry != nullptr && reg_entry->isType(OperatorType::ElementWise);
   }
 
   // TODO: is_reduction is too hacky here. we should categorize operation types
@@ -156,16 +201,11 @@ class IrParser {
       std::shared_ptr<Operator>& op,
       ParseFuncPtr parse_fn,
       MergeQueryFuncPtr merge_query_fn = nullptr,
-      bool is_reduction = false) {
-    jit_operator_registry_[Symbol::fromQualString(op->schema().name())]
-        .emplace_back(
-            std::piecewise_construct,
-            std::forward_as_tuple(op),
-            std::forward_as_tuple(parse_fn, merge_query_fn));
-    if (is_reduction) {
-      jit_reduction_op_registry_.emplace(
-          Symbol::fromQualString(op->schema().name()));
-    }
+      OperatorType type = OperatorType::ElementWise) {
+    jit_operator_registry_.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(canonicalSchemaString(op->schema())),
+        std::forward_as_tuple(parse_fn, merge_query_fn, type));
   }
 
  private:
@@ -577,7 +617,9 @@ class IrParser {
               output = add(output, bias);
             }
             value_map.emplace(node->output()->unique(), output);
-          });
+          },
+          [](const Node* node) -> bool { return true; },
+          OperatorType::Normalization);
     }
 
     {
@@ -651,7 +693,9 @@ class IrParser {
               output = add(output, bias_bcast);
             }
             value_map.emplace(node->output()->unique(), output);
-          });
+          },
+          [](const Node* node) -> bool { return true; },
+          OperatorType::Normalization);
     }
 
     {
@@ -684,7 +728,15 @@ class IrParser {
             auto* bcast_sum = broadcast(sum_exp, broadcast_mask);
             auto* output = div(exp, bcast_sum);
             value_map.emplace(node->output()->unique(), output);
-          });
+          },
+          [](const Node* node) -> bool {
+            if (!node->inputs()[2]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          },
+          OperatorType::Normalization);
     }
 
     {
@@ -735,7 +787,7 @@ class IrParser {
             }
             return true;
           },
-          true);
+          OperatorType::Reduction);
     }
 
     {
@@ -774,22 +826,12 @@ class IrParser {
             *node);
       }
     } else {
-      auto iter = IrParser::jit_operator_registry_.find(node->kind());
-      // make sure we have a parser for the op;
+      auto reg_entry = lookupInRegistry(node);
       TORCH_INTERNAL_ASSERT(
-          iter != IrParser::jit_operator_registry_.end(),
-          "CudaFusionGroup Parser doesn't handle operator kind(): ",
-          node->kind().toDisplayString());
-      for (auto& pair_op_func : iter->second) {
-        if (node->matches(pair_op_func.first->schema())) {
-          pair_op_func.second.parse(node, value_map_);
-          return;
-        }
-      }
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "CudaFusionGroup Parser doesn't recognize operator overload:",
+          reg_entry != nullptr,
+          "CudaFusionGroup Parser doesn't handle node: ",
           canonicalSchemaString(node->schema()));
+      reg_entry->parse(node, value_map_);
     }
   }
 
@@ -867,31 +909,34 @@ class IrParser {
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue> value_map_;
   // parsing rule registry.
-  static std::unordered_map<
-      Symbol,
-      std::vector<std::pair<std::shared_ptr<Operator>, RegistrationEntry>>>
-      jit_operator_registry_;
-  static std::unordered_set<Symbol> jit_reduction_op_registry_;
+  static std::unordered_map<std::string, RegistrationEntry>
+      jit_operator_registry_; // NOLINT
+
+  // pointing cached entry stored in `jit_operator_registry_`
+  static std::unordered_map<const FunctionSchema*, const RegistrationEntry*>
+      cached_registry_lookup_; // NOLINT
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static bool init_registry_;
 };
 
-std::unordered_map<
-    Symbol,
-    std::vector<
-        std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
-    IrParser::jit_operator_registry_;
-std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
+std::unordered_map<std::string, IrParser::RegistrationEntry>
+    IrParser::jit_operator_registry_; // NOLINT
+std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
+    IrParser::cached_registry_lookup_; // NOLINT
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool IrParser::init_registry_ = true;
 
-} // namespace
-
-bool hasReductionNode(const Block* block) {
+bool anyInBlock(
+    const Block* block,
+    const std::function<bool(const Node*)>& fn) {
   for (auto node : block->nodes()) {
-    if (isReductionNode(node)) {
+    if (fn(node)) {
       return true;
     }
     for (auto block : node->blocks()) {
-      if (hasReductionNode(block)) {
+      if (anyInBlock(block, fn)) {
         return true;
       }
     }
@@ -899,8 +944,26 @@ bool hasReductionNode(const Block* block) {
   return false;
 }
 
+} // namespace
+
+bool hasReductionNode(const Block* block) {
+  return anyInBlock(block, isReductionNode);
+}
+
 bool isReductionNode(const Node* node) {
   return IrParser::isReductionNode(node);
+}
+
+bool hasNormalizationNode(const Block* block) {
+  return anyInBlock(block, isNormalizationNode);
+}
+
+bool isNormalizationNode(const Node* node) {
+  return IrParser::isNormalizationNode(node);
+}
+
+bool isElementWiseNode(const Node* node) {
+  return IrParser::isElementWiseNode(node);
 }
 
 bool isNodeParsible(const Node* node) {

@@ -79,13 +79,13 @@ inline bool isFusibleNode(const Node* node) {
   return isFusible;
 }
 
-bool hasReductionOperation(const Node* node) {
-  if (isReductionNode(node)) {
+bool hasNonElementWiseOperation(const Node* node) {
+  if (!isElementWiseNode(node)) {
     return true;
   }
   if (node->kind() == prim::CudaFusionGroup) {
     for (auto n : node->g(attr::Subgraph)->nodes()) {
-      if (hasReductionOperation(n)) {
+      if (hasNonElementWiseOperation(n)) {
         return true;
       }
     }
@@ -324,7 +324,7 @@ bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
 
   // TODO: lift the restriction of not fusing producer containing reduction when
   //       we have proper scheduling.
-  if (isFusibleCudaFusionGroup(node) && !hasReductionOperation(node) &&
+  if (isFusibleCudaFusionGroup(node) && !hasNonElementWiseOperation(node) &&
       !createTrickyBroadcast(fusion, node)) {
     // ensure if the node has a designated device, it's on the same device with
     // fusion.
