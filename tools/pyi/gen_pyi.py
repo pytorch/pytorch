@@ -138,7 +138,7 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
-              'ior', 'irshift', 'isub', 'ixor',  # inplace ops
+              'ior', 'irshift', 'isub', 'ixor', 'ifloordiv',  # inplace ops
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')

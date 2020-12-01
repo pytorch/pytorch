@@ -834,8 +834,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.where: lambda condition, x=None, y=None: -1,
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         Tensor.__floordiv__: lambda self, other: -1,
-        Tensor.__rfloordiv__: lambda self, other: -1,  # type: ignore[attr-defined]
-        Tensor.__ifloordiv__: lambda self, other: -1,  # type: ignore[attr-defined]
+        Tensor.__rfloordiv__: lambda self, other: -1,
+        Tensor.__ifloordiv__: lambda self, other: -1,
         Tensor.__truediv__: lambda self, other: -1,
         Tensor.__rtruediv__: lambda self, other: -1,
         Tensor.__itruediv__: lambda self, other: -1,
