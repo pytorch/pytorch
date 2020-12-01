@@ -1286,15 +1286,26 @@ class DistributedTest:
             self._barrier()
 
         def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=False, secondary_op_call=None, **kwargs):
+            print("CCALL DIST OP")
             op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
-            with torch.autograd.profiler.profile() as prof:
+            use_cuda = True
+            with torch.autograd.profiler.profile(use_cuda=use_cuda) as prof:
+                print(f"Profiling with use_cuda={use_cuda}")
                 works = [op_call() for op_call in op_calls]
                 if is_async:
                     for work in works:
                         work.wait()
+
+                rank_to_GPU = self._init_multigpu_helper()
+                rank = self.rank
+                device_id = rank_to_GPU[rank][0]
+                print(f"Rank is {self.rank} device_id is {device_id}")
+                print(f"Done profiling with use_cuda={use_cuda}")
+
+
 
             def get_event(postfix):
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
