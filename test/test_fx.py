@@ -9,7 +9,6 @@ import functools
 import contextlib
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
-from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
@@ -552,6 +551,21 @@ class TestFX(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
 
+    def test_all_input_nodes(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        a : torch.fx.Node = graph.placeholder('x')
+        b : torch.fx.Node = graph.call_module('linear_mod', args=(a,))
+        c : torch.fx.Node = graph.get_attr('y_attr')
+        d : torch.fx.Node = graph.call_function(operator.add, args=(b, c))
+        e : torch.fx.Node = graph.call_function(torch.unsqueeze, args=(d, 0))
+        graph.output(e)
+        graph.lint()
+
+        self.assertEqual(b.all_input_nodes, [a])
+        self.assertEqual(c.all_input_nodes, [])
+        self.assertEqual(d.all_input_nodes, [b, c])
+        self.assertEqual(e.all_input_nodes, [d])
+
     def test_deepcopy_graphmodule_with_transform(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -656,24 +670,6 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
-    def test_replace_target_nodes_with(self):
-        class testModule(torch.nn.Module):
-            def forward(self, a, b):
-                return a + b
-        m = testModule()
-        traced = symbolic_trace(m)
-        input1 = torch.randn(1)
-        input2 = torch.randn(1)
-        assert (input1 + input2) == traced(input1, input2)
-        GraphManipulation.replace_target_nodes_with(
-            fx_module=traced,
-            old_op="call_function",
-            old_target=operator.add,
-            new_op="call_function",
-            new_target=operator.mul,
-        )
-        assert (input1 * input2) == traced(input1, input2)
-
     def test_pretty_print(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -746,11 +742,10 @@ class TestFX(JitTestCase):
         self.assertEqual(out, ref_out)
 
     def test_symbolic_trace_assert(self):
-        message = "assert_foobar"
 
         class AssertsTensorShape(torch.nn.Module):
             def forward(self, x):
-                torch.Assert(x.shape[1] > 4, message)
+                torch._assert(x.shape[1] > 4, "assert_foobar")
                 return x
 
         m = AssertsTensorShape()
@@ -758,8 +753,13 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(m)
         # verify assertion on traced model works correctly at runtime
         traced(torch.rand(4, 5))
-        with self.assertRaisesRegex(AssertionError, message):
+        with self.assertRaisesRegex(AssertionError, "assert_foobar"):
             traced(torch.rand(4, 3))
+        # verify the symbolically traced module is scriptable
+        ms = torch.jit.script(m)
+        with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
+            ms(torch.rand(4, 3))
+
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())

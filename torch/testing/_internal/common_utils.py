@@ -1106,9 +1106,10 @@ class TestCase(expecttest.TestCase):
                                                          equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                          exact_device=exact_device)
 
-                if not result and msg is None:
+                if not result:
                     assert debug_msg is not None
-                    msg = "Tensors failed to compare as equal! " + debug_msg
+                    msg = msg or "Tensors failed to compare as equal!"
+                    msg = f'{msg}\n{debug_msg}'
                 self.assertTrue(result, msg=msg)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super().assertEqual(x, y, msg=msg)
@@ -1147,6 +1148,18 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg is not None
                 msg = "Scalars failed to compare as equal! " + debug_msg
             self.assertTrue(result, msg=msg)
+        # Tensor x Numpy array
+        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
+            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Tensor
+        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
+            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Numpy array
+        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
 
@@ -1311,16 +1324,6 @@ class TestCase(expecttest.TestCase):
             stderr=subprocess.PIPE,
             env=env)
         return pipes.communicate()[1].decode('ascii')
-
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
 
 
 def download_file(url, binary=True):
