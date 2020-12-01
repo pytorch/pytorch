@@ -56,12 +56,23 @@ IF "%CUVER_NODOT%" == "80" (
   set GPU_TARGET=All
 )
 
+set CUDA_ARCH_LIST= -gencode arch=compute_37,code=sm_37 -gencode arch=compute_50,code=sm_50 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=sm_70
+
+IF "%CUVER_NODOT%" == "110" (
+  set "CUDA_ARCH_LIST=%CUDA_ARCH_LIST% -gencode arch=compute_80,code=sm_80"
+)
+
+IF "%CUVER_NODOT%" == "111" (
+  set "CUDA_ARCH_LIST=%CUDA_ARCH_LIST% -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86"
+)
+
 cmake .. -DGPU_TARGET="%GPU_TARGET%" ^
              -DUSE_FORTRAN=0 ^
              -DCMAKE_CXX_FLAGS="/FS /Zf" ^
              -DCMAKE_BUILD_TYPE=%CONFIG% ^
              -DCMAKE_GENERATOR=Ninja ^
              -DCMAKE_INSTALL_PREFIX=..\install\
+             -CUDA_ARCH_LIST="%CUDA_ARCH_LIST%"
 if errorlevel 1 exit /b 1
                                 
 set CC=cl.exe
