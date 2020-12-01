@@ -268,6 +268,11 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
       case ::c10::prim::ListConstruct: {
         return CloneValueFromListConstruct(v, n_graph);
       }
+      case ::c10::prim::PackPadded: {
+        auto input = n_graph->addInput();
+        input->copyMetadata(v_n->input(0));
+        return input;
+      }
       default: {
         // If the input is not constant, we cannot depend on its value
         // in shape inference. Set it to graph input in the new graph,
@@ -276,18 +281,6 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
         input->copyMetadata(v);
         return input;
       }
-      return input;
-    } else if (v_n->kind() == ::c10::prim::PackPadded) {
-      auto input = n_graph->addInput();
-      input->copyMetadata(v_n->input(0));
-      return input;
-    } else {
-      // If the input is not constant, we cannot depend on its value
-      // in shape inference. Set it to graph input in the new graph,
-      // and copy over metadata, such as datatype and shape.
-      auto input = n_graph->addInput();
-      input->copyMetadata(v);
-      return input;
     }
   });
   return clone_node;
