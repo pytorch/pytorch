@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 from caffe2.proto import caffe2_pb2
 import os
 import sys
@@ -12,7 +12,6 @@ caffe2_pb2.OPENCL = caffe2_pb2.PROTO_OPENCL
 caffe2_pb2.IDEEP = caffe2_pb2.PROTO_IDEEP
 caffe2_pb2.HIP = caffe2_pb2.PROTO_HIP
 caffe2_pb2.COMPILE_TIME_MAX_DEVICE_TYPES = caffe2_pb2.PROTO_COMPILE_TIME_MAX_DEVICE_TYPES
-caffe2_pb2.ONLY_FOR_TEST = caffe2_pb2.PROTO_ONLY_FOR_TEST
 
 if platform.system() == 'Windows':
     is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))

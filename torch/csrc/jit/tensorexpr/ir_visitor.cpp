@@ -208,14 +208,18 @@ void IRVisitor::visit(const RoundOff* v) {
 }
 
 void IRVisitor::visit(const MaxTerm* v) {
-  v->scalar()->accept(this);
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+  }
   for (auto* t : v->variables()) {
     t->accept(this);
   }
 }
 
 void IRVisitor::visit(const MinTerm* v) {
-  v->scalar()->accept(this);
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+  }
   for (auto* t : v->variables()) {
     t->accept(this);
   }
@@ -223,7 +227,7 @@ void IRVisitor::visit(const MinTerm* v) {
 
 void IRVisitor::visit(const ReduceOp* v) {
   v->accumulator()->accept(this);
-  v->body().node()->accept(this);
+  v->body()->accept(this);
 
   for (auto* e : v->output_args()) {
     e->accept(this);

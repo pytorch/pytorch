@@ -30,10 +30,8 @@ class TORCH_API ThreadLocalState {
   // with DebugInfoGuard
   std::shared_ptr<c10::ThreadLocalDebugInfo> debug_info_;
 
-  // RecordFunction TLS callbacks
-  RecordFunctionCallbacks callbacks_;
-
-  bool observers_enabled_ = false;
+  // RecordFunction TLS
+  RecordFunctionTLS rf_tls_;
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;

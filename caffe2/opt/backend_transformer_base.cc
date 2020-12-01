@@ -177,6 +177,6 @@ void BackendTransformerBase::dumpNet(
     const std::string& fname) const {
   NetDef shape_net(pred_net);
   addShapeToNet(shape_net, shape_hints);
-  WriteProtoToTextFile(shape_net, fname);
+  WriteProtoToTextFile(shape_net, fname, false);
 }
 } // namespace caffe2

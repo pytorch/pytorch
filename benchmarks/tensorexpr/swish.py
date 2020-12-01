@@ -3,11 +3,11 @@ import torch
 
 
 class SwishBench(benchmark.Benchmark):
-    def __init__(self, mode, device, M, N):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, M, N):
+        super().__init__(mode, device, dtype)
         self.M = M
         self.N = N
-        self.data = self.rand([M, N], device=device, requires_grad=self.requires_grad)
+        self.data = self.rand([M, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.inputs = [self.data]
         self.zeros = torch.zeros(M, N, device=device)
         self.six = self.zeros + 6.0
@@ -36,7 +36,7 @@ class SwishBench(benchmark.Benchmark):
             sol_count = (1 + 1) + (1 + 1)
             algorithmic_count = (3 + 1) + (3 + 1)
 
-        buffer_size = self.M * self.N * 4
+        buffer_size = self.M * self.N
         return {
             "sol": buffer_size * sol_count,
             "algorithmic": buffer_size * algorithmic_count,

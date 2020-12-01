@@ -236,8 +236,10 @@ void initPythonIRBindings(PyObject* module_) {
              bool use_external_data_format,
              const std::string& onnx_file_path) {
             std::string graph;
+            std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
             RawDataExportMap export_map;
-            std::tie(graph, export_map) = export_onnx(
+            SymbolDimMap symbol_map;
+            std::tie(model_proto, export_map, symbol_map) = export_onnx(
                 g,
                 initializers,
                 onnx_opset_version,
@@ -250,6 +252,7 @@ void initPythonIRBindings(PyObject* module_) {
                 add_node_names,
                 use_external_data_format,
                 onnx_file_path);
+            graph = serialize_model_proto_to_string(model_proto);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -261,6 +264,7 @@ void initPythonIRBindings(PyObject* module_) {
               python_serialized_export_map[kv.first] =
                   py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
             }
+            graph = serialize_model_proto_to_string(model_proto);
             return std::make_tuple(
                 py::bytes(graph), python_serialized_export_map);
           },
@@ -468,8 +472,14 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("returnNode", [](Block& b) { return b.return_node(); })
       .def("paramNode", [](Block& b) { return b.param_node(); })
-      .def("addNode", [](Block& b, Value& input, const char* str) {
-        return addNodeToBlock(&b, &input, Symbol::fromQualString(str));
+      .def(
+          "addNode",
+          [](Block& b, const char* str, const std::vector<Value*>& inputs) {
+            return addNodeToBlock(&b, Symbol::fromQualString(str), inputs);
+          })
+      .def("addInputToBlock", [](Block& b) { return addInputToBlock(&b); })
+      .def("registerOutput", [](Block& b, Value* value) {
+        return b.registerOutput(value);
       });
 
 #define NS(name) def(#name, &Node ::name)
@@ -483,6 +493,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("sourceRange", [](Node& n) { return n.sourceRange().str(); })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
+      .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
@@ -737,7 +748,8 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
-      .def_static("get", &TensorType::get);
+      .def_static("get", &TensorType::get)
+      .def_static("getInferred", &TensorType::getInferred);
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
@@ -745,6 +757,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(
       m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  py::class_<StreamObjType, Type, std::shared_ptr<StreamObjType>>(
+      m, "StreamObjType")
+      .def_static("get", &StreamObjType::get);
   py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
       m, "PyObjectType")
       .def_static("get", &PyObjectType::get);

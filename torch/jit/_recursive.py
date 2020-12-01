@@ -52,6 +52,19 @@ def make_stub_from_method(nn_module, method_name):
     return make_stub(func, method_name)
 
 
+def make_stubs_from_exported_methods(mod):
+    stubs = []
+    for name in dir(mod):
+        item = getattr(mod, name, None)
+        if (
+            _jit_internal.get_torchscript_modifier(item)
+            is _jit_internal.FunctionModifiers.EXPORT
+        ):
+            stubs.append(make_stub_from_method(mod, name))
+
+    return stubs
+
+
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
@@ -91,6 +104,12 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_list()
 
     class_annotations = getattr(nn_module, '__annotations__', {})
+    if isinstance(nn_module, (torch.quantization.QuantWrapper)):
+        class_annotations = {}
+
+    # Get user-annotated ignored attributes.
+    user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", list())
+    concrete_type_builder.add_ignored_attributes(user_annotated_ignored_attributes)
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
@@ -110,6 +129,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     added_names = set()
 
     for name, item in nn_module._parameters.items():
+        if name in user_annotated_ignored_attributes:
+            continue
+
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         # We currently have the invariant in various places in our code
@@ -121,12 +143,18 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
+        if name in user_annotated_ignored_attributes:
+            continue
+
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type, False, True)
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
+        if name in user_annotated_ignored_attributes:
+            continue
+
         attr_type = infer_type(name, item)
         if item is None:
             # Modules can be None. We don't have direct support for optional
@@ -190,6 +218,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if name in ignored_attributes or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
+            continue
+
+        if name in user_annotated_ignored_attributes:
             continue
 
         if name in added_names:
@@ -371,13 +402,13 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             elif isinstance(orig_value, torch.jit.ScriptModule):
                 scripted = orig_value
             else:
-                # use the default recursive rule to compile the module
-                scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+                # always reuse the provided stubs_fn to infer the methods to compile
+                scripted = create_script_module_impl(orig_value, sub_concrete_type, stubs_fn)
 
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
-        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
+        # 3. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
         for name in dir(nn_module):
             item = getattr(nn_module, name, None)
@@ -385,6 +416,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 unbound_function = getattr(type(nn_module), name)
                 bound_method = unbound_function.__get__(script_module)
                 setattr(script_module, name, bound_method)
+            elif concrete_type.is_ignored_attribute(name):
+                setattr(script_module, name, item)
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
@@ -527,6 +560,13 @@ def check_module_initialized(mod):
     if not hasattr(mod, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(torch.typename(type(mod))))
+
+    # This is to avoid importing torch.distributed.nn
+    if not hasattr(mod, 'remote_parameters'):
+        for name, param in mod._parameters.items():
+            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+                raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
+                                   .format(torch.typename(type(mod)), name))
 
 def infer_methods_to_compile(nn_module):
     """

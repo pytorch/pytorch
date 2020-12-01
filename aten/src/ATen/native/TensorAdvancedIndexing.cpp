@@ -135,6 +135,26 @@ static Tensor reshape_indexer(const Tensor& index, int64_t dims_before, int64_t 
   return index.reshape(shape);
 }
 
+static ptrdiff_t dataOffset(const Tensor& tensor, ptrdiff_t linearIndex) {
+  auto size = tensor.sizes();
+  auto stride = tensor.strides();
+  int nDim = tensor.dim();
+  ptrdiff_t dataOffset = 0;
+  for (int i = nDim - 1; i >= 0; i--) {
+    dataOffset += (linearIndex % size[i]) * stride[i];
+    linearIndex /= size[i];
+  }
+  return dataOffset;
+}
+
+static inline int64_t wrapLinearIndex(int64_t linearIndex, int64_t numel) {
+  return linearIndex < 0 ? linearIndex + numel : linearIndex;
+}
+
+static inline void checkLinearIndex(int64_t linearIndex, int64_t numel) {
+  TORCH_CHECK(linearIndex < numel && linearIndex >= -numel, "out of range: ", linearIndex, " out of ", numel);
+}
+
 AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 {
   int64_t element_size_bytes = src.element_size();
@@ -361,7 +381,8 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
 
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_add_(): Expected dtype int64 for index");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+          "index_add_(): Expected dtype int32/int64 for index");
   TORCH_CHECK(self.scalar_type() == source.scalar_type(),
               "index_add_(): self and source must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < source.dim(),
@@ -374,7 +395,6 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   at::assert_no_partial_overlap(self, source);
 
   auto index_contig = index.contiguous();
-  auto index_data = index_contig.data_ptr<int64_t>();
 
   if (self.dim() > 1) {
     // Equivalent to:
@@ -394,32 +414,41 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     auto self_dim_size = self.size(dim);
     auto iter = TensorIterator::binary_op(selfSlice, selfSlice, sourceSlice);
 
-    for (auto i = 0; i < numel; i++) {
-      auto self_i = index_data[i];
-      TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-      auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
-      auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
-      iter.unsafe_replace_operand(0, self_data);
-      iter.unsafe_replace_operand(1, self_data);
-      iter.unsafe_replace_operand(2, source_data);
-      add_stub(iter.device_type(), iter, 1);
-    }
+    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
+      auto index_data = index_contig.data_ptr<index_t>();
+      for (auto i = 0; i < numel; i++) {
+          auto self_i = index_data[i];
+          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+          auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+          auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+          iter.unsafe_replace_operand(0, self_data);
+          iter.unsafe_replace_operand(1, self_data);
+          iter.unsafe_replace_operand(2, source_data);
+          add_stub(iter.device_type(), iter, 1);
+      }
+    });
   }
   else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
-    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&] {
+    // explicitly capture all required variables to work around windows build
+    // TODO: fix this when windows can correctly capture variables in nested lambda
+    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
       // TODO: Maybe TensorAccessor can beused here?
       auto* self_ptr = self.data_ptr<scalar_t>();
       auto* source_ptr = source.data_ptr<scalar_t>();
-      for (auto i = 0; i < numel; i++) {
-        auto self_i = index_data[i];
-        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self_ptr + self_i * self_stride;
-        *self_ip += *(source_ptr + i * source_stride);
-      }
+      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
+        [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride] {
+        auto index_data = index_contig.data_ptr<index_t>();
+        for (auto i = 0; i < numel; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
+            scalar_t *self_ip = self_ptr + self_i * self_stride;
+            *self_ip += *(source_ptr + i * source_stride);
+        }
+      });
     });
   }
   return self;
@@ -434,7 +463,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
 
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_select(): Expected dtype int64 for index");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "index_select(): self and result must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(),
@@ -448,7 +477,6 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
   result.resize_(result_size);
 
   auto index_contig = index.contiguous();
-  auto index_data = index_contig.data_ptr<int64_t>();
 
   if (self.dim() > 1) {
     if (numel == 0 || self.numel() == 0) {
@@ -472,17 +500,26 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
       .build();
 
     auto grain_size = at::internal::GRAIN_SIZE;
-    auto outer_loop = [&](int64_t start, int64_t end) {
+    auto outer_loop =
+      // explicitly capture all required variables to work around windows build
+      // TODO: fix this when windows can correctly capture variables in nested lambda
+      [&index_contig, &iter, &self_dim_size, &selfSlice_data, &self_stride_bytes, &resultSlice_data,
+        &result_stride_bytes](int64_t start, int64_t end) {
       auto sub_iter = TensorIterator(iter);
-      for (int64_t i = start; i < end; i++) {
-        auto self_i = index_data[i];
-        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-        auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
-        auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
-        sub_iter.unsafe_replace_operand(0, result_data);
-        sub_iter.unsafe_replace_operand(1, self_data);
-        copy_stub(sub_iter.device_type(), sub_iter, false);
-      }
+      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
+        [&index_contig, &start, &end, &sub_iter, &self_dim_size, &selfSlice_data, &self_stride_bytes,
+          &resultSlice_data, &result_stride_bytes] () {
+        auto index_data = index_contig.data_ptr<index_t>();
+        for (int64_t i = start; i < end; i++) {
+          auto self_i = index_data[i];
+          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+          auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+          auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
+          sub_iter.unsafe_replace_operand(0, result_data);
+          sub_iter.unsafe_replace_operand(1, self_data);
+          copy_stub(sub_iter.device_type(), sub_iter, false);
+        };
+      });
     };
 
     // parallel on inner loop in case the slice is large enough;
@@ -493,14 +530,23 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
       // use a fast loop when self and result are contiguous and of the same data type
       if (iter.is_contiguous() && self.scalar_type() == result.scalar_type()) {
         auto slice_size_bytes = slice_size * elementSize(self.scalar_type());
-        at::parallel_for(0, numel, grain_size / slice_size, [&](int64_t start, int64_t end) {
-          for (int64_t i = start; i < end; i++) {
-            auto self_i = index_data[i];
-            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-            auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
-            auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
-            memcpy(result_data, self_data, slice_size_bytes);
-          }
+        // explicitly capture all required variables to work around windows build
+        // TODO: fix this when windows can correctly capture variables in nested lambda
+        at::parallel_for(0, numel, grain_size / slice_size,
+          [&index_contig, &slice_size_bytes, &self_dim_size, &selfSlice_data,
+            &self_stride_bytes, &resultSlice_data, &result_stride_bytes](int64_t start, int64_t end) {
+          AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
+            [&index_contig, &slice_size_bytes, &self_dim_size, &selfSlice_data,
+              &self_stride_bytes, &resultSlice_data, &result_stride_bytes, &start, &end] () {
+            auto index_data = index_contig.data_ptr<index_t>();
+            for (int64_t i = start; i < end; i++) {
+              auto self_i = index_data[i];
+              TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+              auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+              auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
+              memcpy(result_data, self_data, slice_size_bytes);
+            }
+          });
         });
       } else {
         at::parallel_for(0, numel, grain_size / slice_size, outer_loop);
@@ -508,20 +554,26 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     }
   } else {
     TORCH_CHECK(result.dim() <= 1, "result.dim() (", result.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
-
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "index_select", [&] {
+    // explicitly capture all required variables to work around windows build
+    // TODO: fix this when windows can correctly capture variables in nested lambda
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "index_select",
+      [&index_contig, &self, &result, &dim, &numel] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
       auto self_data_ptr = self.data_ptr<scalar_t>();
       auto result_data_ptr = result.data_ptr<scalar_t>();
       auto self_numel = self.numel();
-      for (auto i = 0; i < numel; i++) {
-        auto self_i = index_data[i];
-        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
-        scalar_t *self_ip = self_data_ptr + self_i * self_stride;
-        *(result_data_ptr + i * result_stride) = *self_ip;
-      }
+      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
+        [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
+        auto index_data = index_contig.data_ptr<index_t>();
+        for (auto i = 0; i < numel; i++) {
+          auto self_i = index_data[i];
+          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+          scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+          *(result_data_ptr + i * result_stride) = *self_ip;
+        }
+      });
     });
   }
 
@@ -587,22 +639,16 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   if (reduce == "add") {
     return SCATTER_GATHER_OP::REDUCE_ADD;
   }
-  else if (reduce == "subtract") {
-    return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
-  }
   else if (reduce == "multiply") {
     return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
   }
-  else if (reduce == "divide") {
-    return SCATTER_GATHER_OP::REDUCE_DIVIDE;
-  }
   else {
     TORCH_CHECK(false,
-                "reduce argument must be either of add, subtract, multiply or divide.");
+                "reduce argument must be either add or multiply.");
   }
 }
 
-Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
+Tensor& scatter_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
                                    Scalar value, const std::string reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
@@ -613,7 +659,7 @@ Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor
   return self;
 }
 
-Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
+Tensor & scatter_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
                       const Tensor & src, const std::string reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index");
@@ -819,6 +865,77 @@ Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Ten
   auto result = at::zeros_like(
       input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
   return result.masked_scatter_(mask, grad);
+}
+
+void take_out_cpu_template(
+    Tensor& output,
+    Tensor const& input,
+    Tensor const& index)
+{
+    TORCH_CHECK(output.device().type() == at::kCPU, "device type of output (", output.device().type(), ") is not CPU");
+    TORCH_CHECK(input.device().type() == at::kCPU, "device type of input (", input.device().type(), ") is not CPU");
+    TORCH_CHECK(index.device().type() == at::kCPU, "device type of index (", index.device().type(), ") is not CPU");
+
+    TORCH_CHECK(output.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            output.layout(), " on output tensor");
+    TORCH_CHECK(input.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            input.layout(), " on input tensor");
+    TORCH_CHECK(index.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            index.layout(), " on index tensor");
+
+    TORCH_CHECK(output.scalar_type() == input.scalar_type(), "output and input scalar type must match.",
+            "But got different types: ", output.scalar_type(), " and ", input.scalar_type());
+    TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
+
+    output.resize_(index.sizes());
+    auto output_contiguous = output.contiguous();
+    auto index_continuous = index.contiguous();
+    bool is_contiguous = input.is_contiguous();
+    auto input_size = input.numel();
+
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, input.scalar_type(), "take_cpu", [&] {
+        auto output_data = output_contiguous.data_ptr<scalar_t>();
+        auto input_data = input.data_ptr<scalar_t>();
+        auto index_data = index.data_ptr<int64_t>();
+
+        // Exceptions must not be thrown across parallel sections, so we
+        // record the position of the invalid index and throw the exception after the
+        // loop.
+        std::atomic<int64_t> invalidIdxPos(-1);
+
+        at::parallel_for(0, index.numel(), at::internal::GRAIN_SIZE,
+            [&](int64_t start, int64_t end) {
+            for (auto i = start; i < end; i++) {
+                int64_t idx = index_data[i];
+                if (idx < input_size && idx >= -input_size) {
+                    idx = wrapLinearIndex(idx, input_size);
+                    if (is_contiguous) {
+                        output_data[i] = input_data[idx];
+                    } else {
+                        output_data[i] = input_data[dataOffset(input, idx)];
+                    }
+                } else {
+                    int64_t tmp = -1;
+                    invalidIdxPos.compare_exchange_strong(tmp, i);
+                }
+            }
+        });
+
+        if (invalidIdxPos >= 0) {
+            checkLinearIndex(index_data[invalidIdxPos], input_size);
+        }
+    });
+}
+
+Tensor take_cpu(const Tensor& self, const Tensor& index) {
+    auto output = at::empty(index.sizes(), self.options());
+    take_out_cpu_template(output, self, index);
+    return output;
+}
+
+Tensor& take_out_cpu(Tensor& out, const Tensor& self, const Tensor& index) {
+    take_out_cpu_template(out, self, index);
+    return out;
 }
 
 Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& index) {

@@ -1,5 +1,6 @@
+#include <gtest/gtest.h>
+
 #include <c10/core/TensorOptions.h>
-#include <test/cpp/jit/test_base.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/import.h>
@@ -10,11 +11,19 @@
 
 #include <unordered_set>
 
+#define ASSERT_THROWS_WITH(statement, substring)                         \
+  try {                                                                  \
+    (void)statement;                                                     \
+    ASSERT_TRUE(false);                                                  \
+  } catch (const std::exception& e) {                                    \
+    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
+  }
+
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
 
-void testLiteInterpreterUpsampleNearest2d() {
+TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
     def forward(self, input: Tensor, scale:float):
@@ -37,7 +46,26 @@ void testLiteInterpreterUpsampleNearest2d() {
   ASSERT_TRUE(resd.equal(refd));
 }
 
-void testLiteInterpreterAdd() {
+TEST(LiteInterpreterTest, CheckAttrAccess) {
+  Module m("m");
+  m.register_attribute("mobile_optimized", BoolType::get(), true);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bool mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(mobile_optimized);
+  m.setattr("mobile_optimized", false);
+  ss = std::stringstream();
+  m._save_for_mobile(ss);
+  bc = _load_for_mobile(ss);
+  mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(!mobile_optimized);
+}
+
+TEST(LiteInterpreterTest, Add) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   // TODO: support default param val, which was pushed in
@@ -71,7 +99,7 @@ void testLiteInterpreterAdd() {
   AT_ASSERT(resd == refd);
 }
 
-void testLiteInterpreterConv() {
+TEST(LiteInterpreterTest, Conv) {
   auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
   if (s && strcmp(s, "1") == 0)
     return;
@@ -103,7 +131,7 @@ void testLiteInterpreterConv() {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
-void testLiteInterpreterInline() {
+TEST(LiteInterpreterTest, Inline) {
   Module m("m");
   m.define(R"JIT(
   def foo1(self, x):
@@ -123,7 +151,7 @@ void testLiteInterpreterInline() {
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
-void testLiteInterpreterTuple() {
+TEST(LiteInterpreterTest, Tuple) {
   Module m("m");
   m.define(R"JIT(
   def foo(self, x):
@@ -141,7 +169,7 @@ void testLiteInterpreterTuple() {
   AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
-void testLiteInterpreterDict() {
+TEST(LiteInterpreterTest, Dict) {
   Module m("m");
   m.define(R"JIT(
   def foo(self, x):
@@ -159,7 +187,7 @@ void testLiteInterpreterDict() {
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
-void testLiteInterpreterPrimOverload() {
+TEST(LiteInterpreterTest, PrimOverload) {
   /*
   // temporarily disabled
   script::Module m("m");
@@ -178,7 +206,7 @@ void testLiteInterpreterPrimOverload() {
   */
 }
 
-void testLiteInterpreterPrim() {
+TEST(LiteInterpreterTest, Prim) {
   Module m("m");
   m.define(R"JIT(
         def forward(self, x):
@@ -204,7 +232,33 @@ void testLiteInterpreterPrim() {
   AT_ASSERT(resi == refi);
 }
 
-void testLiteInterpreterLoadOrigJit() {
+TEST(LiteInterpreterTest, PrimScalar) {
+  Module m("m");
+  m.define(R"JIT(
+        def forward(self, x):
+            return int(x.item())
+  )JIT");
+
+  std::vector<IValue> inputs;
+  auto minput = 3.5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto ref = m.run_method("forward", minput);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.get_method("forward")(bcinputs);
+  }
+
+  auto resi = res.toInt();
+  auto refi = ref.toInt();
+  AT_ASSERT(resi == refi);
+}
+
+TEST(LiteInterpreterTest, LoadOrigJit) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -217,7 +271,7 @@ void testLiteInterpreterLoadOrigJit() {
   ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
 }
 
-void testLiteInterpreterWrongMethodName() {
+TEST(LiteInterpreterTest, WrongMethodName) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -234,7 +288,7 @@ void testLiteInterpreterWrongMethodName() {
   ASSERT_THROWS_WITH(bc.get_method("forward")(inputs), "is not defined");
 }
 
-void testLiteInterpreterSetState() {
+TEST(LiteInterpreterTest, SetState) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -282,7 +336,7 @@ class TorchBindLiteInterpreterTestStruct
   }
 };
 
-void testLiteInterpreterBuiltinFunction() {
+TEST(LiteInterpreterTest, BuiltinFunction) {
   script::Module m("m");
   auto custom_class_obj =
       make_custom_class<TorchBindLiteInterpreterTestStruct>();
@@ -302,7 +356,7 @@ void testLiteInterpreterBuiltinFunction() {
   AT_ASSERT(str == expected);
 }
 
-void testLiteInterpreterModuleInfoBasic() {
+TEST(LiteInterpreterTest, ModuleInfoBasic) {
   Module m("M");
   m.define(R"JIT(
     def forward(self, x):
@@ -331,7 +385,7 @@ void testLiteInterpreterModuleInfoBasic() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-void testLiteInterpreterNotSavingModuleInfo() {
+TEST(LiteInterpreterTest, NotSaveModuleInfo) {
   Module m("M");
   m.define(R"JIT(
     def forward(self, x):
@@ -354,7 +408,7 @@ void testLiteInterpreterNotSavingModuleInfo() {
   }
 }
 
-void testLiteInterpreterOneSubmoduleModuleInfo() {
+TEST(LiteInterpreterTest, OneSubmoduleModuleInfo) {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):
@@ -390,7 +444,7 @@ void testLiteInterpreterOneSubmoduleModuleInfo() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-void testLiteInterpreterTwoSubmodulesModuleInfo() {
+TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):
@@ -432,7 +486,7 @@ void testLiteInterpreterTwoSubmodulesModuleInfo() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-void testLiteInterpreterSequentialModuleInfo() {
+TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):
@@ -474,7 +528,7 @@ void testLiteInterpreterSequentialModuleInfo() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-void testLiteInterpreterHierarchyModuleInfo() {
+TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):
@@ -520,7 +574,7 @@ void testLiteInterpreterHierarchyModuleInfo() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-void testLiteInterpreterDuplicatedClassTypeModuleInfo() {
+TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   Module a("A");
   a.define(R"JIT(
     def forward(self, x):
@@ -560,7 +614,7 @@ void testLiteInterpreterDuplicatedClassTypeModuleInfo() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
-void testLiteInterpreterEval() {
+TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
 
   Module m("m");
@@ -593,7 +647,7 @@ void testLiteInterpreterEval() {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
-void testLiteInterpreterFindWrongMethodName() {
+TEST(LiteInterpreterTest, FindWrongMethodName) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -607,7 +661,7 @@ void testLiteInterpreterFindWrongMethodName() {
   ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
 }
 
-void testLiteInterpreterFindAndRunMethod() {
+TEST(LiteInterpreterTest, FindAndRunMethod) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -637,7 +691,7 @@ void testLiteInterpreterFindAndRunMethod() {
   AT_ASSERT(resd == refd);
 }
 
-void testLiteInterpreterRunMethodVariadic() {
+TEST(LiteInterpreterTest, RunMethodVariadic) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -658,6 +712,31 @@ void testLiteInterpreterRunMethodVariadic() {
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
   AT_ASSERT(resd == refd);
+}
+
+TEST(LiteInterpreterTest, ExtraFiles) {
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  module->_save_for_mobile(oss, extra_files);
+
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+  loaded_extra_files["metadata.json"] = "";
+  auto loaded_module =
+      torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
 }
 
 namespace {

@@ -49,7 +49,6 @@ class TestModels(TestCase):
     opset_version = _export_onnx_opset_version
 
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
-        self.is_script_test_enabled = True
         with torch.onnx.select_model_mode_for_export(model, None):
             graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
             torch._C._jit_pass_lint(graph)
@@ -94,21 +93,18 @@ class TestModels(TestCase):
         self.exportTest(toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x))
 
     @skipIfNoLapack
-    @disableScriptTest()
     def test_super_resolution(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0)
         )
         self.exportTest(toC(SuperResolutionNet(upscale_factor=3)), toC(x), atol=1e-6)
 
-    @disableScriptTest()
     def test_alexnet(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0)
         )
         self.exportTest(toC(alexnet()), toC(x))
 
-    @disableScriptTest()
     def test_mnist(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
@@ -137,13 +133,12 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19_bn()), toC(x))
 
-    @disableScriptTest()
     def test_resnet(self):
         # ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
-    @disableScriptTest()
+    @disableScriptTest()  # None type in outputs
     def test_inception(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 3, 299, 299) + 1.)
@@ -162,7 +157,6 @@ class TestModels(TestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
-    @disableScriptTest()
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -208,22 +202,20 @@ class TestModels(TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @disableScriptTest()
+    @disableScriptTest()  # None type in outputs
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
     def test_mnasnet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mnasnet1_0()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
     def test_mobilenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
+    @disableScriptTest()  # prim_data
     def test_shufflenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(shufflenet_v2_x1_0()), toC(x), rtol=1e-3, atol=1e-5)
@@ -238,20 +230,18 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(deeplabv3_resnet101()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
     def test_r3d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r3d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
     def test_mc3_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(mc3_18()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
     def test_r2plus1d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)
+
 
 if __name__ == '__main__':
     run_tests()

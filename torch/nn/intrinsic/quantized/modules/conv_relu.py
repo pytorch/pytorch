@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import torch.nn.intrinsic
@@ -40,6 +39,10 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_float(cls, mod):
+        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU1d:
+            mod.weight, mod.bias = fuse_conv_bn_weights(
+                mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                mod.bn.eps, mod.bn.weight, mod.bn.bias)
         return super(ConvReLU1d, cls).from_float(mod)
 
 class ConvReLU2d(nnq.Conv2d):

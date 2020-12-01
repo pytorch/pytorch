@@ -21,9 +21,9 @@ class Conv2d(nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros', qconfig=None):
-        super(Conv2d, self).__init__(in_channels, out_channels, kernel_size,
-                                     stride=stride, padding=padding, dilation=dilation,
-                                     groups=groups, bias=bias, padding_mode=padding_mode)
+        super().__init__(in_channels, out_channels, kernel_size,
+                         stride=stride, padding=padding, dilation=dilation,
+                         groups=groups, bias=bias, padding_mode=padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight()
@@ -32,7 +32,7 @@ class Conv2d(nn.Conv2d):
         return self._conv_forward(input, self.weight_fake_quant(self.weight))
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.quantization utilities
@@ -40,9 +40,8 @@ class Conv2d(nn.Conv2d):
         """
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
-        if not qconfig:
-            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must have a valid qconfig'
+        assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+        assert mod.qconfig, 'Input float module must have a valid qconfig'
         if type(mod) == ConvReLU2d:
             mod = mod[0]
         qconfig = mod.qconfig

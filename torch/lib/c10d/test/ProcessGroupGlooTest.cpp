@@ -1,7 +1,10 @@
+#ifndef _WIN32
 #include <signal.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#include <sys/types.h>
 
 #include <condition_variable>
 #include <iostream>
@@ -21,6 +24,7 @@ using namespace c10d::test;
 constexpr auto kSendDelay = std::chrono::milliseconds(100);
 constexpr auto kWaitTimeout = std::chrono::milliseconds(1);
 
+#ifndef _WIN32
 class SignalTest {
  public:
   SignalTest(const std::string& path) : path_(path) {}
@@ -40,8 +44,8 @@ class SignalTest {
     });
   }
 
-  std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_, size);
+  c10::intrusive_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
+    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     ::c10d::ProcessGroupGloo::Options options;
     // Set a timeout that is small enough to make this test run fast, but also
@@ -58,7 +62,7 @@ class SignalTest {
     };
 
     // Loop until an exception happens
-    std::shared_ptr<::c10d::ProcessGroup::Work> work;
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work;
     while (true) {
       work = pg.allreduce(tensors);
       try {
@@ -78,7 +82,7 @@ class SignalTest {
   Semaphore sem_;
 };
 
-std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
+c10::intrusive_ptr<::c10d::ProcessGroup::Work> testSignal(
     const std::string& path,
     int signal) {
   Fork fork;
@@ -92,17 +96,18 @@ std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
   test.arm(fork.pid, signal);
   return test.run(0, 2);
 }
+#endif
 
 class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
  public:
   ProcessGroupGlooDelayed(
-      const std::shared_ptr<::c10d::Store>& store,
+      const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
       int size,
       Options options)
       : ProcessGroupGloo(store, rank, size, options) {}
 
-  std::shared_ptr<::c10d::ProcessGroup::Work> send(
+  c10::intrusive_ptr<::c10d::ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override {
@@ -146,7 +151,7 @@ class CollectiveTest {
   }
 
   void start(int rank, int size, bool delayed) {
-    auto store = std::make_shared<::c10d::FileStore>(path_, size);
+    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     // Set a timeout that is small enough to make this test run fast, but also
     // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
@@ -195,7 +200,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
   }
 
   // Kick off work
-  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   for (auto i = 0; i < size; i++) {
     work[i] = tests[i].getProcessGroup().allreduce(inputs[i]);
   }
@@ -245,7 +250,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
       options.rootTensor = j;
 
       // Kick off work
-      std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+      std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
       for (auto i = 0; i < size; i++) {
         work[i] = tests[i].getProcessGroup().broadcast(inputs[i], options);
       }
@@ -311,7 +316,7 @@ void testAlltoall(const std::string& path, const at::DeviceType b) {
   };
 
   // Kick off work
-  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   for (auto rank = 0; rank < size; rank++) {
     work[rank] = tests[rank].getProcessGroup().alltoall_base(
         outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
@@ -344,7 +349,7 @@ void testBarrier(const std::string& path) {
   auto tests = CollectiveTest::initialize(path, size);
 
   // Kick off work
-  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> work(size);
   for (auto i = 0; i < size; i++) {
     work[i] = tests[i].getProcessGroup().barrier();
   }
@@ -456,6 +461,7 @@ void testRecv(const std::string& path) {
   EXPECT_TRUE(recvCompleted);
 }
 
+#ifndef _WIN32
 TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   // test SIGSTOP
   // Fork() and TSAN don't play well together, so skip the test if we're testing
@@ -485,6 +491,7 @@ TEST(ProcessGroupGlooTest, testSIGKILLException) {
   EXPECT_FALSE(work->isSuccess());
   EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
 }
+#endif
 
 TEST(ProcessGroupGlooTest, testAllReduceCPU) {
   {

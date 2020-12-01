@@ -1,7 +1,7 @@
 # flake8: noqa
 # TODO: enable linting check for this file
 
-from typing import List
+from typing import List, Any
 import torch
 import torch.nn as nn
 import os
@@ -201,6 +201,44 @@ class TestModuleInterface(JitTestCase):
         # wrong module that is not compatible with module interface
         with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
             as_module_interface(scripted_wrong_mod)
+
+        # Check that interface implementations can be contravariant in argument types and covariant in return type.
+        global TensorToAny
+        @torch.jit.interface
+        class TensorToAny(nn.Module):
+            def forward(self, input: torch.Tensor) -> Any:
+                pass
+
+        @torch.jit.script
+        def as_tensor_to_any(x: TensorToAny) -> TensorToAny:
+            return x
+
+        global AnyToAny
+        @torch.jit.interface
+        class AnyToAny(nn.Module):
+            def forward(self, input: Any) -> Any:
+                pass
+
+        @torch.jit.script
+        def as_any_to_any(x: AnyToAny) -> AnyToAny:
+            return x
+
+        class TensorToAnyImplA(nn.Module):
+            def forward(self, input: Any) -> Any:
+                return input
+
+        class TensorToAnyImplB(nn.Module):
+            def forward(self, input: Any) -> torch.Tensor:
+                return torch.tensor([1])
+
+        class AnyToAnyImpl(nn.Module):
+            def forward(self, input: Any) -> torch.Tensor:
+                return torch.tensor([1])
+
+        as_tensor_to_any(torch.jit.script(TensorToAnyImplA()))
+        as_tensor_to_any(torch.jit.script(TensorToAnyImplB()))
+        as_any_to_any(torch.jit.script(AnyToAnyImpl()))
+
 
     def test_module_interface_inheritance(self):
         with self.assertRaisesRegex(RuntimeError, "does not support inheritance yet. Please directly"):
@@ -594,6 +632,58 @@ class TestModuleInterface(JitTestCase):
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
             mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+
+    def test_freeze_module_with_interface_and_fork(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.b = torch.tensor([1.5])
+
+            def forward(self, x):
+                self.b[0] += 3.2
+                return self.b
+
+        class OrigMod(torch.nn.Module):
+            def __init__(self):
+                super(OrigMod, self).__init__()
+                self.a = torch.tensor([0.5])
+
+            def forward(self, x):
+                return self.a
+
+        @torch.jit.interface
+        class ModInterface(torch.nn.Module):
+            def forward(self, x):
+                # type:  (Tensor) -> Tensor
+                pass
+
+        class TestModule(torch.nn.Module):
+            proxy_mod : ModInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigMod()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                y = self.proxy_mod(x);
+                z= self.sub(x)
+                return y + z
+
+        class MainModule(torch.nn.Module):
+            def __init__(self):
+                super(MainModule, self).__init__()
+                self.test= TestModule();
+
+            def forward(self, x):
+                fut = torch.jit._fork(self.test.forward, x)
+                y = self.test(x)
+                z = torch.jit._wait(fut)
+                return y + z
+
+        m = torch.jit.script(MainModule())
+        m.eval()
+        mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
 
     def test_module_apis_interface(self):
         @torch.jit.interface

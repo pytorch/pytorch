@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -26,16 +27,35 @@ TORCH_API Node* createSingletonSubgraph(
     Symbol subgraphKind,
     std::unordered_map<Value*, Value*>& vmap);
 
+// Creates a new subgraph that only contains `n`, amd udpates the new outputs
+// of the subgraph to have the aliasing properties of the original `n` outputs
+TORCH_API Node* createSingletonSubgraphAndUpdateAliasing(
+    Node* to_merge,
+    Symbol subgraphKind,
+    AliasDb& db);
+
 // Merge a node into a subgraph node. If `toMerge` is also a subgraph, the
 // subgraphs are merged.
-// `toMerge` is destroyed.
+// If `destroyNode` is true `toMerge` is destroyed.
 // An optional argument 'vmap' could be used to retrieve value mappings.
 // Values will be mapped to their new subgraph values
-TORCH_API void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode);
 TORCH_API void mergeNodeIntoSubgraph(
     Node* toMerge,
     Node* subgraphNode,
-    std::unordered_map<Value*, Value*>& vmap);
+    bool destroyNode = true);
+TORCH_API void mergeNodeIntoSubgraph(
+    Node* toMerge,
+    Node* subgraphNode,
+    std::unordered_map<Value*, Value*>& vmap,
+    bool destroyNode = true);
+
+// Merges a node into a subgraph node, and updates the new outputs of the
+// subgraph to have the aliasing properties of the corresponding `to_merge`
+// outputs
+TORCH_API void mergeNodeIntoSubgraphAndUpdateAliasing(
+    Node* to_merge,
+    Node* subgraphNode,
+    AliasDb& db);
 
 // Move nodes from a subgraph node to the outer graph.
 // `subgraphNode` is destroyed.
@@ -47,6 +67,11 @@ TORCH_API void unmergeSubgraph(
 
 // Convenience function
 std::shared_ptr<Graph> getSubgraph(Node* n);
+
+TORCH_API std::string generateNameForGraph(
+    const std::shared_ptr<Graph>& graph,
+    size_t maxlen = 40,
+    const std::string& prefix = "fused");
 
 } // namespace SubgraphUtils
 } // namespace jit

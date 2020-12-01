@@ -46,8 +46,11 @@ DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
+DEFINE_DISPATCH(igamma_stub);
+DEFINE_DISPATCH(igammac_stub);
 DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
+DEFINE_DISPATCH(copysign_stub);
 
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
@@ -121,6 +124,31 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
   return add_relu_impl(self, self, other, alpha);
 }
 
+Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  copysign_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor copysign(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  copysign_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& copysign_(Tensor& self, const Tensor& other) {
+  return native::copysign_out(self, self, other);
+}
+
+Tensor copysign(const Tensor& self, Scalar other) {
+  return native::copysign(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& copysign_(Tensor& self, Scalar other) {
+  return native::copysign_(self, wrapped_scalar_tensor(other));
+}
+
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_float_op(result, self, other);
   div_stub(iter.device_type(), iter);
@@ -152,26 +180,30 @@ Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return result;
+// divide, alias for div
+Tensor& divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::div_out(result, self, other);
 }
 
-Tensor remainder(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  remainder_stub(iter.device_type(), iter);
-  return iter.output();
+Tensor divide(const Tensor& self, const Tensor& other) {
+  return self.div(other);
 }
 
-Tensor& remainder_(Tensor& self, const Tensor& other) {
-  return native::remainder_out(self, self, other);
+Tensor& divide_(Tensor& self, const Tensor& other) {
+  return self.div_(other);
+}
+
+Tensor divide(const Tensor& self, Scalar other) {
+  return self.div(other);
+}
+
+Tensor& divide_(Tensor& self, Scalar other) {
+  return self.div_(other);
 }
 
 // true_divide, an alias for div
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  return native::div_out(result, self, divisor);
+  return at::div_out(result, self, divisor);
 }
 
 Tensor true_divide(const Tensor& self, const Tensor& divisor) {
@@ -188,6 +220,23 @@ Tensor true_divide(const Tensor& self, Scalar divisor) {
 
 Tensor& true_divide_(Tensor& self, Scalar divisor) {
   return self.div_(divisor);
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor remainder(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& remainder_(Tensor& self, const Tensor& other) {
+  return native::remainder_out(self, self, other);
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -234,6 +283,35 @@ Tensor mul(const Tensor& self, const Tensor& other) {
 
 Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
+}
+
+Tensor mul(const Tensor& self, Scalar other) {
+  return native::mul(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& mul_(Tensor& self, Scalar other) {
+  return native::mul_(self, wrapped_scalar_tensor(other));
+}
+
+// multiply, alias for mul
+Tensor& multiply_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::mul_out(result, self, other);
+}
+
+Tensor multiply(const Tensor& self, const Tensor& other) {
+  return self.mul(other);
+}
+
+Tensor& multiply_(Tensor& self, const Tensor& other) {
+  return self.mul_(other);
+}
+
+Tensor multiply(const Tensor& self, Scalar other) {
+  return self.mul(other);
+}
+
+Tensor& multiply_(Tensor& self, Scalar other) {
+  return self.mul_(other);
 }
 
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
@@ -340,14 +418,16 @@ Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_float_op(result, self, other);
   atan2_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor atan2(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  return native::atan2_out(result, self, other);
+  Tensor result;
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  atan2_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& atan2_(Tensor& self, const Tensor& other) {
@@ -400,14 +480,6 @@ Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
   //   BC with TH, but in the future, we should use normal type promotion,
   //   like in numpy
   return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
-}
-
-Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, wrapped_scalar_tensor(other));
-}
-
-Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
@@ -924,6 +996,40 @@ Tensor& hypot_(Tensor& self, const Tensor& other) {
   return at::hypot_out(self, self, other);
 }
 
+Tensor& igamma_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igamma_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor igamma(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igamma_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& igamma_(Tensor& self, const Tensor& other) {
+  return at::igamma_out(self, self, other);
+}
+
+Tensor& igammac_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igammac_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor igammac(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  igammac_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& igammac_(Tensor& self, const Tensor& other) {
+  return at::igammac_out(self, self, other);
+}
+
 Tensor& nextafter_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   nextafter_stub(iter.device_type(), iter);
@@ -972,6 +1078,18 @@ Tensor heaviside(const Tensor& self, const Tensor& values) {
 
 Tensor& heaviside_(Tensor& self, const Tensor& values) {
   return at::heaviside_out(self, self, values);
+}
+
+Tensor& ldexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::mul_out(result, self, at::pow(2.0, other));
+}
+
+Tensor ldexp(const Tensor& self, const Tensor& other) {
+  return at::mul(self, at::pow(2.0, other));
+}
+
+Tensor& ldexp_(Tensor& self, const Tensor& other) {
+  return at::ldexp_out(self, self, other);
 }
 
 // TODO: Deduplicate this with the TensorIterator logic.  This would

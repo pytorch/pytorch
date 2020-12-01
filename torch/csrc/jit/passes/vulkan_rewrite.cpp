@@ -22,6 +22,51 @@ namespace jit {
 
 namespace {
 
+void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+
+  std::string linear_before_inline = R"(
+    graph(%linear, %input, %weight, %bias):
+        %r = prim::CallFunction(%linear, %input, %weight, %bias)
+        return (%r))";
+  std::string prepacked_ops_pattern_before_inline = R"(
+    graph(%linear, %input, %weight, %bias):
+        %weight_t = aten::t(%weight)
+        %packed_weight_bias = vulkan_prepack::linear_prepack(
+            %weight_t, %bias)
+        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
+        return (%res))";
+  std::string linear_pattern = R"(
+    graph(%input, %weight, %bias):
+        %r = aten::linear(%input, %weight, %bias)
+        return (%r))";
+  std::string prepacked_ops_pattern = R"(
+    graph(%input, %weight, %bias):
+        %weight_t = aten::t(%weight)
+        %packed_weight_bias = vulkan_prepack::linear_prepack(
+            %weight_t, %bias)
+        %res = vulkan_prepack::linear_run(%input, %packed_weight_bias)
+        return (%res))";
+
+  const auto filter = [](const Match& match,
+                         const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    const auto linear_value = match_vmap.at(vmap.at("linear"));
+    const auto func_name = graph_rewrite_helper::getFuncName(linear_value);
+    return (func_name == "linear");
+  };
+
+  SubgraphRewriter linear_call_fn_rewriter;
+  linear_call_fn_rewriter.RegisterRewritePattern(
+      linear_before_inline, prepacked_ops_pattern_before_inline);
+  linear_call_fn_rewriter.runOnGraph(graph, filter);
+
+  SubgraphRewriter linear_rewriter;
+  linear_rewriter.RegisterRewritePattern(linear_pattern, prepacked_ops_pattern);
+  linear_rewriter.runOnGraph(graph);
+}
+
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
@@ -131,6 +176,7 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 } // namespace
 
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
+  insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
 }
 
@@ -153,18 +199,22 @@ void vulkanFusePrePackedConvWithClamp(script::Module& module) {
 void vulkanFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFilterFn filter_fn = [](const Node* n) -> bool {
     return (
-        n->kind() ==
-        Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack"));
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::linear_prepack")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-script::Module vulkanOptimizeForMobile(const script::Module& m) {
+script::Module vulkanOptimizeForMobile(
+    const script::Module& m,
+    const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm(cloned_module);
   vulkanInsertPrePackedOps(cloned_module);
-  cloned_module = freeze_module(cloned_module);
+  cloned_module = freeze_module(cloned_module, preserved_methods);
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
@@ -193,7 +243,9 @@ void vulkanFoldPrePackingOps(script::Module& m) {
       "Vulkan is not enabled. Please build with USE_VULKAN=1");
 }
 
-script::Module vulkanOptimizeForMobile(const script::Module& module) {
+script::Module vulkanOptimizeForMobile(
+    const script::Module& module,
+    const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with Vulkan at the moment. "
       "Vulkan is not enabled. Please build with USE_VULKAN=1");

@@ -51,8 +51,8 @@ enum class DispatchKey : uint8_t {
 
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
-  CPU, // registered at build/aten/src/ATen/CPUType.cpp
-  CUDA, // registered at build/aten/src/ATen/CUDAType.cpp
+  CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
+  CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
        // CUDA]
   FPGA, // Xilinx support lives out of tree at https://gitlab.com/pytorch-complex/vitis_kernels
@@ -60,6 +60,7 @@ enum class DispatchKey : uint8_t {
          // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
   Vulkan,
+  Metal,
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -72,8 +73,8 @@ enum class DispatchKey : uint8_t {
 
   // Here are backends which specify more specialized operators
   // based on the dtype of the tensor.
-  QuantizedCPU, // registered at build/aten/src/ATen/QuantizedCPUType.cpp
-  QuantizedCUDA, // registered at build/aten/src/ATen/QuantizedCUDAType.cpp
+  QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
+  QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   ComplexCPU, // lives out of tree at
               // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
   ComplexCUDA, // and
@@ -96,13 +97,14 @@ enum class DispatchKey : uint8_t {
   // based on the layout of the tensor.  Note that the sparse backends
   // are one case where ordering matters: sparse multi-dispatches with
   // the corresponding dense tensors, and must be handled before them.
-  MkldnnCPU, // registered at build/aten/src/ATen/MkldnnCPUType.cpp
+  MkldnnCPU, // registered at build/aten/src/ATen/RegisterMkldnnCPU.cpp
   // NB: not to be confused with MKLDNN, which is Caffe2 only
-  SparseCPU, // registered at build/aten/src/ATen/SparseCPUType.cpp
-  SparseCUDA, // registered at build/aten/src/ATen/SparseCUDAType.cpp
+  SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
+  SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
   SparseHIP, // TODO: I think this is not actually used, due to Note
              // [Masquerading as CUDA]
 
+  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out MSNPU
@@ -216,6 +218,7 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
+  AutogradNestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
@@ -273,10 +276,12 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
+  Math,  // registered at build/aten/src/ATen/RegisterMath.cpp
+  DefaultBackend,  // registered at build/aten/src/ATen/RegisterDefaultBackend.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
-  EndOfAliasKeys = Autograd, //
+  EndOfAliasKeys = DefaultBackend, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
@@ -320,7 +325,6 @@ C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
 C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
-C10_API DispatchKey getBackendKeyFromAutograd(DispatchKey t);
 
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these
@@ -331,7 +335,7 @@ constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
 // Check if a DispatchKey is an alias mapping to other runtime keys.
 inline bool isAliasDispatchKey(DispatchKey k) {
-  return k == DispatchKey::Autograd;
+  return k > DispatchKey::NumDispatchKeys && k <= DispatchKey::EndOfAliasKeys;
 }
 } // namespace c10
 

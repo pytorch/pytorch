@@ -5,9 +5,7 @@ set -eux -o pipefail
 source /env
 
 # Defaults here so they can be changed in one place
-# This script is run inside Docker.2XLarge+ container that has 20 CPU cores
-# But ncpu will return total number of cores on the system
-export MAX_JOBS=18
+export MAX_JOBS=${MAX_JOBS:-$(( $(nproc) - 2 ))}
 
 # Parse the parameters
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then

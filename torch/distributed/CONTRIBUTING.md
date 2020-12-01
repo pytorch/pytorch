@@ -28,7 +28,7 @@ Processes discover each other through a rendezvous process on a common Store (Se
 
 ### Distributed Data Parallel
 
-DDP is implemented as a module in [distributed.py](../nn/parallel/distributed.py) with some of the core functions implemented in [reducer.cpp](../csrc/distributed/c10d/reducer.cpp) and [comm.cpp](../csrc/distributed/c10d/reducer.cpp). Gradients synchronizations occur in backward pass, triggered as autograd hooks.
+DDP is implemented as a module in [distributed.py](../nn/parallel/distributed.py) with some of the core functions implemented in [reducer.cpp](../lib/c10d/reducer.cpp) and [comm.cpp](../lib/c10d/reducer.cpp). Gradients synchronizations occur in backward pass, triggered as autograd hooks.
 
 ### Onboarding Tasks
 
@@ -56,7 +56,7 @@ Most of the APIs for RRefs can be found in [rpc/api.py](rpc/api.py). The C++ int
 
 ### Distributed Autograd
 
-The top level APIs for distributed autograd can be found in [distributed/autograd/init.py](autograd/__init__.py) and [distributed/autograd/init.cpp](../torch/csrc/distributed/autograd/init.cpp).
+The top level APIs for distributed autograd can be found in [distributed/autograd/init.py](autograd/__init__.py) and [distributed/autograd/init.cpp](../csrc/distributed/autograd/init.cpp).
 
 The core engine for executing a distributed backward pass can be found in [dist_engine.h](../csrc/distributed/autograd/engine/dist_engine.h)
 
@@ -70,7 +70,7 @@ A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorc
 
 ## Running unit tests
 
-All the unit tests can be found under the `test/distributed` directory and RPC tests in particular are under `test/distributed/rpc`. A few examples on how to run unit tests:
+All the unit tests can be found under the [test/distributed](../../test/distributed) directory and RPC tests in particular are under [test/distributed/rpc](../../test/distributed/rpc). A few examples on how to run unit tests:
 
 ```
 # Run the c10d unit test.

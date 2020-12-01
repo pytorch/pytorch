@@ -24,6 +24,7 @@ from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
 from torch._six import StringIO
+from collections import defaultdict
 
 import inspect
 import io
@@ -33,6 +34,7 @@ import pickle
 import sys
 import tempfile
 import textwrap
+from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -54,6 +56,7 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+    torch.jit._state._script_classes.clear()
 
 def get_execution_plan(graph_executor_state):
     execution_plans = list(graph_executor_state.execution_plans.values())
@@ -88,6 +91,7 @@ class _AssertRaisesRegexWithHighlightContext(object):
 
         return True
 
+FUSION_GROUP = "prim::TensorExprGroup"
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
@@ -131,6 +135,35 @@ class JitTestCase(TestCase):
         self.clearHooks()
         clear_class_registry()
 
+    def assertAllFused(self, graph, except_for=()):
+
+        # note this helper collects nodes on 'fast path' only
+        # i.e. the true blocks of specialized checks
+        def get_nodes_and_parents_recursively(block, kind, acc):
+            for node in block.nodes():
+                if node.kind() == kind:
+                    acc[block].append(node)
+                elif node.kind() == 'prim::DifferentiableGraph':
+                    get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
+                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
+                    get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
+                else:
+                    for inner_block in node.blocks():
+                        get_nodes_and_parents_recursively(inner_block, kind, acc)
+
+        allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
+                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
+
+        fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
+        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
+        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
+        (graph, fusion_nodes) = list(fusion_groups.items())[0]
+        # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
+        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
+                        'got {}'.format(graph))
+
     def _isHookExceptionOk(self, e):
         se = str(e)
         allowed = ("Could not export Python function",
@@ -148,14 +181,14 @@ class JitTestCase(TestCase):
             self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
             files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
             # unwrap all the code files into strings
-            code_files = filter(lambda x: x.endswith('.py'), files)
-            code_files = map(lambda f: archive.open(f), code_files)
-            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files)
+            code_files_str = filter(lambda x: x.endswith('.py'), files)
+            code_files_stream = (archive.open(f) for f in code_files_str)
+            code_files = ("".join([line.decode() for line in file]) for file in code_files_stream)
 
             # unpickled all the debug files
-            debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files = map(lambda f: archive.open(f), debug_files)
-            debug_files = map(lambda f: pickle.load(f), debug_files)
+            debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
+            debug_files_stream = (archive.open(f) for f in debug_files_str)
+            debug_files = (pickle.load(f) for f in debug_files_stream)
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
@@ -336,11 +369,15 @@ class JitTestCase(TestCase):
 
     def get_frame_vars(self, frames_up):
         frame = inspect.currentframe()
+        if not frame:
+            raise RuntimeError("failed to inspect frame")
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
+            if not frame:
+                raise RuntimeError("failed to get frame")
             i += 1
-        defined_vars = {}
+        defined_vars: Dict[str, Any] = {}
         defined_vars.update(frame.f_locals)
         defined_vars.update(frame.f_globals)
         return defined_vars
@@ -408,7 +445,7 @@ class JitTestCase(TestCase):
                     # outputs
 
                     frame = self.get_frame_vars(frames_up)
-                    the_locals = {}
+                    the_locals: Dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 
@@ -610,6 +647,14 @@ def inline_everything_mode(should_inline):
     finally:
         torch._C._jit_set_inline_everything_mode(old)
 
+@contextmanager
+def set_fusion_group_inlining(inlining):
+    old = torch._C._debug_get_fusion_group_inlining()
+    torch._C._debug_set_fusion_group_inlining(inlining)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_fusion_group_inlining(old)
 
 # note: not re-entrant, use unnested only
 @contextmanager

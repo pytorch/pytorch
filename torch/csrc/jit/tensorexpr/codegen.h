@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -24,8 +23,12 @@ class TORCH_API CodeGen {
   CodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      at::Device device = at::kCPU)
-      : stmt_(stmt), buffer_args_(buffer_args), device_(device) {}
+      at::Device device = at::kCPU,
+      const std::string& kernel_func_name = "func")
+      : stmt_(stmt),
+        buffer_args_(buffer_args),
+        device_(device),
+        kernel_func_name_(kernel_func_name) {}
 
   virtual ~CodeGen() {}
 
@@ -63,28 +66,23 @@ class TORCH_API CodeGen {
 
   virtual void call(const std::vector<CallArg>& args) = 0;
 
+  const std::string& kernel_func_name() const {
+    return kernel_func_name_;
+  }
+
  private:
   Stmt* stmt_;
   std::vector<BufferArg> buffer_args_;
   at::Device device_ = at::kCPU;
+  std::string kernel_func_name_ = "func";
 };
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Buffer& buffer)
+  BufferArg(const Placeholder& buffer)
       : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
-      : var_(tensor->function()
-                 ->func_var(tensor->output_index())
-                 ->base_handle()),
-        dtype_(tensor->function()->body(tensor->output_index())->dtype()) {}
-  BufferArg(const Function& func)
-      : var_(func.func_var(0)->base_handle()), dtype_(func.body(0)->dtype()) {
-    // TODO: Support multiple-output functions
-    if (func.func_vars().size() != 1) {
-      throw unimplemented_lowering();
-    }
-  }
+      : var_(tensor->buf()->base_handle()), dtype_(tensor->body()->dtype()) {}
   BufferArg(const VarHandle& var)
       : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
 
@@ -158,7 +156,8 @@ class RegisterCodeGenList {
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>&,
-      at::Device device)>;
+      at::Device device,
+      const std::string& kernel_func_name)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
 
@@ -184,9 +183,10 @@ class RegisterCodeGen {
         name,
         [](Stmt* stmt,
            const std::vector<CodeGen::BufferArg>& params,
-           at::Device device) {
+           at::Device device,
+           const std::string& kernel_func_name) {
           std::unique_ptr<CodeGen> method(
-              new CodeGenType(stmt, params, device));
+              new CodeGenType(stmt, params, device, kernel_func_name));
           return method;
         });
   }
@@ -196,7 +196,8 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params,
-    at::Device device = at::kCPU);
+    at::Device device = at::kCPU,
+    const std::string& kernel_func_name = "func");
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:

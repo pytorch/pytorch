@@ -1,5 +1,6 @@
 import re
 import torch
+from ..utils import is_per_tensor, is_per_channel
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -17,7 +18,7 @@ def graph_pretty_str(g, shorten=True) -> str:
     built_in_meth_re = re.compile('<built-in method (.*) of type.*>')
     op_dict = {
         'placeholder': 'plchdr',
-        'get_param': 'gt_prm',
+        'get_attr': 'gt_prm',
         'call_function': 'cl_fun',
         'call_module': 'cl_mod',
         'call_method': 'cl_meth',
@@ -75,15 +76,6 @@ def graph_pretty_str(g, shorten=True) -> str:
         res_str += "*obs_{n} = activation_post_process_{n}\n"
     return res_str
 
-def is_per_tensor(qscheme):
-    return qscheme == torch.per_tensor_affine or \
-        qscheme == torch.per_tensor_symmetric
-
-def is_per_channel(qscheme):
-    return qscheme in [torch.per_channel_affine,
-                       torch.per_channel_affine_float_qparams,
-                       torch.per_channel_symmetric]
-
 def get_per_tensor_qparams(activation_post_process):
     assert is_per_tensor(activation_post_process.qscheme), 'Only per tensor quantization is supported'
     scale, zero_point = activation_post_process.calculate_qparams()
@@ -107,7 +99,7 @@ def get_quantize_op_and_qparams(activation_post_process):
         scale = float(scale)
         zero_point = int(zero_point)
         qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_tensor
+        quantize_op = torch.quantize_per_tensor  # type: ignore
     return quantize_op, qparams
 
 def quantize_node(root_module, graph, node, activation_post_process):
@@ -136,5 +128,44 @@ def quantize_node(root_module, graph, node, activation_post_process):
     for key, value in qparams.items():
         setattr(root_module, key + str(idx), value)
         qparam_full_path = key + str(idx)
-        inputs.append(graph.create_node('get_param', qparam_full_path))
+        inputs.append(graph.create_node('get_attr', qparam_full_path))
     return graph.create_node('call_function', quantize_op, tuple(inputs), {})
+
+def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
+    r""" Get all the unique custom module keys in the custom config dict
+    e.g.
+    Input:
+    custom_config_dict = {
+        "float_to_observed_custom_module_class": {
+           "static": {
+               CustomModule1: ObservedCustomModule
+           },
+           "dynamic": {
+               CustomModule2: DynamicObservedCustomModule
+           },
+           "weight_only": {
+               CustomModule3: WeightOnlyObservedCustomModule
+           },
+        },
+    }
+
+    Output:
+    # extract all the keys in "static", "dynamic" and "weight_only" dict
+    [CustomModule1, CustomModule2, CustomModule3]
+    """
+    # using set to dedup
+    float_custom_module_classes = set()
+    custom_module_mapping = custom_config_dict.get(custom_config_dict_key, {})
+    for quant_mode in ["static", "dynamic", "weight_only"]:
+        quant_mode_custom_module_config = custom_module_mapping.get(quant_mode, {})
+        quant_mode_custom_module_classes = set(quant_mode_custom_module_config.keys())
+        float_custom_module_classes |= quant_mode_custom_module_classes
+    return list(float_custom_module_classes)
+
+def get_linear_prepack_op_for_dtype(dtype):
+    if dtype == torch.float16:
+        return torch.ops.quantized.linear_prepack_fp16
+    elif dtype == torch.qint8:
+        return torch.ops.quantized.linear_prepack
+    else:
+        raise Exception("can't get linear prepack op for dtype:", dtype)

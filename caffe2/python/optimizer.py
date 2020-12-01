@@ -1,6 +1,6 @@
 # @package optimizer
 # Module caffe2.python.optimizer
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import copy
 import logging

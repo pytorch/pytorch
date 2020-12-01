@@ -12,7 +12,7 @@ typedef long long int int64_t;
 
 template<typename T, int N>
 struct Tensor {
-  T& operator[](int64_t ind) {
+  __device__ T& operator[](int64_t ind) {
     return data[ind];
   };
 
@@ -25,7 +25,7 @@ struct Tensor {
 // They will be an error as well since zero-length arrays are not allowed.
 template<typename T>
 struct Tensor<T, 0> {
-  T& operator[](int64_t) {
+  __device__ T& operator[](int64_t) {
     return *data;
   };
 
@@ -34,6 +34,9 @@ struct Tensor<T, 0> {
 )";
 
 // Code support for FP16 __half type and intrinsics
+#ifdef __HIP_PLATFORM_HCC__
+static auto code_fp16_support = R"()";
+#else
 static auto code_fp16_support = R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
@@ -55,7 +58,7 @@ __device__ float __half2float(const __half h) {
   return val;
 }
 )";
-
+#endif
 // struct and code for functions that need random number generation
 static auto code_random_number_gen = R"(
 class Philox {
@@ -149,6 +152,9 @@ static auto code_helper_funcs = R"(
 __device__ constexpr int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
+__device__ constexpr int alignBufferSize(const int buffer, const int size) {
+  return (buffer + (size-1)) & ~(size-1);
+}
 __device__ float clamp(const float x, const float minv, const float maxv) {
   return x < minv ? minv : (x > maxv ? maxv : x);
 }
@@ -181,6 +187,9 @@ __device__ float randLike(Philox rnd) {
 };
 )";
 
+// Note: We agressively template functions taking dim3 in the functions below
+//       because ROCM uses different types for the various dim3 and maps them
+//       directly to intrinsics, but they're dim3 when used after modification.
 /*
  *  EXAMPLE USAGE:
  *  blockReduceSum<X_THREADS, Y_THREADS, Z_THREADS>
@@ -193,11 +202,19 @@ static auto code_template_block_reduction = R"(
 // participate, otherwise it is the number of threads. We could start with warp
 // reductions, then reduce the warps, this could save some shared memory, but
 // may actually be slower.
-template<bool X_REDUCE, bool Y_REDUCE, bool Z_REDUCE, typename T, typename Func>
+template<bool X_REDUCE, bool Y_REDUCE, bool Z_REDUCE, typename T, typename Func, typename _dim3ti, typename _dim3bd>
 __inline__ __device__
-void blockReduce(T& out, const T inp_val, Func reduction_op, const dim3& thread_idx, const dim3& block_dim, T* shared_mem) {
+void blockReduce(
+    T& out,
+    const T inp_val,
+    Func reduction_op,
+    const _dim3ti& thread_idx,
+    const _dim3bd& block_dim,
+    T* shared_mem,
+    bool read_write_pred,
+    T init_val) {
 
-  unsigned int reduction_size 
+  unsigned int reduction_size
     = (X_REDUCE ? block_dim.x : 1)
     * (Y_REDUCE ? block_dim.y : 1)
     * (Z_REDUCE ? block_dim.z : 1);
@@ -223,8 +240,8 @@ void blockReduce(T& out, const T inp_val, Func reduction_op, const dim3& thread_
     reduction_tid = threadIdx.z * blockDim.x + threadIdx.x;
   } else {
     // Normal reduction in order
-    reduction_stride 
-    = (X_REDUCE ? 1 
+    reduction_stride
+    = (X_REDUCE ? 1
     : (Y_REDUCE ? block_dim.x
     : (Z_REDUCE ? block_dim.x * block_dim.y : 0)));
 
@@ -238,7 +255,11 @@ void blockReduce(T& out, const T inp_val, Func reduction_op, const dim3& thread_
 
   assert( reduction_stride != 0 );
 
-  shared_mem[linear_tid] = inp_val;
+  if(read_write_pred){
+    shared_mem[linear_tid] = inp_val;
+  } else {
+    shared_mem[linear_tid] = init_val;
+  }
   __syncthreads();
   // Reduce down to nearest power of 2:
   int np2 =  1 << (31 - __clz(reduction_size));
@@ -256,9 +277,10 @@ void blockReduce(T& out, const T inp_val, Func reduction_op, const dim3& thread_
     }
     __syncthreads();
   }
-  if(should_write)
+
+  if(should_write && read_write_pred)
     out = shared_mem[linear_tid];
-  
+
 }
 )";
 
@@ -308,49 +330,47 @@ static auto code_template_grid_reduction = R"(
 namespace reduction {
 
 // Utility functions
-__host__ __device__ __forceinline__ size_t size(const dim3& d) {
+template<typename _dim3>
+__host__ __device__ __forceinline__ size_t size(const _dim3& d) {
   return (size_t)d.x * (size_t)d.y * (size_t)d.z;
 }
 
-__host__ __device__ __forceinline__ int isize(const dim3& d) {
-  return d.x * d.y * d.z;
-}
+#define isize(d) d.x * d.y * d.z
 
-__host__ __device__ __forceinline__ size_t offset(const dim3& pos, const dim3& dim) {
+template<typename _dim3pos, typename _dim3dim>
+__host__ __device__ __forceinline__ size_t offset(const _dim3pos& pos, const _dim3dim& dim) {
   return (size_t)pos.x + (size_t)pos.y * (size_t)dim.x +
       (size_t)pos.z * (size_t)dim.x * (size_t)dim.y;
 }
 
-__host__ __device__ __forceinline__ size_t ioffset(const dim3& pos, const dim3& dim) {
-  return pos.x + pos.y * dim.x + pos.z * dim.x * dim.y;
-}
+#define ioffset(pos, dim) pos.x + pos.y * dim.x + pos.z * dim.x * dim.y
 
 // Returns dim3 of each reduction segment.
-template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK>
-__host__ __device__ dim3 dimension_of_reduction_segment(const dim3& grid_dim) {
+template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
+__host__ __device__ dim3 dimension_of_reduction_segment(const _dim3& grid_dim) {
   return dim3{X_BLOCK ? grid_dim.x : 1,
         Y_BLOCK ? grid_dim.y : 1,
         Z_BLOCK ? grid_dim.z : 1};
 }
 
 // Returns the number of blocks in each reduction segment.
-template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK>
-__host__ __device__ size_t size_of_reduction_segment(const dim3& grid_dim) {
+template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
+__host__ __device__ size_t size_of_reduction_segment(const _dim3& grid_dim) {
   return size(dimension_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(grid_dim));
 }
 
 // Returns the total number of reduction segments.
-template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK>
-__host__ __device__ size_t number_of_reduction_segments(const dim3& grid_dim) {
+template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
+__host__ __device__ size_t number_of_reduction_segments(const _dim3& grid_dim) {
   return (X_BLOCK ? 1: grid_dim.x) *
       (Y_BLOCK ? 1 : grid_dim.y) *
       (Z_BLOCK ? 1 : grid_dim.z);
 }
 
 // Returns the 1-D index of the segment of thread block of block_idx.
-template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK>
-__host__ __device__ size_t index_of_reduction_segment(const dim3& block_idx,
-                                                      const dim3& grid_dim) {
+template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3bi, typename _dim3gd>
+__host__ __device__ size_t index_of_reduction_segment(const _dim3bi& block_idx,
+                                                      const _dim3gd& grid_dim) {
   size_t seg_idx = 0;
   if (!Z_BLOCK)
     seg_idx += block_idx.z;
@@ -362,9 +382,9 @@ __host__ __device__ size_t index_of_reduction_segment(const dim3& block_idx,
 }
 
 // Returns the offset of thread block in its reduction segment.
-template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK>
-__host__ __device__ size_t offset_in_reduction_segment(const dim3& block_idx,
-                                                       const dim3& grid_dim) {
+template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3bi, typename _dim3gd>
+__host__ __device__ size_t offset_in_reduction_segment(const _dim3bi& block_idx,
+                                                       const _dim3gd& grid_dim) {
   size_t offset = 0;
   if (Z_BLOCK)
     offset = offset * grid_dim.z + block_idx.z;
@@ -376,23 +396,24 @@ __host__ __device__ size_t offset_in_reduction_segment(const dim3& block_idx,
 }
 
 // Returns dim3 of each reduction block.
-template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD>
-__host__ __device__ dim3 dimension_of_reduction_block(const dim3& block_dim) {
+template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename _dim3>
+__host__ __device__ dim3 dimension_of_reduction_block(const _dim3& block_dim) {
   return dim3{X_THREAD ? block_dim.x : 1,
         Y_THREAD ? block_dim.y : 1,
         Z_THREAD ? block_dim.z : 1};
 }
 
 // Returns the number of threads of each reduction block.
-template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD>
-__host__ __device__ int size_of_reduction_block(const dim3& block_dim) {
-  return isize(dimension_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(block_dim));
+template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename _dim3>
+__host__ __device__ int size_of_reduction_block(const _dim3& block_dim) {
+  auto tmp_dim = dimension_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(block_dim);
+  return isize(tmp_dim);
 }
 
 // Returns the linear offset of a thread in a reduction block.
-template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD>
-__host__ __device__ int offset_in_reduction_block(const dim3& thread_idx,
-                                                  const dim3& block_dim) {
+template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename _dim3ti, typename _dim3bd>
+__host__ __device__ int offset_in_reduction_block(const _dim3ti& thread_idx,
+                                                  const _dim3bd& block_dim) {
   int offset = 0;
   if (Z_THREAD)
     offset += thread_idx.z;
@@ -434,13 +455,20 @@ __host__ __device__ int offset_in_reduction_block(const dim3& thread_idx,
 */
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD,
           typename T, typename Func>
-__device__ void gridReduceLastBlock(T& out, const T *in, const size_t in_size,
-                                    Func reduction_op, T* shared_buf) {
+__device__ void gridReduceLastBlock(
+      T& out,
+      const T *in,
+      const size_t in_size,
+      Func reduction_op,
+      T* shared_buf,
+      bool read_write_pred,
+      T init_val) {
+        
   const int tid = ioffset(threadIdx, blockDim);
   const int block_size = isize(blockDim);
   const int rblock_size = size_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
 
-  T inp = 0;
+  T inp = init_val;
   if (tid < in_size) {
     inp = in[tid];
   }
@@ -461,7 +489,7 @@ __device__ void gridReduceLastBlock(T& out, const T *in, const size_t in_size,
         inp, inp, reduction_op,
         dim3{(unsigned)rblock_offset, (unsigned)rblock_idx, 0},
         dim3{(unsigned)rblock_size, (unsigned)rem_size},
-        shared_buf);
+        shared_buf, true, init_val);
     __syncthreads();
     if (tid < rblock_size) {
       shared_buf[tid] = inp;
@@ -473,7 +501,7 @@ __device__ void gridReduceLastBlock(T& out, const T *in, const size_t in_size,
     }
   }
 
-  if (should_write) {
+  if (should_write && read_write_pred) {
     out = inp;
   }
 }
@@ -527,15 +555,22 @@ template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK,
 __device__ bool gridReduce(T& out, T inp_val, Func reduction_op,
                            volatile T* work_buf,
                            Tensor<int64_t, 1> sync_flags,
-                           T* shared_buf) {
+                           T* shared_buf, bool read_write_pred, T init_val) {
+
+  // Number of values to reduce in the grid dimensions
   const auto seg_size =
       size_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim);
+
+  // Index of the reduction we're performing out of the seg_size
   const auto seg_idx =
       index_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
+
+  // Number of threads we can use in final reduction, Seems to assume all threads in the block participate
   const auto rblock_size =
       size_of_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
 
   // advance to the offset for this segment
+  // index of reduction * size of the reduction * size of threads
   work_buf += seg_idx * seg_size * rblock_size;
 
   if ((X_THREAD || threadIdx.x == 0) &&
@@ -546,25 +581,33 @@ __device__ bool gridReduce(T& out, T inp_val, Func reduction_op,
     auto thread_offset =
         offset_in_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(threadIdx, blockDim);
     auto work_buf_offset = rblock_size * rblock_offset + thread_offset;
-    work_buf[work_buf_offset] = inp_val;
+    if(read_write_pred){
+      work_buf[work_buf_offset] = inp_val;
+    } else {
+      work_buf[work_buf_offset] = init_val;
+    }
   }
   __syncthreads();
 
   __shared__ bool last_block;
   if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
     __threadfence();
-    auto old = atomicAdd(  (unsigned long long*) &sync_flags[seg_idx], 1);
+    // printf("%ld\n", sync_flags[seg_idx]);
+    auto old = (int64_t) atomicAdd(  (unsigned long long*) &sync_flags[seg_idx], 1);
     last_block = old + 1 == seg_size;
+    // printf("Last_block = %d + 1 == %d\n", (int)old, (int)seg_size);
   }
   __syncthreads();
 
   if (last_block) {
+    // printf("Last block %d %d %d %d\n", blockIdx.x, blockIdx.y, blockIdx.z);
     // final reduction
     gridReduceLastBlock<X_THREAD, Y_THREAD, Z_THREAD>(
         out, (T*)work_buf, seg_size * rblock_size,
-        reduction_op, shared_buf);
+        reduction_op, shared_buf, read_write_pred, init_val);
     return true;
   } else {
+    // printf("Not last block %d %d %d\n", blockIdx.x, blockIdx.y, blockIdx.z);
     return false;
   }
 }
@@ -595,10 +638,7 @@ __host__ __device__ unsigned offset_of_source(const dim3& block_dim, const dim3&
     out: Per-thread output location
  */
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename T>
-__device__ void blockBroadcast(T& out, T inp_val) {
-
-  // Use worst case for memory.
-  __shared__ T shared_mem[1024];
+  __device__ void blockBroadcast(T& out, T inp_val, T* shared_mem) {
 
   const bool has_valid_data =
       (!X_THREAD || threadIdx.x == 0) &&

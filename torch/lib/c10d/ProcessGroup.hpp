@@ -11,9 +11,42 @@
 
 #include <c10d/Types.hpp>
 
+// *************************************************************************
+// PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
+// versions 1.7 and 1.8.
+// PLEASE DO NOT ADD ANY DEPENDENCIES.
+// SEE RFC: https://github.com/pytorch/pytorch/issues/39662
+// *************************************************************************
+
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 
 namespace c10d {
+
+enum class OpType : std::uint8_t {
+  BROADCAST = 0,
+  ALLREDUCE = 1,
+  ALLREDUCE_COALESCED = 2,
+  REDUCE = 3,
+  ALLGATHER = 4,
+  ALLGATHER_BASE = 5,
+  ALLGATHER_COALESCED = 6,
+  GATHER = 7,
+  SCATTER = 8,
+  REDUCE_SCATTER = 9,
+  ALLTOALL_BASE = 10,
+  ALLTOALL = 11,
+  SEND = 12,
+  RECV = 13,
+  RECVANYSOURCE = 14,
+  BARRIER = 15,
+  UNKNOWN = 100,
+};
+
+// Converts OpType to human readable string.
+std::string opTypeToString(OpType opType);
+
+// Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
+bool isP2POp(OpType opType);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -35,10 +68,16 @@ namespace c10d {
 // process group to find each other (referred to as rendezvous from
 // hereon)
 //
-class ProcessGroup {
+class ProcessGroup : public torch::CustomClassHolder {
  public:
-  class Work {
+  // Please do not use ProcessGroup::Work API, it is going away, to be
+  // replaced by ivalue::Future.
+  // Python binding for this class might change, please do not assume
+  // this will be bound using pybind.
+  class Work : public torch::CustomClassHolder {
    public:
+    Work(int rank = -1, OpType opType = OpType::UNKNOWN, const char* profilingTitle = nullptr);
+
     virtual ~Work();
 
     // Checks if request has completed. Non-blocking operation.
@@ -93,6 +132,8 @@ class ProcessGroup {
     // work. Only NCCL backend is currently supported.
     virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
+    OpType retrieveOpType();
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -106,6 +147,16 @@ class ProcessGroup {
     std::condition_variable cv_;
     bool completed_ = false;
     std::exception_ptr exception_;
+
+    // Current rank of the node.
+    const int rank_;
+
+    // Operation type that this work object refers to.
+    OpType opType_;
+
+    // When profiling, the callback to record end of operation event. This
+    // callback needs to be called when collective operation is complete.
+    std::function<void()> recordFunctionEndCallback_;
   };
 
   explicit ProcessGroup(int rank, int size);
@@ -119,25 +170,25 @@ class ProcessGroup {
     return size_;
   }
 
-  virtual std::shared_ptr<ProcessGroup::Work> broadcast(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> allreduce(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& data,
       const AllreduceOptions& opts = AllreduceOptions()) = 0;
 
   // This will be moved out of ProcessGroup, do not add dependencies on this
   // function.
-  virtual std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> reduce(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> allgather(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) = 0;
@@ -145,7 +196,7 @@ class ProcessGroup {
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
-  virtual std::shared_ptr<ProcessGroup::Work> allgather_base(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) = 0;
@@ -154,27 +205,27 @@ class ProcessGroup {
   // * do not add dependencies on this function,
   // * do not implement it in your ProcessGroup, implement allgather_base
   //   instead.
-  virtual std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions());
 
-  virtual std::shared_ptr<ProcessGroup::Work> gather(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> scatter(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> alltoall_base(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
@@ -183,28 +234,28 @@ class ProcessGroup {
     throw std::runtime_error("ProcessGroup does not support alltoall");
   }
 
-  virtual std::shared_ptr<ProcessGroup::Work> alltoall(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) {
     throw std::runtime_error("ProcessGroup does not support alltoall");
   }
 
-  virtual std::shared_ptr<ProcessGroup::Work> send(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> recv(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> recvAnysource(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> barrier(
+  virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) = 0;
 
  protected:

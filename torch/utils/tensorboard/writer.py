@@ -1,10 +1,6 @@
 """Provides an API for writing protocol buffers to event files to be
 consumed by TensorBoard for visualization."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import six
 import time

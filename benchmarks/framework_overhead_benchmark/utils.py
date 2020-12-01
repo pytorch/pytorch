@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import time
 from collections import namedtuple
 from torch.utils import ThroughputBenchmark

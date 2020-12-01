@@ -1,9 +1,13 @@
+#include <gtest/gtest.h>
+
 #include <torch/jit.h>
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/runtime/argument_spec.h"
 
 namespace torch {
 namespace jit {
+
+namespace {
 
 int device(const autograd::Variable& v) {
   return v.device().is_cuda() ? v.get_device() : -1;
@@ -38,8 +42,9 @@ autograd::Variable var(
 autograd::Variable undef() {
   return autograd::Variable();
 }
+} // namespace
 
-void testCompleteArgumentSpec() {
+TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
   auto const CF = at::CPU(at::kFloat);
   auto const CD = at::CPU(at::kDouble);
   auto const GF = at::CUDA(at::kFloat);
@@ -94,34 +99,35 @@ void testCompleteArgumentSpec() {
   ASSERT_EQ(with_const.at(2).sizes().size(), 2);
 }
 
-size_t hashCode(const TensorTypePtr& ptr) {
-  return std::hash<TensorType>()(*ptr.get());
-}
+// TODO: this test was disabled for unknown reasons and doesn't run.
+// static size_t hashCode(const TensorTypePtr& ptr) {
+//   return std::hash<TensorType>()(*ptr.get());
+// }
 
-void testProfiledTensorTypeHashing() {
-  c10::VaryingShape<int64_t> vs(c10::optional<size_t>{});
-  auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
-  auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);
-  ASSERT_EQ(hashCode(ptt_empty1), hashCode(ptt_empty2));
+// TEST(ArgumentSpecTest, VaryingShape) {
+//   c10::VaryingShape<int64_t> vs(c10::optional<size_t>{});
+//   auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
+//   auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);
+//   ASSERT_EQ(hashCode(ptt_empty1), hashCode(ptt_empty2));
 
-  c10::VaryingShape<int64_t> vs22(std::vector<int64_t>{2, 2});
-  auto ptt_vs22_vs22_1 = TensorType::create({}, {}, vs22, vs22, false);
-  auto ptt_vs22_vs22_2 = TensorType::create({}, {}, vs22, vs22, false);
-  ASSERT_EQ(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs22_2));
+//   c10::VaryingShape<int64_t> vs22(std::vector<int64_t>{2, 2});
+//   auto ptt_vs22_vs22_1 = TensorType::create({}, {}, vs22, vs22, false);
+//   auto ptt_vs22_vs22_2 = TensorType::create({}, {}, vs22, vs22, false);
+//   ASSERT_EQ(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs22_2));
 
-  c10::VaryingShape<int64_t> vs23(std::vector<int64_t>{2, 3});
-  auto ptt_vs22_vs23_2 = TensorType::create({}, {}, vs22, vs23, false);
-  ASSERT_NE(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs23_2));
+//   c10::VaryingShape<int64_t> vs23(std::vector<int64_t>{2, 3});
+//   auto ptt_vs22_vs23_2 = TensorType::create({}, {}, vs22, vs23, false);
+//   ASSERT_NE(hashCode(ptt_vs22_vs22_1), hashCode(ptt_vs22_vs23_2));
 
-  auto ptt_vs22_vs22_1_true = TensorType::create({}, {}, vs22, vs22, true);
-  auto ptt_vs22_vs22_2_true = TensorType::create({}, {}, vs22, vs22, true);
-  ASSERT_EQ(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_2_true));
+//   auto ptt_vs22_vs22_1_true = TensorType::create({}, {}, vs22, vs22, true);
+//   auto ptt_vs22_vs22_2_true = TensorType::create({}, {}, vs22, vs22, true);
+//   ASSERT_EQ(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_2_true));
 
-  auto ptt_vs22_vs22_1_false = TensorType::create({}, {}, vs22, vs22, false);
-  ASSERT_NE(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_1_false));
-}
+//   auto ptt_vs22_vs22_1_false = TensorType::create({}, {}, vs22, vs22, false);
+//   ASSERT_NE(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_1_false));
+// }
 
-void testArgumentSpec() {
+TEST(ArgumentSpecTest, Basic_CUDA) {
   auto& CF = at::CPU(at::kFloat);
   auto& CD = at::CPU(at::kDouble);
   auto& GF = at::CUDA(at::kFloat);

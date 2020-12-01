@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
-#include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -176,7 +175,7 @@ void IRPrinter::visit(const CompareSelect* v) {
 }
 
 static void formatFPSuffix(std::ostream& os, double v) {
-  // No suffix for doubles.
+  os << (v == std::ceil(v) ? ".0" : "");
 }
 
 template <typename T>
@@ -350,8 +349,7 @@ void IRPrinter::visit(const MinTerm* v) {
 
 void IRPrinter::visit(const ReduceOp* v) {
   os() << "ReduceOp(";
-  os() << *v->accumulator() << ", ";
-  os() << v->complete() << ", ";
+  os() << *v->body() << ", ";
 
   bool first = true;
   os() << "out_args={";
@@ -553,11 +551,6 @@ std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const Function& f) {
-  stream << std::to_string(&f);
-  return stream;
-}
-
 void print(const Expr* expr) {
   if (expr) {
     IRPrinter p(std::cout);
@@ -565,6 +558,7 @@ void print(const Expr* expr) {
   } else {
     std::cout << "(null expr)";
   }
+  std::cout << "\n";
 }
 
 void print(const Stmt* stmt) {
@@ -578,10 +572,6 @@ void print(const Stmt* stmt) {
 
 void print(const Tensor* t) {
   std::cout << std::to_string(t);
-}
-
-void print(const Function* f) {
-  std::cout << std::to_string(f);
 }
 
 } // namespace tensorexpr
@@ -614,26 +604,6 @@ std::string to_string(const Tensor* t) {
     oss << *t->arg(i) << "[" << *t->dim(i) << "]";
   }
   oss << ") = " << *t->body() << "\n";
-  return oss.str();
-}
-
-std::string to_string(const Function* f) {
-  if (!f) {
-    return "(null function)\n";
-  }
-  std::ostringstream oss;
-  oss << "Function F(";
-  for (size_t i = 0; i < f->ndim(); i++) {
-    if (i != 0) {
-      oss << ", ";
-    }
-    oss << *f->arg(i) << "[" << *f->dim(i) << "]";
-  }
-  oss << ") {\n";
-  for (size_t i = 0; i < f->bodies().size(); i++) {
-    oss << "  " << *f->func_var(i) << " = " << *f->body(i) << "\n";
-  }
-  oss << "}\n";
   return oss.str();
 }
 } // namespace std

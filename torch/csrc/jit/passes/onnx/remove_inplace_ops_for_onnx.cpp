@@ -105,15 +105,29 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   // Loop over fetched slice and select nodes and convert them to index tensors.
   // keep track of which dimension the current slice/select node is applying to.
   int64_t cur_dim = 0;
-  // select does not keep dims,
-  // this creates offset for latter slice and select nodes.
   int64_t dim_offset = 0;
   const auto orig_tensor_indices = index_put_node->input(1)->node()->inputs();
   for (auto it = slice_and_select_nodes.rbegin();
        it != slice_and_select_nodes.rend();
        ++it) {
     auto node = *it;
-    auto dim = node->get(attr::dim)->toInt() + dim_offset;
+    // select does not keep dims,
+    // this creates offset for latter slice and select nodes.
+    auto dim = node->get(attr::dim)->toInt();
+    if (dim < 0) {
+      auto input_type = orig_data->type()->expect<TensorType>();
+      if (input_type->dim().has_value()) {
+        auto rank = input_type->dim().value();
+        // Rank of original tensor to index on.
+        // Minus the offset created by select operators.
+        dim = dim + rank - dim_offset;
+      } else {
+        std::cerr
+            << "Error: ONNX Remove Inplace Ops - Cannot export ellipsis indexing for input "
+            << "of unknown rank.";
+      }
+    }
+    dim = dim + dim_offset;
 
     while (cur_dim < dim) {
       // Handle skipped dims, these are created from ..., or tensor indices
@@ -340,14 +354,23 @@ void PrepareCopyForONNX(Block* block) {
       // Remove aten::copy_, and replace it with index_put.
       // 1. create an empty listConstruct node as indices input for index_put.
       // 2. create index_put node.
+
+      // Tracing aten::copy_ broadcasts the rhs values.
+      // 3. Apply broadcasting for scripting.
       WithInsertPoint guard(node);
       auto graph = node->owningGraph();
       auto dummy_list =
           graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
               ->output();
+
+      auto expanded_value =
+          graph->insert(aten::expand_as, {node->input(1), node->input(0)});
+      expanded_value->node()->setSourceRange(node->sourceRange());
+      expanded_value->copyMetadata(node->input(1));
+
       auto index_put = graph->insert(
           aten::index_put,
-          {node->input(0), dummy_list, node->input(1), node->input(2)});
+          {node->input(0), dummy_list, expanded_value, node->input(2)});
       index_put->node()->setSourceRange(node->sourceRange());
       index_put->copyMetadata(node->output());
       node->output()->replaceAllUsesWith(index_put);
@@ -452,18 +475,29 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
             << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
             << "This changes graph semantics." << std::endl;
 
-        auto newNode = node->owningGraph()->create(aten::clone, 1);
-        newNode->output()->copyMetadata(input);
-        newNode->addInput(input);
+        if (input->type()->kind() == TypeKind::ListType) {
+          // Create an aten::list to clone the list in graph inputs
+          auto newNode = node->owningGraph()->create(aten::list, 1);
+          newNode->output()->copyMetadata(input);
+          newNode->addInput(input);
+          newNode->insertBefore(node);
+          node->replaceInput(index, newNode->output());
+          input->replaceAllUsesAfterNodeWith(node, newNode->output());
+        } else {
+          // Create an aten::clone to clone the tensor in graph inputs
+          auto newNode = node->owningGraph()->create(aten::clone, 1);
+          newNode->output()->copyMetadata(input);
+          newNode->addInput(input);
 
-        auto* noneNode = node->owningGraph()->create(prim::Constant);
-        noneNode->output()->setType(NoneType::get());
-        newNode->addInput(noneNode->output());
+          auto* noneNode = node->owningGraph()->create(prim::Constant);
+          noneNode->output()->setType(NoneType::get());
+          newNode->addInput(noneNode->output());
 
-        newNode->insertBefore(node);
-        noneNode->insertBefore(newNode);
-        node->replaceInput(index, newNode->output());
-        input->replaceAllUsesAfterNodeWith(node, newNode->output());
+          newNode->insertBefore(node);
+          noneNode->insertBefore(newNode);
+          node->replaceInput(index, newNode->output());
+          input->replaceAllUsesAfterNodeWith(node, newNode->output());
+        }
       }
     }
   }

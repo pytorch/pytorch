@@ -4,12 +4,25 @@
 
 namespace at { namespace native {
 
-inline std::vector<int64_t> computeStrideForViewAsReal(IntArrayRef oldstride) {
-  auto res = oldstride.vec();
-  for(size_t i = 0; i < res.size(); i++) {
-    res[i] = res[i] * 2;
+// View tensor with new dtype, storage offset, sizes and strides 
+inline Tensor view_tensor(
+    const Tensor &tensor, ScalarType dtype,
+    int64_t offset, IntArrayRef sizes, IntArrayRef strides) {
+  Storage storage = tensor.storage();
+  auto new_tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage), tensor.key_set(), scalarTypeToTypeMeta(dtype));
+  auto * impl = new_tensor.unsafeGetTensorImpl();
+  impl->set_storage_offset(offset);
+  impl->set_sizes_and_strides(sizes, strides);
+  return new_tensor;
+}
+
+inline DimVector computeStrideForViewAsReal(IntArrayRef oldstride) {
+  DimVector res(oldstride.size() + 1);
+  for(size_t i = 0; i < oldstride.size(); i++) {
+    res[i] = oldstride[i] * 2;
   }
-  res.emplace_back(1);
+  res.back() = 1;
   return res;
 }
 
@@ -18,25 +31,25 @@ inline std::vector<int64_t> computeStrideForViewAsReal(IntArrayRef oldstride) {
 // in the last two dimensions
 Tensor view_as_real(const Tensor& self) {
   TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
-  auto new_sizes = self.sizes().vec();
+  auto old_sizes = self.sizes();
+  DimVector new_sizes(old_sizes.size() + 1);
+  std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
   // last dimension will always have two elements containing the real and imag vals
-  new_sizes.emplace_back(2);
+  new_sizes.back() = 2;
   auto new_strides = computeStrideForViewAsReal(self.strides());
   auto new_storage_offset = 2 * self.storage_offset();
   const auto float_type = c10::toValueType(self.scalar_type());
-  return at::empty({0}, self.options().dtype(float_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
+  return view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
 }
 
-inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride) {
-  auto res = oldstride.vec();
-  int dim = res.size();
+inline DimVector computeStrideForViewAsComplex(IntArrayRef oldstride) {
+  const int64_t dim = oldstride.size();
+  TORCH_CHECK(oldstride[dim-1] == 1, "Tensor must have a last dimension with stride 1");
 
-  TORCH_CHECK(res[dim-1] == 1, "Tensor must have a last dimension with stride 1");
-  res.pop_back();
-
-  for (auto i = decltype(res.size()){0}; i < res.size(); i++) {
-    TORCH_CHECK(res[i] % 2 == 0, "Tensor must have a stride divisible by 2 for all but last dimension");
-    res[i] = res[i] / 2;
+  DimVector res(dim - 1);
+  for (int64_t i = 0; i < res.size(); i++) {
+    TORCH_CHECK(oldstride[i] % 2 == 0, "Tensor must have a stride divisible by 2 for all but last dimension");
+    res[i] = oldstride[i] / 2;
   }
   return res;
 }
@@ -48,10 +61,10 @@ Tensor view_as_complex(const Tensor& self) {
     self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
     "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
 
-  TORCH_CHECK(self.dim() != 0, "Input tensor must have one or more dimensions");
-  auto new_sizes = self.sizes().vec();
-  TORCH_CHECK(new_sizes[self.dim()-1] == 2, "Tensor must have a last dimension of size 2");
-  new_sizes.pop_back();
+  auto old_sizes = self.sizes();
+  TORCH_CHECK(old_sizes.size() != 0, "Input tensor must have one or more dimensions");
+  TORCH_CHECK(old_sizes[old_sizes.size()-1] == 2, "Tensor must have a last dimension of size 2");
+  DimVector new_sizes(old_sizes.begin(), old_sizes.end() - 1);
 
   const auto new_strides = computeStrideForViewAsComplex(self.strides());
   const auto complex_type = c10::toComplexType(self.scalar_type());
@@ -59,7 +72,7 @@ Tensor view_as_complex(const Tensor& self) {
   TORCH_CHECK(self.storage_offset() % 2 == 0, "Tensor must have a storage_offset divisible by 2");
   const auto new_storage_offset = self.storage_offset() / 2;
 
-  return at::empty({0}, self.options().dtype(complex_type)).set_(self.storage(), new_storage_offset, new_sizes, new_strides);
+  return view_tensor(self, complex_type, new_storage_offset, new_sizes, new_strides);
 }
 
 }} // namespace at::native

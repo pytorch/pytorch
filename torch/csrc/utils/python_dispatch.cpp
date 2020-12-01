@@ -27,11 +27,14 @@ torch::Library::Kind parseKind(const std::string& k) {
 
 c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-    {"cpu", c10::DispatchKey::CPU},
-    {"cuda", c10::DispatchKey::CUDA},
-    {"xla", c10::DispatchKey::XLA},
-    {"autograd", c10::DispatchKey::Autograd},
-    {"autogradcpu", c10::DispatchKey::AutogradCPU},
+    {"CPU", c10::DispatchKey::CPU},
+    {"CUDA", c10::DispatchKey::CUDA},
+    {"XLA", c10::DispatchKey::XLA},
+    {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
+    {"Math", c10::DispatchKey::Math},
+    {"Autograd", c10::DispatchKey::Autograd},
+    {"DefaultBackend", c10::DispatchKey::DefaultBackend},
+    {"AutogradCPU", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };
   auto it = key_map.find(k);

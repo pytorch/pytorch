@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import warnings
@@ -172,6 +171,8 @@ def _is_none(x):
 def _is_value(x):
     return isinstance(x, torch._C.Value)
 
+def _is_tensor(x):
+    return x.type().isSubtypeOf(torch._C.TensorType.get())
 
 def _is_tensor_list(x):
     return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
@@ -223,8 +224,14 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 def _is_fp(value):
     if value:
-        type = value.type().scalarType()
-        return (type == 'Float') or (type == 'Double') or (type == 'Half')
+        if isinstance(value, torch.Tensor):
+            type = value.dtype
+            return (type == 'torch.float32') or (type == 'torch.float64') or (type == 'torch.float16')
+        else:
+            type = value.type().scalarType()
+            if type is None:
+                warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
+            return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
 
@@ -351,6 +358,14 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     else:
         return _unimplemented("Both size and scales are None in __interpolate")
     return scale_factor, mode
+
+
+def _unbind_helper(g, self, dim, _outputs):
+    if _export_onnx_opset_version <= 9:
+        from torch.onnx.symbolic_opset9 import unbind
+    else:
+        from torch.onnx.symbolic_opset11 import unbind
+    return unbind(g, self, dim, _outputs)
 
 
 def _scatter_helper(g, self, dim, index, src):

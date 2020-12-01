@@ -33,6 +33,8 @@ docs/cpp/src
 docs/src/**/*
 docs/cpp/build
 docs/cpp/source/api
+docs/cpp/source/html/
+docs/cpp/source/latex/
 docs/source/generated/
 log
 test/.coverage
@@ -261,6 +263,7 @@ TAGS
 
 # clangd background index
 .clangd/
+.cache/
 
 # bazel symlinks
 bazel-*

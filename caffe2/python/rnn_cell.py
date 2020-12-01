@@ -1,9 +1,9 @@
 ## @package rnn_cell
 # Module caffe2.python.rnn_cell
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import functools
 import inspect
@@ -42,7 +42,7 @@ def _RectifyName(blob_reference_or_name):
 def _RectifyNames(blob_references_or_names):
     if blob_references_or_names is None:
         return None
-    return list(map(_RectifyName, blob_references_or_names))
+    return [_RectifyName(i) for i in blob_references_or_names]
 
 
 class RNNCell(object):
@@ -236,7 +236,7 @@ class RNNCell(object):
         '''
         Returns recurrent state names with self.name scoping applied
         '''
-        return list(map(self.scope, self.get_state_names_override()))
+        return [self.scope(name) for name in self.get_state_names_override()]
 
     def get_state_names_override(self):
         '''

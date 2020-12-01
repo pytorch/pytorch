@@ -43,7 +43,7 @@ class TORCH_API Module {
     return get_method("forward")(std::move(inputs));
   }
   c10::optional<Method> find_method(const std::string& basename) const;
-  std::string name() {
+  const std::string name() const {
     return object_->name();
   }
   const std::vector<at::IValue>& slots() const {
@@ -65,6 +65,16 @@ class TORCH_API Module {
   bool is_training() const;
   const std::unordered_map<std::string, std::string> metadata() const {
     return metadata_;
+  }
+
+  c10::IValue attr(const std::string& name, c10::IValue or_else) const {
+    if (auto r = object_->type()->findAttributeSlot(name)) {
+      return object_->getSlot(*r);
+    }
+    if (auto r = object_->type()->findConstantSlot(name)) {
+      return object_->type()->getConstant(*r);
+    }
+    return or_else;
   }
 
  private:
