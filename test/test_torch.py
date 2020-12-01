@@ -722,6 +722,17 @@ class AbstractTestCases:
                 device_hash_set.add(hash(torch.device(device)))
             self.assertEqual(len(device_set), len(device_hash_set))
 
+            def get_expected_device_repr(device):
+                if device.index is not None:
+                    return "device(type='{type}', index={index})".format(
+                        type=device.type, index=device.index)
+
+                return "device(type='{type}')".format(type=device.type)
+
+            for device in device_set:
+                dev = torch.device(device)
+                self.assertEqual(repr(dev), get_expected_device_repr(dev))
+
         def test_to(self):
             def test_copy_behavior(t, non_blocking=False):
                 self.assertIs(t, t.to(t, non_blocking=non_blocking))
