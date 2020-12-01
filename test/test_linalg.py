@@ -1887,30 +1887,6 @@ class TestLinalg(TestCase):
             b = torch.randn(2, 2, 2, dtype=dtype, device=device)
             torch.linalg.solve(A, b, out=out)
 
-    # TODO: implement tests using OpInfo
-    # This test is here insead of method_tests of common_methods_invocations.py because
-    # adding 'linalg.' functions there breaks some Facebook internal tests
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_solve_autograd(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-        batches = [(), (0, ), (2, )]
-        ns = [0, 5]
-        nrhs = [(), (1, ), (3, )]
-        for n, batch, rhs in itertools.product(ns, batches, nrhs):
-            # using .to(device) instead of device=device because @xwang233 claims it's faster
-            a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
-            a.requires_grad_()
-            b = torch.randn(*batch, n, *rhs, dtype=dtype, device=device)
-
-            def func(a, b):
-                return torch.linalg.solve(a, b)
-
-            gradcheck(func, [a, b])
-            gradgradcheck(func, [a, b])
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
