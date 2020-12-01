@@ -1,17 +1,179 @@
 #include <c10d/frontend.hpp>
 
+#include <ATen/core/Tensor.h>
+#include <ATen/Functions.h>
 #include <c10/util/Exception.h>
+#include <c10d/PrefixStore.hpp>
+#include <c10d/Utils.hpp>
 
+#include <chrono>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
+
+#ifdef USE_C10D_GLOO
+#include <c10d/ProcessGroupGloo.hpp>
+#endif
+
+#ifdef USE_C10D_NCCL
+#include <c10d/ProcessGroupNCCL.hpp>
+#endif
+
+#ifdef USE_C10D_MPI
+#include <c10d/ProcessGroupMPI.hpp>
+#endif
 
 namespace c10d {
+
+namespace {
+
+void maybePreprocessComplexTensor(at::Tensor& tensor) {
+  if(!tensor.is_complex()) {
+    return;
+  }
+
+  tensor = at::view_as_real(tensor);
+}
+
+void maybePreprocessComplexTensor(std::vector<at::Tensor>& tensors) {
+  for(at::Tensor& t : tensors) {
+    maybePreprocessComplexTensor(t);
+  }
+}
+
+void maybePreprocessComplexTensor(std::vector<std::vector<at::Tensor>>& tensors_lists) {
+  for(std::vector<at::Tensor>& t : tensors_lists) {
+    maybePreprocessComplexTensor(t);
+  }
+}
+
+void assertReduceOpSupportsComplexTensor(ReduceOp op) {
+  switch (op) {
+    case ReduceOp::MAX:
+    case ReduceOp::MIN:
+    case ReduceOp::PRODUCT:
+      TORCH_CHECK(
+          false,
+          "all_reduce does not support requested Reduce op on complex tensors");
+    default:
+      return;
+  }
+}
+
+}  // namespace anonymous
+
+std::string Backend::get(const std::string& backend_type) {
+  return backend_type;
+}
+
+void Backend::registerBackend() {
+  TORCH_CHECK(false, "Registering third-party backend is currently not supported by TorchScript-friendly c10d");
+}
+
+c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
+    const int64_t world_size,
+    const int64_t rank,
+    const std::vector<int64_t>& group_ranks,
+    const std::string& backend_str,
+    const c10::intrusive_ptr<Store>& store,
+    c10::optional<std::string> group_name,
+    int64_t timeout_milisesonds) {
+  if (!group_name.has_value()) {
+    group_name = std::to_string(group_count_);
+    ++group_count_;
+  }
+
+  auto it = std::find_if(
+      pg_names_.begin(),
+      pg_names_.end(),
+      [&](const std::pair<c10::intrusive_ptr<ProcessGroup>, std::string>&
+              pg_name) { return pg_name.second == *group_name; });
+
+  if (it == pg_names_.end()) {
+    throw std::runtime_error(
+        "The specified group name has already been "
+        "created, please use a different group name");
+  }
+
+  bool is_default_group = pg_group_ranks_.size() == 0;
+
+  c10::intrusive_ptr<ProcessGroup> pg;
+
+  auto timeout = std::chrono::milliseconds(timeout_milisesonds);
+
+  std::string backend = Backend::get(backend_str);
+  if (backend == "mpi") {
+#ifdef USE_C10D_MPI
+    std::vector<int> group_ranks_copy(group_ranks.begin(), group_ranks.end());
+    pg = ProcessGroupMPI::createProcessGroupMPI(group_ranks_copy);
+#else
+    throw std::runtime_error(
+        "Distributed package doesn't have MPI built in."
+        " MPI is only included if you build PyTorch from"
+        " source on a host that has MPI installed.");
+#endif
+  } else {
+    if (!is_default_group) {
+      int64_t global_rank = default_pg_->getRank();
+      if (std::find(group_ranks.begin(), group_ranks.end(), global_rank) ==
+          group_ranks.end()) {
+        return pg;
+      }
+    }
+
+    auto prefix_store = c10::make_intrusive<PrefixStore>(*group_name, store);
+
+    if (backend == "gloo") {
+#ifdef USE_C10D_GLOO
+      auto options = ProcessGroupGloo::Options();
+
+      // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
+      char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
+      if (ifnameEnv) {
+        for (const auto& iface : split(',', ifnameEnv)) {
+          options.devices.push_back(
+              ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
+        }
+      } else {
+        // If no hostname is specified, this function looks up
+        // the machine's hostname and returns a device instance
+        // associated with the address that the hostname resolves to.
+        options.devices.push_back(
+            ::c10d::ProcessGroupGloo::createDefaultDevice());
+      }
+
+      options.timeout = timeout;
+      options.threads = options.devices.size() * 2;
+      pg = c10::make_intrusive<ProcessGroupGloo>(
+          prefix_store, rank, world_size, options);
+#endif
+    } else if (backend == "nccl") {
+#ifdef USE_C10D_NCCL
+      auto options = c10::make_intrusive<ProcessGroupNCCL::Options>();
+
+      options->isHighPriorityStream = false;
+      options->opTimeout = timeout;
+      pg = c10::make_intrusive<ProcessGroupNCCL>(
+          prefix_store, rank, world_size, options);
+#endif
+    } else {
+      // TODO: discuss to figure out how to extend this to third party backends?
+      return pg;
+    }
+  }
+
+  // register to process group map
+  pg_map_[pg] = std::make_pair(backend, store);
+  pg_names_[pg] = *group_name;
+  return pg;
+}
 
 // Note: We assume that group.WORLD equates default_pg_. Otherwise,
 // we need many additional conditionals to check whether group is WORLD and
 // then use default_pg_ explicitly.
 
-int64_t DistributedC10d::getRank(const std::shared_ptr<ProcessGroup>& group) const {
+int64_t DistributedC10d::getRank(
+    const c10::intrusive_ptr<ProcessGroup>& group) const {
   if (rankNotInGroup(group)) {
     return -1;
   }
@@ -20,7 +182,7 @@ int64_t DistributedC10d::getRank(const std::shared_ptr<ProcessGroup>& group) con
 }
 
 int64_t DistributedC10d::getWorldSize(
-    const std::shared_ptr<ProcessGroup>& group) const {
+    const c10::intrusive_ptr<ProcessGroup>& group) const {
   if (rankNotInGroup(group)) {
     return -1;
   }
@@ -29,7 +191,7 @@ int64_t DistributedC10d::getWorldSize(
 }
 
 int64_t DistributedC10d::getGroupSize(
-    const std::shared_ptr<ProcessGroup>& group) const {
+    const c10::intrusive_ptr<ProcessGroup>& group) const {
   if (group == default_pg_) {
     default_pg_->getSize();
   }
@@ -40,21 +202,25 @@ int64_t DistributedC10d::getGroupSize(
   return it->second.size();
 }
 
-std::shared_ptr<ProcessGroup> DistributedC10d::worldProcessGroup() {
+void DistributedC10d::checkDefaultPg() const {
+  TORCH_CHECK(default_pg_, "Default process group is not initialized");
+}
+
+c10::intrusive_ptr<ProcessGroup> DistributedC10d::worldProcessGroup() {
   checkDefaultPg();
   return default_pg_;
 }
 
 bool DistributedC10d::rankNotInGroup(
-    const std::shared_ptr<ProcessGroup>& group) const {
+    const c10::intrusive_ptr<ProcessGroup>& group) const {
   if (group == default_pg_) {
     return false;
   }
-  return group == nullptr;
+  return group;
 }
 
 int64_t DistributedC10d::getGroupRank(
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     const int64_t rank) const {
   TORCH_CHECK(
       group != default_pg_,
@@ -84,7 +250,7 @@ int64_t DistributedC10d::getGroupRank(
 }
 
 int64_t DistributedC10d::getGlobalRank(
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     const int64_t group_rank) const {
   TORCH_CHECK(
       group != default_pg_,
@@ -104,7 +270,7 @@ int64_t DistributedC10d::getGlobalRank(
 }
 
 std::string DistributedC10d::getBackend(
-    const std::shared_ptr<ProcessGroup>& group) {
+    const c10::intrusive_ptr<ProcessGroup>& group) {
   TORCH_CHECK(!rankNotInGroup(group), "Invalid process group specified");
 
   auto it = pg_map_.find(group);
@@ -113,13 +279,14 @@ std::string DistributedC10d::getBackend(
   return it->second.first;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::isend(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::isend(
     at::Tensor tensor,
     int64_t dst,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     c10::optional<int64_t>& tag) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   std::vector<at::Tensor> inputs = {std::move(tensor)};
@@ -133,13 +300,14 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::isend(
   return group->send(inputs, group_dst_rank, tag.value_or(0));
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::irecv(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::irecv(
     at::Tensor tensor,
     int64_t src,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     c10::optional<int64_t>& tag) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   std::vector<at::Tensor> inputs = {std::move(tensor)};
@@ -156,7 +324,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::irecv(
 void DistributedC10d::send(
     at::Tensor tensor,
     int64_t dst,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     c10::optional<int64_t>& tag) {
   auto work = isend(std::move(tensor), dst, group, tag);
   if (work) {
@@ -167,7 +335,7 @@ void DistributedC10d::send(
 int64_t DistributedC10d::recv(
     at::Tensor tensor,
     const c10::optional<int64_t>& src,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     c10::optional<int64_t>& tag) {
   if (rankNotInGroup(group)) {
     return -1;
@@ -195,14 +363,15 @@ int64_t DistributedC10d::recv(
   return src.value();
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::broadcastMultiGPU(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::broadcastMultiGPU(
     std::vector<at::Tensor>& tensor_list,
     int64_t src,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op,
     int64_t src_tensor) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   BroadcastOptions opts;
@@ -210,7 +379,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::broadcastMultiGPU(
   opts.rootTensor = src_tensor;
 
   checkDefaultPg();
-  std::shared_ptr<ProcessGroup::Work> work;
+  c10::intrusive_ptr<ProcessGroup::Work> work;
   if (group == default_pg_) {
     work = default_pg_->broadcast(tensor_list, opts);
   } else {
@@ -223,16 +392,17 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::broadcastMultiGPU(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::broadcast(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::broadcast(
     at::Tensor tensor,
     int64_t src,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   BroadcastOptions opts;
@@ -240,7 +410,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::broadcast(
   opts.rootTensor = 0;
 
   std::vector<at::Tensor> tensors = {std::move(tensor)};
-  std::shared_ptr<ProcessGroup::Work> work;
+  c10::intrusive_ptr<ProcessGroup::Work> work;
   checkDefaultPg();
   if (group == default_pg_) {
     work = group->broadcast(tensors, opts);
@@ -254,40 +424,48 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::broadcast(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allReduceMultiGPU(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allReduceMultiGPU(
     std::vector<at::Tensor>& tensor_list,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     ReduceOp op,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   AllreduceOptions opts;
   opts.reduceOp = op;
+
+  assertReduceOpSupportsComplexTensor(op);
+  maybePreprocessComplexTensor(tensor_list);
 
   auto work = group->allreduce(tensor_list, opts);
   if (async_op) {
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allReduce(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allReduce(
     at::Tensor tensor,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     ReduceOp op,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   AllreduceOptions opts;
   opts.reduceOp = op;
+
+  assertReduceOpSupportsComplexTensor(op);
+  maybePreprocessComplexTensor(tensor);
 
   std::vector<at::Tensor> tensors = {std::move(tensor)};
   auto work = group->allreduce(tensors, opts);
@@ -295,38 +473,43 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allReduce(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allReduceCoalesced(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allReduceCoalesced(
     std::vector<at::Tensor>& tensors,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     ReduceOp op,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   AllreduceCoalescedOptions opts;
   opts.reduceOp = op;
+
+  assertReduceOpSupportsComplexTensor(op);
+  maybePreprocessComplexTensor(tensors);
 
   auto work = group->allreduce_coalesced(tensors, opts);
   if (async_op) {
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduceMultiGPU(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::reduceMultiGPU(
     std::vector<at::Tensor>& tensor_list,
     int64_t dst,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     ReduceOp op,
-    bool async_op ,
+    bool async_op,
     int64_t dst_tensor) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   ReduceOptions opts;
@@ -336,7 +519,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduceMultiGPU(
 
   checkDefaultPg();
 
-  std::shared_ptr<ProcessGroup::Work> work;
+  c10::intrusive_ptr<ProcessGroup::Work> work;
   if (group == default_pg_) {
     work = group->reduce(tensor_list, opts);
   } else {
@@ -349,17 +532,18 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduceMultiGPU(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduce(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::reduce(
     at::Tensor tensor,
     int64_t dst,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     ReduceOp op,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   ReduceOptions opts;
@@ -367,7 +551,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduce(
   opts.rootRank = dst;
 
   checkDefaultPg();
-  std::shared_ptr<ProcessGroup::Work> work;
+  c10::intrusive_ptr<ProcessGroup::Work> work;
   std::vector<at::Tensor> tensors = {std::move(tensor)};
   if (group == default_pg_) {
     work = group->reduce(tensors, opts);
@@ -381,17 +565,21 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduce(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGatherMultiGPU(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allGatherMultiGPU(
     std::vector<std::vector<at::Tensor>>& output_tensor_lists,
     std::vector<at::Tensor>& input_tensor_list,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
+
+  maybePreprocessComplexTensor(output_tensor_lists);
+  maybePreprocessComplexTensor(input_tensor_list);
 
   auto work = group->allgather(output_tensor_lists, input_tensor_list);
 
@@ -399,17 +587,21 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGatherMultiGPU(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGather(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allGather(
     std::vector<at::Tensor>& tensor_list,
     at::Tensor tensor,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
+
+  maybePreprocessComplexTensor(tensor_list);
+  maybePreprocessComplexTensor(tensor);
 
   std::vector<std::vector<at::Tensor>> output_tensor_lists = {std::move(tensor_list)};
   std::vector<at::Tensor> input_tensor_list = {std::move(tensor)};
@@ -419,17 +611,21 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGather(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGatherCoalesced(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allGatherCoalesced(
     std::vector<std::vector<at::Tensor>>& output_tensor_lists,
     std::vector<at::Tensor>& input_tensor_list,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
+
+  maybePreprocessComplexTensor(output_tensor_lists);
+  maybePreprocessComplexTensor(input_tensor_list);
 
   auto work =
       group->allgather_coalesced(output_tensor_lists, input_tensor_list);
@@ -438,17 +634,18 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allGatherCoalesced(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::gather(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::gather(
     at::Tensor tensor,
     const c10::optional<std::vector<at::Tensor>>& gather_list,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     int64_t dst,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   auto my_rank = group->getRank();
@@ -471,7 +668,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::gather(
   GatherOptions opts;
   opts.rootRank = dst;
 
-  std::shared_ptr<ProcessGroup::Work> work;
+  c10::intrusive_ptr<ProcessGroup::Work> work;
   if (group == default_pg_) {
     work = group->gather(output_tensors, input_tensors, opts);
   } else {
@@ -484,17 +681,18 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::gather(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::scatter(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::scatter(
     at::Tensor tensor,
     std::vector<at::Tensor>& scatter_list,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     int64_t src,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   auto my_rank = getRank(default_pg_);
@@ -508,7 +706,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::scatter(
   ScatterOptions opts;
   opts.rootRank = src;
 
-  std::shared_ptr<ProcessGroup::Work> work;
+  c10::intrusive_ptr<ProcessGroup::Work> work;
   if (group == default_pg_) {
     work = group->scatter(output_tensors, input_tensors, opts);
   } else {
@@ -521,17 +719,18 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::scatter(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduceScatterMultiGPU(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::reduceScatterMultiGPU(
     std::vector<at::Tensor>& output_tensor_list,
     std::vector<std::vector<at::Tensor>>& input_tensor_lists,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     ReduceOp op,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   ReduceScatterOptions opts;
@@ -544,17 +743,18 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduceScatterMultiGPU(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduceScatter(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::reduceScatter(
     at::Tensor output,
     std::vector<at::Tensor>& input_tensor_list,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     ReduceOp op,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   ReduceScatterOptions opts;
@@ -570,18 +770,19 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::reduceScatter(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allToAllSingle(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allToAllSingle(
     at::Tensor output,
     at::Tensor input,
     std::vector<int64_t>& output_split_sizes,
     std::vector<int64_t>& input_split_sizes,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   AllToAllOptions opts;
@@ -592,16 +793,17 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allToAllSingle(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::allToAll(
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::allToAll(
     std::vector<at::Tensor>& output_tensor_list,
     std::vector<at::Tensor>& input_tensor_list,
-    const std::shared_ptr<ProcessGroup>& group,
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   AllToAllOptions opts;
@@ -611,14 +813,15 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::allToAll(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
-std::shared_ptr<ProcessGroup::Work> DistributedC10d::barrier(
-    const std::shared_ptr<ProcessGroup>& group,
+c10::intrusive_ptr<ProcessGroup::Work> DistributedC10d::barrier(
+    const c10::intrusive_ptr<ProcessGroup>& group,
     bool async_op) {
+  c10::intrusive_ptr<ProcessGroup::Work> empty_work;
   if (rankNotInGroup(group)) {
-    return nullptr;
+    return empty_work;
   }
 
   auto work = group->barrier();
@@ -627,7 +830,7 @@ std::shared_ptr<ProcessGroup::Work> DistributedC10d::barrier(
     return work;
   }
   work->wait();
-  return nullptr;
+  return empty_work;
 }
 
 } // namespace c10d
