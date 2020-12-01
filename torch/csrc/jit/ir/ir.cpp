@@ -1614,7 +1614,7 @@ Node* Graph::createTupleSlice(
     int64_t beg,
     int64_t end,
     int64_t step_size) {
-  //auto n = create(prim::TupleSlice, {tup});
+  // auto n = create(prim::TupleSlice, {tup});
   auto unpacked_tuple = insertNode(createTupleUnpack(tup));
   auto outputs = unpacked_tuple->outputs();
   std::vector<Value*> newValues;

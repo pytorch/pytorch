@@ -3882,7 +3882,7 @@ struct to_ir {
 
     return graph
         ->insertNode(graph->createTupleSlice(
-          tuple_val.value(*graph), beg, end, step_size))
+            tuple_val.value(*graph), beg, end, step_size))
         ->output();
   }
 

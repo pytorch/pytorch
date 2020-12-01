@@ -546,10 +546,7 @@ struct CodeImpl {
     return instructions_source_;
   }
 
-  void insertInstruction(
-      OpCode op,
-      int64_t X = 0,
-      uint64_t N = 0) {
+  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),
@@ -884,7 +881,8 @@ struct CodeImpl {
   //     if (end_ind < beg_ind) {
   //       insertInstruction(TUPLE_SLICE, beg_ind, 0, step_size);
   //     } else {
-  //       insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind, step_size);
+  //       insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind,
+  //       step_size);
   //     }
   //   } else {
   //     // TODO: hack to make sure there is no slicing happens (imagine case
@@ -892,7 +890,8 @@ struct CodeImpl {
   //     if (beg_ind < end_ind) {
   //       insertInstruction(TUPLE_SLICE, end_ind, 0, step_size);
   //     } else {
-  //       insertInstruction(TUPLE_SLICE, end_ind, beg_ind - end_ind, step_size);
+  //       insertInstruction(TUPLE_SLICE, end_ind, beg_ind - end_ind,
+  //       step_size);
   //     }
   //   }
   // }
@@ -1499,7 +1498,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           // case TUPLE_SLICE: {
-          //   // For TupleSlice, it is guaranteed that it is carrying the slicing
+          //   // For TupleSlice, it is guaranteed that it is carrying the
+          //   slicing
           //   // step in the extra unused space inside Instruction.
           //   tupleSlice(stack, inst.X, inst.X + inst.N, inst.unused);
           //   ++frame.pc;
