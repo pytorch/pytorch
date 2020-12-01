@@ -57,6 +57,19 @@ c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType);
 
 inline void noop(Stack* n) {}
 
+// As described in https://docs.python.org/3/library/functions.html#round
+// When a number is exactly halfway between two integers, python builtin round
+// function will round to even number. We use round(x/2)*2 to handle the
+// special halfway case. For positive 'x', round(x/2)*2 =
+// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
+// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
+// result will always be a even number. Due to symmetricity, it also applies to
+// negative cases.
+inline double round_to_even(double a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
+}
+
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
