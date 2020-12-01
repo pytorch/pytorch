@@ -238,7 +238,7 @@ class C10_API SizesAndStrides {
     return size_ <= MAX_INLINE_SIZE;
   }
 
-  void copyDataInline(const SizesAndStrides& rhs) noexcept {
+  void copyDataInline(const SizesAndStrides& rhs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.isInline());
     memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
   }
