@@ -1,15 +1,10 @@
-#include <ATen/Utils.h>
 #include <ATen/CUDAGeneratorImpl.h>
-#include <ATen/cuda/CUDAGraphsUtils.cuh>
-#include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/Utils.h>
 
 namespace at {
-namespace cuda {
-namespace detail {
 
-namespace {
+namespace cuda { namespace detail {
 
 // Ensures we only call cudaGetDeviceCount only once.
 static std::once_flag num_gpu_init_flag;
@@ -32,8 +27,6 @@ static void initCUDAGenVector(){
   cuda_gens_init_flag.resize(num_gpus);
   default_gens_cuda.resize(num_gpus);
 }
-
-} // anonymous namespace
 
 /**
  * PyTorch maintains a collection of default generators that get
@@ -78,15 +71,12 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
 } // namespace detail
 } // namespace cuda
 
-
 /**
  * CUDAGeneratorImpl class implementation
  */
 CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
   : c10::GeneratorImpl{Device(Device::Unchecked::UNCHECKED, kCUDA, device_index),
-              DispatchKeySet(c10::DispatchKey::CUDA)} {
-  at::cuda::assertNotCapturing("Cannot construct a new CUDAGeneratorImpl");
-}
+              DispatchKeySet(c10::DispatchKey::CUDA)} { }
 
 /**
  * Sets the seed to be used by curandStatePhilox4_32_10
@@ -95,26 +85,14 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_current_seed");
   seed_ = seed;
   philox_offset_per_thread_ = 0;
 }
-
-#define CAPTURE_DEFAULT_GENS_MSG \
-"Non-default (user-constructed) CUDA RNG generators cannot be used " \
-"in regions captured by CUDA graphs. " \
-"If you need a non-default CUDA generator in a captured region, " \
-"please file an issue."
 
 /**
  * Gets the current seed of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::current_seed() const {
-  TORCH_CHECK((at::cuda::currentStreamCaptureStatus() ==
-               at::cuda::CaptureStatus::None) ||
-              ((void*)this ==
-               (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index())),
-              CAPTURE_DEFAULT_GENS_MSG);
   return seed_;
 }
 
@@ -126,7 +104,6 @@ uint64_t CUDAGeneratorImpl::current_seed() const {
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
 uint64_t CUDAGeneratorImpl::seed() {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::seed");
   auto random = c10::detail::getNonDeterministicRandom(true);
   this->set_current_seed(random);
   return random;
@@ -138,7 +115,6 @@ uint64_t CUDAGeneratorImpl::seed() {
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_philox_offset_per_thread");
   philox_offset_per_thread_ = offset;
 }
 
@@ -146,39 +122,12 @@ void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
  * Gets the current philox_offset_per_thread_ of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::philox_offset_per_thread() {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::philox_offset_per_thread");
   return philox_offset_per_thread_;
 }
 
 /**
- * Prepares this instance for a cuda graph capture region.
- * offset_extragraph is the initial offset at the start of the graphed region.
- * offset_intragraph tracks the offset in the graphed region.
- */
-void CUDAGeneratorImpl::graph_prologue(int64_t* offset_extragraph) {
-  TORCH_CHECK((void*)this ==
-              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
-              CAPTURE_DEFAULT_GENS_MSG);
-  offset_extragraph_ = offset_extragraph;
-  offset_intragraph_ = 0;
-}
-
-/**
- * Finalizes a cuda graph capture region for this instance.
- */
-uint64_t CUDAGeneratorImpl::graph_epilogue() {
-  TORCH_CHECK((void*)this ==
-              (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
-              CAPTURE_DEFAULT_GENS_MSG);
-  return offset_intragraph_;
-}
-
-/**
  * Gets the seed and philox offset value to be used in
- * curandStatePhilox4_32_10, in an opaque PhiloxCudaState that's safe
- * and can be used non-divergently in callers whether CUDA graph
- * capture is underway or not.  See
- * Note [CUDA Graph-safe RNG states]
+ * curandStatePhilox4_32_10
  *
  * Each kernel using philox has to sensibly increment offset
  * for future users of philox. So it gets the "old" value for
@@ -194,32 +143,7 @@ uint64_t CUDAGeneratorImpl::graph_epilogue() {
  *
  * See Note [Acquire lock when using random generators]
  */
-PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
-  if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-    TORCH_CHECK((void*)this ==
-                (void*)&at::cuda::detail::getDefaultCUDAGenerator(device_.index()),
-                CAPTURE_DEFAULT_GENS_MSG);
-    uint32_t offset = this->offset_intragraph_;
-    TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
-                          std::numeric_limits<uint32_t>::max() - increment);
-    this->offset_intragraph_ += increment;
-    return PhiloxCudaState(this->seed_,
-                           this->offset_extragraph_,
-                           offset);
-  } else {
-    uint64_t offset = this->philox_offset_per_thread_;
-    this->philox_offset_per_thread_ += increment;
-    return PhiloxCudaState(this->seed_, offset);
-  }
-}
-
-/**
- * Temporarily accommodates call sites that use philox_engine_inputs.
- * Allows incremental refactor of call sites to use philox_cuda_state.
- */
 std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
-  at::cuda::assertNotCapturing("Refactor this op to use CUDAGeneratorImpl::philox_cuda_state. "
-                               "Cannot call CUDAGeneratorImpl::philox_engine_inputs");
   uint64_t offset = this->philox_offset_per_thread_;
   this->philox_offset_per_thread_ += increment;
   return std::make_pair(this->seed_, offset);
@@ -248,7 +172,6 @@ std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
  * See Note [Acquire lock when using random generators]
  */
 CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {
-  at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::clone_impl");
   auto gen = new CUDAGeneratorImpl(this->device().index());
   gen->set_current_seed(this->seed_);
   gen->set_philox_offset_per_thread(this->philox_offset_per_thread_);
