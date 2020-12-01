@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <c10d/comm.hpp>
+#include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
@@ -28,7 +29,7 @@ class Reducer {
   explicit Reducer(
       std::vector<std::vector<torch::autograd::Variable>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
-      std::shared_ptr<c10d::ProcessGroup> process_group,
+      c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
@@ -96,7 +97,7 @@ class Reducer {
   // Creates and sets ForwardPassWorkHandle given a ProcessGroup::Work and the
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
-      std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+      c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
       bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. For
@@ -124,7 +125,7 @@ class Reducer {
 
   mutable std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;
-  std::shared_ptr<c10d::ProcessGroup> process_group_;
+  c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
@@ -158,7 +159,7 @@ class Reducer {
   bool local_used_maps_reduced_;
 
   // Work handle for allreduce on local_used_maps_
-  std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   void verify_replicas_within_process();
 
@@ -282,7 +283,7 @@ class Reducer {
     size_t pending;
 
     // Keep work handle around when this set of buckets is being reduced.
-    std::shared_ptr<c10d::ProcessGroup::Work> work;
+    c10::intrusive_ptr<c10d::ProcessGroup::Work> work;
 
     // Keep future work handle around if DDP comm hook is registered.
     c10::intrusive_ptr<torch::jit::Future> future_work;
@@ -340,7 +341,7 @@ class Reducer {
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
   struct ForwardPassAllreduceWork {
-    std::shared_ptr<c10d::ProcessGroup::Work> workHandle;
+    c10::intrusive_ptr<c10d::ProcessGroup::Work> workHandle;
     at::Tensor resultTensor;
     // whether we should divide by the initial world_size or the no. of
     // remaining DDP ranks.
