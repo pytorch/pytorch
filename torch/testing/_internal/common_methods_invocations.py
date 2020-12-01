@@ -70,9 +70,10 @@ class OpInfo(object):
                  autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a 
                                                   # DifferentiableGraph when autodiffed. Ex: ['aten::add', 'aten::mm'], 
                                                   # default is populated to be ['aten::(name of Python operator)']
-                 autodiff_fusible_nodes=None, # a list of strings with node names that are expected to be in FusionGroups
-                                              # inside of DifferentiableGraphs when this operation is autodiffed. 
-                                              # Ex: ['aten::add', 'aten::mm'], defaults to an empty list  
+                 autodiff_fusible_nodes=None,  # a list of strings with node names that are expected to be in FusionGroups
+                                               # inside of DifferentiableGraphs when this operation is autodiffed. 
+                                               # Ex: ['aten::add', 'aten::mm'], defaults to an empty list  
+                                               # Note: currently no ops use fusible nodes 
                  output_func=lambda x: x,  # fn mapping output to part that should be gradcheck'ed 
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
