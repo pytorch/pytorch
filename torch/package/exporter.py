@@ -170,7 +170,7 @@ class PackageExporter:
 
     def _write_dep_graph(self, failing_module=None):
         edges = '\n'.join(f'"{f}" -> "{t}";' for f, t in self.debug_deps)
-        failing = '' if failing_module is None else f'{failing_module} [color=red];'
+        failing = '' if failing_module is None else f'"{failing_module}" [color=red];'
         template = f"""\
 digraph G {{
 rankdir = LR;
