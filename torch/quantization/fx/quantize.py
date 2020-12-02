@@ -820,11 +820,23 @@ class Quantizer:
                     root_module, self.quantized_graph,
                     load_non_quantized(node.args[0]), observer_module)
 
+        # additional state to override inputs to be quantized, if specified
+        # by the user
+        placeholder_node_seen_cnt = 0
+        output_node_seen_cnt = 0
+        input_quantized_idxs: List[int] = convert_custom_config_dict.get(
+            "input_quantized_idxs", [])
+        output_quantized_idxs: List[int] = convert_custom_config_dict.get(
+            "output_quantized_idxs", [])
+
         for node in model.graph.nodes:
             if node.op == 'output':
-                if is_standalone_module:
-                    # result are kept quantized in the quantized standalone
-                    # module
+                cur_output_node_idx = output_node_seen_cnt
+                output_node_seen_cnt += 1
+                if is_standalone_module or (cur_output_node_idx in output_quantized_idxs):
+                    # Result are kept quantized in the quantized standalone
+                    # module, or if the user specified the output_quantized_idxs
+                    # override.
                     graph_output = map_arg(node.args[0], load_x)
                 else:
                     graph_output = map_arg(node.args[0], load_non_quantized)
@@ -862,6 +874,15 @@ class Quantizer:
                 # the node is quantized in parent module
                 quant_env[node.name] = \
                     self.quantized_graph.node_copy(node, load_non_quantized)
+            elif node.op == 'placeholder':
+                cur_placeholder_node_idx = placeholder_node_seen_cnt
+                placeholder_node_seen_cnt += 1
+                if cur_placeholder_node_idx in input_quantized_idxs:
+                    quant_env[node.name] = \
+                        self.quantized_graph.node_copy(node, load_non_quantized)
+                else:
+                    env[node.name] = \
+                        self.quantized_graph.node_copy(node, load_non_quantized)
             else:
                 # copy quantized or non-quantized node
                 env[node.name] = \
