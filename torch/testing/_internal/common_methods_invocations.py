@@ -193,7 +193,6 @@ class UnaryUfuncInfo(OpInfo):
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
-                 output_grows_fast=False,  # whether the output of the operator grows fast eg. exp, sinh
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -207,7 +206,6 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
         self.promotes_integers_to_float = promotes_integers_to_float
-        self.output_grows_fast = output_grows_fast
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -441,7 +439,6 @@ op_db = [
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    promotes_integers_to_float=True,
-                   output_grows_fast=True,
                    decorators=(precisionOverride({torch.float16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
