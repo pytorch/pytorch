@@ -1,10 +1,9 @@
 import torch
 from torch.serialization import normalize_storage_type, location_tag, _should_read_directly
 import io
-import pickle
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
-from ._custom_import_pickler import CustomImportPickler
+from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
 import types
 import importlib
@@ -161,6 +160,9 @@ class PackageExporter:
             for dep in dep_list.keys():
                 self.require_module_if_not_provided(dep)
 
+    def _import_module(self, module_name):
+        return import_module_from_importers(module_name, self.importers)
+
     def _module_exists(self, module_name: str) -> bool:
         try:
             self._import_module(module_name)
@@ -227,28 +229,6 @@ node [shape=box];
         source = self._get_source_of_module(module)
         self.save_source_string(module_name, source, hasattr(module, '__path__'), dependencies, module.__file__)
 
-
-    def _import_module(self, module_name):
-        last_err = None
-        for import_module in self.importers:
-            try:
-                return import_module(module_name)
-            except ModuleNotFoundError as err:
-                last_err = err
-
-        if last_err is not None:
-            raise last_err
-        else:
-            raise ModuleNotFoundError(module_name)
-
-    def _create_pickler(self, data_buf):
-        if self.importers == [importlib.import_module]:
-            # if we are using the normal import library system, then
-            # we can use the C implementation of pickle which is faster
-            return pickle.Pickler(data_buf, protocol=3)
-        else:
-            return CustomImportPickler(self._import_module, data_buf, protocol=3)
-
     def save_pickle(self, package: str, resource: str, obj: Any, dependencies: bool = True):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -269,7 +249,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = self._create_pickler(data_buf)
+        pickler = create_custom_import_pickler(data_buf, self.importers)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
