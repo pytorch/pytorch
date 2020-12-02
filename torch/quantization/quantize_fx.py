@@ -302,6 +302,7 @@ def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
         convert_custom_config_dict = {
+
           # addtional object (module/operator) mappings that will overwrite the default
           # module mappingn
           "additional_object_mapping": {
@@ -314,6 +315,7 @@ def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
                 float_op: dynamically_quantized_op
              },
           }
+
           # user will manually define the corresponding quantized
           # module class which has a from_observed class method that converts
           # observed custom module to quantized custom module
@@ -328,6 +330,14 @@ def convert_fx(graph_module, debug=False, convert_custom_config_dict=None):
                  ObservedCustomModule: QuantizedCustomModule
              }
           }
+
+          # By default, inputs and outputs of the graph are assumed to be in
+          # fp32. Providing `input_quantized_idxs` will set the inputs with the
+          # corresponding indices to be quantized. Providing
+          # `output_quantized_idxs` will set the outputs with the corresponding
+          # indices to be quantized.
+          "input_quantized_idxs": [0],
+          "output_quantized_idxs": [0],
         }
 
     Return:
