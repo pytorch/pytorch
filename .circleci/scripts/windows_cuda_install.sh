@@ -16,6 +16,10 @@ else
     exit 1
 fi
 
+if [[ "${CUDA_VERSION}" != "10" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+    cuda_install_packages="${cuda_install_packages} Display.Driver"
+fi
+
 cuda_installer_link="https://ossci-windows.s3.amazonaws.com/${cuda_installer_name}.exe"
 
 curl --retry 3 -kLO $cuda_installer_link

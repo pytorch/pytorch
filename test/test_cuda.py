@@ -1779,8 +1779,11 @@ class TestCuda(TestCase):
                 # bwd ops don't sync with bwd_ambient_stream before consuming grad.
                 torch.autograd.backward(tensors=c, grad_tensors=grad)
 
+                # See https://github.com/pytorch/pytorch/issues/47028
                 # assertEquals below run on bwd_ambient_stream, so this test may also fail
                 # if backward() fails to sync with bwd_ambient_stream at the end.
+                # Synchronizing here works around the issue until a proper fix can be made.
+                torch.cuda.synchronize()
                 with torch.no_grad():
                     self.assertEqual(a.grad, grad * b)
                     self.assertEqual(b.grad, grad * a)

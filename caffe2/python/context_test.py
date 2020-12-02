@@ -7,8 +7,13 @@ from caffe2.python import context, test_util
 from threading import Thread
 
 
-@context.define_context()
-class MyContext(object):
+class MyContext(context.Managed):
+    pass
+
+class DefaultMyContext(context.DefaultManaged):
+    pass
+
+class ChildMyContext(MyContext):
     pass
 
 
@@ -37,3 +42,26 @@ class TestContext(test_util.TestCase):
     @MyContext()
     def testDecorator(self):
         self.assertIsNotNone(MyContext.current())
+
+    def testNonDefaultCurrent(self):
+        with self.assertRaises(AssertionError):
+            MyContext.current()
+
+        ctx = MyContext()
+        self.assertEqual(MyContext.current(value=ctx), ctx)
+
+        self.assertIsNone(MyContext.current(required=False))
+
+    def testDefaultCurrent(self):
+        self.assertIsInstance(DefaultMyContext.current(), DefaultMyContext)
+
+    def testNestedContexts(self):
+        with MyContext() as ctx1:
+            with DefaultMyContext() as ctx2:
+                self.assertEqual(DefaultMyContext.current(), ctx2)
+                self.assertEqual(MyContext.current(), ctx1)
+
+    def testChildClasses(self):
+        with ChildMyContext() as ctx:
+            self.assertEqual(ChildMyContext.current(), ctx)
+            self.assertEqual(MyContext.current(), ctx)
