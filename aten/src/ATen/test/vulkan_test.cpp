@@ -1,3 +1,5 @@
+#ifndef USE_VULKAN_API
+
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -938,3 +940,5 @@ TEST(VulkanTest, avg_pool2d) {
   }
   ASSERT_TRUE(check);
 }
+
+#endif /* USE_VULKAN_API */
