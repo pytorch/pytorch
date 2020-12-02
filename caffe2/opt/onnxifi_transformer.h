@@ -39,9 +39,6 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   // fp16 or not
   bool merge_fp32_inputs_into_fp16{false};
 
-  // Enter loop test mode
-  bool loop_test{false};
-
   // Whether the net has been ssaRewritten
   bool predictor_net_ssa_rewritten{false};
 

@@ -13,7 +13,7 @@ const int64_t INDEX_MIN = std::numeric_limits<int64_t>::min();
 
 enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
 
-constexpr c10::nullopt_t None{c10::nullopt_t::init()};
+constexpr c10::nullopt_t None = c10::nullopt;
 
 struct CAFFE2_API EllipsisIndexType final { EllipsisIndexType() {} };
 CAFFE2_API extern const EllipsisIndexType Ellipsis;
@@ -339,6 +339,13 @@ static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
 }
 
 static inline void copy_to(const Tensor& dst, const Tensor& src) {
+  if (dst.sizes().equals(src.sizes())) {
+    // A shortcut to avoid generating hard-coded constant sizes during tracing.
+    // This is not a perfect solution: when src & dst have different shapes, constants will still
+    // appear. Users can workaround that case by dst[index..] = src.reshape(..)
+    dst.copy_(src);
+    return;
+  }
   Tensor b_src;
   std::tie(b_src) = expand_inplace(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
   dst.copy_(b_src);

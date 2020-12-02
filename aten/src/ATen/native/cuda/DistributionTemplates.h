@@ -273,12 +273,6 @@ namespace cuda {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cuda", [&] {
     if ((
       std::is_same<scalar_t, int64_t>::value ||
@@ -319,12 +313,6 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
     if (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
@@ -361,12 +349,6 @@ struct RandomFromToKernel {
 
 template<typename RNG>
 void random_kernel(TensorIterator& iter, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "random_kernel_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       auto random_func = [] __device__ (uint64_t rand) {
@@ -462,12 +444,6 @@ struct NormalKernel {
 
 template<typename RNG>
 void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
-#ifdef _WIN32
-  // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::BFloat16) {
-    TORCH_CHECK(false, "uniform_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
-  }
-#endif
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);

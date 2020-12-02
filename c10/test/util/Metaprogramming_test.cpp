@@ -243,14 +243,36 @@ namespace test_tuple_take {
 
   TEST(MetaprogrammingTest, TupleTake_nonemptyPrefix) {
     auto x = std::make_tuple(0, "HEY", 2.0);
-    auto y = tuple_take<std::tuple<int, const char*, double>, 2>(x);
+    auto y = tuple_take<decltype(x), 2>(x);
     auto z = std::make_tuple(0, "HEY");
     EXPECT_EQ(y, z);
   }
 
   TEST(MetaprogrammingTest, TupleTake_fullPrefix) {
     auto x = std::make_tuple(0, "HEY", 2.0);
-    auto y = tuple_take<std::tuple<int, const char*, double>, 3>(x);
+    auto y = tuple_take<decltype(x), 3>(x);
+    EXPECT_EQ(x, y);
+  }
+
+  TEST(MetaprogrammingTest, TupleTake_negative) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<decltype(x), -2>(x);
+    auto z = std::make_tuple("HEY", 2.0);
+    EXPECT_EQ(y, z);
+  }
+}
+
+namespace test_tuple_slice {
+  TEST(MetaprogrammingTest, TupleSlice_middle) {
+    auto x = std::make_tuple(0, "HEY", 2.0, false);
+    auto y = tuple_slice<decltype(x), 1, 2>(x);
+    auto z = std::make_tuple("HEY", 2.0);
+    EXPECT_EQ(y, z);
+  }
+
+  TEST(MetaprogrammingTest, TupleSlice_full) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_slice<decltype(x), 0, 3>(x);
     EXPECT_EQ(x, y);
   }
 }

@@ -81,6 +81,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
       std::vector<std::string> overloadedMethodNames);
   void addBuiltinFunction(std::string name, std::string symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
+  void addIgnoredAttribute(std::string name);
   void setIterableModuleKind(IterableModuleKind kind);
 
   // If a ConcreteModuleType is poisoned, it will never compare equal to any
@@ -150,6 +151,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // Any attributes we failed to convert to TorchScript, along with a hint as to
   // why
   std::unordered_map<std::string, std::string> failedAttributes_;
+  // Any attributes that were marked as ignored. They cannot be used in
+  // TorchScript but can still be used in ignored function in Python.
+  std::unordered_set<std::string> ignoredAttributes_;
   // Any function attributes. These are special right now because functions are
   // not first-class in the type system.
   std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
@@ -191,6 +195,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
       const std::string& name) const;
   c10::optional<std::string> findFailedAttribute(const std::string& name) const;
+  bool isIgnoredAttribute(const std::string& name) const;
 
   // These getters are only here to return things as types that can be
   // automatically converted by pybind.

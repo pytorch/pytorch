@@ -15,6 +15,7 @@ import math
 from functools import partial
 import inspect
 import io
+import operator
 import argparse
 import unittest
 import warnings
@@ -32,9 +33,9 @@ from numbers import Number
 import tempfile
 import json
 from urllib.request import urlopen
-import __main__
+import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Iterable, Optional
+from typing import cast, Any, Dict, Iterable, Optional
 
 from torch.testing._internal import expecttest
 from torch.testing import \
@@ -53,7 +54,13 @@ from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
 
+FILE_SCHEMA = "file://"
+if sys.platform == 'win32':
+    FILE_SCHEMA = "file:///"
+
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
+IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -123,8 +130,9 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-torch._C.ScriptFunction.__call__ = prof_func_call
-torch._C.ScriptMethod.__call__ = prof_meth_call
+# TODO fix when https://github.com/python/mypy/issues/2427 is address
+torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
+torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this
@@ -140,22 +148,22 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--ge_config', type=str)
+parser.add_argument('--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CI')) else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 
 args, remaining = parser.parse_known_args()
-if args.ge_config == 'legacy':
+if args.jit_executor == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.ge_config == 'profiling':
+elif args.jit_executor == 'profiling':
     GRAPH_EXECUTOR = ProfilingMode.PROFILING
-elif args.ge_config == 'simple':
+elif args.jit_executor == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 else:
     # infer flags based on the default settings
@@ -272,7 +280,7 @@ def run_tests(argv=UNITTEST_ARGS):
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
-        import xmlrunner
+        import xmlrunner  # type: ignore[import]
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         os.makedirs(test_report_path, exist_ok=True)
         verbose = '--verbose' in argv or '-v' in argv
@@ -506,6 +514,11 @@ def slowTest(fn):
     return wrapper
 
 
+def slowAwareTest(fn):
+    fn.__dict__['slow_test'] = True
+    return fn
+
+
 def skipCUDAMemoryLeakCheckIf(condition):
     def dec(fn):
         if getattr(fn, '_do_cuda_memory_leak_check', True):  # if current True
@@ -701,11 +714,11 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-disabled_test_from_issues = None
+disabled_test_from_issues: Optional[Dict[str, Any]] = None
 def check_disabled(test_name):
     global disabled_test_from_issues
     if disabled_test_from_issues is None:
-        disabled_test_from_issues = {}
+        _disabled_test_from_issues: Dict = {}
 
         def read_and_process():
             url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
@@ -716,18 +729,21 @@ def check_disabled(test_name):
                 key = 'DISABLED '
                 if title.startswith(key):
                     test_name = title[len(key):].strip()
-                    disabled_test_from_issues[test_name] = item['html_url']
+                    _disabled_test_from_issues[test_name] = item['html_url']
 
         if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
             try:
                 read_and_process()
+                disabled_test_from_issues = _disabled_test_from_issues
             except Exception:
                 print("Couldn't download test skip set, leaving all tests enabled...")
+                disabled_test_from_issues = {}
 
-    if test_name in disabled_test_from_issues:
-        raise unittest.SkipTest(
-            "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
-            " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+    if disabled_test_from_issues is not None:
+        if test_name in disabled_test_from_issues:
+            raise unittest.SkipTest(
+                "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
+                " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
@@ -845,7 +861,6 @@ class TestCase(expecttest.TestCase):
         if is_uncoalesced:
             v = torch.cat([v, torch.randn_like(v)], 0)
             i = torch.cat([i, i], 1)
-
         x = torch.sparse_coo_tensor(i, v, torch.Size(size))
 
         if not is_uncoalesced:
@@ -861,47 +876,7 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        r = self.safeCoalesce(t)
-        return r.to_dense()
-
-    def safeCoalesce(self, t):
-        tc = t.coalesce()
-        self.assertEqual(tc.to_dense(), t.to_dense())
-        self.assertTrue(tc.is_coalesced())
-
-        # Our code below doesn't work when nnz is 0, because
-        # then it's a 0D tensor, not a 2D tensor.
-        if t._nnz() == 0:
-            self.assertEqual(t._indices(), tc._indices())
-            self.assertEqual(t._values(), tc._values())
-            return tc
-
-        value_map = {}
-        for idx, val in zip(t._indices().t(), t._values()):
-            idx_tup = tuple(idx.tolist())
-            if idx_tup in value_map:
-                value_map[idx_tup] += val
-            else:
-                value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
-
-        new_indices = sorted(list(value_map.keys()))
-        new_values = [value_map[idx] for idx in new_indices]
-        if t._values().ndimension() < 2:
-            new_values = t._values().new(new_values)
-        else:
-            new_values = torch.stack(new_values)
-
-        new_indices = t._indices().new(new_indices).t()
-        tg = t.new(new_indices, new_values, t.size())
-
-        self.assertEqual(tc._indices(), tg._indices())
-        self.assertEqual(tc._values(), tg._values())
-
-        if t.is_coalesced():
-            self.assertEqual(tc._indices(), t._indices())
-            self.assertEqual(tc._values(), t._values())
-
-        return tg
+        return t.coalesce().to_dense()
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -1027,9 +1002,12 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = self._getDefaultRtolAndAtol(torch.float32, torch.float32)
             else:
                 rtol, atol = 0, 0
+        rtol = cast(float, rtol)
+        atol = cast(float, atol)
+        assert atol is not None
         atol = max(atol, self.precision)
 
-        return _compare_scalars_internal(a, b, rtol=cast(float, rtol), atol=cast(float, atol), equal_nan=equal_nan)
+        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
@@ -1062,8 +1040,15 @@ class TestCase(expecttest.TestCase):
             super().assertEqual(x.is_sparse, y.is_sparse, msg=msg)
             super().assertEqual(x.is_quantized, y.is_quantized, msg=msg)
             if x.is_sparse:
-                x = self.safeCoalesce(x)
-                y = self.safeCoalesce(y)
+                if x.size() != y.size():
+                    debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes. "
+                                        f"Got sizes {x.size()} and {y.size()}.")
+                    if msg is None:
+                        msg = debug_msg_sparse
+                    self.assertTrue(False, msg=msg)
+
+                x = x.coalesce()
+                y = y.coalesce()
                 indices_result, debug_msg = self._compareTensors(x._indices(), y._indices(),
                                                                  rtol=rtol, atol=atol,
                                                                  equal_nan=equal_nan, exact_dtype=exact_dtype,
@@ -1121,9 +1106,10 @@ class TestCase(expecttest.TestCase):
                                                          equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                          exact_device=exact_device)
 
-                if not result and msg is None:
+                if not result:
                     assert debug_msg is not None
-                    msg = "Tensors failed to compare as equal! " + debug_msg
+                    msg = msg or "Tensors failed to compare as equal!"
+                    msg = f'{msg}\n{debug_msg}'
                 self.assertTrue(result, msg=msg)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super().assertEqual(x, y, msg=msg)
@@ -1162,11 +1148,23 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg is not None
                 msg = "Scalars failed to compare as equal! " + debug_msg
             self.assertTrue(result, msg=msg)
+        # Tensor x Numpy array
+        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
+            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Tensor
+        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
+            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # Numpy array x Numpy array
+        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
+            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
+                             exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
+    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -1225,7 +1223,7 @@ class TestCase(expecttest.TestCase):
                     msg = 'Caught unexpected warnings:\n'
                     for w in ws:
                         msg += warnings.formatwarning(
-                            w.message, w.category, w.filename, w.lineno, w.line)
+                            str(w.message), w.category, w.filename, w.lineno, w.line)
                         msg += '\n'
                     self.fail(msg)
 
@@ -1326,16 +1324,6 @@ class TestCase(expecttest.TestCase):
             stderr=subprocess.PIPE,
             env=env)
         return pipes.communicate()[1].decode('ascii')
-
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
-
-    if sys.version_info < (3, 5):
-        # assertNotRegexpMatches renamed to assertNotRegex in 3.5
-        assertNotRegex = unittest.TestCase.assertNotRegexpMatches
 
 
 def download_file(url, binary=True):
@@ -1450,9 +1438,9 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         span = high - low
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            t = (torch.rand(size, device=device, dtype=torch.float32) * span - (span / 2)).to(torch.bfloat16)
+            t = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
-            t = torch.rand(size, device=device, dtype=dtype) * span - (span / 2)
+            t = torch.rand(size, device=device, dtype=dtype) * span + low
         t.requires_grad = requires_grad
         return t
     else:
@@ -1461,8 +1449,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
         high = 9 if high is None else min(high, 10)
         span = high - low
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        real = torch.rand(size, device=device, dtype=float_dtype) * span - (span / 2)
-        imag = torch.rand(size, device=device, dtype=float_dtype) * span - (span / 2)
+        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         c = torch.complex(real, imag)
         c.requires_grad = requires_grad
         return c
@@ -1494,6 +1482,14 @@ def random_symmetric_matrix(l, *batches, **kwargs):
     return A
 
 
+def random_hermitian_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
+    A = (A + A.transpose(-2, -1).conj()).div_(2)
+    return A
+
+
 def random_symmetric_psd_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
@@ -1508,6 +1504,19 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
                     dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1)) \
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
+
+
+def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
+    """
+    Returns a batch of random Hermitian positive-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_hermitian_pd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
+                    dtype=dtype, device=device)
+    return torch.matmul(A, A.transpose(-2, -1).conj())
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -1538,8 +1547,9 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
     A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
     u, _, v = A.svd()
-    s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
-    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
+    real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
+    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).to(A.dtype).matmul(v.transpose(-2, -1)))
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
@@ -1604,7 +1614,8 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     values = torch.randn(nonzero_elements, dtype=dtype, device=device)
     # ensure that the diagonal dominates
     values *= torch.tensor([-float(i - j)**2 for i, j in zip(*indices)], dtype=dtype, device=device).exp()
-    A = torch.sparse_coo_tensor(indices, values, (rows, columns), device=device)
+    indices_tensor = torch.tensor(indices)
+    A = torch.sparse_coo_tensor(indices_tensor, values, (rows, columns), device=device)
     return A.coalesce()
 
 
@@ -1661,8 +1672,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
         icoords.append(i)
         jcoords.append(j)
         values.append(v)
-    indices = [icoords, jcoords]
-    return torch.sparse_coo_tensor(indices, values, (matrix_size, matrix_size), dtype=dtype, device=device)
+    indices_tensor = torch.tensor([icoords, jcoords])
+    return torch.sparse_coo_tensor(indices_tensor, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
 
 def do_test_dtypes(self, dtypes, layout, device):

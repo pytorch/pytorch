@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
@@ -261,6 +261,33 @@ class TestActivations(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0],
                                   ensure_outputs_are_inferred=True)
+
+
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs_cpu_only)
+    def test_mish(self, n, m, gc, dc, seed):
+        np.random.seed(seed)
+        X = np.random.rand(n, m).astype(np.float32)
+
+        def mish_ref(X):
+            return (X * np.tanh(np.log1p(np.exp(X))),)
+
+        op = core.CreateOperator(
+            "Mish",
+            ["X"],
+            ["Y"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=mish_ref,
+            ensure_outputs_are_inferred=True,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
 
 
 if __name__ == "__main__":

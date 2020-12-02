@@ -12,11 +12,13 @@ SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
 # Figure out which Python to use for ROCm
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
+  unset HIP_PLATFORM
   PYTHON=$(which "python${BASH_REMATCH[1]}")
   # non-interactive bashs do not expand aliases by default
   shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
-  alias python="$PYTHON"
+  alias python='$PYTHON'
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
 fi
@@ -43,7 +45,7 @@ fatal() { error "$@"; exit 1; }
 # - remaining args:  names of traps to modify
 #
 trap_add() {
-    trap_add_cmd=$1; shift || fatal "${FUNCNAME} usage error"
+    trap_add_cmd=$1; shift || fatal "${FUNCNAME[0]} usage error"
     for trap_add_name in "$@"; do
         trap -- "$(
             # helper fn to get existing trap command from output
@@ -69,9 +71,13 @@ if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
     # Save sccache logs to file
     sccache --stop-server || true
     rm ~/sccache_error.log || true
-    # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
-    # https://github.com/pytorch/pytorch/pull/16645
-    SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+    else
+      # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+      # https://github.com/pytorch/pytorch/pull/16645
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    fi
 
     # Report sccache stats for easier debugging
     sccache --zero-stats
@@ -110,6 +116,7 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
+  # shellcheck disable=SC2034
   BUILD_TEST_LIBTORCH=0
 fi
 
@@ -122,6 +129,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py2* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-bionic* ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
@@ -129,9 +137,12 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-xla-linux-bionic* ]] || \
   else
     conda install -q -y cmake
   fi
+  if [[ "$BUILD_ENVIRONMENT" == *pytorch-*centos* ]]; then
+    # cmake3 package will conflict with conda cmake
+    sudo yum -y remove cmake3 || true
+  fi
 fi
 
 retry () {
-  $*  || (sleep 1 && $*) || (sleep 2 && $*)
+  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
 }
-

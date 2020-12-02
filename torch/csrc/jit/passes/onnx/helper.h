@@ -27,7 +27,10 @@ void eraseUnusedBlockInputs(Block* b);
 void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,
     ParamMap& paramsDict);
-Node* addNodeToBlock(Block* block, Value* input, Symbol kind);
+
+Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs);
+
+Value* addInputToBlock(Block* block);
 
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 } // namespace jit

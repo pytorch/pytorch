@@ -18,7 +18,6 @@ install_ubuntu() {
   # Install common dependencies
   apt-get update
   # TODO: Some of these may not be necessary
-  # TODO: libiomp also gets installed by conda, aka there's a conflict
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
   numpy_deps="gfortran"
   apt-get install -y --no-install-recommends \
@@ -40,20 +39,10 @@ install_ubuntu() {
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
-    python \
-    python-dev \
-    python-setuptools \
-    python-wheel \
     software-properties-common \
     sudo \
     wget \
     vim
-
-  # TODO: THIS IS A HACK!!!
-  # distributed nccl(2) tests are a bit busted, see https://github.com/pytorch/pytorch/issues/5877
-  if dpkg -s libnccl-dev; then
-    apt-get remove -y libnccl-dev libnccl2 --allow-change-held-packages
-  fi
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean
@@ -118,7 +107,7 @@ esac
 
 # Install Valgrind separately since the apt-get version is too old.
 mkdir valgrind_build && cd valgrind_build
-VALGRIND_VERSION=3.15.0
+VALGRIND_VERSION=3.16.1
 if ! wget http://valgrind.org/downloads/valgrind-${VALGRIND_VERSION}.tar.bz2
 then
   wget https://sourceware.org/ftp/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2
@@ -131,4 +120,3 @@ sudo make install
 cd ../../
 rm -rf valgrind_build
 alias valgrind="/usr/local/bin/valgrind"
-

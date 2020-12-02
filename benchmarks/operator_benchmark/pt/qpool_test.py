@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 
 import operator_benchmark as op_bench
@@ -93,8 +88,12 @@ class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
                 self.q_input = self.q_input.permute(0, 2, 3, 1).contiguous()
                 self.q_input = self.q_input.permute(0, 3, 1, 2)
 
-    def forward(self):
-        return self.pool_op(self.q_input)
+        self.inputs = {
+            "q_input": self.q_input
+        }
+
+    def forward(self, q_input):
+        return self.pool_op(q_input)
 
 
 class QMaxPool2dBenchmark(_QPool2dBenchmarkBase):

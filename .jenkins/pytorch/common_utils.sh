@@ -18,7 +18,7 @@ function cleanup {
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]]) ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
         git_status=$(git status --porcelain)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -66,7 +66,7 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
-TORCHVISION_COMMIT=c2e8a00885e68ae1200eb6440f540e181d9125de
+TORCHVISION_COMMIT=e70c91a9ff9b8a20e05c133aec6ec3ed538c32fb
 
 function install_torchvision() {
   # Check out torch/vision at Jun 11 2020 commit
